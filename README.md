@@ -536,6 +536,13 @@ the claim; existing tenant-specific values win during rotation. **Disconnect**
 asks the plugin to drop this CMS's record, authenticated with the pairwise
 secret, so it can only ever remove its own row.
 
+Plugins that expose the shared authenticated tenant configuration endpoint at
+`/__plugin/tenants/config` also get editable `tenantVars` fields on this page
+after the CMS is connected. The CMS reads the declared values with the
+pairwise secret and sends partial `PUT` updates; blank fields remove a value.
+Undeclared variables and connection fields are preserved and cannot be changed
+through this UI.
+
 ### Plugin write-back authentication
 
 Server-to-server calls from a plugin to `/__cms/*` must send:

@@ -36,7 +36,7 @@ import {
   revokePageTypeAccess,
 } from '../page-types';
 import { deleteAllPluginState } from '../state';
-import { PLUGIN_ORIGIN } from '../registry';
+import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from '../registry';
 import { pluginTenantId } from '../proxy';
 import { enrollPluginTenant, manifestAllowsAutoTenant, revokePluginTenant } from '../enroll';
 import {
@@ -60,7 +60,7 @@ import {
   type PluginLimitRow,
   type PluginListItem,
 } from '../templates/manage';
-import type { PluginManifest, PluginPageTypeAccess } from '../types';
+import type { PluginManifest, PluginPageTypeAccess, ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -130,6 +130,59 @@ function normalizeConfig(raw: string): [string | null, string | null] {
     return [trimmed, null];
   } catch {
     return [trimmed, 'Config must be valid JSON (or left blank).'];
+  }
+}
+
+const TENANT_CONFIG_PATH = `${PLUGIN_PREFIX}/tenants/config`;
+const TENANT_VAR_FORM_PREFIX = 'tenant_var_';
+
+function manifestTenantVars(manifest: PluginManifest | undefined): string[] {
+  return [...new Set([
+    ...(manifest?.tenantVars ?? []),
+    ...(manifest?.tenant_vars ?? []),
+  ])];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+interface TenantConfigRead {
+  available: boolean;
+  values: Record<string, string>;
+}
+
+/** Reads only the manifest-declared tenant vars; never logs or stores values. */
+async function readPluginTenantConfig(
+  plugin: ResolvedPlugin | undefined,
+  tenantId: string,
+  names: string[],
+): Promise<TenantConfigRead> {
+  if (!plugin || !tenantId || !names.length) return { available: false, values: {} };
+  const secret = plugin.apiSecret || plugin.secret;
+  if (!secret) return { available: false, values: {} };
+
+  try {
+    const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${TENANT_CONFIG_PATH}`, {
+      headers: {
+        'x-plugin-secret': secret,
+        'x-cms-tenant': tenantId,
+      },
+    });
+    if (!response.ok) return { available: false, values: {} };
+    const body = await response.json().catch(() => null) as unknown;
+    if (!isRecord(body)) return { available: false, values: {} };
+    const rawVars = body.vars;
+    if (!isRecord(rawVars)) return { available: false, values: {} };
+    return {
+      available: true,
+      values: Object.fromEntries(names.map((name) => [
+        name,
+        typeof rawVars[name] === 'string' ? rawVars[name] : '',
+      ])),
+    };
+  } catch {
+    return { available: false, values: {} };
   }
 }
 
@@ -229,6 +282,8 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
   if (!found) return c.notFound();
   const { row: plugin, resolved } = found;
   const tenantId = pluginTenantId(c.env);
+  const tenantVarNames = manifestTenantVars(resolved?.manifest);
+  const tenantConfig = await readPluginTenantConfig(resolved, tenantId, tenantVarNames);
   return renderPage(c, pluginFormPage, {
     isNew: false,
     id: plugin.id,
@@ -239,11 +294,62 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
     config: plugin.config ?? '',
     secret: plugin.secret ?? '',
     tenantKvKey: `tenant:${tenantId}`,
+    tenantVars: tenantVarNames.map((name) => ({ name, value: tenantConfig.values[name] ?? '' })),
+    tenantConfigAvailable: tenantConfig.available,
+    tenantConfigAction: `/admin/plugins-manage/${plugin.id}/tenant-config`,
     // Connect is offered only when the plugin says it accepts enrollment AND
     // we have a canonical origin for it to verify us against.
     autoTenant: !!resolved && manifestAllowsAutoTenant(resolved.manifest) && !!tenantId,
     flash: c.req.query('flash') ?? undefined,
   });
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/tenant-config', async (c) => {
+  const id = Number(c.req.param('id'));
+  const found = await resolvedPluginFor(c.env, id);
+  if (!found) return c.notFound();
+  const { row: plugin, resolved } = found;
+  const tenantId = pluginTenantId(c.env);
+  const names = manifestTenantVars(resolved?.manifest);
+  const secret = resolved?.apiSecret || resolved?.secret || '';
+  if (!resolved || !tenantId || !names.length || !secret) {
+    return c.redirect(`/admin/plugins-manage/${id}/edit?flash=tenant-config-failed`);
+  }
+
+  const form = await c.req.formData();
+  const vars: Record<string, string | null> = {};
+  for (const name of names) {
+    const value = form.get(`${TENANT_VAR_FORM_PREFIX}${name}`);
+    if (value === null) continue;
+    if (typeof value !== 'string') {
+      logAudit(c, 'plugin.tenant.config', 'plugin', plugin.url, { ok: false, keys: [name] });
+      return c.redirect(`/admin/plugins-manage/${id}/edit?flash=tenant-config-failed`);
+    }
+    vars[name] = value === '' ? null : value;
+  }
+
+  try {
+    const response = await resolved.fetcher.fetch(`${PLUGIN_ORIGIN}${TENANT_CONFIG_PATH}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-plugin-secret': secret,
+        'x-cms-tenant': tenantId,
+      },
+      body: JSON.stringify({ vars }),
+    });
+    const ok = response.ok;
+    logAudit(c, 'plugin.tenant.config', 'plugin', plugin.url, {
+      ok,
+      keys: Object.keys(vars),
+      status: response.status,
+    });
+    return c.redirect(`/admin/plugins-manage/${id}/edit?flash=${ok ? 'tenant-config-saved' : 'tenant-config-failed'}`);
+  } catch (error) {
+    console.error(`Plugin ${plugin.url} tenant config update failed:`, error);
+    logAudit(c, 'plugin.tenant.config', 'plugin', plugin.url, { ok: false, keys: Object.keys(vars) });
+    return c.redirect(`/admin/plugins-manage/${id}/edit?flash=tenant-config-failed`);
+  }
 });
 
 /** Maps an enrollment outcome onto the flash code the edit page renders. */

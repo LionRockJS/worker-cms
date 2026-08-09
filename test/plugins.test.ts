@@ -276,6 +276,87 @@ describe('viewsFor', () => {
   });
 });
 
+describe('plugin tenant configuration management', () => {
+  const worker = (exports as unknown as { default: Fetcher }).default;
+  const testEnv = env as unknown as Record<string, unknown>;
+
+  async function adminCookie(): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJWT({
+      sub: '1', email: 'admin@example.com', name: 'Admin User', role: 'admin',
+      type: 'access', exp: now + 900, iat: now,
+    }, env.JWT_SECRET);
+    return `access_token=${token}`;
+  }
+
+  it('reads and writes declared tenant vars through the authenticated plugin API', async () => {
+    const url = `https://plugin-tenant-config-${crypto.randomUUID()}.local`;
+    const secret = 'server-secret';
+    const manifest = {
+      id: 'theme-editor',
+      name: 'Theme Editor',
+      version: '1.0.0',
+      tenantVars: ['GITHUB_APP_ID', 'GITHUB_APP_SECRET'],
+    };
+    const requests: Array<{ path: string; headers: Headers; body: unknown }> = [];
+    await env.DB.prepare('INSERT INTO plugins (label, url, enabled, secret) VALUES (?, ?, 1, ?)')
+      .bind('Theme Editor', url, secret)
+      .run();
+    __injectPluginFetcher(url, {
+      fetch: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const requestUrl = new URL(href);
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        requests.push({ path: requestUrl.pathname, headers: new Headers(init?.headers), body });
+        if (requestUrl.pathname === '/__plugin/manifest') return Response.json(manifest);
+        if (requestUrl.pathname === '/__plugin/tenants/config') {
+          if (new Headers(init?.headers).get('x-plugin-secret') !== secret) return new Response('forbidden', { status: 403 });
+          if (init?.method === 'PUT') return Response.json({ ok: true, vars: body?.vars ?? {} });
+          return Response.json({ ok: true, vars: { GITHUB_APP_ID: '123456', GITHUB_APP_SECRET: 'old-secret' } });
+        }
+        return new Response('nf', { status: 404 });
+      },
+    } as unknown as Fetcher);
+
+    const previousOrigin = testEnv.CANONICAL_ORIGIN;
+    testEnv.CANONICAL_ORIGIN = 'https://cms.example.com';
+    try {
+      const headers = { Cookie: await adminCookie(), 'Sec-Fetch-Site': 'same-origin' };
+      const edit = await worker.fetch(new Request(
+        `http://localhost/admin/plugins-manage/${await env.DB.prepare('SELECT id FROM plugins WHERE url = ?').bind(url).first<{ id: number }>().then((row) => row!.id)}/edit`,
+        { headers },
+      ));
+      expect(edit.status).toBe(200);
+      const editData = bodyData(await edit.text());
+      expect(editData.tenantConfigAvailable).toBe(true);
+      expect(editData.tenantVars).toEqual([
+        { name: 'GITHUB_APP_ID', value: '123456' },
+        { name: 'GITHUB_APP_SECRET', value: 'old-secret' },
+      ]);
+
+      const row = await env.DB.prepare('SELECT id FROM plugins WHERE url = ?').bind(url).first<{ id: number }>();
+      const saved = await worker.fetch(new Request(`http://localhost/admin/plugins-manage/${row!.id}/tenant-config`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          tenant_var_GITHUB_APP_ID: '987654',
+          tenant_var_GITHUB_APP_SECRET: '',
+        }),
+        redirect: 'manual',
+      }));
+      expect(saved.status).toBe(302);
+      expect(saved.headers.get('location')).toBe(`/admin/plugins-manage/${row!.id}/edit?flash=tenant-config-saved`);
+      const update = requests.find((request) => request.path === '/__plugin/tenants/config' && request.body !== null);
+      expect(update?.headers.get('x-plugin-secret')).toBe(secret);
+      expect(update?.headers.get('x-cms-tenant')).toBe('https://cms.example.com');
+      expect(update?.body).toEqual({ vars: { GITHUB_APP_ID: '987654', GITHUB_APP_SECRET: null } });
+    } finally {
+      if (previousOrigin === undefined) delete testEnv.CANONICAL_ORIGIN;
+      else testEnv.CANONICAL_ORIGIN = previousOrigin;
+    }
+  });
+});
+
 describe('plugin admin proxy', () => {
   const worker = (exports as unknown as {
     default: Fetcher & { queue(batch: MessageBatch<unknown>, env: Env): Promise<void> };

@@ -81,6 +81,8 @@ function pluginFormFlashKey(flash: string | undefined): string {
     'connect-not-supported': 'plugins.form.connect_not_supported',
     'connect-no-secret': 'plugins.form.connect_no_secret',
     'connect-no-canonical-origin': 'plugins.form.connect_no_origin',
+    'tenant-config-saved': 'view_strings.sections_plugin_form.tenant_config_saved',
+    'tenant-config-failed': 'view_strings.sections_plugin_form.tenant_config_failed',
     'rotate-connect-ok': 'plugins.form.rotate_connect_ok',
     'disconnect-ok': 'plugins.form.disconnect_ok',
     'disconnect-unreachable': 'plugins.form.connect_unreachable',
@@ -103,11 +105,30 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
   config: string;
   secret?: string;
   tenantKvKey?: string;
+  tenantVars?: Array<{ name: string; value: string }>;
+  tenantConfigAvailable?: boolean;
+  tenantConfigAction?: string;
   autoTenant?: boolean;
   flash?: string;
   error?: string;
 }): Promise<string> {
-  const { isNew, id, label, url, enabled, sortOrder, config, secret, tenantKvKey, autoTenant, flash, error } = opts;
+  const {
+    isNew,
+    id,
+    label,
+    url,
+    enabled,
+    sortOrder,
+    config,
+    secret,
+    tenantKvKey,
+    tenantVars,
+    tenantConfigAvailable,
+    tenantConfigAction,
+    autoTenant,
+    flash,
+    error,
+  } = opts;
   const heading = isNew ? 'Register Plugin' : 'Edit Plugin';
   const flashMessageKey = pluginFormFlashKey(flash);
   // A failed enrollment is a warning, not the usual informational flash.
@@ -131,6 +152,10 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     secret: secret ?? '',
     tenantKvKey: tenantKvKey ?? '',
     tenantKvValue: JSON.stringify({ secret: secret ?? '' }),
+    hasTenantVars: !!tenantVars?.length,
+    tenantVars: tenantVars ?? [],
+    tenantConfigAvailable: !!tenantConfigAvailable,
+    tenantConfigAction: tenantConfigAction ?? '',
     usesSharedSecret: !secret,
     rotateSecretAction: isNew ? '' : `/admin/plugins-manage/${id}/rotate-secret`,
     autoTenant: !isNew && !!autoTenant,
