@@ -20,6 +20,17 @@ export const PLUGIN_ORIGIN = 'https://plugin.local';
 // Manifests rarely change between deploys; cache per isolate with a short TTL.
 const MANIFEST_TTL_MS = 60_000;
 const MAX_MANIFEST_BYTES = 256 * 1024;
+const TENANT_VAR_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
+const RESERVED_TENANT_VARS = new Set([
+  'CMS_URL',
+  'PLUGIN_SECRET',
+  'SIGN_KEY',
+  'PUBLIC_BASE_URL',
+  'CMS_TENANT_ID',
+  'CMS_TENANT_REF',
+  'CMS_TENANT_LEGACY',
+  'TENANTS',
+]);
 const manifestCache = new Map<string, { manifest: PluginManifest; expires: number }>();
 
 // The enabled-plugins list also changes rarely; cache it so we don't hit D1 on
@@ -136,6 +147,17 @@ function isPluginManifest(value: unknown): value is PluginManifest {
   if (value.i18n !== undefined && typeof value.i18n !== 'boolean') return false;
   if (value.autoTenant !== undefined && typeof value.autoTenant !== 'boolean') return false;
   if (value.auto_tenant !== undefined && typeof value.auto_tenant !== 'boolean') return false;
+  for (const key of ['tenantVars', 'tenant_vars']) {
+    if (value[key] === undefined) continue;
+    if (!Array.isArray(value[key]) || value[key].length > 64) return false;
+    const vars = value[key] as unknown[];
+    if (new Set(vars).size !== vars.length) return false;
+    if (vars.some((name) => (
+      typeof name !== 'string'
+      || !TENANT_VAR_NAME.test(name)
+      || RESERVED_TENANT_VARS.has(name)
+    ))) return false;
+  }
 
   const arrayFields = [
     'hooks', 'autoPublishTypes', 'nav', 'fieldTypes', 'editViews', 'newViews',

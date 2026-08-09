@@ -8,7 +8,10 @@
 // hand the secret over — without ever putting it on an unauthenticated wire:
 //
 //   1. This CMS mints a single-use ticket, stores only its SHA-256, and POSTs
-//      {tenant, plugin_id, ticket} to {plugin}/__plugin/tenants/enroll.
+//      {tenant, plugin_id, ticket, tenant_vars} to
+//      {plugin}/__plugin/tenants/enroll. The optional tenant_vars list comes
+//      from the plugin's validated manifest; it contains names only, never
+//      values.
 //   2. The plugin calls back to THIS origin's /__cms/tenant/claim to redeem the
 //      ticket. Because the plugin dials the origin itself, a request that lies
 //      about which CMS it is cannot be redeemed anywhere.
@@ -51,6 +54,18 @@ interface PendingEnrollment {
 /** True when a manifest advertises host-initiated tenant enrollment. */
 export function manifestAllowsAutoTenant(manifest: PluginManifest): boolean {
   return manifest.autoTenant === true || manifest.auto_tenant === true;
+}
+
+/**
+ * Returns the union of both supported manifest spellings. The registry has
+ * already validated these names, so this function only needs to deduplicate
+ * them before putting them on the enrollment wire.
+ */
+function manifestTenantVars(manifest: PluginManifest): string[] {
+  return [...new Set([
+    ...(manifest.tenantVars ?? []),
+    ...(manifest.tenant_vars ?? []),
+  ])];
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -118,10 +133,16 @@ export async function enrollPluginTenant(
   await saveSetting(env, enrollmentKey(plugin.manifest.id), JSON.stringify(pending));
 
   try {
+    const tenantVars = manifestTenantVars(plugin.manifest);
     const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${ENROLL_PATH}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tenant: tenantId, plugin_id: plugin.manifest.id, ticket }),
+      body: JSON.stringify({
+        tenant: tenantId,
+        plugin_id: plugin.manifest.id,
+        ticket,
+        ...(tenantVars.length ? { tenant_vars: tenantVars } : {}),
+      }),
     });
     if (response.ok) return { ok: true, code: 'connected' };
     return { ok: false, code: 'rejected', detail: await failureDetail(response) };

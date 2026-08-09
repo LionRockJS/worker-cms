@@ -317,6 +317,30 @@ live), `contentTypes.publishLect` (fields stripped at publish time — see
 locale catalogs), and `autoTenant: true` (see
 [Automatic tenant registration](#automatic-tenant-registration)).
 
+For a plugin that uses the shared SDK's enrollment helper, `tenantVars` may
+list environment variable names to copy into a newly enrolled tenant record's
+`vars` object. The CMS reads this declaration from the plugin manifest and
+forwards the names as `tenant_vars` during Connect; the plugin SDK copies the
+matching non-empty Worker env values after the ticket is redeemed. Existing
+tenant-specific `vars` win on rotation, so an operator's override is not
+silently replaced. Do not list the connection fields (`CMS_URL`,
+`PLUGIN_SECRET`, `SIGN_KEY`, or the tenant metadata fields); those are reserved
+by the SDK.
+
+For example:
+
+```json
+{
+  "autoTenant": true,
+  "tenantVars": [
+    "GITHUB_APP_ID",
+    "GITHUB_APP_SLUG",
+    "GITHUB_APP_CLIENT_ID",
+    "GITHUB_APP_SECRET"
+  ]
+}
+```
+
 With no plugins registered, the system is inert and adds no plugin traffic.
 
 ### Localized Liquid views
@@ -493,8 +517,10 @@ The handshake never puts the secret on an unauthenticated wire, and never lets a
 caller talk this CMS into registering someone else:
 
 1. The CMS mints a single-use ticket (256-bit, 5-minute TTL), stores only its
-   SHA-256 in `settings`, and POSTs `{tenant, plugin_id, ticket}` to the
-   plugin's `/__plugin/tenants/enroll`. **No secret in this request.**
+   SHA-256 in `settings`, and POSTs `{tenant, plugin_id, ticket}` plus the
+   optional manifest-declared `tenant_vars` names to the plugin's
+   `/__plugin/tenants/enroll`. **No secret or variable value is in this
+   request.**
 2. The plugin redeems the ticket by calling `POST {tenant}/__cms/tenant/claim`
    — dialing the named origin *itself*, so a request that lies about which CMS
    it is can never be redeemed. Only this response carries the secret.
@@ -504,8 +530,11 @@ caller talk this CMS into registering someone else:
 
 Requirements: `CANONICAL_ORIGIN` must be set — it is both the tenant id and the
 origin the plugin verifies against — and the plugin must have a dedicated
-secret. **Disconnect** asks the plugin to drop this CMS's record, authenticated
-with the pairwise secret, so it can only ever remove its own row.
+secret. If `tenantVars` is present in the manifest, the plugin SDK copies the
+matching non-empty Worker env values into the new tenant's `vars` object after
+the claim; existing tenant-specific values win during rotation. **Disconnect**
+asks the plugin to drop this CMS's record, authenticated with the pairwise
+secret, so it can only ever remove its own row.
 
 ### Plugin write-back authentication
 

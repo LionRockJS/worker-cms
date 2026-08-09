@@ -126,6 +126,27 @@ describe('plugin tenant enrollment', () => {
     expect(JSON.stringify(plugin.enrollCalls[0])).not.toContain(resolved.apiSecret);
   });
 
+  it('forwards manifest-declared tenant vars with the enrollment request', async () => {
+    const plugin = makePlugin({
+      manifest: {
+        ...MANIFEST,
+        tenantVars: ['GITHUB_APP_ID', 'GITHUB_APP_SECRET'],
+        tenant_vars: ['GITHUB_APP_SECRET', 'GITHUB_APP_SLUG'],
+      },
+      cms: cmsApp({ DB: env.DB, CANONICAL_ORIGIN: CMS_ORIGIN } as unknown as Env),
+    });
+    const { testEnv, url } = await register(plugin);
+
+    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), 'admin@example.com');
+
+    expect(result.ok).toBe(true);
+    expect(plugin.enrollCalls[0]?.tenant_vars).toEqual([
+      'GITHUB_APP_ID',
+      'GITHUB_APP_SECRET',
+      'GITHUB_APP_SLUG',
+    ]);
+  });
+
   it('leaves no redeemable ticket behind after the handshake', async () => {
     const plugin = makePlugin({ cms: cmsApp({ DB: env.DB, CANONICAL_ORIGIN: CMS_ORIGIN } as unknown as Env) });
     const { testEnv, url } = await register(plugin);

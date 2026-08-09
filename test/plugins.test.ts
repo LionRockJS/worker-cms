@@ -112,6 +112,27 @@ describe('resolveCmsConfig', () => {
     expect(await getPlugins(invalidEnv)).toEqual([]);
   });
 
+  it('accepts manifest-declared tenant environment variables', async () => {
+    const pluginEnv = await envWith(makePlugin({
+      ...EVENTS_MANIFEST,
+      tenantVars: ['GITHUB_APP_ID', 'GITHUB_APP_CLIENT_SECRET'],
+    }));
+    expect((await getPlugins(pluginEnv))[0]?.manifest.tenantVars).toEqual([
+      'GITHUB_APP_ID',
+      'GITHUB_APP_CLIENT_SECRET',
+    ]);
+  });
+
+  it.each([
+    ['not-an-array', { ...EVENTS_MANIFEST, tenantVars: 'GITHUB_APP_ID' }],
+    ['lowercase name', { ...EVENTS_MANIFEST, tenantVars: ['github_app_id'] }],
+    ['duplicate name', { ...EVENTS_MANIFEST, tenantVars: ['GITHUB_APP_ID', 'GITHUB_APP_ID'] }],
+    ['reserved connection name', { ...EVENTS_MANIFEST, tenantVars: ['PLUGIN_SECRET'] }],
+  ])('rejects invalid tenantVars (%s)', async (_label, manifest) => {
+    const invalidEnv = await envWith(makePlugin(manifest));
+    expect(await getPlugins(invalidEnv)).toEqual([]);
+  });
+
   it.each([
     ['a misleading Content-Length header', new Response('x'.repeat(256 * 1024 + 1), { headers: { 'content-length': '1' } })],
     ['a chunked response without Content-Length', new Response(new ReadableStream({

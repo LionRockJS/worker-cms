@@ -202,6 +202,15 @@ export interface PluginManifest {
   autoTenant?: boolean;
   /** Snake-case alias for manifests that expose auto_tenant. */
   auto_tenant?: boolean;
+  /**
+   * Environment variable names that the plugin may copy into a newly enrolled
+   * tenant record's `vars` object. The CMS forwards this validated declaration
+   * as `tenant_vars` during enrollment; the SDK copies matching non-empty
+   * plugin env values after the ticket is redeemed.
+   */
+  tenantVars?: string[];
+  /** Snake-case alias for manifests that expose tenant_vars. */
+  tenant_vars?: string[];
 }
 
 /** How a declared plugin limit counts existing pages. */
