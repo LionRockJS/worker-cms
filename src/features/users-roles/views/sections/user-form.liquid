@@ -25,7 +25,6 @@
   </form>
 
   {% if showCreditsPanel %}
-  {# One card per wallet: balance, admin adjustment, pool grant and ledger. #}
   {% for wallet in creditWallets %}
   <section class="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
     <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ wallet.nameKey | t }}</h3>
