@@ -264,7 +264,7 @@ describe('view assembly', () => {
     const editor = await (await env.VIEWS.fetch('https://views.local/sections/editor.liquid')).text();
     expect(editor).toContain('md:flex-row');
     expect(editor).toContain('md:max-w-[25%]');
-    expect(editor).toContain('border-l border-gray-200');
+    expect(editor).toContain('md:border-l md:border-gray-200 md:pl-4');
   });
 
   it('keeps publish actions inside the publish schedule card', async () => {

@@ -35,6 +35,11 @@
       "active": "Active",
       "disabled": "Disabled",
       "unreachable": "Unreachable"
+    },
+    "trust": {
+      "sandboxed_ui": "Sandboxed UI",
+      "server_only": "Server only",
+      "trusted_ui": "Trusted UI"
     }
   },
   "view_strings": {
@@ -195,6 +200,7 @@
     "sections_plugins_manage.register_plugin": "Register plugin",
     "sections_plugins_manage.registered_over_https_added_here_without_a_cms_redeploy": "Registered over HTTPS - added here without a CMS redeploy.",
     "sections_plugins_manage.remove_this_plugin": "Remove this plugin?",
-    "sections_plugins_manage.status": "Status"
+    "sections_plugins_manage.status": "Status",
+    "sections_plugins_manage.trust": "Browser trust"
   }
 }

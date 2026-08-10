@@ -9,7 +9,7 @@
     "build:migrations": "node tools/build-migrations.mjs",
     "build:views": "node tools/build-views.mjs",
     "build:css": "tailwindcss -i assets-source/admin.css -o dist/views/assets/admin.css --minify",
-    "build:js": "esbuild assets-source/richtext-md.js --bundle --minify --format=iife --outfile=dist/views/assets/richtext-md.js",
+    "build:js": "esbuild assets-source/richtext-md.js assets-source/yjs.js --bundle --minify --format=iife --outdir=dist/views/assets",
     "deploy": "npm run build && wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply cms --local && wrangler d1 migrations apply cms-published --local",
     "db:migrate:admin": "wrangler d1 migrations apply cms --local",
@@ -23,16 +23,17 @@
     "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check"
   },
   "dependencies": {
-    "hono": "^4.12.34"
+    "hono": "^4.12.34",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.20.1",
     "@cloudflare/workers-types": "^5.20260801.1",
     "@tailwindcss/cli": "^4.3.3",
-    "marked": "^18.0.7",
-    "turndown": "^7.2.4",
     "esbuild": "^0.28.1",
+    "marked": "^18.0.7",
     "tailwindcss": "^4.3.3",
+    "turndown": "^7.2.4",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.118.0"

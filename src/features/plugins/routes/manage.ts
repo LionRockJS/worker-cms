@@ -70,7 +70,7 @@ import {
   type PluginLimitRow,
   type PluginListItem,
 } from '../templates/manage';
-import type { PluginManifest, PluginPageTypeAccess, ResolvedPlugin } from '../types';
+import { pluginTrustLevel, type PluginManifest, type PluginPageTypeAccess, type ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -236,6 +236,7 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       manifestId: manifest?.id,
       manifestName: manifest?.name,
       version: manifest?.version,
+      trustLevel: manifest ? pluginTrustLevel(manifest) : undefined,
       hasAssets: !!manifest?.assets?.length,
       hasFilePrefixes: !!manifest?.filePrefixes?.length,
       hasPageTypes: !!(

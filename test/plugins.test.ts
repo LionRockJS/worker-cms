@@ -113,6 +113,16 @@ describe('resolveCmsConfig', () => {
     expect(await getPlugins(invalidEnv)).toEqual([]);
   });
 
+  it('validates explicit plugin browser trust levels', async () => {
+    expect(await getPlugins(await envWith(makePlugin({ ...EVENTS_MANIFEST, trustLevel: 'root-access' })))).toEqual([]);
+    expect(await getPlugins(await envWith(makePlugin({ ...EVENTS_MANIFEST, trustLevel: 'server-only' })))).toEqual([]);
+    expect(await getPlugins(await envWith(makePlugin({
+      ...EVENTS_MANIFEST,
+      trustLevel: 'sandboxed-ui',
+      editViews: ['event'],
+    })))).toEqual([]);
+  });
+
   it('accepts manifest-declared tenant environment variables', async () => {
     const pluginEnv = await envWith(makePlugin({
       ...EVENTS_MANIFEST,
@@ -741,6 +751,46 @@ describe('plugin admin proxy', () => {
     expect(response.headers.get('Content-Security-Policy')).toContain("script-src 'self' 'nonce-");
     // Default admin pages stay un-frameable.
     expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+  });
+
+  it('isolates sandboxed plugin UI in an opaque-origin iframe', async () => {
+    testEnv.PLUGIN_SECRET = 'server-secret';
+    const url = 'https://plugin-sandbox.local';
+    await env.DB.prepare('INSERT INTO plugins (label, url, enabled) VALUES (?, ?, 1)').bind('Sandbox', url).run();
+    __injectPluginFetcher(url, {
+      fetch: async (input: RequestInfo | URL): Promise<Response> => {
+        const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(u).pathname === '/__plugin/manifest') {
+          return Response.json({ ...EVENTS_MANIFEST, trustLevel: 'sandboxed-ui' });
+        }
+        return new Response('<!doctype html><body>SANDBOX_CONTENT</body>', {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      },
+    } as unknown as Fetcher);
+
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJWT({
+      sub: '1', email: 'admin@example.com', name: 'Admin User', role: 'admin',
+      type: 'access', exp: now + 900, iat: now,
+    }, env.JWT_SECRET);
+    const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
+
+    const shell = await worker.fetch(new Request('http://localhost/admin/plugins/events/dashboard', { headers }));
+    const shellBody = await shell.text();
+    const sandboxMarkup = String(renderPayload(shellBody).layoutData.body || '');
+    expect(shell.status).toBe(200);
+    expect(sandboxMarkup).toContain('data-plugin-sandbox="events"');
+    expect(sandboxMarkup).toContain('sandbox="allow-downloads allow-forms allow-popups allow-scripts"');
+    expect(sandboxMarkup).not.toContain('allow-same-origin');
+    expect(shellBody).not.toContain('SANDBOX_CONTENT');
+
+    const frame = await worker.fetch(new Request(
+      'http://localhost/admin/plugins/events/dashboard?__cms_sandbox=1', { headers },
+    ));
+    expect(frame.status).toBe(200);
+    expect(await frame.text()).toContain('SANDBOX_CONTENT');
+    expect(frame.headers.get('X-Frame-Options')).toBe('SAMEORIGIN');
   });
 
   it('strips scripts and scriptable attributes from chrome-wrapped plugin fragments', async () => {

@@ -23,8 +23,10 @@ export const CORE_CLIENT_ASSETS: readonly string[] = [
   '/assets/color-tag.js',
   '/assets/picture-field.js',
   '/assets/page-ref.js',
+  '/assets/yjs.js',
   '/assets/richtext-md.js',
   '/assets/editor.js',
+  '/assets/editor-sync.js',
 ];
 
 /**
@@ -239,10 +241,12 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   const revision = opts.viewRevision || 'dev';
   const revisionQuery = assetRevisionQuery(revision);
   // The bootstrap shell and the document client-render.js swaps in need the
-  // same scripts, minus the engine (already running) and plus editor-sync
-  // (request-scoped: only plugin edit views ask for it).
+  // same scripts, minus the engine (already running). Custom asset sets used by
+  // plugin edit views may still request editor-sync explicitly.
   const installedAssets = opts.clientAssets ?? CORE_CLIENT_ASSETS;
-  const documentAssets = opts.editorSync ? [...installedAssets, '/assets/editor-sync.js'] : [...installedAssets];
+  const documentAssets = opts.editorSync && !installedAssets.includes('/assets/editor-sync.js')
+    ? [...installedAssets, '/assets/editor-sync.js']
+    : [...installedAssets];
   const layoutData = {
     ...opts,
     body: isClientView(opts.body) ? '' : opts.body,

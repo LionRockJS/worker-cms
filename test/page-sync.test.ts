@@ -1,9 +1,9 @@
-// Multi-user CRDT sync tests for the PageSyncDO Durable Object.
+// Multi-user live-sync tests for the PageSyncDO Durable Object.
 //
 // These connect several real WebSocket clients to one DO instance and exercise
 // the sync protocol directly (bypassing the Hono route + auth, which just
 // forwards X-User-Id / X-User-Name headers). The focus is correctness with
-// MORE THAN THREE concurrent editors: broadcast fan-out, last-write-wins
+// MORE THAN THREE concurrent editors: broadcast fan-out, field-level LWW
 // convergence, snapshots for late joiners, per-user abandon-on-leave reverts,
 // multi-tab handling, and save commits.
 //
@@ -17,6 +17,7 @@
 
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
 
 type Json = Record<string, any>;
 
@@ -151,6 +152,17 @@ function op(path: string, value: string, h: string): Json {
   return { type: 'op', path, value, hlc: h, opId: crypto.randomUUID() };
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 /** Pull a fresh full snapshot from the DO via a throwaway client. */
 async function snapshotOf(page: string): Promise<Json[]> {
   const probe = await connect(page, 'probe');
@@ -163,6 +175,66 @@ async function snapshotOf(page: string): Promise<Json[]> {
 }
 
 describe('PageSyncDO multi-user sync', () => {
+  it('merges concurrent edits within one richtext field with a sequence CRDT', async () => {
+    const page = freshPage();
+    const [a, b] = await Promise.all([connect(page, 'A'), connect(page, 'B')]);
+    const path = '.body|en';
+
+    a.send({ type: 'text-sync', path, baseline: 'Hello' });
+    b.send({ type: 'text-sync', path, baseline: 'Hello' });
+    const [aSync, bSync] = await Promise.all([
+      a.waitFor({ type: 'text-sync', path }),
+      b.waitFor({ type: 'text-sync', path }),
+    ]);
+
+    const aDoc = new Y.Doc();
+    const bDoc = new Y.Doc();
+    Y.applyUpdate(aDoc, base64ToBytes(aSync.update));
+    Y.applyUpdate(bDoc, base64ToBytes(bSync.update));
+
+    let aUpdate = new Uint8Array();
+    let bUpdate = new Uint8Array();
+    aDoc.on('update', (update) => { aUpdate = update; });
+    bDoc.on('update', (update) => { bUpdate = update; });
+    aDoc.getText('markdown').insert(5, ' Alice');
+    bDoc.getText('markdown').insert(5, ' Bob');
+
+    a.send({ type: 'text-update', path, update: bytesToBase64(aUpdate) });
+    b.send({ type: 'text-update', path, update: bytesToBase64(bUpdate) });
+    const [fromB, fromA] = await Promise.all([
+      a.waitFor({ type: 'text-update', path }),
+      b.waitFor({ type: 'text-update', path }),
+    ]);
+    Y.applyUpdate(aDoc, base64ToBytes(fromB.update));
+    Y.applyUpdate(bDoc, base64ToBytes(fromA.update));
+
+    const merged = aDoc.getText('markdown').toString();
+    expect(bDoc.getText('markdown').toString()).toBe(merged);
+    expect(merged).toContain('Alice');
+    expect(merged).toContain('Bob');
+
+    const late = await connect(page, 'late');
+    late.send({ type: 'text-sync', path, baseline: 'ignored' });
+    const lateSync = await late.waitFor({ type: 'text-sync', path });
+    const lateDoc = new Y.Doc();
+    Y.applyUpdate(lateDoc, base64ToBytes(lateSync.update));
+    expect(lateDoc.getText('markdown').toString()).toBe(merged);
+
+    const stub = env.PAGE_SYNC.get(env.PAGE_SYNC.idFromName(page));
+    const saved = await stub.fetch('https://page-sync/?action=saved', { method: 'POST' });
+    expect(saved.status).toBe(200);
+    await Promise.all([a, b, late].map((client) => client.waitFor({ type: 'saved' })));
+
+    const afterSave = await connect(page, 'after-save');
+    afterSave.send({ type: 'text-sync', path, baseline: 'Committed baseline' });
+    const resetSync = await afterSave.waitFor({ type: 'text-sync', path });
+    const resetDoc = new Y.Doc();
+    Y.applyUpdate(resetDoc, base64ToBytes(resetSync.update));
+    expect(resetDoc.getText('markdown').toString()).toBe('Committed baseline');
+
+    [a, b, late, afterSave].forEach((client) => client.close());
+  });
+
   it('broadcasts one user\'s op to all other connected users, never the sender (4 users)', async () => {
     const page = freshPage();
     const [a, b, c, d] = await Promise.all([

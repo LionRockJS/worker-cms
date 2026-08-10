@@ -215,7 +215,7 @@ async function deletePageTagApi(c: AppContext) {
   return c.json({ type: 'DELETE_PAGE_TAG', payload: { success: true, id } });
 }
 
-// ── Lect CRDT sync (WebSocket) ────────────────────────────────────────────────
+// ── Lect live sync: LWW fields + Y.Text richtext (WebSocket) ─────────────────
 
 async function draftPageExists(c: AppContext, pageId: number): Promise<boolean> {
   const page = await c.env.DB.prepare('SELECT id FROM pages WHERE id = ?')

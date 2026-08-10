@@ -35,6 +35,11 @@
       "active": "已啟用",
       "disabled": "已停用",
       "unreachable": "無法連接"
+    },
+    "trust": {
+      "sandboxed_ui": "沙箱介面",
+      "server_only": "僅伺服器端",
+      "trusted_ui": "受信任介面"
     }
   },
   "view_strings": {
@@ -195,6 +200,7 @@
     "sections_plugins_manage.register_plugin": "註冊外掛程式",
     "sections_plugins_manage.registered_over_https_added_here_without_a_cms_redeploy": "透過 HTTPS 註冊；在此新增，毋須重新部署 CMS。",
     "sections_plugins_manage.remove_this_plugin": "要移除此外掛程式嗎？",
-    "sections_plugins_manage.status": "狀態"
+    "sections_plugins_manage.status": "狀態",
+    "sections_plugins_manage.trust": "瀏覽器信任"
   }
 }

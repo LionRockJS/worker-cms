@@ -8,7 +8,13 @@
 // ============================================================
 
 import type { Env } from '../../types';
-import type { PluginHookEvent, PluginManifest, ResolvedPlugin, PluginRecord } from './types';
+import {
+  manifestDeclaresUi,
+  type PluginHookEvent,
+  type PluginManifest,
+  type ResolvedPlugin,
+  type PluginRecord,
+} from './types';
 import { listEnabledPlugins } from './store';
 
 /** Reserved prefix every plugin Worker serves its CMS-facing endpoints under. */
@@ -146,6 +152,9 @@ function isPluginManifest(value: unknown): value is PluginManifest {
   if (typeof value.id !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(value.id)) return false;
   if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200) return false;
   if (typeof value.version !== 'string' || !value.version.trim() || value.version.length > 100) return false;
+  for (const key of ['trustLevel', 'trust_level']) {
+    if (value[key] !== undefined && !['server-only', 'sandboxed-ui', 'trusted-ui'].includes(String(value[key]))) return false;
+  }
   if (value.i18n !== undefined && typeof value.i18n !== 'boolean') return false;
   if (value.autoTenant !== undefined && typeof value.autoTenant !== 'boolean') return false;
   if (value.auto_tenant !== undefined && typeof value.auto_tenant !== 'boolean') return false;
@@ -190,6 +199,12 @@ function isPluginManifest(value: unknown): value is PluginManifest {
       if (contentTypes[key] !== undefined && !Array.isArray(contentTypes[key])) return false;
     }
   }
+  const manifest = value as unknown as PluginManifest;
+  const declaredTrust = manifest.trustLevel ?? manifest.trust_level;
+  if (declaredTrust === 'server-only' && manifestDeclaresUi(manifest)) return false;
+  if (declaredTrust === 'sandboxed-ui' && (
+    manifest.editViews?.length || manifest.newViews?.length || manifest.readViews?.length
+  )) return false;
   return true;
 }
 

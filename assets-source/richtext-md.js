@@ -11,6 +11,7 @@ import TurndownService from 'turndown';
   }
 
   const turndown = new TurndownService();
+  const bindings = new WeakMap();
   turndown.keep(['u']);
   // Match the legacy Eventuai Turndown customizations. Keep the literal
   // `&#8288;` HTML entity in Markdown so inline delimiters are not absorbed by
@@ -112,25 +113,35 @@ import TurndownService from 'turndown';
       if (characterCount) characterCount.textContent = String(Array.from(text).length);
     }
 
-    function syncFromPreview() {
+    function emitCollaborativeChange() {
+      root.dispatchEvent(new CustomEvent('cms:richtext-change', {
+        bubbles: true,
+        detail: { markdown: markdown.value },
+      }));
+    }
+
+    function syncFromPreview(emit = false) {
       const markdownValue = htmlToMarkdown(preview.innerHTML);
       markdown.value = markdownValue;
       setSourceHtml(markdownToHtml(markdownValue));
       updateCounts();
+      if (emit) emitCollaborativeChange();
     }
 
-    function syncFromMarkdown() {
+    function syncFromMarkdown(emit = false) {
       const html = markdownToHtml(markdown.value);
       preview.innerHTML = html;
       setSourceHtml(html);
       updateCounts();
+      if (emit) emitCollaborativeChange();
     }
 
-    function syncFromSource() {
+    function syncFromSource(emit = false) {
       source.value = encodeWordJoiners(source.value);
       preview.innerHTML = source.value;
       markdown.value = htmlToMarkdown(source.value);
       updateCounts();
+      if (emit) emitCollaborativeChange();
     }
 
     function showMode(mode) {
@@ -147,7 +158,8 @@ import TurndownService from 'turndown';
     const selectedMode = root.querySelector('[data-richtext-mode]:checked');
     showMode(selectedMode ? selectedMode.value : 'preview');
 
-    preview.addEventListener('input', syncFromPreview);
+    bindings.set(root, { markdown, syncFromMarkdown });
+    preview.addEventListener('input', function () { syncFromPreview(true); });
     preview.addEventListener('blur', function () {
       preview.innerHTML = source.value;
       source.dispatchEvent(new Event('blur'));
@@ -155,9 +167,9 @@ import TurndownService from 'turndown';
     preview.addEventListener('focus', function () {
       source.dispatchEvent(new Event('focus'));
     });
-    markdown.addEventListener('input', syncFromMarkdown);
+    markdown.addEventListener('input', function () { syncFromMarkdown(true); });
     source.addEventListener('input', function () {
-      if (!syncingSource) syncFromSource();
+      if (!syncingSource) syncFromSource(true);
     });
     source.addEventListener('invalid', function () {
       modes.forEach(function (mode) {
@@ -182,6 +194,12 @@ import TurndownService from 'turndown';
     encodeWordJoiners,
     stripWordJoiners,
     decodeEscapedHtml,
+    applyCollaborativeMarkdown(root, value) {
+      const binding = bindings.get(root);
+      if (!binding) return;
+      binding.markdown.value = String(value || '');
+      binding.syncFromMarkdown(false);
+    },
     scan,
   };
   scan(document);

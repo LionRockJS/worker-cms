@@ -16,7 +16,7 @@ import { coreExtensions } from '../../../core/extensions';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
 import { appendQuery } from '../../../core/http/forms';
 import { jsonError, wantsJsonResponse } from '../../../core/auth/guards';
-import { adminLayout } from '../../../core/render/layout';
+import { adminLayout, escHtml } from '../../../core/render/layout';
 import { pluginClientView } from '../../../core/render/liquid';
 import { buildBaseProps } from '../../../core/render/chrome';
 import { viewsFor } from '../views';
@@ -39,7 +39,7 @@ import {
   releaseFormOnceToken,
 } from '../../../core/auth/form-once';
 import type { ApprovedPluginAssets } from '../../../core/render/layout';
-import type { PluginManifest } from '../types';
+import { pluginTrustLevel, type PluginManifest } from '../types';
 import { pluginViewRevision, pluginWorkerRevision } from '../revision';
 
 export const pluginAdminRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -215,6 +215,9 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
 
   if (!plugin) return c.notFound();
 
+  const trustLevel = pluginTrustLevel(plugin.manifest);
+  if (trustLevel === 'server-only') return c.notFound();
+
   // Each plugin authenticates with its own secret (or the env fallback). Fail
   // closed when neither is configured rather than proxying unauthenticated.
   if (!plugin.secret) {
@@ -228,6 +231,12 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
   const url = new URL(c.req.url);
   const prefix = `/admin/plugins/${pluginId}`;
   const rest = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : '';
+  const insideSandbox = trustLevel === 'sandboxed-ui' && url.searchParams.get('__cms_sandbox') === '1';
+  if (trustLevel === 'sandboxed-ui' && !insideSandbox) {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return c.text('Sandboxed plugin mutations require a capability bridge', 405);
+    return sandboxedPluginPage(c, pluginId, plugin.manifest.name);
+  }
+  url.searchParams.delete('__cms_sandbox');
   const pluginAdminPath = `${PLUGIN_PREFIX}/admin${rest}${url.search}`;
   const upstream = `${PLUGIN_ORIGIN}${pluginAdminPath}`;
 
@@ -290,6 +299,16 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
     await releaseFormOnceToken(c.env, claimedOnceToken);
   }
 
+  if (insideSandbox) {
+    const framedHeaders = new Headers(upstreamResponse.headers);
+    framedHeaders.set('x-cms-frame', '1');
+    return pluginDocumentResponse(new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: framedHeaders,
+    }), c.req.url);
+  }
+
   // Opt-in chrome: a plugin that returns an HTML *fragment* with `x-cms-chrome: 1`
   // gets wrapped in the standard admin layout — same sidebar, fonts, and
   // /assets/admin.css as every CMS page — so plugin admin UIs match the CMS
@@ -335,6 +354,21 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
   // origin isolation - see warnSharedPluginOrigin() - it only limits injection
   // into an otherwise-benign plugin.
   return pluginDocumentResponse(upstreamResponse, c.req.url);
+}
+
+async function sandboxedPluginPage(c: AppContext, pluginId: string, title: string): Promise<Response> {
+  const frameUrl = new URL(c.req.url);
+  frameUrl.searchParams.set('__cms_sandbox', '1');
+  const body = `<iframe
+    src="${escHtml(frameUrl.pathname + frameUrl.search)}"
+    title="${escHtml(title)}"
+    sandbox="allow-downloads allow-forms allow-popups allow-scripts"
+    referrerpolicy="no-referrer"
+    class="block h-screen w-full border-0 bg-white"
+    data-plugin-sandbox="${escHtml(pluginId)}"></iframe>`;
+  const base = await buildBaseProps(c);
+  const html = await adminLayout(viewsFor(c.env), base, { title, body });
+  return c.html(html);
 }
 
 function shouldQueuePluginAdminAction(c: AppContext, pluginId: string, rest: string): boolean {

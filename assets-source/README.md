@@ -7,6 +7,7 @@ Sources that need a build step before the CMS can serve them, compiled into
 |---|---|---|
 | `admin.css` | `npm run build:css` (Tailwind) | `dist/views/assets/admin.css` |
 | `richtext-md.js` | `npm run build:js` (esbuild) | `dist/views/assets/richtext-md.js` |
+| `yjs.js` | `npm run build:js` (esbuild) | `dist/views/assets/yjs.js` |
 
 They live here rather than in the view tree because `wrangler.toml` serves the
 assets directory in full — sources placed there would be published.

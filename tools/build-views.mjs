@@ -29,7 +29,7 @@
 // carries its own namespace (`trash.*`) and its own view strings
 // (`view_strings.sections_trash.*`) and takes them with it when it goes.
 //
-// dist/views also receives the compiled admin.css and richtext-md.js bundle.
+// dist/views also receives the compiled admin.css, richtext-md.js and yjs.js bundles.
 // Those are written by build:css / build:js after this runs, so the assembler
 // leaves them alone (see GENERATED) instead of pruning them as strays.
 //
@@ -61,10 +61,10 @@ const LOCALES = 'locales';
 /**
  * Build outputs that land in dist/views without passing through here:
  * `build:css` compiles assets-source/admin.css, `build:js` bundles
- * assets-source/richtext-md.js. The assembler must not prune them, and
+ * assets-source/richtext-md.js and yjs.js. The assembler must not prune them, and
  * --check must not read them as strays.
  */
-const GENERATED = new Set(['assets/admin.css', 'assets/richtext-md.js']);
+const GENERATED = new Set(['assets/admin.css', 'assets/richtext-md.js', 'assets/yjs.js']);
 
 /** Files that are never assets, however they got into the source tree. */
 function isIgnored(name) {

@@ -1,13 +1,15 @@
-// Durable Object: one instance per page, handles WebSocket CRDT sync.
+// Durable Object: one instance per page, handles hybrid WebSocket live sync.
 //
 // Model: a live overlay of *uncommitted* edits on top of the last-saved page.
-// Ops are stored per (path, user_id) so one editor's contributions can be
-// removed independently of another's. The effective value of a field is the
-// op with the highest HLC across users (last-write-wins).
+// Ordinary form fields are LWW registers stored per (path, user_id). Richtext
+// Markdown is a Y.Text sequence CRDT, so concurrent changes within one field
+// merge instead of replacing the whole field.
 //
 // Protocol (JSON over WebSocket):
 //   Client → Server  { type: 'sync' }
 //   Client → Server  { type: 'op', path, value, hlc, opId }
+//   Client → Server  { type: 'text-sync', path, baseline }
+//   Client → Server  { type: 'text-update', path, update }
 //   Server → Client  { type: 'snapshot', ops: [...] }
 //   Server → Client  { type: 'op', path, value, hlc, userId, userName, opId }
 //   Server → Client  { type: 'reset', entries: [{ path, value, hlc } | { path, baseline: true }] }
@@ -21,6 +23,11 @@
 // HLC format: "<Date.now()>.<counter>.<userId>" – lexicographic ordering is sufficient.
 
 import type { Env } from '../../types';
+import * as Y from 'yjs';
+
+const MAX_TEXT_BASELINE = 1_000_000;
+const MAX_TEXT_UPDATE_BASE64 = 2_000_000;
+const MAX_PATH_LENGTH = 512;
 
 function strField(msg: Record<string, unknown>, key: string): string {
   return String(msg[key] ?? '');
@@ -31,13 +38,30 @@ interface WsAttachment {
   userName: string;
 }
 
-interface CrdtRow {
+interface LwwFieldRow {
   path: string;
   value: string;
   hlc: string;
   userId: string;
   userName: string;
   opId: string;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array | null {
+  try {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    return null;
+  }
 }
 
 interface PresenceInput {
@@ -60,15 +84,13 @@ export class PageSyncDO implements DurableObject {
   constructor(private readonly state: DurableObjectState, _env: Env) {
     this.sql = state.storage.sql;
 
-    // Migration: earlier versions keyed crdt_ops by path alone. Ops are an
-    // ephemeral live overlay, so it's safe to drop a stale-shaped table.
-    const cols = this.sql.exec(`PRAGMA table_info(crdt_ops)`).toArray() as Array<{ name: string }>;
-    if (cols.length && !cols.some((col) => col.name === 'user_id')) {
-      this.sql.exec(`DROP TABLE crdt_ops`);
-    }
+    // The old name overclaimed what this table did. Its rows are an ephemeral
+    // LWW overlay, so upgrading can discard them safely; richtext CRDT state is
+    // stored separately below.
+    this.sql.exec(`DROP TABLE IF EXISTS crdt_ops`);
 
     this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS crdt_ops (
+      CREATE TABLE IF NOT EXISTS lww_field_ops (
         path      TEXT NOT NULL,
         user_id   TEXT NOT NULL,
         user_name TEXT NOT NULL,
@@ -76,6 +98,14 @@ export class PageSyncDO implements DurableObject {
         hlc       TEXT NOT NULL,
         op_id     TEXT NOT NULL,
         PRIMARY KEY (path, user_id)
+      )
+    `);
+
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS crdt_text_docs (
+        path       TEXT PRIMARY KEY,
+        state      TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       )
     `);
 
@@ -96,7 +126,8 @@ export class PageSyncDO implements DurableObject {
 
     // Internal call from the save route: commit the live overlay.
     if (url.searchParams.get('action') === 'saved') {
-      this.sql.exec(`DELETE FROM crdt_ops`);
+      this.sql.exec(`DELETE FROM lww_field_ops`);
+      this.sql.exec(`DELETE FROM crdt_text_docs`);
       this.broadcast(JSON.stringify({ type: 'saved' }));
       return new Response('ok');
     }
@@ -196,8 +227,8 @@ export class PageSyncDO implements DurableObject {
                 user_id   AS userId,
                 user_name AS userName,
                 op_id     AS opId
-         FROM crdt_ops`,
-      ).toArray() as unknown as CrdtRow[];
+         FROM lww_field_ops`,
+      ).toArray() as unknown as LwwFieldRow[];
       ws.send(JSON.stringify({ type: 'snapshot', ops }));
       return;
     }
@@ -220,6 +251,32 @@ export class PageSyncDO implements DurableObject {
       return;
     }
 
+    if (msg.type === 'text-sync') {
+      const path = strField(msg, 'path');
+      const baseline = strField(msg, 'baseline');
+      if (!this.validTextPath(path) || baseline.length > MAX_TEXT_BASELINE) return;
+      const doc = this.loadTextDoc(path, baseline);
+      ws.send(JSON.stringify({ type: 'text-sync', path, update: bytesToBase64(Y.encodeStateAsUpdate(doc)) }));
+      return;
+    }
+
+    if (msg.type === 'text-update') {
+      const path = strField(msg, 'path');
+      const encoded = strField(msg, 'update');
+      if (!this.validTextPath(path) || !encoded || encoded.length > MAX_TEXT_UPDATE_BASE64) return;
+      const update = base64ToBytes(encoded);
+      if (!update) return;
+      const doc = this.loadTextDoc(path, '');
+      try {
+        Y.applyUpdate(doc, update);
+      } catch {
+        return;
+      }
+      this.storeTextDoc(path, doc);
+      this.broadcast(JSON.stringify({ type: 'text-update', path, update: encoded, userId, userName }), ws);
+      return;
+    }
+
     if (msg.type === 'op') {
       const path  = strField(msg, 'path');
       const value = strField(msg, 'value');
@@ -229,12 +286,12 @@ export class PageSyncDO implements DurableObject {
       if (!path || !hlc) return;
 
       const existing = this.sql.exec(
-        `SELECT hlc FROM crdt_ops WHERE path = ? AND user_id = ?`, path, userId,
+        `SELECT hlc FROM lww_field_ops WHERE path = ? AND user_id = ?`, path, userId,
       ).toArray()[0] as { hlc: string } | undefined;
 
       if (!existing || hlc > existing.hlc) {
         this.sql.exec(
-          `INSERT OR REPLACE INTO crdt_ops (path, user_id, user_name, value, hlc, op_id)
+          `INSERT OR REPLACE INTO lww_field_ops (path, user_id, user_name, value, hlc, op_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
           path, userId, userName, value, hlc, opId,
         );
@@ -272,15 +329,15 @@ export class PageSyncDO implements DurableObject {
     this.broadcast(JSON.stringify({ type: 'blur', userId, clearAll: true }), ws);
 
     const paths = this.sql.exec(
-      `SELECT DISTINCT path FROM crdt_ops WHERE user_id = ?`, userId,
+      `SELECT DISTINCT path FROM lww_field_ops WHERE user_id = ?`, userId,
     ).toArray() as unknown as Array<{ path: string }>;
     if (!paths.length) return;
 
-    this.sql.exec(`DELETE FROM crdt_ops WHERE user_id = ?`, userId);
+    this.sql.exec(`DELETE FROM lww_field_ops WHERE user_id = ?`, userId);
 
     const entries = paths.map(({ path }) => {
       const winner = this.sql.exec(
-        `SELECT value, hlc FROM crdt_ops WHERE path = ? ORDER BY hlc DESC LIMIT 1`, path,
+        `SELECT value, hlc FROM lww_field_ops WHERE path = ? ORDER BY hlc DESC LIMIT 1`, path,
       ).toArray()[0] as { value: string; hlc: string } | undefined;
       return winner ? { path, value: winner.value, hlc: winner.hlc } : { path, baseline: true };
     });
@@ -294,5 +351,36 @@ export class PageSyncDO implements DurableObject {
         try { other.send(payload); } catch { /* already closed */ }
       }
     }
+  }
+
+  private validTextPath(path: string): boolean {
+    return path.length > 0 && path.length <= MAX_PATH_LENGTH && /^[.@*#\d][\w\[\].@*|:-]*$/.test(path);
+  }
+
+  private loadTextDoc(path: string, baseline: string): Y.Doc {
+    const row = this.sql.exec(
+      `SELECT state FROM crdt_text_docs WHERE path = ?`, path,
+    ).toArray()[0];
+    const doc = new Y.Doc();
+    if (row && typeof row.state === 'string') {
+      const state = base64ToBytes(row.state);
+      if (state) Y.applyUpdate(doc, state);
+      return doc;
+    }
+    if (baseline) doc.getText('markdown').insert(0, baseline);
+    this.storeTextDoc(path, doc);
+    return doc;
+  }
+
+  private storeTextDoc(path: string, doc: Y.Doc): void {
+    const state = bytesToBase64(Y.encodeStateAsUpdate(doc));
+    this.sql.exec(
+      `INSERT INTO crdt_text_docs (path, state, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(path) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+      path,
+      state,
+      new Date().toISOString(),
+    );
   }
 }

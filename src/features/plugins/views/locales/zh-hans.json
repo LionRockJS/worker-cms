@@ -35,6 +35,11 @@
       "active": "已启用",
       "disabled": "已停用",
       "unreachable": "无法连接"
+    },
+    "trust": {
+      "sandboxed_ui": "沙箱界面",
+      "server_only": "仅服务端",
+      "trusted_ui": "受信任界面"
     }
   },
   "view_strings": {
@@ -195,6 +200,7 @@
     "sections_plugins_manage.register_plugin": "注册插件",
     "sections_plugins_manage.registered_over_https_added_here_without_a_cms_redeploy": "通过 HTTPS 注册；在此添加，无需重新部署 CMS。",
     "sections_plugins_manage.remove_this_plugin": "要移除此插件吗？",
-    "sections_plugins_manage.status": "状态"
+    "sections_plugins_manage.status": "状态",
+    "sections_plugins_manage.trust": "浏览器信任"
   }
 }

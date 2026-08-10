@@ -8,7 +8,10 @@ Content management system on Workers
 - **Capability-based access** – routes enforce granular permissions resolved from built-in or custom roles; delegated user/role managers cannot grant authority they do not already hold
 - **Separated D1 content stores** – the CMS database keeps auth, sessions, draft, trash, taxonomy, and media metadata; the published database keeps only live content (pages, tag links and the tag catalogue) for public reads. Both call the page tables `pages` / `page_tags` — same name, same shape — so a published database can serve as the next host's working set; this repo disambiguates by binding (`DB.pages` vs `PUBLISHED_DB.pages`)
 - **Page versioning** – `pages.lect` is the working copy and the single source of truth for a draft; every save appends a `page_versions` row. The log is an append-only backup: the newest row mirrors `pages.lect`, older rows are restore candidates. There is deliberately no current-version pointer
-- **Live collaborative editing** – `PageSyncDO` holds unsaved per-user field operations and editor presence in Durable Object SQLite, cleared on save
+- **Live collaborative editing** – Markdown richtext fields use a Yjs `Y.Text`
+  sequence CRDT, so concurrent character-level edits merge; ordinary form
+  fields use explicit field-level LWW registers. `PageSyncDO` persists both
+  overlays plus editor presence in Durable Object SQLite and clears them on save.
 - **Private R2 media uploads** – picture fields upload to a private R2 bucket and are served back through the Worker at `/media/...`
 - **Tailwind CSS + VanillaJS** admin UI rendered from Liquid views; the rich-text field keeps a contenteditable preview, its Markdown source, and the submitted HTML in sync (`marked` + `turndown`, bundled by esbuild)
 - **Plugins** – extend the CMS with separate Worker plugins (lifecycle hooks, content types, fields/blocks, admin pages, publish targets). See [Plugins](#plugins).
@@ -280,6 +283,24 @@ The CMS can be extended with **plugins**, each of which is a separate Cloudflare
 Worker registered at runtime by HTTPS URL. Registration, enable/disable,
 credential rotation, delegated page-type scopes, assets, quotas, and credits are
 managed under **Admin → Plugins** without redeploying the CMS.
+
+Every new manifest should declare one browser trust level with `trustLevel`
+(or `trust_level` in static JSON):
+
+| Level | Browser behavior | Intended use |
+|-------|------------------|--------------|
+| `server-only` | No admin nav, browser assets, or custom page views are allowed | Hooks, APIs, publish targets, content types |
+| `sandboxed-ui` | Admin pages run in an iframe without `allow-same-origin`; the document has an opaque origin and cannot reach CMS DOM/session authority | Read-only or independently authenticated third-party UI |
+| `trusted-ui` | Approved assets and proxied pages may execute in CMS chrome on the CMS origin | Audited first-party UI that must integrate deeply with the editor |
+
+`sandboxed-ui` deliberately has no direct CMS-authenticated mutation bridge yet,
+and it cannot declare `editViews`, `newViews`, or `readViews`; use
+`trusted-ui` only after code review when those capabilities are required.
+Legacy manifests remain compatible by defaulting to `trusted-ui`. Older plugins
+could expose unlisted admin routes, so the CMS cannot safely infer that a
+manifest without nav or assets is server-only. The Plugins admin screen shows
+the effective level so this fallback is visible rather than silent.
+
 A plugin can add six things:
 
 - **Lifecycle hooks** – run on page `create`/`update`/`publish`/`unpublish`/`delete`
@@ -504,11 +525,12 @@ served on the CMS origin.
 4. Enable the plugin and explicitly approve only the assets and delegated
    `readTypes`/`writeTypes` it needs.
 
-> **Trust boundary:** plugin Workers receive scoped content and signed-in user
-> context. Approved plugin JavaScript and proxied plugin pages execute on the
-> CMS origin, so an enabled plugin is trusted application code, not a sandboxed
-> third party. Review its source, pin approved asset hashes, grant least
-> privilege, and rotate/revoke its dedicated secret if compromised.
+> **Trust boundary:** server-side Worker separation limits database and secret
+> access; it does not automatically isolate browser code. `server-only` has no
+> browser surface, `sandboxed-ui` uses an opaque-origin iframe, and
+> `trusted-ui` executes with CMS same-origin authority. SRI pins the reviewed
+> bytes but does not make those bytes benign. Review trusted UI source, grant
+> least privilege, and rotate/revoke its dedicated secret if compromised.
 
 ### Automatic tenant registration
 
@@ -977,15 +999,22 @@ Keeping public content in this separate database allows a public Worker to read
 published pages without receiving access to users, sessions, drafts, trash,
 plugin configuration, or other private CMS state.
 
-### Live editing Durable Object — 2 tables per page object
+### Live editing Durable Object — 3 tables per page object
 
 | Table | Purpose |
 |-------|---------|
-| `crdt_ops` | Unsaved per-user field operations that form the live collaborative editing overlay; cleared after a save |
+| `lww_field_ops` | Unsaved per-user LWW register operations for ordinary form fields; a disconnect can remove that user's uncommitted values |
+| `crdt_text_docs` | Compacted Yjs state for Markdown richtext fields; concurrent insert/delete operations merge and remain until save |
 | `presence` | Currently connected editors and their last-seen/last-active state |
 
 These tables are created by `PageSyncDO` in Durable Object SQLite storage, not
-by the D1 migration directories.
+by the D1 migration directories. A save serializes the converged richtext HTML
+through the normal form handler, appends the page version, then clears both live
+overlays. Connected editors then initialize a fresh Yjs document epoch from the
+committed Markdown, so later incremental updates do not depend on discarded
+history. Unlike ordinary LWW values, a disconnected user's Yjs operations are
+not selectively removed: removing causally integrated sequence operations would
+break CRDT semantics. They remain visible for another editor to save.
 
 ### Publish / un-publish flow
 

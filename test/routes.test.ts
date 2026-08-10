@@ -2383,7 +2383,7 @@ describe('admin routes', () => {
   it('GET /media-preview/* serves a resized thumbnail for editor previews', async () => {
     const body = new FormData();
     body.append('dir', 'pictures');
-    body.append('file', new File([pngBytes()], 'avatar.png', { type: 'image/png' }));
+    body.append('file', new File([decodablePngBytes()], 'avatar.png', { type: 'image/png' }));
 
     const upload = await fetchWorker('/admin/upload', {
       method: 'POST',
@@ -2398,7 +2398,7 @@ describe('admin routes', () => {
     expect(response.status).toBe(200);
     // The Images binding re-encodes to webp; the untransformed original is png.
     expect(response.headers.get('Content-Type')).toBe('image/webp');
-    expect(new Uint8Array(await response.arrayBuffer())).not.toEqual(pngBytes());
+    expect(new Uint8Array(await response.arrayBuffer())).not.toEqual(decodablePngBytes());
     expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'none'; sandbox");
   });
 
@@ -3324,6 +3324,12 @@ function form(values: Record<string, string>): URLSearchParams {
 /** 10 bytes: the PNG signature plus two filler bytes. */
 function pngBytes(): Uint8Array {
   return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+}
+
+/** A complete 1×1 PNG for tests that exercise the Images decoder. */
+function decodablePngBytes(): Uint8Array {
+  const binary = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=');
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function cookieValue(header: string | null, name: string): string {

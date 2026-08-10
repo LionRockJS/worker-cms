@@ -112,9 +112,10 @@
     var hlcCounter = 0;
     var register = {};
     var baseline = {};
+    var textDocs = {};
     var ws = null;
     var reconnectTimer = null;
-    var crdtEnabled = false;
+    var liveSyncEnabled = false;
     var editorsByPath = {};
     var badgeEls = {};
     var highlightOverlay = document.createElement('div');
@@ -136,6 +137,91 @@
         type: 'op', path: path, value: value, hlc: hlc, opId: crypto.randomUUID(),
       }));
     }
+
+    function bytesToBase64(bytes) {
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
+
+    function base64ToBytes(value) {
+      var binary = atob(String(value || ''));
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    // Apply only the changed span. Y.Text turns these positional changes into
+    // commutative operations, so concurrent edits to one richtext field merge.
+    function replaceText(ytext, value, origin) {
+      var before = ytext.toString();
+      if (before === value) return;
+      var prefix = 0;
+      while (prefix < before.length && prefix < value.length && before[prefix] === value[prefix]) prefix++;
+      var oldEnd = before.length;
+      var newEnd = value.length;
+      while (oldEnd > prefix && newEnd > prefix && before[oldEnd - 1] === value[newEnd - 1]) {
+        oldEnd--;
+        newEnd--;
+      }
+      ytext.doc.transact(function () {
+        if (oldEnd > prefix) ytext.delete(prefix, oldEnd - prefix);
+        if (newEnd > prefix) ytext.insert(prefix, value.slice(prefix, newEnd));
+      }, origin);
+    }
+
+    function resetTextDocument(state) {
+      var Y = window.WorkerCmsY;
+      var richtext = window.WorkerCmsRichtextMd;
+      if (state.doc) state.doc.destroy();
+      var doc = new Y.Doc();
+      var ytext = doc.getText('markdown');
+      state.doc = doc;
+      state.text = ytext;
+      ytext.observe(function (_event, transaction) {
+        if (transaction.origin !== 'local') richtext.applyCollaborativeMarkdown(state.root, ytext.toString());
+      });
+      doc.on('update', function (update, origin) {
+        if (origin !== 'local' || !state.synced) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          state.dirty = true;
+          return;
+        }
+        ws.send(JSON.stringify({ type: 'text-update', path: state.path, update: bytesToBase64(update) }));
+      });
+    }
+
+    function bindRichtextCrdt() {
+      var Y = window.WorkerCmsY;
+      var richtext = window.WorkerCmsRichtextMd;
+      if (!Y || !richtext) return;
+      document.querySelectorAll('[data-richtext-md]').forEach(function (root) {
+        var source = root.querySelector('[data-richtext-source][name]');
+        var markdown = root.querySelector('[data-richtext-markdown]');
+        if (!source || !markdown || textDocs[source.name]) return;
+        var state = {
+          doc: null,
+          text: null,
+          path: source.name,
+          root: root,
+          baseline: markdown.value,
+          pending: markdown.value,
+          synced: false,
+          dirty: false,
+        };
+        textDocs[source.name] = state;
+        resetTextDocument(state);
+        root.addEventListener('cms:richtext-change', function (event) {
+          var value = event.detail && typeof event.detail.markdown === 'string'
+            ? event.detail.markdown
+            : markdown.value;
+          state.pending = value;
+          if (state.synced) replaceText(state.text, value, 'local');
+        });
+      });
+    }
+
+    bindRichtextCrdt();
 
     function setSyncStatus(status) {
       if (!indicator) return;
@@ -177,6 +263,7 @@
     document.querySelectorAll('input[name], textarea[name], select[name]').forEach(function (el) {
       var name = el.getAttribute('name') || '';
       if (!/^[.@*#\d]/.test(name)) return;
+      if (el.hasAttribute('data-richtext-source')) return;
       baseline[name] = el.value;
       el.addEventListener('input', function () { sendOp(el); });
       el.addEventListener('change', function () { sendOp(el); });
@@ -298,17 +385,17 @@
     window.addEventListener('resize', repositionBadges);
 
     function sendFocus(path) {
-      if (!crdtEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!liveSyncEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ type: 'focus', path: path, userAvatar: userAvatar }));
     }
 
     function sendBlur(path) {
-      if (!crdtEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!liveSyncEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ type: 'blur', path: path }));
     }
 
     function connect() {
-      if (!crdtEnabled) return;
+      if (!liveSyncEnabled) return;
       if (ws && ws.readyState < 2) return;
       clearTimeout(reconnectTimer);
       setSyncStatus('connecting');
@@ -317,6 +404,10 @@
       ws.onopen = function () {
         setSyncStatus('connected');
         ws.send(JSON.stringify({ type: 'sync' }));
+        Object.keys(textDocs).forEach(function (path) {
+          var state = textDocs[path];
+          ws.send(JSON.stringify({ type: 'text-sync', path: path, baseline: state.baseline }));
+        });
         var active = document.activeElement;
         if (active && active.name && /^[.@*#\d]/.test(active.name)) sendFocus(active.name);
       };
@@ -338,6 +429,28 @@
           if (!editorsByPath[msg.path] || !editorsByPath[msg.path][msg.userId]) {
             setFieldEditor(msg.path, msg.userId, { name: msg.userName, color: userColor(msg.userId), avatar: '' });
           }
+        } else if (msg.type === 'text-sync') {
+          var textState = textDocs[msg.path];
+          if (!textState || !msg.update) return;
+          var wasSynced = textState.synced;
+          var pendingText = textState.pending;
+          window.WorkerCmsY.applyUpdate(textState.doc, base64ToBytes(msg.update), 'remote');
+          textState.synced = true;
+          if (!wasSynced && pendingText !== textState.baseline) {
+            replaceText(textState.text, pendingText, 'local');
+          } else {
+            window.WorkerCmsRichtextMd.applyCollaborativeMarkdown(textState.root, textState.text.toString());
+          }
+          textState.pending = textState.text.toString();
+          if (textState.dirty) {
+            var fullUpdate = window.WorkerCmsY.encodeStateAsUpdate(textState.doc);
+            ws.send(JSON.stringify({ type: 'text-update', path: msg.path, update: bytesToBase64(fullUpdate) }));
+            textState.dirty = false;
+          }
+        } else if (msg.type === 'text-update') {
+          var remoteTextState = textDocs[msg.path];
+          if (!remoteTextState || !msg.update) return;
+          window.WorkerCmsY.applyUpdate(remoteTextState.doc, base64ToBytes(msg.update), 'remote');
         } else if (msg.type === 'focus') {
           setFieldEditor(msg.path, msg.userId, {
             name: msg.userName, color: userColor(msg.userId), avatar: msg.userAvatar || '',
@@ -361,11 +474,22 @@
             if (el) baseline[path] = el.value;
           });
           register = {};
+          Object.keys(textDocs).forEach(function (path) {
+            var state = textDocs[path];
+            state.baseline = state.text.toString();
+            state.pending = state.baseline;
+            state.synced = false;
+            state.dirty = false;
+            resetTextDocument(state);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'text-sync', path: path, baseline: state.baseline }));
+            }
+          });
         }
       };
       ws.onclose = ws.onerror = function () {
         clearAllHighlights();
-        if (!crdtEnabled) {
+        if (!liveSyncEnabled) {
           setSyncStatus('idle');
           return;
         }
@@ -375,7 +499,7 @@
     }
 
     function disconnect() {
-      crdtEnabled = false;
+      liveSyncEnabled = false;
       clearTimeout(reconnectTimer);
       if (ws) {
         ws.onclose = ws.onerror = null;
@@ -388,8 +512,8 @@
 
     window.__cmsSync = {
       enable: function () {
-        if (crdtEnabled) return;
-        crdtEnabled = true;
+        if (liveSyncEnabled) return;
+        liveSyncEnabled = true;
         connect();
       },
       disable: disconnect,

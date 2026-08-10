@@ -9,6 +9,8 @@ import type { BlueprintEntry } from '../../cms-config';
 import type { PublishLectRule } from '../../core/publish/projection';
 export type { PublishLectRule };
 
+export type PluginTrustLevel = 'server-only' | 'sandboxed-ui' | 'trusted-ui';
+
 /** A registered plugin (URL transport) stored in the `plugins` table. The CMS
  *  reaches it at `{url}/__plugin/...`; see src/plugins/registry.ts. */
 export interface PluginRecord {
@@ -97,6 +99,18 @@ export interface PluginManifest {
   id: string;
   name: string;
   version: string;
+  /**
+   * Browser trust boundary. `server-only` forbids admin UI declarations;
+   * `sandboxed-ui` renders plugin pages in an opaque-origin iframe;
+   * `trusted-ui` allows approved code to execute in CMS chrome and therefore
+   * grants it the signed-in user's same-origin authority.
+   *
+   * Legacy manifests remain trusted-ui for compatibility because older plugins
+   * could expose unlisted admin routes. New plugins should always be explicit.
+   */
+  trustLevel?: PluginTrustLevel;
+  /** Snake-case alias for static JSON manifests. */
+  trust_level?: PluginTrustLevel;
   /** Plugin Worker deploy revision. Plugins should expose CF_VERSION_METADATA.id here when available. */
   workerVersionId?: string;
   /** Snake-case alias for plugin manifests that expose worker_version_id. */
@@ -323,4 +337,20 @@ export interface ResolvedPlugin {
   apiSecret: string;
   /** Admin-entered display label from the plugin row (Plugins → edit → Label). Empty when unset. */
   label?: string;
+}
+
+export function manifestDeclaresUi(manifest: PluginManifest): boolean {
+  return !!(
+    manifest.nav?.length
+    || manifest.assets?.length
+    || manifest.editViews?.length
+    || manifest.newViews?.length
+    || manifest.readViews?.length
+  );
+}
+
+export function pluginTrustLevel(manifest: PluginManifest): PluginTrustLevel {
+  return manifest.trustLevel
+    ?? manifest.trust_level
+    ?? 'trusted-ui';
 }

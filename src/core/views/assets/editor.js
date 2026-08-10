@@ -755,6 +755,13 @@
     panelClose.addEventListener('click', closePanel);
   }
 
+  // Presence and live collaboration now live in editor-sync.js so native and
+  // plugin-owned editors share the same hybrid LWW + Y.Text implementation.
+  // The legacy blocks below are retained temporarily for pages with custom
+  // asset sets that do not load editor-sync, but must not run alongside it.
+  if (document.getElementById('presence-bar')
+      && document.querySelector('script[src*="/assets/editor-sync.js"]')) return;
+
 (function () {
   var bar = document.getElementById('presence-bar');
   if (!bar) return;
@@ -821,7 +828,7 @@
       node.style.transition = 'opacity .3s';
       container.appendChild(node);
     });
-    // Enable CRDT only while at least one other editor is present.
+    // Enable live sync only while at least one other editor is present.
     if (editors.length > 1) {
       window.__cmsSync && window.__cmsSync.enable();
     } else {
@@ -873,7 +880,7 @@
   // updated from BOTH our own edits and remote ops. It lets us:
   //   (a) reject stale remote ops, and
   //   (b) replay un-synced local edits when we (re)connect — including edits
-  //       typed while we were solo and CRDT was still disabled.
+  //       typed while we were solo and live sync was still disabled.
   var register = {};
 
   // baseline[path] = the last-saved value (the field's value at page load, and
@@ -883,7 +890,7 @@
 
   var ws = null;
   var reconnectTimer = null;
-  var crdtEnabled = false;
+  var liveSyncEnabled = false;
 
   function findField(path) {
     var escaped = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -1083,17 +1090,17 @@
   window.addEventListener('resize', repositionBadges);
 
   function sendFocus(path) {
-    if (!crdtEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!liveSyncEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'focus', path: path, userAvatar: userAvatar }));
   }
 
   function sendBlur(path) {
-    if (!crdtEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!liveSyncEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'blur', path: path }));
   }
 
   function connect() {
-    if (!crdtEnabled) return;
+    if (!liveSyncEnabled) return;
     if (ws && ws.readyState < 2) return; // already CONNECTING or OPEN
     clearTimeout(reconnectTimer);
     setSyncStatus('connecting');
@@ -1168,7 +1175,7 @@
     ws.onclose = ws.onerror = function () {
       // Remote highlights are stale once we lose the connection.
       clearAllHighlights();
-      if (!crdtEnabled) {
+      if (!liveSyncEnabled) {
         setSyncStatus('idle');
         return;
       }
@@ -1178,7 +1185,7 @@
   }
 
   function disconnect() {
-    crdtEnabled = false;
+    liveSyncEnabled = false;
     clearTimeout(reconnectTimer);
     if (ws) {
       ws.onclose = ws.onerror = null;
@@ -1189,11 +1196,11 @@
     setSyncStatus('idle');
   }
 
-  // Exposed to the presence script so it can drive CRDT activation.
+  // Exposed to the presence script so it can drive live-sync activation.
   window.__cmsSync = {
     enable: function () {
-      if (crdtEnabled) return; // already active
-      crdtEnabled = true;
+      if (liveSyncEnabled) return; // already active
+      liveSyncEnabled = true;
       connect();
     },
     disable: disconnect,

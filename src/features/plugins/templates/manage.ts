@@ -11,6 +11,7 @@ export interface PluginListItem {
   manifestId?: string;
   manifestName?: string;
   version?: string;
+  trustLevel?: 'server-only' | 'sandboxed-ui' | 'trusted-ui';
   /** True when the manifest declares candidate JS/CSS assets to approve. */
   hasAssets?: boolean;
   /** True when the manifest declares host file prefixes to approve. */
@@ -47,6 +48,12 @@ export async function pluginsManagePage(views: Fetcher, opts: BaseTemplateProps 
       status: plugin.status,
       statusKey: `plugins.status.${plugin.status}`,
       statusClass: STATUS_BADGE[plugin.status],
+      trustLevelKey: plugin.trustLevel ? `plugins.trust.${plugin.trustLevel.replaceAll('-', '_')}` : '',
+      trustLevelClass: plugin.trustLevel === 'trusted-ui'
+        ? 'bg-red-100 text-red-800'
+        : plugin.trustLevel === 'sandboxed-ui'
+          ? 'bg-blue-100 text-blue-800'
+          : 'bg-green-100 text-green-800',
       toggleAction: `/admin/plugins-manage/${plugin.id}/toggle`,
       editHref: `/admin/plugins-manage/${plugin.id}/edit`,
       deleteAction: `/admin/plugins-manage/${plugin.id}/delete`,

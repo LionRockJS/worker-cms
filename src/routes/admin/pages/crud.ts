@@ -540,7 +540,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
     action || 'update',
   );
 
-  // Commit the live CRDT overlay: clears uncommitted ops so a save-then-leave
+  // Commit the live collaboration overlay: clears uncommitted ops so save-then-leave
   // doesn't revert, and pushes the saved values as everyone's new baseline.
   await notifyPageSaved(c.env, pageId);
 
