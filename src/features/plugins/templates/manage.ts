@@ -13,6 +13,8 @@ export interface PluginListItem {
   version?: string;
   /** True when the manifest declares candidate JS/CSS assets to approve. */
   hasAssets?: boolean;
+  /** True when the manifest declares host file prefixes to approve. */
+  hasFilePrefixes?: boolean;
   /** Live approval health for the manifest-declared assets. */
   assetNeedsApproval?: boolean;
   assetNeedsUpdate?: boolean;
@@ -53,6 +55,8 @@ export async function pluginsManagePage(views: Fetcher, opts: BaseTemplateProps 
       assetNeedsUpdate: !!plugin.assetNeedsUpdate,
       assetStatusError: !!plugin.assetStatusError,
       assetsHref: `/admin/plugins-manage/${plugin.id}/assets`,
+      hasFilePrefixes: !!plugin.hasFilePrefixes,
+      filePrefixesHref: `/admin/plugins-manage/${plugin.id}/files`,
       hasPageTypes: !!plugin.hasPageTypes,
       pageTypesHref: `/admin/plugins-manage/${plugin.id}/page-types`,
       hasLimits: !!plugin.hasLimits,
@@ -213,6 +217,57 @@ export async function pluginAssetsPage(views: Fetcher, opts: BaseTemplateProps &
   });
 
   return adminLayout(views, opts, { title: `${pluginLabel} · Assets`, body });
+}
+
+export interface PluginFilePrefixRow {
+  prefix: string;
+  approved: boolean;
+  approvedBy: string;
+  conflict: boolean;
+  conflictPluginId: string;
+  approveAction: string;
+  revokeAction: string;
+}
+
+export async function pluginFilePrefixesPage(views: Fetcher, opts: BaseTemplateProps & {
+  pluginId: number;
+  pluginLabel: string;
+  unreachable: boolean;
+  prefixes: PluginFilePrefixRow[];
+  flash?: string;
+}): Promise<string> {
+  const { pluginLabel, unreachable, prefixes, flash } = opts;
+  const flashMessageKey = flash === 'approved'
+    ? 'view_strings.sections_plugin_file_prefixes.flash_approved'
+    : flash === 'revoked'
+      ? 'view_strings.sections_plugin_file_prefixes.flash_revoked'
+      : flash === 'conflict'
+        ? 'view_strings.sections_plugin_file_prefixes.flash_conflict'
+        : '';
+
+  const body = await renderView(views, '/templates/plugin-file-prefixes.json', {
+    pluginLabel,
+    unreachable,
+    hasPrefixes: prefixes.length > 0,
+    prefixes: prefixes.map((prefix) => ({
+      ...prefix,
+      statusKey: prefix.conflict
+        ? 'view_strings.sections_plugin_file_prefixes.status_reserved'
+        : prefix.approved
+          ? 'view_strings.sections_plugin_file_prefixes.status_approved'
+          : 'view_strings.sections_plugin_file_prefixes.status_not_approved',
+      statusClass: prefix.conflict
+        ? 'bg-red-100 text-red-800'
+        : prefix.approved
+          ? 'bg-green-100 text-green-800'
+          : 'bg-gray-100 text-gray-600',
+    })),
+    hasFlash: !!flashMessageKey,
+    flashMessageKey,
+    backHref: '/admin/plugins-manage',
+  });
+
+  return adminLayout(views, opts, { title: `${pluginLabel} · Files`, body });
 }
 
 export interface PluginLimitRow {

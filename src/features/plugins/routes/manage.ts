@@ -35,6 +35,15 @@ import {
   revokeAllPageTypeAccess,
   revokePageTypeAccess,
 } from '../page-types';
+import {
+  approveFilePrefix,
+  FilePrefixConflictError,
+  findFilePrefixConflict,
+  getFilePrefixApproval,
+  listFilePrefixApprovals,
+  revokeAllFilePrefixes,
+  revokeFilePrefix,
+} from '../file-prefixes';
 import { deleteAllPluginState } from '../state';
 import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from '../registry';
 import { pluginTenantId } from '../proxy';
@@ -53,6 +62,7 @@ import {
   pluginsManagePage,
   pluginFormPage,
   pluginAssetsPage,
+  pluginFilePrefixesPage,
   pluginCreditsPage,
   pluginLimitsPage,
   pluginPageTypesPage,
@@ -227,6 +237,7 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       manifestName: manifest?.name,
       version: manifest?.version,
       hasAssets: !!manifest?.assets?.length,
+      hasFilePrefixes: !!manifest?.filePrefixes?.length,
       hasPageTypes: !!(
         Object.keys(manifest?.contentTypes?.blueprint ?? {}).length
         + Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length
@@ -471,6 +482,7 @@ pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
       deleteAllPluginState(c.env.DB, manifestId),
       revokeAllAssets(c.env.DB, manifestId),
       revokeAllPageTypeAccess(c.env.DB, manifestId),
+      revokeAllFilePrefixes(c.env.DB, manifestId),
     ]);
   } else {
     console.warn(
@@ -583,6 +595,96 @@ pluginsManageRoutes.post('/plugins-manage/:id/assets/revoke', async (c) => {
     logAudit(c, 'plugin.asset.revoke', 'plugin', resolved.manifest.id, { path });
   }
   return c.redirect(`/admin/plugins-manage/${id}/assets?flash=revoked`);
+});
+
+// ── File-prefix approvals ─────────────────────────────────────────────────
+// A manifest only declares candidate host-storage namespaces. Approval is
+// explicit and global: an approved prefix also reserves every nested prefix
+// from another plugin, so plugins cannot overwrite one another's R2 folders.
+
+pluginsManageRoutes.get('/plugins-manage/:id/files', async (c) => {
+  const id = Number(c.req.param('id'));
+  const found = await resolvedPluginFor(c.env, id);
+  if (!found) return c.notFound();
+  const { row, resolved } = found;
+  if (!resolved) {
+    return renderPage(c, pluginFilePrefixesPage, {
+      pluginId: id,
+      pluginLabel: row.label || row.url,
+      unreachable: true,
+      prefixes: [],
+      flash: c.req.query('flash') ?? undefined,
+    });
+  }
+
+  const declared = resolved.manifest.filePrefixes ?? [];
+  const approvals = new Map((await listFilePrefixApprovals(c.env.DB, resolved.manifest.id)).map((approval) => [approval.prefix, approval]));
+  const prefixes = await Promise.all(declared.map(async (prefix) => {
+    const approval = approvals.get(prefix);
+    const conflict = approval ? null : await findFilePrefixConflict(c.env.DB, resolved.manifest.id, prefix);
+    return {
+      prefix,
+      approved: !!approval,
+      approvedBy: approval?.approved_by ?? '',
+      conflict: !!conflict,
+      conflictPluginId: conflict?.plugin_id ?? '',
+      approveAction: `/admin/plugins-manage/${id}/files/approve`,
+      revokeAction: `/admin/plugins-manage/${id}/files/revoke`,
+    };
+  }));
+
+  return renderPage(c, pluginFilePrefixesPage, {
+    pluginId: id,
+    pluginLabel: resolved.manifest.name || row.label || row.url,
+    unreachable: false,
+    prefixes,
+    flash: c.req.query('flash') ?? undefined,
+  });
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/files/approve', async (c) => {
+  const id = Number(c.req.param('id'));
+  const found = await resolvedPluginFor(c.env, id);
+  if (!found?.resolved) return c.notFound();
+  const { resolved } = found;
+
+  const prefix = str((await c.req.formData()).get('prefix'));
+  if (!(resolved.manifest.filePrefixes ?? []).includes(prefix)) {
+    return c.text('Unknown file prefix', 400);
+  }
+
+  try {
+    await approveFilePrefix(c.env.DB, resolved.manifest.id, prefix, c.get('user').email);
+  } catch (error) {
+    if (error instanceof FilePrefixConflictError) {
+      logAudit(c, 'plugin.file_prefix.approve', 'plugin', resolved.manifest.id, {
+        prefix,
+        ok: false,
+        conflict_plugin_id: error.conflict.plugin_id,
+        conflict_prefix: error.conflict.prefix,
+      });
+      return c.redirect(`/admin/plugins-manage/${id}/files?flash=conflict`);
+    }
+    throw error;
+  }
+
+  logAudit(c, 'plugin.file_prefix.approve', 'plugin', resolved.manifest.id, { prefix, ok: true });
+  return c.redirect(`/admin/plugins-manage/${id}/files?flash=approved`);
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/files/revoke', async (c) => {
+  const id = Number(c.req.param('id'));
+  const found = await resolvedPluginFor(c.env, id);
+  if (!found?.resolved) return c.notFound();
+  const { resolved } = found;
+
+  const prefix = str((await c.req.formData()).get('prefix'));
+  const existing = await getFilePrefixApproval(c.env.DB, resolved.manifest.id, prefix);
+  if (existing) {
+    await revokeFilePrefix(c.env.DB, resolved.manifest.id, prefix);
+    logAudit(c, 'plugin.file_prefix.revoke', 'plugin', resolved.manifest.id, { prefix });
+  }
+  return c.redirect(`/admin/plugins-manage/${id}/files?flash=revoked`);
 });
 
 // ── Quota limits ───────────────────────────────────────────────────────────

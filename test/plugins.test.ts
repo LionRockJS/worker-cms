@@ -98,6 +98,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM admin_jobs').run();
   await env.DB.prepare('DELETE FROM settings').run();
   await env.DB.prepare('DELETE FROM plugin_asset_approvals').run();
+  await env.DB.prepare('DELETE FROM plugin_file_prefix_approvals').run();
   await env.DB.prepare('DELETE FROM plugin_page_type_approvals').run();
 });
 
@@ -1565,6 +1566,70 @@ describe('plugin admin proxy', () => {
       'SELECT approved_by FROM plugin_page_type_approvals WHERE plugin_id = ? AND page_type = ? AND access = ?',
     ).bind('checkin', 'guest', 'write').first<{ approved_by: string }>();
     expect(approved?.approved_by).toBe('admin@example.com');
+  });
+
+  it('manages host file-prefix approvals and exposes them on the plugin list', async () => {
+    const url = 'https://plugin-file-prefix-approvals.local';
+    await env.DB.prepare('INSERT INTO plugins (id, label, url, enabled) VALUES (?, ?, ?, 1)')
+      .bind(45, 'Theme files', url).run();
+    const manifest = {
+      id: 'theme-files',
+      name: 'Theme files',
+      version: '1.0.0',
+      filePrefixes: ['uploads/'],
+    };
+    __injectPluginFetcher(url, {
+      fetch: async (input: RequestInfo | URL): Promise<Response> => {
+        const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(href).pathname === '/__plugin/manifest') return Response.json(manifest);
+        return new Response('nf', { status: 404 });
+      },
+    } as unknown as Fetcher);
+
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJWT({
+      sub: '1', email: 'admin@example.com', name: 'Admin User', role: 'admin',
+      type: 'access', exp: now + 900, iat: now,
+    }, env.JWT_SECRET);
+    const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
+
+    const listResponse = await worker.fetch(new Request('http://localhost/admin/plugins-manage', { headers }));
+    expect(listResponse.status).toBe(200);
+    expect(bodyData(await listResponse.text()).plugins).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hasFilePrefixes: true, filePrefixesHref: '/admin/plugins-manage/45/files' }),
+    ]));
+
+    const pageResponse = await worker.fetch(new Request('http://localhost/admin/plugins-manage/45/files', { headers }));
+    expect(pageResponse.status).toBe(200);
+    expect(bodyData(await pageResponse.text()).prefixes).toEqual([
+      expect.objectContaining({ prefix: 'uploads/', approved: false, conflict: false }),
+    ]);
+
+    const approveResponse = await worker.fetch(new Request('http://localhost/admin/plugins-manage/45/files/approve', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ prefix: 'uploads/' }),
+      redirect: 'manual',
+    }));
+    expect(approveResponse.status).toBe(302);
+    expect(approveResponse.headers.get('location')).toBe('/admin/plugins-manage/45/files?flash=approved');
+
+    const approved = await env.DB.prepare(
+      'SELECT approved_by FROM plugin_file_prefix_approvals WHERE plugin_id = ? AND prefix = ?',
+    ).bind('theme-files', 'uploads/').first<{ approved_by: string }>();
+    expect(approved?.approved_by).toBe('admin@example.com');
+
+    const revokeResponse = await worker.fetch(new Request('http://localhost/admin/plugins-manage/45/files/revoke', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ prefix: 'uploads/' }),
+      redirect: 'manual',
+    }));
+    expect(revokeResponse.status).toBe(302);
+    expect(revokeResponse.headers.get('location')).toBe('/admin/plugins-manage/45/files?flash=revoked');
+    expect(await env.DB.prepare(
+      'SELECT 1 FROM plugin_file_prefix_approvals WHERE plugin_id = ? AND prefix = ?',
+    ).bind('theme-files', 'uploads/').first()).toBeNull();
   });
 
   it('places a group:settings nav item inside the Settings group, not the top level', async () => {

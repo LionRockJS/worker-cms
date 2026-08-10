@@ -50,6 +50,9 @@ const EXPECTED = [
   'GET /state/:key',
   'PUT /state/:key',
   'DELETE /state/:key',
+  'GET /files',
+  'HEAD /files',
+  'PUT /files',
 ];
 
 describe('/__cms route table', () => {

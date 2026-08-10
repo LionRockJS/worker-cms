@@ -488,6 +488,19 @@ CREATE TABLE IF NOT EXISTS plugin_page_type_approvals(
     UNIQUE(plugin_id, page_type, access)
 );
 
+-- Admin-approved plugin file prefixes. A prefix is globally reserved so two
+-- plugins cannot write the same folder (or nested folders under one another).
+CREATE TABLE IF NOT EXISTS plugin_file_prefix_approvals(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    plugin_id TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    UNIQUE(plugin_id, prefix),
+    UNIQUE(prefix)
+);
+
 -- Host-owned per-plugin state, read and written by the plugin Worker over
 -- /__cms/state. A plugin Worker serving several CMS hosts must not be the
 -- system of record for any one host's data: keeping it here means the record
@@ -511,6 +524,7 @@ CREATE TABLE IF NOT EXISTS plugin_state(
 CREATE INDEX IF NOT EXISTS idx_plugins_enabled ON plugins(enabled, sort_order);
 CREATE INDEX IF NOT EXISTS idx_plugin_asset_approvals_plugin ON plugin_asset_approvals(plugin_id);
 CREATE INDEX IF NOT EXISTS idx_plugin_page_type_approvals_plugin ON plugin_page_type_approvals(plugin_id);
+CREATE INDEX IF NOT EXISTS idx_plugin_file_prefix_approvals_plugin ON plugin_file_prefix_approvals(plugin_id);
 
 -- Feature: plugin-pointer-indexes — expression indexes for the JSON pointer
 -- feature: plugin-pointer-indexes

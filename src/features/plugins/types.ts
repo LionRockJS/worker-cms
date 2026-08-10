@@ -202,6 +202,8 @@ export interface PluginManifest {
   autoTenant?: boolean;
   /** Snake-case alias for manifests that expose auto_tenant. */
   auto_tenant?: boolean;
+  /** Candidate key prefixes; each needs host-admin approval before file API access. */
+  filePrefixes?: string[];
   /**
    * Environment variable names that the plugin may copy into a newly enrolled
    * tenant record's `vars` object. The CMS forwards this validated declaration
@@ -291,6 +293,18 @@ export interface PluginPageTypeApproval {
   plugin_id: string;
   page_type: string;
   access: PluginPageTypeAccess;
+  approved_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** An admin-approved host R2 prefix (see PluginManifest.filePrefixes), stored
+ * in `plugin_file_prefix_approvals`. Prefixes are globally reserved so one
+ * plugin cannot overwrite another plugin's folder. */
+export interface PluginFilePrefixApproval {
+  id: number;
+  plugin_id: string;
+  prefix: string;
   approved_by: string;
   created_at: string;
   updated_at: string;

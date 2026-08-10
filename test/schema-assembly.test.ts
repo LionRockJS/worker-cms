@@ -17,7 +17,11 @@ const FEATURE_MARKERS: Record<string, string[]> = {
   'trash': ['CREATE TABLE IF NOT EXISTS trash_pages(', 'CREATE TABLE IF NOT EXISTS trash_page_versions('],
   'runtime-content-types': ['CREATE TABLE IF NOT EXISTS page_types(', 'CREATE TABLE IF NOT EXISTS block_types('],
   'media': ['CREATE TABLE IF NOT EXISTS media_files('],
-  'plugins': ['CREATE TABLE IF NOT EXISTS plugins(', 'CREATE TABLE IF NOT EXISTS plugin_asset_approvals('],
+  'plugins': [
+    'CREATE TABLE IF NOT EXISTS plugins(',
+    'CREATE TABLE IF NOT EXISTS plugin_asset_approvals(',
+    'CREATE TABLE IF NOT EXISTS plugin_file_prefix_approvals(',
+  ],
   'plugin-pointer-indexes': ['idx_pages_pointer_event'],
   'jobs': ['CREATE TABLE IF NOT EXISTS admin_jobs('],
   'credits': [

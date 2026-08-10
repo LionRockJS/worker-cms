@@ -21,6 +21,8 @@ export const PLUGIN_ORIGIN = 'https://plugin.local';
 const MANIFEST_TTL_MS = 60_000;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const TENANT_VAR_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
+const FILE_PREFIX_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const MAX_FILE_PREFIX_BYTES = 1024;
 const RESERVED_TENANT_VARS = new Set([
   'CMS_URL',
   'PLUGIN_SECRET',
@@ -147,6 +149,19 @@ function isPluginManifest(value: unknown): value is PluginManifest {
   if (value.i18n !== undefined && typeof value.i18n !== 'boolean') return false;
   if (value.autoTenant !== undefined && typeof value.autoTenant !== 'boolean') return false;
   if (value.auto_tenant !== undefined && typeof value.auto_tenant !== 'boolean') return false;
+  if (value.filePrefixes !== undefined) {
+    if (!Array.isArray(value.filePrefixes) || value.filePrefixes.length > 32) return false;
+    const prefixes = value.filePrefixes as unknown[];
+    if (new Set(prefixes).size !== prefixes.length) return false;
+    if (prefixes.some((prefix) => {
+      if (typeof prefix !== 'string' || !prefix.endsWith('/')) return true;
+      if (new TextEncoder().encode(prefix).byteLength > MAX_FILE_PREFIX_BYTES) return true;
+      const segments = prefix.slice(0, -1).split('/');
+      return segments.some((segment) => (
+        !segment || segment === '.' || segment === '..' || !FILE_PREFIX_SEGMENT.test(segment)
+      ));
+    })) return false;
+  }
   for (const key of ['tenantVars', 'tenant_vars']) {
     if (value[key] === undefined) continue;
     if (!Array.isArray(value[key]) || value[key].length > 64) return false;

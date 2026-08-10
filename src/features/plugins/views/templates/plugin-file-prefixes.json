@@ -1,0 +1,20 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "backHref": "{{ backHref }}",
+        "backLabel": "{{ 'view_strings.sections_plugin_file_prefixes.plugins' | t }}",
+        "title": "{{ pluginLabel }} · {{ 'view_strings.sections_plugin_file_prefixes.files' | t }}",
+        "description": "{{ 'view_strings.sections_plugin_file_prefixes.declared_prefixes_are_host_storage_namespaces_each_prefix_must_be_approved' | t }}"
+      }
+    },
+    "content": {
+      "type": "plugin-file-prefixes"
+    }
+  },
+  "order": [
+    "header",
+    "content"
+  ]
+}

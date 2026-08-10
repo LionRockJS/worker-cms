@@ -109,6 +109,11 @@ bucket_name = "worker-cms-media"
 
 The checked-in `wrangler.toml` already contains this binding. If you choose another bucket name, update both the create command and `bucket_name`.
 
+This `/admin/upload` endpoint is the signed-in editor workflow: it validates
+browser image uploads and records `media_files` metadata. Plugin Workers use
+the separate authenticated `/__cms/files` API documented below when they need
+generic host-owned binary storage.
+
 If uploads return a Cloudflare challenge page such as `Just a moment... Enable JavaScript and cookies to continue`, create a narrow Cloudflare skip rule for the authenticated upload endpoint. The Worker still requires a valid CMS session and editor role before writing to R2.
 
 In the Cloudflare dashboard:
@@ -558,6 +563,53 @@ Responses under `/__cms` use `Cache-Control: no-store`. Existing plugin rows
 whose `secret` is `NULL` must be rotated in the admin before they can call this
 API; they fail closed with `503 plugin_api_unavailable`.
 
+### Authenticated file API
+
+Plugins that declare `filePrefixes` in their manifest may request use of the
+host's private `MEDIA_BUCKET` without binding that bucket into a multi-tenant
+plugin Worker. A CMS administrator must approve each declared prefix in the
+plugin's **Files** configuration screen first. Approval reserves that prefix
+globally, including nested paths, so one plugin cannot overwrite another
+plugin's folder. The API has no theme-specific behavior. The same plugin
+authentication headers are required:
+
+```http
+x-plugin-id: theme-editor
+x-plugin-secret: <that plugin's dedicated secret>
+```
+
+For example, a plugin that stores themes and generated documents can declare:
+
+```json
+{
+  "filePrefixes": ["themes/", "plugin-data/"]
+}
+```
+
+The API uses only the intersection of declared and approved prefixes; before
+approval it returns `403 file_storage_not_approved`.
+
+The generic API is:
+
+```http
+GET  /__cms/files?prefix=<approved-prefix>&delimiter=/  → list folders/files
+GET  /__cms/files?key=<approved-key>                    → stream one file
+HEAD /__cms/files?key=<approved-key>                    → existence check
+PUT  /__cms/files?key=<approved-key>                    → write request bytes
+```
+
+`PUT` preserves the request content type and is capped at 50 MiB. List results
+include `objects`, `delimited_prefixes`, `truncated`, and a continuation
+`cursor` when needed. A list without `prefix` uses the first approved prefix.
+Keys and list prefixes must stay inside one of the approved prefixes; traversal,
+backslashes, and file keys ending in `/` are rejected. The API currently has no
+delete operation; a plugin must not assume host-backed files can be removed
+through this surface.
+
+The host owns the bucket and the plugin owns only its authenticated request.
+Do not add a direct `MEDIA_BUCKET` binding to a plugin that serves multiple CMS
+tenants: one binding cannot select a different host's bucket per request.
+
 ### Plugin state
 
 A plugin Worker typically serves several CMS hosts. Anything describing **one
@@ -724,8 +776,8 @@ that no longer declares the cost cancels the row.
 
 ## Database schema
 
-With every feature enabled, the generated initial migrations create **32
-application D1 tables**: 30 in the private CMS database and 2 in the published
+With every feature enabled, the generated initial migrations create **33
+application D1 tables**: 31 in the private CMS database and 2 in the published
 database. Live page editing also uses 2 SQLite tables inside each page's
 Durable Object; these are not D1 tables.
 
@@ -774,7 +826,7 @@ A feature may own code, tables, or both. Ten are switchable:
 
 | Feature | Owns |
 |---|---|
-| `plugins` | The plugin platform: registry, hooks, proxy, manage UI, `/__cms` API — plus `plugins`, `plugin_asset_approvals`, `plugin_page_type_approvals`, `plugin_state` (+3 indexes) |
+| `plugins` | The plugin platform: registry, hooks, proxy, manage UI, `/__cms` API — plus `plugins`, `plugin_asset_approvals`, `plugin_file_prefix_approvals`, `plugin_page_type_approvals`, `plugin_state` (+4 indexes) |
 | `credits` | Metered billing (credits and diamonds) and the credit summary screen — plus `credit_wallets`, `credit_ledger`, `shared_credits`, `shared_credit_ledger`, `credit_subscriptions` (+4 indexes) |
 | `search` | The advanced-search screen and bulk actions (code only; the query builder is core) |
 | `users-roles` | The user and role admin screens (code only; the tables and permission resolver are core) |
@@ -892,8 +944,8 @@ The private schema is divided into five feature categories:
   - `users`, `user_oauth_identities`, `sessions`, `roles`, `role_permissions`
 - **Credits (5)**
   - `credit_wallets`, `credit_ledger`, `shared_credits`, `shared_credit_ledger`, `credit_subscriptions`
-- **Plugin (6)**
-  - `plugins`, `plugin_asset_approvals`, `plugin_page_type_approvals`, `plugin_state`, `settings`, `admin_jobs`
+- **Plugin (7)**
+  - `plugins`, `plugin_asset_approvals`, `plugin_file_prefix_approvals`, `plugin_page_type_approvals`, `plugin_state`, `settings`, `admin_jobs`
 - **Compliance (1)**
   - `audit_log`
 
