@@ -715,7 +715,7 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
     userAvatar,
   });
 
-  return adminLayout(views, opts, { title: pageTitle, body });
+  return adminLayout(views, opts, { title: pageTitle, body, editorSync: isEdit });
 }
 
 /** Merges config/plugin taxonomy definitions with DB rows; DB wins on slug. */

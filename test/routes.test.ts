@@ -2335,6 +2335,20 @@ describe('admin routes', () => {
     expect(Number.isFinite(Date.parse(rows[0].last_active))).toBe(true);
   });
 
+  it('loads one Yjs runtime only in an existing page editor document', async () => {
+    const response = await fetchWorker('/admin/pages/101/edit', {
+      headers: { Cookie: await authCookie() },
+    });
+    const html = await response.text();
+    const clientAssets = renderPayload(html).layoutData.clientAssets as string[];
+    const bootstrapAssets = [...html.matchAll(/<script src="([^"?]+)/g)].map((match) => match[1]);
+
+    expect(clientAssets.filter((asset) => asset === '/assets/yjs.js')).toEqual(['/assets/yjs.js']);
+    expect(clientAssets.filter((asset) => asset === '/assets/editor-sync.js')).toEqual(['/assets/editor-sync.js']);
+    expect(bootstrapAssets).not.toContain('/assets/yjs.js');
+    expect(bootstrapAssets).not.toContain('/assets/editor-sync.js');
+  });
+
   it('POST /admin/api/page/:pageId/tag/:tagId reports duplicate tag links', async () => {
     await env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id) VALUES (?, ?, ?)')
       .bind(402, 101, 301)
@@ -2425,6 +2439,12 @@ describe('admin routes', () => {
 
 describe('capability enforcement', () => {
   it('lets a moderator publish but not create or edit content', async () => {
+    const edit = await fetchWorker('/admin/pages/101/edit?language=mis&version=502&return_to=%2Fadmin%2Fpages', {
+      headers: { Cookie: await authCookie('moderator') },
+    });
+    expect(edit.status).toBe(302);
+    expect(edit.headers.get('Location')).toBe('/admin/pages/101/read?language=mis&version=502&return_to=%2Fadmin%2Fpages');
+
     const publish = await fetchWorker('/admin/pages/101/publish', {
       method: 'POST',
       headers: { Cookie: await authCookie('moderator') },
@@ -2738,6 +2758,11 @@ describe('capability enforcement', () => {
     });
     expect(readPresence.status).toBe(404);
     expect(await readPresence.json()).toEqual({ error: 'page_not_found' });
+
+    const moderatorReadPresence = await fetchWorker('/admin/api/presence/101', {
+      headers: { Cookie: await authCookie('moderator') },
+    });
+    expect(moderatorReadPresence.status).toBe(200);
 
     const writePresence = await fetchWorker('/admin/api/presence/101', {
       method: 'POST',

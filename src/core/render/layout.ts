@@ -23,9 +23,12 @@ export const CORE_CLIENT_ASSETS: readonly string[] = [
   '/assets/color-tag.js',
   '/assets/picture-field.js',
   '/assets/page-ref.js',
-  '/assets/yjs.js',
   '/assets/richtext-md.js',
   '/assets/editor.js',
+];
+
+const EDITOR_SYNC_CLIENT_ASSETS: readonly string[] = [
+  '/assets/yjs.js',
   '/assets/editor-sync.js',
 ];
 
@@ -224,7 +227,7 @@ export interface LayoutOptions extends NavFlags {
   clientAssets?: readonly string[];
   /** Admin-approved plugin assets available to the current page's plugin (if any). */
   approvedPluginAssets?: ApprovedPluginAssets;
-  /** Load the CMS-owned live editor presence/sync script for plugin edit views. */
+  /** Load CMS-owned Yjs and presence/sync assets in the rendered editor document. */
   editorSync?: boolean;
 }
 
@@ -240,12 +243,12 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   const nonce = currentCspNonce();
   const revision = opts.viewRevision || 'dev';
   const revisionQuery = assetRevisionQuery(revision);
-  // The bootstrap shell and the document client-render.js swaps in need the
-  // same scripts, minus the engine (already running). Custom asset sets used by
-  // plugin edit views may still request editor-sync explicitly.
+  // The bootstrap shell only needs general chrome assets. Collaboration assets
+  // belong exclusively to the rendered editor document: loading Yjs in both
+  // phases creates two module copies and breaks Yjs constructor identity.
   const installedAssets = opts.clientAssets ?? CORE_CLIENT_ASSETS;
-  const documentAssets = opts.editorSync && !installedAssets.includes('/assets/editor-sync.js')
-    ? [...installedAssets, '/assets/editor-sync.js']
+  const documentAssets = opts.editorSync
+    ? [...installedAssets, ...EDITOR_SYNC_CLIENT_ASSETS.filter((asset) => !installedAssets.includes(asset))]
     : [...installedAssets];
   const layoutData = {
     ...opts,

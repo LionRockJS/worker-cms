@@ -22,6 +22,7 @@ import { publishPageToTargets } from '../../../core/publish';
 import { renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { requirePermission } from '../../../core/auth/guards';
+import { userCan } from '../../../core/auth/permissions';
 import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
 import { publishFlash } from './lifecycle';
 import {
@@ -319,6 +320,15 @@ pageCrudRoutes.get('/pages/:id/read', requirePermission('content:read'), async (
 // ── Edit page form ────────────────────────────────────────────────────────────
 
 pageCrudRoutes.get('/pages/:id/edit', requirePermission('content:read'), async (c) => {
+  // Read-only users may follow edit links from shared URLs or plugin views, but
+  // must never receive an editable form (or its collaboration client). Keep the
+  // complete query string so language, version previews, native views, and the
+  // caller's return path survive the redirect.
+  if (!(await userCan(c, 'content:write'))) {
+    const query = new URL(c.req.url).search;
+    return c.redirect(`/admin/pages/${encodeURIComponent(c.req.param('id'))}/read${query}`);
+  }
+
   const pageId = parseInt(c.req.param('id'), 10);
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, undefined, config);
