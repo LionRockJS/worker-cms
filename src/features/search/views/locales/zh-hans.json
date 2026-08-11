@@ -34,6 +34,24 @@
     "sections_advanced_search.type": "类型",
     "sections_advanced_search.unpublish_this_page": "要取消发布此页面吗？",
     "sections_advanced_search.updated": "更新时间",
-    "sections_advanced_search.weight": "权重"
+    "sections_advanced_search.weight": "权重",
+    "sections_bulk_replace_preview.affected_pages_in_preview": "个预览页面会受影响",
+    "sections_bulk_replace_preview.back": "返回",
+    "sections_bulk_replace_preview.changes": "项更改",
+    "sections_bulk_replace_preview.changes_shown": "项更改已显示",
+    "sections_bulk_replace_preview.confirm": "确认替换",
+    "sections_bulk_replace_preview.confirm_applies_all": "确认后将把替换应用于整个所选范围。",
+    "sections_bulk_replace_preview.current_value": "当前值",
+    "sections_bulk_replace_preview.empty_value": "（空）",
+    "sections_bulk_replace_preview.field": "字段",
+    "sections_bulk_replace_preview.find": "查找",
+    "sections_bulk_replace_preview.future_value": "替换后的值",
+    "sections_bulk_replace_preview.no_changes": "没有匹配的字段值需要更改。",
+    "sections_bulk_replace_preview.page": "页面",
+    "sections_bulk_replace_preview.pages": "个页面",
+    "sections_bulk_replace_preview.preview_limited": "预览仅显示前",
+    "sections_bulk_replace_preview.replace_with": "替换为",
+    "sections_bulk_replace_preview.scope": "范围",
+    "sections_bulk_replace_preview.title": "预览搜索和替换"
   }
 }

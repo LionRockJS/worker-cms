@@ -1,0 +1,27 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "title": "{{ 'view_strings.sections_bulk_replace_preview.title' | t }}",
+        "description": "{{ displayedChangeCount }} {{ 'view_strings.sections_bulk_replace_preview.changes_shown' | t }}"
+      },
+      "blocks": {
+        "back": {
+          "type": "link",
+          "settings": {
+            "href": "{{ returnTo }}",
+            "label": "{{ 'view_strings.sections_bulk_replace_preview.back' | t }}",
+            "icon": "arrow-left",
+            "variant": "secondary"
+          }
+        }
+      },
+      "block_order": ["back"]
+    },
+    "content": {
+      "type": "bulk-replace-preview"
+    }
+  },
+  "order": ["header", "content"]
+}

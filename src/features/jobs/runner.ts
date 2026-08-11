@@ -83,7 +83,11 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
 
   const cursor = Math.max(0, input.cursor ?? 0);
   const pageIds = input.ids.slice(cursor, cursor + BULK_ACTION_PAGE_LIMIT);
-  const outcome = await applyBulkPageAction(env, job.user, input.action, pageIds, input.targetTagIds);
+  const outcome = await applyBulkPageAction(env, job.user, input.action, pageIds, {
+    targetTagIds: input.targetTagIds,
+    searchText: input.searchText,
+    replacementText: input.replacementText,
+  });
   const updated = (input.updated ?? 0) + outcome.updated;
   const refused = (input.refused ?? 0) + outcome.refused;
   const failedTargets = Array.from(new Set([...(input.failedTargets ?? []), ...outcome.failedTargets]));
@@ -115,7 +119,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
 function parseAdvancedSearchBulkActionJob(body: string | null): AdvancedSearchBulkActionPayload {
   const value = body ? JSON.parse(body) as Partial<AdvancedSearchBulkActionPayload> : null;
   if (!value || typeof value !== 'object') throw new Error('Admin job is missing bulk action payload');
-  if (value.action !== 'publish' && value.action !== 'unpublish' && value.action !== 'delete' && value.action !== 'add_tag' && value.action !== 'remove_tag') {
+  if (value.action !== 'publish' && value.action !== 'unpublish' && value.action !== 'delete' && value.action !== 'add_tag' && value.action !== 'remove_tag' && value.action !== 'replace_text') {
     throw new Error('Admin job has invalid bulk action');
   }
   const scope = value.scope === 'all' ? 'all' : 'selected';
@@ -136,6 +140,10 @@ function parseAdvancedSearchBulkActionJob(body: string | null): AdvancedSearchBu
   const targetTagIds = Array.isArray(value.targetTagIds)
     ? value.targetTagIds.filter((tagId): tagId is number => typeof tagId === 'number' && Number.isInteger(tagId) && tagId > 0)
     : [];
+  const searchText = typeof value.searchText === 'string' ? value.searchText : '';
+  const replacementText = typeof value.replacementText === 'string' ? value.replacementText : '';
+  if (value.action === 'replace_text' && !searchText) throw new Error('Admin job is missing search text');
+  if (searchText.length > 5000 || replacementText.length > 5000) throw new Error('Admin job replacement text is too long');
   const returnTo = typeof value.returnTo === 'string' && value.returnTo.startsWith('/admin')
     ? value.returnTo
     : '/admin/advanced-search';
@@ -147,5 +155,5 @@ function parseAdvancedSearchBulkActionJob(body: string | null): AdvancedSearchBu
     : [];
   const resolvedAll = value.resolvedAll === true;
   if (scope === 'all' && !pageTypes.length) throw new Error('Admin job is missing page types');
-  return { action: value.action, scope, ids, pageTypes, criteria, operator, status, targetTagIds, returnTo, resolvedAll, cursor, updated, refused, failedTargets };
+  return { action: value.action, scope, ids, pageTypes, criteria, operator, status, targetTagIds, searchText, replacementText, returnTo, resolvedAll, cursor, updated, refused, failedTargets };
 }

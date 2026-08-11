@@ -97,9 +97,13 @@ export const authMiddleware = createMiddleware<{
   return next();
 });
 
-/** Middleware that gates /admin to anyone whose roles grant at least one
- *  capability (admin/editor/moderator and any custom role with permissions;
- *  a permission-less viewer/custom role is blocked). */
+/** A permission-less signed-in user may reach only their landing page and
+ *  self-service profile. Everything else still needs at least one granted
+ *  capability, followed by the route's own least-privilege check. */
+function isViewerSafeAdminRoute(path: string): boolean {
+  return path === '/admin' || path === '/admin/' || path.startsWith('/admin/profile');
+}
+
 export const editorGuard = createMiddleware<{
   Bindings: Env;
   Variables: Variables;
@@ -107,6 +111,7 @@ export const editorGuard = createMiddleware<{
   const user = c.get('user');
   const map = await resolveRolePermissions(c.env);
   if (effectivePermissions(map, user.role).size === 0) {
+    if (isViewerSafeAdminRoute(c.req.path)) return next();
     if (wantsJsonResponse(c.req.raw)) {
       return jsonError({ success: false, error: 'Editor role required' }, 403, 'editor-role-required');
     }

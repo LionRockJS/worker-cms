@@ -8,6 +8,7 @@
 // balances (now a feature contribution, see core/feature.ts).
 
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { Permission } from '../../types';
 import type { AppContext } from '../http/context';
 import { dashboardPageHref, userIdFromContext } from '../http/forms';
 import { coreExtensions } from '../extensions';
@@ -59,8 +60,10 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   ]);
   const sidebarSettings = await loadSidebarChromeSettings(c.env);
   const menuSettings = sidebarSettings.items;
+  const isAdmin = userRoles.includes('admin');
   const visible = navItems
-    .filter((item) => !item.roles?.length || item.roles.some((role) => userRoles.includes(role)));
+    .filter((item) => !item.roles?.length || item.roles.some((role) => userRoles.includes(role)))
+    .filter((item) => isAdmin || (item.permissions?.some((permission) => permissions.has(permission as Permission)) ?? false));
   // Plugins that do not ship locale catalogs (manifest `i18n: true`) get no
   // translation key at all: the sidebar renders their manifest label directly
   // instead of asking the client for a key that can never resolve.
@@ -81,14 +84,19 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   const nav = visible.filter((item) => item.group !== 'settings').map(toLink);
   const settingsNav = visible.filter((item) => item.group === 'settings').map(toLink);
   const canSeeMenuItem = (key: SidebarMenuItemKey): boolean => {
+    if (key === 'pages') return permissions.has('content:read');
+    if (key === 'trash') return permissions.has('content:read') || permissions.has('trash:restore') || permissions.has('trash:purge');
+    if (key === 'tags' || key === 'taxonomies') return permissions.has('content:read');
+    if (key === 'pageTypes' || key === 'blockTypes') return permissions.has('content:read');
     if (key === 'users') return permissions.has('users:manage');
     if (key === 'roles') return permissions.has('roles:manage');
     if (key === 'plugins') return permissions.has('plugin:manage');
-    // Credit summary is read-only and visible to every admin user; only the
+    // Credit summary is read-only and visible to content/plugin operators; only the
     // configure links inside it require plugin:manage.
-    if (key === 'credits') return true;
+    if (key === 'credits') return permissions.has('content:read') || permissions.has('plugin:manage');
     if (key === 'languages') return permissions.has('menu:manage');
     if (key === 'system') return permissions.has('menu:manage');
+    if (key === 'content') return permissions.has('content:read') || permissions.has('media:upload');
     return true;
   };
   const orderedSidebarItems = SIDEBAR_MENU_ITEMS
@@ -193,16 +201,17 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     canManageMenu: permissions.has('menu:manage'),
     sidebarNav,
     sidebarSettingsNav,
-    showSidebarPages: menuSettings.pages.visible,
-    showSidebarTags: menuSettings.tags.visible,
-    showSidebarTaxonomies: menuSettings.taxonomies.visible,
-    showSidebarPageTypes: menuSettings.pageTypes.visible,
-    showSidebarBlockTypes: menuSettings.blockTypes.visible,
+    showSidebarPages: menuSettings.pages.visible && permissions.has('content:read'),
+    showSidebarTags: menuSettings.tags.visible && permissions.has('content:read'),
+    showSidebarTaxonomies: menuSettings.taxonomies.visible && permissions.has('content:read'),
+    showSidebarPageTypes: menuSettings.pageTypes.visible && permissions.has('content:read'),
+    showSidebarBlockTypes: menuSettings.blockTypes.visible && permissions.has('content:read'),
     showSidebarUsers: menuSettings.users.visible,
     showSidebarRoles: menuSettings.roles.visible,
     showSidebarPlugins: menuSettings.plugins.visible,
     showSidebarMenu: menuSettings.system.visible,
-    showSidebarTrash: menuSettings.trash.visible && featureInstalled('trash'),
+    showSidebarTrash: menuSettings.trash.visible && featureInstalled('trash')
+      && (permissions.has('content:read') || permissions.has('trash:restore') || permissions.has('trash:purge')),
     ...contributed,
   };
 }

@@ -34,6 +34,24 @@
     "sections_advanced_search.type": "類型",
     "sections_advanced_search.unpublish_this_page": "要取消發佈此頁面嗎？",
     "sections_advanced_search.updated": "更新時間",
-    "sections_advanced_search.weight": "權重"
+    "sections_advanced_search.weight": "權重",
+    "sections_bulk_replace_preview.affected_pages_in_preview": "個預覽頁面會受影響",
+    "sections_bulk_replace_preview.back": "返回",
+    "sections_bulk_replace_preview.changes": "項變更",
+    "sections_bulk_replace_preview.changes_shown": "項變更已顯示",
+    "sections_bulk_replace_preview.confirm": "確認取代",
+    "sections_bulk_replace_preview.confirm_applies_all": "確認後會將取代套用至整個所選範圍。",
+    "sections_bulk_replace_preview.current_value": "目前值",
+    "sections_bulk_replace_preview.empty_value": "（空白）",
+    "sections_bulk_replace_preview.field": "欄位",
+    "sections_bulk_replace_preview.find": "尋找",
+    "sections_bulk_replace_preview.future_value": "取代後的值",
+    "sections_bulk_replace_preview.no_changes": "沒有相符的欄位值需要變更。",
+    "sections_bulk_replace_preview.page": "頁面",
+    "sections_bulk_replace_preview.pages": "個頁面",
+    "sections_bulk_replace_preview.preview_limited": "預覽僅顯示前",
+    "sections_bulk_replace_preview.replace_with": "取代為",
+    "sections_bulk_replace_preview.scope": "範圍",
+    "sections_bulk_replace_preview.title": "預覽搜尋及取代"
   }
 }

@@ -77,6 +77,8 @@ export interface PageInput {
   page_id?: unknown;
   tags?: unknown;
   version_action?: unknown;
+  /** Optional exact stored-lect precondition for compare-and-swap updates. */
+  if_lect?: unknown;
 }
 
 export interface AdvancedSearchInput {

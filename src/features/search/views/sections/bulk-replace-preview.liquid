@@ -1,0 +1,79 @@
+<div class="px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
+  <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <dl class="grid gap-3 sm:grid-cols-3">
+      <div>
+        <dt class="text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.find" | t }}</dt>
+        <dd class="mt-1 whitespace-pre-wrap break-words text-sm text-gray-900">{{ searchText }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.replace_with" | t }}</dt>
+        <dd class="mt-1 whitespace-pre-wrap break-words text-sm text-gray-900">{% if replacementText == "" %}{{ "view_strings.sections_bulk_replace_preview.empty_value" | t }}{% else %}{{ replacementText }}{% endif %}</dd>
+      </div>
+      <div>
+        <dt class="text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.scope" | t }}</dt>
+        <dd class="mt-1 text-sm text-gray-900">{{ targetPageCount }} {{ "view_strings.sections_bulk_replace_preview.pages" | t }}</dd>
+      </div>
+    </dl>
+  </div>
+
+  {% if previewTruncated %}
+    <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      {{ "view_strings.sections_bulk_replace_preview.preview_limited" | t }}
+      {{ previewPageCount }} {{ "view_strings.sections_bulk_replace_preview.pages" | t }},
+      {{ displayedChangeCount }} {{ "view_strings.sections_bulk_replace_preview.changes" | t }}.
+      {{ "view_strings.sections_bulk_replace_preview.confirm_applies_all" | t }}
+    </div>
+  {% endif %}
+
+  {% if hasChanges %}
+    <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[760px] text-left">
+          <thead class="border-b border-gray-200 bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.page" | t }}</th>
+              <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.field" | t }}</th>
+              <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.current_value" | t }}</th>
+              <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_bulk_replace_preview.future_value" | t }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% for change in changes %}
+              <tr class="align-top hover:bg-gray-50">
+                <td class="px-4 py-3 text-sm font-medium text-gray-900"><a href="{{ change.pageEditHref }}" class="text-indigo-600 hover:text-indigo-800">{{ change.pageName }}</a></td>
+                <td class="px-4 py-3"><code class="break-words text-xs text-gray-700">{{ change.fieldPath }}</code></td>
+                <td class="px-4 py-3"><div class="max-w-xl whitespace-pre-wrap break-words text-sm text-gray-700">{{ change.currentValue }}</div></td>
+                <td class="px-4 py-3"><div class="max-w-xl whitespace-pre-wrap break-words text-sm text-gray-900">{{ change.futureValue }}</div></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <div class="rounded-xl border border-gray-200 bg-white px-6 py-10 text-center text-sm text-gray-500">
+      {{ "view_strings.sections_bulk_replace_preview.no_changes" | t }}
+    </div>
+  {% endif %}
+
+  <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+    <p class="text-sm text-gray-500">{{ affectedPageCount }} {{ "view_strings.sections_bulk_replace_preview.affected_pages_in_preview" | t }}</p>
+    <div class="flex items-center gap-3">
+      <a href="{{ returnTo }}" class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "common.cancel" | t }}</a>
+      {% if canConfirm %}
+        <form method="POST" action="{{ confirmAction }}">
+          <input type="hidden" name="confirmed" value="1">
+          <input type="hidden" name="bulk_action" value="replace_text">
+          <input type="hidden" name="scope" value="{{ scope }}">
+          <input type="hidden" name="search_text" value="{{ searchText }}">
+          <input type="hidden" name="replacement_text" value="{{ replacementText }}">
+          <input type="hidden" name="return_to" value="{{ returnTo }}">
+          {% for pageId in selectedPageIds %}<input type="hidden" name="page_ids" value="{{ pageId }}">{% endfor %}
+          <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
+            {{ "view_strings.sections_bulk_replace_preview.confirm" | t }}
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</div>

@@ -79,6 +79,7 @@
           data-dashboard-bulk-page-singular="{{ "view_strings.sections_dashboard.bulk_selected_page" | t }}"
           data-dashboard-bulk-page-plural="{{ "view_strings.sections_dashboard.bulk_selected_pages" | t }}"
           data-dashboard-bulk-choose-tag="{{ "view_strings.shared_bulk_actions.choose_tags" | t }}"
+          data-dashboard-bulk-enter-search="{{ "view_strings.shared_bulk_actions.enter_text_to_find" | t }}"
           aria-hidden="true">
       <input type="hidden" name="return_to" value="{{ returnPath }}">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -90,6 +91,7 @@
               <option value="publish">{{ "view_strings.shared_bulk_actions.publish" | t }}</option>
               <option value="unpublish">{{ "view_strings.shared_bulk_actions.unpublish" | t }}</option>
               <option value="delete">{{ "view_strings.shared_bulk_actions.move_to_trash" | t }}</option>
+              <option value="replace_text">{{ "view_strings.shared_bulk_actions.replace_text" | t }}</option>
               {% if hasBulkTagOptions %}
                 <option value="add_tag">{{ "view_strings.shared_bulk_actions.add_tags" | t }}</option>
                 <option value="remove_tag">{{ "view_strings.shared_bulk_actions.remove_tags" | t }}</option>
@@ -136,6 +138,23 @@
               </p>
             </div>
           {% endif %}
+          <div class="hidden sm:col-span-2" data-dashboard-bulk-replacement>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.find_text" | t }}</span>
+                <input type="text" name="search_text" maxlength="5000" autocomplete="off"
+                       class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                       data-dashboard-bulk-search-text>
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.replacement_text" | t }}</span>
+                <input type="text" name="replacement_text" maxlength="5000" autocomplete="off"
+                       class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                       data-dashboard-bulk-replacement-text>
+              </label>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">{{ "view_strings.shared_bulk_actions.replace_text_help" | t }}</p>
+          </div>
         </div>
         <div class="flex items-center gap-3">
           <div class="text-sm text-gray-500"><span data-dashboard-selected-count>0</span> {{ "view_strings.shared_bulk_actions.selected" | t }}</div>
@@ -431,6 +450,9 @@
     const tagLabelRemove = document.querySelector('[data-dashboard-bulk-tag-label-remove]');
     const tagHelpAdd = document.querySelector('[data-dashboard-bulk-tag-help-add]');
     const tagHelpRemove = document.querySelector('[data-dashboard-bulk-tag-help-remove]');
+    const replacementPanel = document.querySelector('[data-dashboard-bulk-replacement]');
+    const searchText = document.querySelector('[data-dashboard-bulk-search-text]');
+    const replacementText = document.querySelector('[data-dashboard-bulk-replacement-text]');
     const selectedTagIds = new Set();
 
     const renderTagPicker = () => {
@@ -488,19 +510,27 @@
 
     tagOptions.forEach((option) => option.addEventListener('click', () => addTagChip(option)));
     tagSearch?.addEventListener('input', renderTagPicker);
-    const syncTagAction = () => {
+    const syncAction = () => {
       const addingTags = action?.value === 'add_tag';
       const removingTags = action?.value === 'remove_tag';
       const changingTags = addingTags || removingTags;
+      const replacingText = action?.value === 'replace_text';
       tagsPanel?.classList.toggle('hidden', !changingTags);
       tagsPanel?.setAttribute('aria-hidden', changingTags ? 'false' : 'true');
+      replacementPanel?.classList.toggle('hidden', !replacingText);
+      replacementPanel?.setAttribute('aria-hidden', replacingText ? 'false' : 'true');
+      if (searchText) {
+        searchText.required = replacingText;
+        searchText.disabled = !replacingText;
+      }
+      if (replacementText) replacementText.disabled = !replacingText;
       tagLabelAdd?.classList.toggle('hidden', !addingTags);
       tagLabelRemove?.classList.toggle('hidden', !removingTags);
       tagHelpAdd?.classList.toggle('hidden', !addingTags);
       tagHelpRemove?.classList.toggle('hidden', !removingTags);
       if (changingTags) renderTagPicker();
     };
-    action?.addEventListener('change', syncTagAction);
+    action?.addEventListener('change', syncAction);
 
     const countSelected = () => checkboxes.filter((checkbox) => checkbox.checked).length;
     const syncSelection = () => {
@@ -531,6 +561,13 @@
         alert(bulkForm.dataset.dashboardBulkChooseTag || 'Choose at least one tag');
         return;
       }
+      if (action?.value === 'replace_text' && !searchText?.value) {
+        event.preventDefault();
+        alert(bulkForm.dataset.dashboardBulkEnterSearch || 'Enter text to find');
+        searchText?.focus();
+        return;
+      }
+      if (action?.value === 'replace_text') return;
       const actionLabel = action?.selectedOptions?.[0]?.textContent?.trim() || action?.value || 'publish';
       const subject = scope?.value === 'all'
         ? bulkForm.dataset.dashboardBulkAllSubject
@@ -544,7 +581,7 @@
         event.preventDefault();
       }
     });
-    syncTagAction();
+    syncAction();
     syncSelection();
   })();
 </script>

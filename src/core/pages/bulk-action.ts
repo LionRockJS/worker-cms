@@ -1,4 +1,5 @@
-// Applying one action to many pages: publish, unpublish, move to trash, or change tags.
+// Applying one action to many pages: publish, unpublish, move to trash, change tags,
+// or replace text in draft content.
 //
 // Core, not a feature, for the same reason the advanced-search query builder
 // is: two callers need it and neither may depend on the other. The search
@@ -18,10 +19,24 @@ import type { Env, JWTPayload, Page } from '../../types';
 import { trashDraftPages, type TrashedPageRef } from '../db/admin-queries';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
 import { isSubmissionMirror } from '../db/submission-ingest';
-import { publicationStatusForPage } from '../db/page-logic';
+import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
+import { safeParseLect, stringifyLect, type Lect } from '../db/lect';
 
 /** The bulk actions a page listing offers. */
-export type BulkPageAction = 'publish' | 'unpublish' | 'delete' | 'add_tag' | 'remove_tag';
+export type BulkPageAction = 'publish' | 'unpublish' | 'delete' | 'add_tag' | 'remove_tag' | 'replace_text';
+
+/** Extra values used only by the bulk actions that need them. */
+export interface BulkPageActionOptions {
+  targetTagIds?: number[];
+  searchText?: string;
+  replacementText?: string;
+}
+
+export interface LectTextReplacementPreview {
+  path: string;
+  currentValue: string;
+  futureValue: string;
+}
 
 /**
  * Pages per slice. A slice is sized to fit one Worker invocation's subrequest
@@ -76,7 +91,7 @@ export async function applyBulkPageAction(
   user: JWTPayload,
   action: BulkPageAction,
   ids: number[],
-  targetTagIds: number[] = [],
+  options: BulkPageActionOptions = {},
 ): Promise<BulkPageActionOutcome> {
   const failedTargets = new Set<string>();
   let updated = 0;
@@ -89,7 +104,7 @@ export async function applyBulkPageAction(
     const taggedPageIds = await addTagsToDraftPages(
       env.DB,
       pages.map((page) => page.id),
-      targetTagIds,
+      options.targetTagIds ?? [],
     );
     const tagged = new Set(taggedPageIds);
     await emitPageLifecycle(env, user, 'update', pages.filter((page) => tagged.has(page.id)));
@@ -101,11 +116,32 @@ export async function applyBulkPageAction(
     const untaggedPageIds = await removeTagsFromDraftPages(
       env.DB,
       pages.map((page) => page.id),
-      targetTagIds,
+      options.targetTagIds ?? [],
     );
     const untagged = new Set(untaggedPageIds);
     await emitPageLifecycle(env, user, 'update', pages.filter((page) => untagged.has(page.id)));
     return { updated: untaggedPageIds.length, refused, failedTargets };
+  }
+
+  if (action === 'replace_text') {
+    const searchText = options.searchText ?? '';
+    if (!searchText) return { updated, refused, failedTargets };
+
+    const changed: Page[] = [];
+    const statements: D1PreparedStatement[] = [];
+    for (const page of await draftPagesByIds(env.DB, ids)) {
+      const replaced = replaceLectText(safeParseLect(page.lect), searchText, options.replacementText ?? '');
+      if (!replaced.changed) continue;
+      const lect = stringifyLect(withDraftMetadata(replaced.lect, Number.parseInt(user.sub, 10) || 0));
+      statements.push(
+        env.DB.prepare('UPDATE pages SET lect = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(lect, page.id),
+        env.DB.prepare("INSERT INTO page_versions (page_id, lect, action) VALUES (?, ?, 'bulk-replace')").bind(page.id, lect),
+      );
+      changed.push({ ...page, lect });
+    }
+    if (statements.length) await env.DB.batch(statements);
+    await emitPageLifecycle(env, user, 'update', changed);
+    return { updated: changed.length, refused, failedTargets };
   }
 
   if (action === 'delete') {
@@ -159,6 +195,8 @@ export function bulkActionFlash(
       ? 'tagged'
       : action === 'remove_tag'
         ? 'had tags removed'
+        : action === 'replace_text'
+          ? 'had text replaced'
         : `${action}ed`;
   const pageLabel = count === 1 ? 'page' : 'pages';
   const base = count === 0 ? 'No pages updated' : `${count} ${pageLabel} ${past}`;
@@ -166,6 +204,61 @@ export function bulkActionFlash(
   if (refused) notes.push(`${refused} submission ${refused === 1 ? 'page was' : 'pages were'} skipped`);
   if (failedTargets.length) notes.push(`target failures: ${failedTargets.join(', ')}`);
   return notes.length ? `${base}; ${notes.join('; ')}` : base;
+}
+
+/**
+ * Literal, case-sensitive replacement in user-authored Lect values. Structural
+ * metadata and pointer values are left intact, while blocks/items are walked
+ * recursively. JSON keys are never modified.
+ */
+export function replaceLectText(lect: Lect, searchText: string, replacementText: string): { lect: Lect; changed: boolean } {
+  const result = transformLectText(lect, searchText, replacementText);
+  return { lect: result.lect, changed: result.changes.length > 0 };
+}
+
+/** Builds the field-level before/after rows used by the confirmation preview. */
+export function previewLectTextReplacement(
+  lect: Lect,
+  searchText: string,
+  replacementText: string,
+): { lect: Lect; changes: LectTextReplacementPreview[] } {
+  return transformLectText(lect, searchText, replacementText);
+}
+
+function transformLectText(
+  lect: Lect,
+  searchText: string,
+  replacementText: string,
+): { lect: Lect; changes: LectTextReplacementPreview[] } {
+  if (!searchText) return { lect, changes: [] };
+  const changes: LectTextReplacementPreview[] = [];
+
+  const visit = (value: unknown, path: string[], key = ''): unknown => {
+    if (typeof value === 'string') {
+      if (key.startsWith('_') || !value.includes(searchText)) return value;
+      const futureValue = value.split(searchText).join(replacementText);
+      changes.push({ path: path.join('.'), currentValue: value, futureValue });
+      return futureValue;
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry, index) => visit(entry, [
+        ...path.slice(0, -1),
+        `${path.at(-1) ?? 'item'}[${index + 1}]`,
+      ]));
+    }
+    if (!value || typeof value !== 'object') return value;
+
+    const result: Record<string, unknown> = {};
+    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+      const displayKey = childKey === '_blocks' ? 'blocks' : childKey === '_tags' ? 'tags' : childKey;
+      result[childKey] = childKey === '_pointers'
+        ? childValue
+        : visit(childValue, [...path, displayKey], childKey);
+    }
+    return result;
+  };
+
+  return { lect: visit(lect, []) as Lect, changes };
 }
 
 // Records audit rows and fires lifecycle hooks for a whole batch of pages at

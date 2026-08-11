@@ -101,7 +101,7 @@ describe('database locale registry', () => {
     const viewPaths = [
       'layout/default.liquid',
       ...[
-        'advanced-search', 'block-type-form', 'content-list', 'credit-summary', 'dashboard', 'editor', 'error',
+        'advanced-search', 'block-type-form', 'bulk-replace-preview', 'content-list', 'credit-summary', 'dashboard', 'editor', 'error',
         'languages', 'login', 'menu-settings', 'page-type-form', 'plugin-assets', 'plugin-credits', 'plugin-form',
         'plugin-limits', 'plugin-page-types', 'plugins-manage', 'profile', 'role-form', 'roles', 'tag-form', 'tags',
         'taxonomies', 'taxonomy-form', 'translations', 'trash', 'type-list', 'user-form', 'users',
@@ -159,12 +159,14 @@ describe('database locale registry', () => {
     expect(simplified['view_strings.shared_bulk_actions.add_tags']).toBe('添加索引');
     expect(simplified['view_strings.shared_bulk_actions.remove_tags']).toBe('移除索引');
     expect(simplified['view_strings.shared_bulk_actions.tags_to_remove']).toBe('要移除的索引');
+    expect(simplified['view_strings.shared_bulk_actions.replace_text']).toBe('搜索并替换文本');
     expect(simplified['view_strings.sections_dashboard.all_matching_pages']).toBe('所有匹配页面');
     expect(traditional['view_strings.shared_bulk_actions.move_to_trash']).toBe('移至回收站');
     expect(traditional['view_strings.shared_bulk_actions.apply_to']).toBe('套用至');
     expect(traditional['view_strings.shared_bulk_actions.add_tags']).toBe('新增索引');
     expect(traditional['view_strings.shared_bulk_actions.remove_tags']).toBe('移除索引');
     expect(traditional['view_strings.shared_bulk_actions.tags_to_remove']).toBe('要移除的索引');
+    expect(traditional['view_strings.shared_bulk_actions.replace_text']).toBe('搜尋並取代文字');
     expect(traditional['view_strings.sections_dashboard.all_matching_pages']).toBe('所有相符頁面');
   });
 

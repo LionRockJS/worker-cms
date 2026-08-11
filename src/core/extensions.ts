@@ -27,6 +27,9 @@ export interface ContributedNavItem {
   label: string;
   href: string;
   roles?: string[];
+  /** Any one grants this navigation item to a non-admin user. An empty list
+   *  keeps the contribution admin-only. */
+  permissions?: string[];
   group?: 'settings';
   i18n: boolean;
 }
@@ -179,6 +182,9 @@ export interface QueuedBulkAction {
   status?: 'draft' | 'scheduled' | 'live' | 'ended';
   /** Tag ids to add or remove when `action` is a tag action. */
   targetTagIds?: number[];
+  /** Literal, case-sensitive draft-content replacement values. */
+  searchText?: string;
+  replacementText?: string;
   /** Where the finished job sends the browser back to. */
   returnTo: string;
 }

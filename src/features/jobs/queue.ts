@@ -33,6 +33,8 @@ export interface AdvancedSearchBulkActionInput {
   operator: AdvancedSearchOperator;
   status?: 'draft' | 'scheduled' | 'live' | 'ended';
   targetTagIds: number[];
+  searchText: string;
+  replacementText: string;
   returnTo: string;
   user: JWTPayload;
 }

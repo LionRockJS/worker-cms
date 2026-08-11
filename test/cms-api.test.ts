@@ -901,6 +901,28 @@ describe('Plugin API create / read / list / update / delete', () => {
     expect(versions.results.map((v) => v.action).sort()).toEqual(['create', 'update from google sheet']);
   });
 
+  it('compare-and-swaps a page lect and rejects a stale concurrent update', async () => {
+    const created = (await (await cmsApi('POST', '/__cms/pages', {
+      page_type: 'guest', name: 'Concurrent guest', lect: { status: 'invited', version: 0 },
+    })).json() as { page: { id: number; lect: Record<string, unknown> } }).page;
+
+    const first = await cmsApi('PUT', `/__cms/pages/${created.id}`, {
+      lect: { status: 'confirmed', version: 1 },
+      if_lect: created.lect,
+    });
+    expect(first.status).toBe(200);
+
+    const stale = await cmsApi('PUT', `/__cms/pages/${created.id}`, {
+      lect: { status: 'declined', version: 1 },
+      if_lect: created.lect,
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: 'version_conflict' });
+
+    const stored = await env.DB.prepare('SELECT lect FROM pages WHERE id = ?').bind(created.id).first<{ lect: string }>();
+    expect(JSON.parse(stored?.lect ?? '{}')).toMatchObject({ status: 'confirmed', version: 1 });
+  });
+
   it('soft-deletes a page to trash', async () => {
     const created = (await (await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest', name: 'Temp Guest',

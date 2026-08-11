@@ -5,7 +5,7 @@
 // and the projection code that only this one screen needs.
 
 import type { AppContext } from '../../core/http/context';
-import { advancedSearchPage } from './template';
+import { advancedSearchPage, bulkReplacePreviewPage } from './template';
 import { num } from '../../core/http/forms';
 import {
   advancedSearchFormCriteria,
@@ -29,6 +29,15 @@ import { draftLectProjector } from '../../core/publish/projection';
 import { withLiveStatus } from '../../core/db/page-logic';
 import { renderPage } from '../../core/render/chrome';
 import { coreExtensions } from '../../core/extensions';
+import {
+  draftPagesByIds,
+  previewLectTextReplacement,
+  resolveBulkTargetIds,
+} from '../../core/pages/bulk-action';
+import { safeParseLect } from '../../core/db/lect';
+
+const BULK_REPLACE_PREVIEW_PAGE_LIMIT = 100;
+const BULK_REPLACE_PREVIEW_CHANGE_LIMIT = 500;
 
 export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all', canSelectPageType = true) {
   const config = await resolveCmsConfig(c.env);
@@ -116,5 +125,73 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
       currentHref: `${routeBase}?${pageQuery(result.pagination.currentPage)}`,
       queryWithoutPage,
       pages: withLiveStatus(result.results, liveMap, projectDraft),
+  });
+}
+
+export async function renderBulkReplacePreview(c: AppContext, input: {
+  scope: 'selected' | 'all';
+  ids: number[];
+  pageTypes: string[];
+  criteria: ReturnType<typeof parseAdvancedSearchCriteria>;
+  operator: ReturnType<typeof advancedSearchOperator>;
+  status?: 'draft' | 'scheduled' | 'live' | 'ended';
+  searchText: string;
+  replacementText: string;
+  returnTo: string;
+}): Promise<Response> {
+  const targetIds = input.scope === 'all'
+    ? await resolveBulkTargetIds(c.env, {
+        pageTypes: input.pageTypes,
+        criteria: input.criteria,
+        operator: input.operator,
+        status: input.status,
+      })
+    : input.ids;
+  const previewPages = await draftPagesByIds(c.env.DB, targetIds.slice(0, BULK_REPLACE_PREVIEW_PAGE_LIMIT));
+  const changes: Array<{
+    pageName: string;
+    pageEditHref: string;
+    fieldPath: string;
+    currentValue: string;
+    futureValue: string;
+  }> = [];
+  let previewedChangeCount = 0;
+  let affectedPageCount = 0;
+
+  for (const page of previewPages) {
+    const preview = previewLectTextReplacement(safeParseLect(page.lect), input.searchText, input.replacementText);
+    if (preview.changes.length) affectedPageCount += 1;
+    previewedChangeCount += preview.changes.length;
+    for (const change of preview.changes) {
+      if (changes.length >= BULK_REPLACE_PREVIEW_CHANGE_LIMIT) break;
+      changes.push({
+        pageName: page.name,
+        pageEditHref: `/admin/pages/${page.id}/edit`,
+        fieldPath: change.path,
+        currentValue: change.currentValue,
+        futureValue: change.futureValue,
+      });
+    }
+  }
+
+  const previewTruncated = targetIds.length > previewPages.length
+    || previewedChangeCount > changes.length;
+  const requestUrl = new URL(c.req.url);
+  return renderPage(c, bulkReplacePreviewPage, {
+    pageTitle: 'Preview search and replace',
+    returnTo: input.returnTo,
+    confirmAction: `${requestUrl.pathname}${requestUrl.search}`,
+    scope: input.scope,
+    selectedPageIds: input.scope === 'selected' ? targetIds : [],
+    searchText: input.searchText,
+    replacementText: input.replacementText,
+    targetPageCount: targetIds.length,
+    previewPageCount: previewPages.length,
+    affectedPageCount,
+    displayedChangeCount: changes.length,
+    previewTruncated,
+    hasChanges: changes.length > 0,
+    canConfirm: previewedChangeCount > 0 || targetIds.length > previewPages.length,
+    changes,
   });
 }

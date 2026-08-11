@@ -1523,6 +1523,166 @@ describe('admin routes', () => {
     expect(repeatRemoveJob?.result_location).toContain('flash=No%20pages%20updated');
   });
 
+  it('bulk-replaces literal text in selected draft content and records a version', async () => {
+    const { queue, sent } = queueStub<CmsAdminJobMessage>();
+    (env as unknown as { ADMIN_JOBS_QUEUE?: Queue<CmsAdminJobMessage> }).ADMIN_JOBS_QUEUE = queue;
+    const lect = {
+      _type: 'Old-structural-type',
+      _pointers: { related: 'Old-pointer-value' },
+      name: { en: 'Old title' },
+      body: { en: 'Old text, Old text, and old text.' },
+      _blocks: [{ _type: 'Old-block-type', body: { en: '<p>Old block text</p>' } }],
+    };
+    await env.DB.prepare('UPDATE pages SET lect = ? WHERE id = ?')
+      .bind(JSON.stringify(lect), 101)
+      .run();
+    const versionsBefore = await env.DB.prepare('SELECT COUNT(*) AS total FROM page_versions WHERE page_id = ?')
+      .bind(101)
+      .first<{ total: number }>();
+
+    const previewResponse = await fetchWorker('/admin/advanced-search/default/bulk?dashboard=1', {
+      method: 'POST',
+      body: form({
+        bulk_action: 'replace_text',
+        scope: 'selected',
+        page_ids: '101',
+        search_text: 'Old',
+        replacement_text: 'New',
+        return_to: '/admin/pages/list/default',
+      }),
+      headers: { Cookie: await authCookie() },
+    });
+
+    expect(previewResponse.status).toBe(200);
+    const preview = bodyData(await previewResponse.text());
+    expect(preview).toMatchObject({
+      pageTitle: 'Preview search and replace',
+      targetPageCount: 1,
+      affectedPageCount: 1,
+      displayedChangeCount: 3,
+      canConfirm: true,
+      searchText: 'Old',
+      replacementText: 'New',
+      selectedPageIds: [101],
+    });
+    expect(preview.changes).toEqual([
+      expect.objectContaining({ fieldPath: 'name.en', currentValue: 'Old title', futureValue: 'New title' }),
+      expect.objectContaining({ fieldPath: 'body.en', currentValue: 'Old text, Old text, and old text.', futureValue: 'New text, New text, and old text.' }),
+      expect.objectContaining({ fieldPath: 'blocks[1].body.en', currentValue: '<p>Old block text</p>', futureValue: '<p>New block text</p>' }),
+    ]);
+    const previewSection = await (await env.VIEWS.fetch('https://views.local/sections/bulk-replace-preview.liquid')).text();
+    expect(previewSection).toContain('change.currentValue');
+    expect(previewSection).toContain('change.futureValue');
+    expect(previewSection).toContain('name="confirmed" value="1"');
+    expect(sent).toHaveLength(0);
+    expect(await env.DB.prepare('SELECT lect FROM pages WHERE id = ?').bind(101).first<{ lect: string }>())
+      .toEqual({ lect: JSON.stringify(lect) });
+
+    const response = await fetchWorker('/admin/advanced-search/default/bulk?dashboard=1', {
+      method: 'POST',
+      body: form({
+        confirmed: '1',
+        bulk_action: 'replace_text',
+        scope: 'selected',
+        page_ids: '101',
+        search_text: 'Old',
+        replacement_text: 'New',
+        return_to: '/admin/pages/list/default',
+      }),
+      headers: { Cookie: await authCookie() },
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=Bulk%20text%20replacement%20queued.%20It%20may%20take%20a%20moment%20to%20finish.');
+    expect(sent).toHaveLength(1);
+    const queued = await env.DB.prepare('SELECT body FROM admin_jobs WHERE id = ?')
+      .bind(sent[0].jobId)
+      .first<{ body: string }>();
+    expect(JSON.parse(queued?.body ?? '{}')).toMatchObject({
+      action: 'replace_text', searchText: 'Old', replacementText: 'New', ids: [101],
+    });
+
+    await worker.queue(queueBatch([sent[0]]), env as unknown as AppEnv);
+
+    const page = await env.DB.prepare('SELECT name, slug, lect FROM pages WHERE id = ?')
+      .bind(101)
+      .first<{ name: string; slug: string; lect: string }>();
+    const changed = JSON.parse(page?.lect ?? '{}') as {
+      _type: string;
+      _pointers: { related: string };
+      name: { en: string };
+      body: { en: string };
+      _blocks: Array<{ _type: string; body: { en: string } }>;
+      _modifier?: number;
+    };
+    expect(page).toMatchObject({ name: 'About', slug: 'about' });
+    expect(changed.name.en).toBe('New title');
+    expect(changed.body.en).toBe('New text, New text, and old text.');
+    expect(changed._blocks[0].body.en).toBe('<p>New block text</p>');
+    expect(changed._type).toBe('Old-structural-type');
+    expect(changed._blocks[0]._type).toBe('Old-block-type');
+    expect(changed._pointers.related).toBe('Old-pointer-value');
+    expect(changed._modifier).toBe(1);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS total FROM page_versions WHERE page_id = ?')
+      .bind(101)
+      .first<{ total: number }>()).toEqual({ total: (versionsBefore?.total ?? 0) + 1 });
+    expect(await env.DB.prepare('SELECT action, lect FROM page_versions WHERE page_id = ? ORDER BY rowid DESC LIMIT 1')
+      .bind(101)
+      .first<{ action: string; lect: string }>()).toMatchObject({ action: 'bulk-replace', lect: page?.lect });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS total FROM audit_log WHERE action = 'page.update' AND entity_id = '101'")
+      .first<{ total: number }>()).toEqual({ total: 1 });
+  });
+
+  it('rejects bulk text replacement without search text', async () => {
+    const response = await fetchWorker('/admin/advanced-search/default/bulk?dashboard=1', {
+      method: 'POST',
+      body: form({
+        bulk_action: 'replace_text',
+        scope: 'selected',
+        page_ids: '101',
+        replacement_text: 'New',
+        return_to: '/admin/pages/list/default',
+      }),
+      headers: { Cookie: await authCookie() },
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=Enter%20text%20to%20find');
+  });
+
+  it('bulk-replaces inline without the jobs feature and allows an empty replacement', async () => {
+    const original = coreExtensions().enqueueBulkAction;
+    registerCoreExtensions({ enqueueBulkAction: undefined });
+    try {
+      await env.DB.prepare('UPDATE pages SET lect = ? WHERE id = ?')
+        .bind(JSON.stringify({ body: { en: 'Remove this text; remove stays lowercase.' } }), 101)
+        .run();
+
+      const response = await fetchWorker('/admin/advanced-search/default/bulk?dashboard=1', {
+        method: 'POST',
+        body: form({
+          confirmed: '1',
+          bulk_action: 'replace_text',
+          scope: 'selected',
+          page_ids: '101',
+          search_text: 'Remove ',
+          replacement_text: '',
+          return_to: '/admin/pages/list/default',
+        }),
+        headers: { Cookie: await authCookie() },
+      });
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=1%20page%20had%20text%20replaced');
+      const page = await env.DB.prepare('SELECT lect FROM pages WHERE id = ?')
+        .bind(101)
+        .first<{ lect: string }>();
+      expect(JSON.parse(page?.lect ?? '{}')).toMatchObject({ body: { en: 'this text; remove stays lowercase.' } });
+    } finally {
+      registerCoreExtensions({ enqueueBulkAction: original });
+    }
+  });
+
   it('POST /admin/advanced-search/:pageType/bulk moves all matching results to trash', async () => {
     const { queue, sent } = queueStub<CmsAdminJobMessage>();
     (env as unknown as { ADMIN_JOBS_QUEUE?: Queue<CmsAdminJobMessage> }).ADMIN_JOBS_QUEUE = queue;
@@ -2190,9 +2350,14 @@ describe('admin routes', () => {
     expect(section).toContain('<option value="delete">');
     expect(section).toContain('<option value="add_tag">');
     expect(section).toContain('<option value="remove_tag">');
+    expect(section).toContain('<option value="replace_text">');
     expect(section).toContain('data-dashboard-bulk-tag-label-remove');
     expect(section).toContain('data-dashboard-bulk-tag-option');
     expect(section).toContain('data-dashboard-bulk-scope');
+    expect(section).toContain('data-dashboard-bulk-replacement');
+    expect(section).toContain('name="search_text"');
+    expect(section).toContain('name="replacement_text"');
+    expect(section).toContain("if (action?.value === 'replace_text') return;");
     expect(section).toContain('<option value="all">');
     expect(data.bulkTagGroups).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -2501,6 +2666,28 @@ describe('capability enforcement', () => {
       headers: { Cookie: await authCookie('editor') },
     });
     expect(plugin.status).toBe(403);
+  });
+
+  it('lets viewers reach a safe dashboard and profile without exposing pages', async () => {
+    const cookie = await authCookie('viewer');
+    const dashboard = await fetchWorker('/admin', { headers: { Cookie: cookie } });
+    expect(dashboard.status).toBe(200);
+    const payload = renderPayload(await dashboard.text());
+    expect(payload.bodyView?.viewPath).toBe('/templates/viewer-home.json');
+    expect(payload.layoutData.showSidebarPages).toBe(false);
+
+    const profile = await fetchWorker('/admin/profile', { headers: { Cookie: cookie } });
+    expect(profile.status).toBe(200);
+
+    const list = await fetchWorker('/admin/pages/list', { headers: { Cookie: cookie } });
+    expect(list.status).toBe(302);
+    expect(list.headers.get('Location')).toBe('/auth/login?error=forbidden');
+    const read = await fetchWorker('/admin/pages/101/read', { headers: { Cookie: cookie } });
+    expect(read.status).toBe(302);
+    expect(read.headers.get('Location')).toBe('/auth/login?error=forbidden');
+    const edit = await fetchWorker('/admin/pages/101/edit', { headers: { Cookie: cookie } });
+    expect(edit.status).toBe(302);
+    expect(edit.headers.get('Location')).toBe('/auth/login?error=forbidden');
   });
 
   it('keeps plugin admin pages admin-only even when a custom role has plugin:access', async () => {

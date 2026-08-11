@@ -34,6 +34,24 @@
     "sections_advanced_search.type": "Type",
     "sections_advanced_search.unpublish_this_page": "Unpublish this page?",
     "sections_advanced_search.updated": "Updated",
-    "sections_advanced_search.weight": "Weight"
+    "sections_advanced_search.weight": "Weight",
+    "sections_bulk_replace_preview.affected_pages_in_preview": "affected pages in this preview",
+    "sections_bulk_replace_preview.back": "Back",
+    "sections_bulk_replace_preview.changes": "changes",
+    "sections_bulk_replace_preview.changes_shown": "changes shown",
+    "sections_bulk_replace_preview.confirm": "Confirm replacement",
+    "sections_bulk_replace_preview.confirm_applies_all": "Confirmation applies the replacement to the full selected scope.",
+    "sections_bulk_replace_preview.current_value": "Current value",
+    "sections_bulk_replace_preview.empty_value": "(empty)",
+    "sections_bulk_replace_preview.field": "Field",
+    "sections_bulk_replace_preview.find": "Find",
+    "sections_bulk_replace_preview.future_value": "Future value",
+    "sections_bulk_replace_preview.no_changes": "No matching field values would change.",
+    "sections_bulk_replace_preview.page": "Page",
+    "sections_bulk_replace_preview.pages": "pages",
+    "sections_bulk_replace_preview.preview_limited": "Preview is limited to",
+    "sections_bulk_replace_preview.replace_with": "Replace with",
+    "sections_bulk_replace_preview.scope": "Scope",
+    "sections_bulk_replace_preview.title": "Preview search and replace"
   }
 }

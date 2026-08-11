@@ -13,7 +13,7 @@ import {
   BULK_ACTION_PAGE_LIMIT,
   type BulkPageAction,
 } from '../../core/pages/bulk-action';
-import { renderAdvancedSearch } from './render';
+import { renderAdvancedSearch, renderBulkReplacePreview } from './render';
 import { userCan } from '../../core/auth/permissions';
 import type { AppContext } from '../../core/http/context';
 import { appendQuery, dashboardStatusFilter, safeAdminReturnPath, str } from '../../core/http/forms';
@@ -48,11 +48,12 @@ const BULK_ACTIONS: Record<BulkPageAction, { permission: Permission; queued: str
   delete: { permission: 'content:delete', queued: 'Bulk deletion queued. It may take a moment to finish.' },
   add_tag: { permission: 'content:write', queued: 'Bulk tag addition queued. It may take a moment to finish.' },
   remove_tag: { permission: 'content:write', queued: 'Bulk tag removal queued. It may take a moment to finish.' },
+  replace_text: { permission: 'content:write', queued: 'Bulk text replacement queued. It may take a moment to finish.' },
 };
 
 function bulkAction(value: FormDataEntryValue | null): BulkPageAction | null {
   const action = str(value);
-  return action === 'publish' || action === 'unpublish' || action === 'delete' || action === 'add_tag' || action === 'remove_tag'
+  return action === 'publish' || action === 'unpublish' || action === 'delete' || action === 'add_tag' || action === 'remove_tag' || action === 'replace_text'
     ? action
     : null;
 }
@@ -67,6 +68,10 @@ function uniqueNumericIds(values: FormDataEntryValue[]): number[] {
 
 function uniquePageIds(values: FormDataEntryValue[]): number[] {
   return uniqueNumericIds(values);
+}
+
+function rawText(value: FormDataEntryValue | null): string {
+  return typeof value === 'string' ? value : '';
 }
 
 async function bulkAdvancedSearch(
@@ -89,6 +94,14 @@ async function bulkAdvancedSearch(
   const targetTagIds = isTagAction ? uniqueNumericIds(form.getAll('tag_ids')) : [];
   if (isTagAction && !targetTagIds.length) {
     return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Choose at least one tag')}`));
+  }
+  const searchText = action === 'replace_text' ? rawText(form.get('search_text')) : '';
+  const replacementText = action === 'replace_text' ? rawText(form.get('replacement_text')) : '';
+  if (action === 'replace_text' && !searchText) {
+    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Enter text to find')}`));
+  }
+  if (searchText.length > 5000 || replacementText.length > 5000) {
+    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Search and replacement text must be 5000 characters or fewer')}`));
   }
   let pageTypes: string[] = [];
   const criteria = parseAdvancedSearchCriteria(c.req.url);
@@ -123,6 +136,20 @@ async function bulkAdvancedSearch(
     return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('No matching pages')}`));
   }
 
+  if (action === 'replace_text' && str(form.get('confirmed')) !== '1') {
+    return renderBulkReplacePreview(c, {
+      scope,
+      ids,
+      pageTypes,
+      criteria,
+      operator,
+      status,
+      searchText,
+      replacementText,
+      returnTo,
+    });
+  }
+
   // Hand the whole set to a durable runner when one is installed: it walks the
   // ids in bounded slices, surviving the invocation that started it.
   const queued = await coreExtensions().enqueueBulkAction?.(c, {
@@ -134,6 +161,8 @@ async function bulkAdvancedSearch(
     operator,
     status,
     targetTagIds,
+    searchText,
+    replacementText,
     returnTo,
   }) ?? false;
   if (queued) {
@@ -149,6 +178,8 @@ async function bulkAdvancedSearch(
     operator,
     status,
     targetTagIds,
+    searchText,
+    replacementText,
     returnTo,
   });
 }
@@ -171,6 +202,8 @@ async function bulkAdvancedSearchInline(
     operator: ReturnType<typeof advancedSearchOperator>;
     status?: 'draft' | 'scheduled' | 'live' | 'ended';
     targetTagIds: number[];
+    searchText: string;
+    replacementText: string;
     returnTo: string;
   },
 ): Promise<Response> {
@@ -184,7 +217,11 @@ async function bulkAdvancedSearchInline(
     : input.ids;
 
   const slice = targetIds.slice(0, BULK_ACTION_PAGE_LIMIT);
-  const outcome = await applyBulkPageAction(c.env, c.get('user'), input.action, slice, input.targetTagIds);
+  const outcome = await applyBulkPageAction(c.env, c.get('user'), input.action, slice, {
+    targetTagIds: input.targetTagIds,
+    searchText: input.searchText,
+    replacementText: input.replacementText,
+  });
   const remaining = targetIds.length - slice.length;
   const flash = bulkActionFlash(
     input.action,

@@ -3,6 +3,7 @@
 
 import { Hono } from 'hono';
 import { dashboardPage } from '../../../core/templates/dashboard';
+import { viewerHomePage } from '../../../core/templates/viewer-home';
 import { resolveCmsConfig } from '../../../core/db/content-config';
 import { advancedSearchPageTypes } from '../../../core/db/search';
 import { announcePageEvent } from '../../../core/page-events';
@@ -322,13 +323,13 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
 }
 
 pageDashboardRoutes.get('/', async (c) => {
+  if (!(await userCan(c, 'content:read'))) {
+    return renderPage(c, viewerHomePage, {});
+  }
+
   const adminHome = await loadAdminHomeSettings(c.env);
   if (!new URL(c.req.url).search && adminHome.href !== '/admin') {
     return c.redirect(adminHome.href);
-  }
-
-  if (!(await userCan(c, 'content:read'))) {
-    return c.text('Forbidden: insufficient permissions', 403);
   }
 
   return renderAllPagesList(c, '/admin');

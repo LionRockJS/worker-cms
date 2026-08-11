@@ -903,6 +903,14 @@ async function updatePage(c: AppContext): Promise<Response> {
   const body = await c.req.json().catch(() => null) as PageInput | null;
   if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
 
+  let expectedLect: string | null = null;
+  if (Object.hasOwn(body, 'if_lect')) {
+    if (!body.if_lect || typeof body.if_lect !== 'object' || Array.isArray(body.if_lect)) {
+      return c.json({ error: 'invalid_if_lect' }, 400);
+    }
+    expectedLect = stringifyLect(coerceLect(body.if_lect));
+  }
+
   const config = await resolveCmsConfig(c.env);
   const pageType = page.page_type ?? 'default';
 
@@ -927,11 +935,17 @@ async function updatePage(c: AppContext): Promise<Response> {
   const timezone = 'timezone' in body ? (typeof body.timezone === 'string' ? body.timezone : null) : page.timezone;
   const parentId = 'page_id' in body ? asFiniteNumber(body.page_id) : page.page_id;
 
-  await c.env.DB.prepare(
-    'UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, lect=?, page_id=? WHERE id=?',
-  )
-    .bind(name, slug, weight, start, end, timezone, lectVal, parentId, id)
-    .run();
+  const update = expectedLect === null
+    ? c.env.DB.prepare(
+        'UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, lect=?, page_id=? WHERE id=?',
+      ).bind(name, slug, weight, start, end, timezone, lectVal, parentId, id)
+    : c.env.DB.prepare(
+        'UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, lect=?, page_id=? WHERE id=? AND lect=?',
+      ).bind(name, slug, weight, start, end, timezone, lectVal, parentId, id, expectedLect);
+  const updateResult = await update.run();
+  if ((updateResult.meta?.changes ?? 0) !== 1) {
+    return c.json({ error: 'version_conflict' }, 409);
+  }
 
   await savePageVersion(c.env.DB, id, lectVal, versionAction(body.version_action, 'update'));
   if ('tags' in body) await setDraftPageTags(c.env.DB, id, body.tags, true);
