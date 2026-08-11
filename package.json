@@ -14,6 +14,7 @@
     "db:migrate": "wrangler d1 migrations apply cms --local && wrangler d1 migrations apply cms-published --local",
     "db:migrate:admin": "wrangler d1 migrations apply cms --local",
     "db:migrate:published": "wrangler d1 migrations apply cms-published --local",
+    "apple:client-secret": "node tools/generate-apple-client-secret.mjs",
     "type-check": "tsc --noEmit",
     "pretest": "npm run build",
     "test": "npm run check:profiles && npm run check:boundaries && npm run check:generated && vitest run",

@@ -246,6 +246,11 @@ not silently merge logged-out accounts just because their emails match.
    ```
 4. Generate an Apple client-secret JWT for that Services ID and store it:
    ```bash
+   npm run apple:client-secret -- \
+     --key-file ./AuthKey_XXXXXXXXXX.p8 \
+     --team-id <team-id> \
+     --key-id <key-id> \
+     --client-id <services-id>
    npx wrangler secret put APPLE_CLIENT_SECRET
    ```
 

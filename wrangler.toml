@@ -120,14 +120,14 @@ simple = { limit = 30, period = 60 }
 # and do not need to be listed here.
 # PUBLISH_TARGETS = "d1,r2"
 # Comma-separated list of enabled OAuth providers: "github", "google", "microsoft", "apple", "eventuai"
-ENABLED_PROVIDERS = "eventuai,github,google,microsoft"
+ENABLED_PROVIDERS = "eventuai,github,google,microsoft,apple"
 # Per-provider OAuth client IDs – add the ones you use
 EVENTUAI_CLIENT_ID = "RnFAoAkXz1JLwaKx"
 GITHUB_CLIENT_ID = "Ov23lis6jG7x2nBmbFM1"
 GOOGLE_CLIENT_ID = "314543822201-i1n5al6ddo2afmuait7d2hormpgv3pue.apps.googleusercontent.com"
 MICROSOFT_CLIENT_ID = "768c819f-4981-420d-a0d6-529fd0b8642f"
 MICROSOFT_TENANT = "common"
-# APPLE_CLIENT_ID = ""
+APPLE_CLIENT_ID = "com.eventuai.cms"
 # Shared redirect URI – registered with every enabled provider
 OAUTH_REDIRECT_URI = "https://cms.eventuai.com/auth/callback"
 CANONICAL_ORIGIN = "https://cms.eventuai.com"
