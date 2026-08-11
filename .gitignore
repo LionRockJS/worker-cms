@@ -9,3 +9,4 @@ dist/
 wrangler.production.toml
 /.claude
 src/core/views/locales/en.default.json
+*.p8
