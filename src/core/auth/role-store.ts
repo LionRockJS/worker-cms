@@ -19,6 +19,7 @@ export interface RoleSummary {
 }
 
 const BUILTIN = new Set<string>(USER_ROLES);
+const PERMISSION_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?::[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$/;
 
 /** All assignable roles (built-in + custom) as { name, label } for pickers. */
 export async function allRoleOptions(env: Env): Promise<Array<{ name: string; label: string }>> {
@@ -70,7 +71,7 @@ export async function getRoleForEdit(env: Env, name: string): Promise<{ name: st
  *  override (including an empty set) overrides its code default. Accepts both
  *  built-in permissions and plugin-declared permissions (namespaced strings). */
 export async function saveRolePermissions(env: Env, name: string, label: string, permissions: string[]): Promise<void> {
-  const valid = [...new Set(permissions.filter((p) => /^[a-z][a-z0-9]*(?::[a-z][a-z0-9]*)+$/.test(p)))];
+  const valid = [...new Set(permissions.filter((permission) => PERMISSION_PATTERN.test(permission)))];
   const builtin = BUILTIN.has(name) ? 1 : 0;
   await env.DB.prepare(
     `INSERT INTO roles (name, label, builtin) VALUES (?, ?, ?)
