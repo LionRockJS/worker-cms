@@ -412,7 +412,7 @@
     "viewer_home.apps_hint": "Use an available app from the navigation, or open your profile below.",
     "shared_bulk_actions.find_text": "Find text",
     "shared_bulk_actions.replace_text": "Search and replace text",
-    "shared_bulk_actions.replace_text_help": "Replaces exact, case-sensitive matches in draft content. Page slugs and structural metadata are unchanged.",
+    "shared_bulk_actions.replace_text_help": "Replaces exact, case-sensitive matches in page names and draft content. Page slugs and structural metadata are unchanged.",
     "shared_bulk_actions.replacement_text": "Replace with",
     "shared_bulk_actions.move_to_trash": "Move to Trash",
     "shared_bulk_actions.publish": "Publish",

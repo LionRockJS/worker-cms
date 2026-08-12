@@ -32,6 +32,7 @@ import { coreExtensions } from '../../core/extensions';
 import {
   draftPagesByIds,
   previewLectTextReplacement,
+  replaceLiteralText,
   resolveBulkTargetIds,
 } from '../../core/pages/bulk-action';
 import { safeParseLect } from '../../core/db/lect';
@@ -160,9 +161,16 @@ export async function renderBulkReplacePreview(c: AppContext, input: {
 
   for (const page of previewPages) {
     const preview = previewLectTextReplacement(safeParseLect(page.lect), input.searchText, input.replacementText);
-    if (preview.changes.length) affectedPageCount += 1;
-    previewedChangeCount += preview.changes.length;
-    for (const change of preview.changes) {
+    const futurePageName = replaceLiteralText(page.name, input.searchText, input.replacementText);
+    const pageNameChange = futurePageName === page.name ? [] : [{
+      path: 'page.name',
+      currentValue: page.name,
+      futureValue: futurePageName,
+    }];
+    const pageChanges = [...pageNameChange, ...preview.changes];
+    if (pageChanges.length) affectedPageCount += 1;
+    previewedChangeCount += pageChanges.length;
+    for (const change of pageChanges) {
       if (changes.length >= BULK_REPLACE_PREVIEW_CHANGE_LIMIT) break;
       changes.push({
         pageName: page.name,

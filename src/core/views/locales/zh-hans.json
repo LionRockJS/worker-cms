@@ -412,7 +412,7 @@
     "viewer_home.apps_hint": "请从导航栏使用可用应用，或在下方打开个人资料。",
     "shared_bulk_actions.find_text": "查找文本",
     "shared_bulk_actions.replace_text": "搜索并替换文本",
-    "shared_bulk_actions.replace_text_help": "替换草稿内容中完全匹配且区分大小写的文本。页面别名和结构元数据不会更改。",
+    "shared_bulk_actions.replace_text_help": "替换页面名称和草稿内容中完全匹配且区分大小写的文本。页面别名和结构元数据不会更改。",
     "shared_bulk_actions.replacement_text": "替换为",
     "shared_bulk_actions.move_to_trash": "移至回收站",
     "shared_bulk_actions.publish": "发布",

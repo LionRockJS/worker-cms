@@ -1533,8 +1533,8 @@ describe('admin routes', () => {
       body: { en: 'Old text, Old text, and old text.' },
       _blocks: [{ _type: 'Old-block-type', body: { en: '<p>Old block text</p>' } }],
     };
-    await env.DB.prepare('UPDATE pages SET lect = ? WHERE id = ?')
-      .bind(JSON.stringify(lect), 101)
+    await env.DB.prepare('UPDATE pages SET name = ?, lect = ? WHERE id = ?')
+      .bind('Old About', JSON.stringify(lect), 101)
       .run();
     const versionsBefore = await env.DB.prepare('SELECT COUNT(*) AS total FROM page_versions WHERE page_id = ?')
       .bind(101)
@@ -1559,13 +1559,14 @@ describe('admin routes', () => {
       pageTitle: 'Preview search and replace',
       targetPageCount: 1,
       affectedPageCount: 1,
-      displayedChangeCount: 3,
+      displayedChangeCount: 4,
       canConfirm: true,
       searchText: 'Old',
       replacementText: 'New',
       selectedPageIds: [101],
     });
     expect(preview.changes).toEqual([
+      expect.objectContaining({ fieldPath: 'page.name', currentValue: 'Old About', futureValue: 'New About' }),
       expect.objectContaining({ fieldPath: 'name.en', currentValue: 'Old title', futureValue: 'New title' }),
       expect.objectContaining({ fieldPath: 'body.en', currentValue: 'Old text, Old text, and old text.', futureValue: 'New text, New text, and old text.' }),
       expect.objectContaining({ fieldPath: 'blocks[1].body.en', currentValue: '<p>Old block text</p>', futureValue: '<p>New block text</p>' }),
@@ -1575,8 +1576,8 @@ describe('admin routes', () => {
     expect(previewSection).toContain('change.futureValue');
     expect(previewSection).toContain('name="confirmed" value="1"');
     expect(sent).toHaveLength(0);
-    expect(await env.DB.prepare('SELECT lect FROM pages WHERE id = ?').bind(101).first<{ lect: string }>())
-      .toEqual({ lect: JSON.stringify(lect) });
+    expect(await env.DB.prepare('SELECT name, lect FROM pages WHERE id = ?').bind(101).first<{ name: string; lect: string }>())
+      .toEqual({ name: 'Old About', lect: JSON.stringify(lect) });
 
     const response = await fetchWorker('/admin/advanced-search/default/bulk?dashboard=1', {
       method: 'POST',
@@ -1615,7 +1616,7 @@ describe('admin routes', () => {
       _blocks: Array<{ _type: string; body: { en: string } }>;
       _modifier?: number;
     };
-    expect(page).toMatchObject({ name: 'About', slug: 'about' });
+    expect(page).toMatchObject({ name: 'New About', slug: 'about' });
     expect(changed.name.en).toBe('New title');
     expect(changed.body.en).toBe('New text, New text, and old text.');
     expect(changed._blocks[0].body.en).toBe('<p>New block text</p>');
@@ -1654,8 +1655,8 @@ describe('admin routes', () => {
     const original = coreExtensions().enqueueBulkAction;
     registerCoreExtensions({ enqueueBulkAction: undefined });
     try {
-      await env.DB.prepare('UPDATE pages SET lect = ? WHERE id = ?')
-        .bind(JSON.stringify({ body: { en: 'Remove this text; remove stays lowercase.' } }), 101)
+      await env.DB.prepare('UPDATE pages SET name = ?, lect = ? WHERE id = ?')
+        .bind('Remove this name', JSON.stringify({ body: { en: 'remove stays lowercase.' } }), 101)
         .run();
 
       const response = await fetchWorker('/admin/advanced-search/default/bulk?dashboard=1', {
@@ -1674,10 +1675,11 @@ describe('admin routes', () => {
 
       expect(response.status).toBe(302);
       expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=1%20page%20had%20text%20replaced');
-      const page = await env.DB.prepare('SELECT lect FROM pages WHERE id = ?')
+      const page = await env.DB.prepare('SELECT name, lect FROM pages WHERE id = ?')
         .bind(101)
-        .first<{ lect: string }>();
-      expect(JSON.parse(page?.lect ?? '{}')).toMatchObject({ body: { en: 'this text; remove stays lowercase.' } });
+        .first<{ name: string; lect: string }>();
+      expect(page?.name).toBe('this name');
+      expect(JSON.parse(page?.lect ?? '{}')).toMatchObject({ body: { en: 'remove stays lowercase.' } });
     } finally {
       registerCoreExtensions({ enqueueBulkAction: original });
     }

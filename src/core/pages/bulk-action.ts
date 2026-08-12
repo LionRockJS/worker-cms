@@ -131,13 +131,16 @@ export async function applyBulkPageAction(
     const statements: D1PreparedStatement[] = [];
     for (const page of await draftPagesByIds(env.DB, ids)) {
       const replaced = replaceLectText(safeParseLect(page.lect), searchText, options.replacementText ?? '');
-      if (!replaced.changed) continue;
-      const lect = stringifyLect(withDraftMetadata(replaced.lect, Number.parseInt(user.sub, 10) || 0));
+      const name = replaceLiteralText(page.name, searchText, options.replacementText ?? '');
+      if (!replaced.changed && name === page.name) continue;
+      const lect = replaced.changed
+        ? stringifyLect(withDraftMetadata(replaced.lect, Number.parseInt(user.sub, 10) || 0))
+        : page.lect;
       statements.push(
-        env.DB.prepare('UPDATE pages SET lect = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(lect, page.id),
+        env.DB.prepare('UPDATE pages SET name = ?, lect = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(name, lect, page.id),
         env.DB.prepare("INSERT INTO page_versions (page_id, lect, action) VALUES (?, ?, 'bulk-replace')").bind(page.id, lect),
       );
-      changed.push({ ...page, lect });
+      changed.push({ ...page, name, lect });
     }
     if (statements.length) await env.DB.batch(statements);
     await emitPageLifecycle(env, user, 'update', changed);
@@ -216,6 +219,13 @@ export function replaceLectText(lect: Lect, searchText: string, replacementText:
   return { lect: result.lect, changed: result.changes.length > 0 };
 }
 
+/** Literal, case-sensitive replacement for a single text value. */
+export function replaceLiteralText(value: string, searchText: string, replacementText: string): string {
+  return searchText && value.includes(searchText)
+    ? value.split(searchText).join(replacementText)
+    : value;
+}
+
 /** Builds the field-level before/after rows used by the confirmation preview. */
 export function previewLectTextReplacement(
   lect: Lect,
@@ -236,7 +246,7 @@ function transformLectText(
   const visit = (value: unknown, path: string[], key = ''): unknown => {
     if (typeof value === 'string') {
       if (key.startsWith('_') || !value.includes(searchText)) return value;
-      const futureValue = value.split(searchText).join(replacementText);
+      const futureValue = replaceLiteralText(value, searchText, replacementText);
       changes.push({ path: path.join('.'), currentValue: value, futureValue });
       return futureValue;
     }

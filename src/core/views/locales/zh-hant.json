@@ -412,7 +412,7 @@
     "viewer_home.apps_hint": "請從導覽列使用可用應用程式，或在下方開啟個人資料。",
     "shared_bulk_actions.find_text": "尋找文字",
     "shared_bulk_actions.replace_text": "搜尋並取代文字",
-    "shared_bulk_actions.replace_text_help": "取代草稿內容中完全相符且區分大小寫的文字。頁面代稱和結構中繼資料不會變更。",
+    "shared_bulk_actions.replace_text_help": "取代頁面名稱和草稿內容中完全相符且區分大小寫的文字。頁面代稱和結構中繼資料不會變更。",
     "shared_bulk_actions.replacement_text": "取代為",
     "shared_bulk_actions.move_to_trash": "移至回收站",
     "shared_bulk_actions.publish": "發佈",
