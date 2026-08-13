@@ -359,10 +359,11 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
   });
   const routeBase = `/admin/pages/list/${encodeURIComponent(pageType)}`;
   const statusParams = statusFilter ? { status: statusFilter } : {};
-  const [config, taxonomy, { importHref, exportHref }] = await Promise.all([
+  const [config, taxonomy, { importHref, exportHref }, canWrite] = await Promise.all([
     resolveCmsConfig(c.env),
     editorTaxonomy(c.env.DB),
     importExportLinks(c.env, pageType),
+    userCan(c, 'content:write'),
   ]);
   const t = await uiTranslator(c);
 
@@ -380,6 +381,7 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     pageTypeChoices: advancedSearchPageTypes(config),
     bulkTagGroups: dashboardBulkTagGroups(taxonomy.tags, taxonomy.taxonomies, config.taxonomies),
     pagination: dashboardPagination(routeBase, draftPages, statusParams),
+    reorder: canWrite,
     privacyTable: pageTypeHasPrivacyFields(config.blueprint[pageType]),
     t,
   });

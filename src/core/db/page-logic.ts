@@ -352,3 +352,71 @@ export function isStructuredEditorAction(action: string): boolean {
     'block-item-delete',
   ].includes(action.split(':')[0] || '');
 }
+
+// ── Drag-and-drop reorder across a paginated list ─────────────────────────────
+//
+// The page list is windowed (LIMIT/OFFSET over `weight ASC, name ASC, id ASC`),
+// so a drop can only ever restate the order of the rows on screen. Numbering
+// those rows 0..n by their position in the table would collide with every other
+// page of the list, and numbering them by their global offset would still lose
+// to the untouched rows that sit at the default weight — ties fall back to name.
+//
+// So the client posts the window it rendered plus the order it wants, and the
+// whole sequence is renumbered onto a dense `(index + 1) * step` scale. Only the
+// rows whose weight actually moves are written back: the first reorder of a list
+// normalizes it, and every reorder after that touches just the rows between the
+// dragged row's old and new slot.
+
+/** Gap between adjacent weights after a reorder. Room for manual edits between. */
+export const REORDER_WEIGHT_STEP = 10;
+
+export interface ReorderSequenceRow {
+  id: number;
+  weight: number;
+}
+
+export type ReorderPlan =
+  /** The rendered window no longer matches the stored order — the caller should
+   *  reject the drop and let the client reload rather than write a guess. */
+  | { stale: true }
+  | { stale: false; updates: ReorderSequenceRow[] };
+
+/**
+ * Splice `after` into `sequence` at `offset` and renumber the result.
+ *
+ * `before` is the window exactly as the client rendered it; if it no longer
+ * matches the stored slice (someone else moved, added or deleted a page) the
+ * drop is stale and nothing is written.
+ */
+export function planPageReorder(
+  sequence: ReorderSequenceRow[],
+  offset: number,
+  before: number[],
+  after: number[],
+  step = REORDER_WEIGHT_STEP,
+): ReorderPlan {
+  if (before.length !== after.length) return { stale: true };
+
+  const window = sequence.slice(offset, offset + before.length);
+  if (window.length !== before.length) return { stale: true };
+  if (window.some((row, index) => row.id !== before[index])) return { stale: true };
+
+  const rowById = new Map(window.map((row) => [row.id, row]));
+  const reordered = after.map((id) => rowById.get(id));
+  // A permutation of the same window, or the drop is talking about other rows.
+  if (reordered.some((row) => !row)) return { stale: true };
+
+  const next = [
+    ...sequence.slice(0, offset),
+    ...(reordered as ReorderSequenceRow[]),
+    ...sequence.slice(offset + before.length),
+  ];
+
+  const updates: ReorderSequenceRow[] = [];
+  next.forEach((row, index) => {
+    const weight = (index + 1) * step;
+    if (row.weight !== weight) updates.push({ id: row.id, weight });
+  });
+
+  return { stale: false, updates };
+}

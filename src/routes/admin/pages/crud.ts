@@ -1,8 +1,8 @@
 // Page create / read / edit / update, plus the weight controls.
 //
-// NOTE on ordering: POST /pages/batch-weight must stay registered ahead of
-// POST /pages/:id, or "batch-weight" is read as a page id. Both live here so
-// the order is local and visible.
+// NOTE on ordering: the static POST /pages/batch-weight and POST /pages/reorder
+// must stay registered ahead of POST /pages/:id, or the path segment is read as
+// a page id. All three live here so the order is local and visible.
 
 import { Hono } from 'hono';
 import { editorPage } from '../../../core/templates/editor';
@@ -14,9 +14,9 @@ import { coreExtensions } from '../../../core/extensions';
 import { reservePageCreate, type FeatureReservation } from '../../../features/services';
 import { blueprintToLect, safeParseLect, stringifyLect } from '../../../core/db/lect';
 import type { Env, Variables, Page, PageVersion } from '../../../types';
-import { appendQuery, editorsFromForm, languageFromRequest, nullableStr, num, safeAdminReturnPath, str, userIdFromContext } from '../../../core/http/forms';
+import { appendQuery, dashboardPageNumber, dashboardPageSize, editorsFromForm, languageFromRequest, nullableStr, num, safeAdminReturnPath, str, userIdFromContext } from '../../../core/http/forms';
 import { validatePageBasics } from '../../../core/db/validation';
-import { applyStructuredAction, isStructuredEditorAction, lectForPage, lectFromForm, withDraftMetadata } from '../../../core/db/page-logic';
+import { applyStructuredAction, isStructuredEditorAction, lectForPage, lectFromForm, planPageReorder, withDraftMetadata, type ReorderSequenceRow } from '../../../core/db/page-logic';
 import { editorTaxonomy, ensureUniqueDraftSlug, fetchEditorUsers, fetchUserName, parentPageOption, resolveParentPageId, savePageVersion } from '../../../core/db/admin-queries';
 import { publishPageToTargets } from '../../../core/publish';
 import { renderPage } from '../../../core/render/chrome';
@@ -24,6 +24,7 @@ import { uiTranslator } from '../../../core/i18n';
 import { requirePermission } from '../../../core/auth/guards';
 import { userCan } from '../../../core/auth/permissions';
 import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
+import { logAudit } from '../../../core/db/audit';
 import { publishFlash } from './lifecycle';
 import {
   defaultTimezone,
@@ -254,6 +255,88 @@ pageCrudRoutes.post('/pages/batch-weight', requirePermission('content:write'), a
 
   return c.json({ success: true });
 });
+
+// ── Drag-and-drop reorder ─────────────────────────────────────────────────────
+//
+// See planPageReorder (db/page-logic.ts) for why the whole sequence is
+// renumbered instead of the visible window. Only single-page-type lists are
+// reorderable: on the all-types list a renumber would interleave unrelated
+// types, and on the live/scheduled/ended filters the rows come from the
+// published DB while the weight write lands in the draft DB.
+
+/** Sequences longer than this are refused rather than renumbered in one go —
+ *  the per-row weight field stays available for those. */
+const REORDER_MAX_SEQUENCE = 5000;
+
+pageCrudRoutes.post('/pages/reorder', requirePermission('content:write'), async (c) => {
+  const body = await c.req.json<{
+    pageType?: unknown;
+    page?: unknown;
+    pagesize?: unknown;
+    before?: unknown;
+    after?: unknown;
+  }>().catch(() => null);
+
+  const pageType = str(typeof body?.pageType === 'string' ? body.pageType : '');
+  const before = pageIdList(body?.before);
+  const after = pageIdList(body?.after);
+  if (!pageType || !before || !after || !before.length) {
+    return c.json({ error: 'Invalid input' }, 400);
+  }
+
+  const pageSize = dashboardPageSize(String(body?.pagesize ?? ''));
+  const pageNumber = dashboardPageNumber(String(body?.page ?? ''));
+  if (before.length > pageSize) return c.json({ error: 'Invalid input' }, 400);
+
+  const sequence = await c.env.DB.prepare(
+    `SELECT id, weight FROM pages WHERE page_type = ?
+     ORDER BY weight ASC, name ASC, id ASC
+     LIMIT ?`,
+  )
+    .bind(pageType, REORDER_MAX_SEQUENCE + 1)
+    .all<ReorderSequenceRow>();
+
+  if (sequence.results.length > REORDER_MAX_SEQUENCE) {
+    return c.json({ error: 'Too many pages to reorder; set weights directly' }, 409);
+  }
+
+  const plan = planPageReorder(sequence.results, (pageNumber - 1) * pageSize, before, after);
+  if (plan.stale) return c.json({ error: 'List changed; reload to reorder' }, 409);
+
+  for (const chunk of reorderChunks(plan.updates)) {
+    const results = await c.env.DB.batch(chunk.map((update) => (
+      c.env.DB.prepare('UPDATE pages SET weight = ? WHERE id = ?').bind(update.weight, update.id)
+    )));
+    if (results.some((result) => !result.success)) {
+      return c.json({ error: 'Some updates failed' }, 500);
+    }
+  }
+
+  if (plan.updates.length) {
+    logAudit(c, 'page.reorder', 'page_type', pageType, {
+      page: pageNumber,
+      moved: before.length,
+      renumbered: plan.updates.length,
+    });
+  }
+
+  return c.json({ success: true, renumbered: plan.updates.length });
+});
+
+/** Positive page ids, no duplicates, or null when the payload is not that. */
+function pageIdList(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.map((entry) => Number(entry));
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) return null;
+  return new Set(ids).size === ids.length ? ids : null;
+}
+
+/** One D1 batch per chunk; keeps a first-time normalize off the statement cap. */
+function reorderChunks(updates: ReorderSequenceRow[], size = 50): ReorderSequenceRow[][] {
+  const out: ReorderSequenceRow[][] = [];
+  for (let index = 0; index < updates.length; index += size) out.push(updates.slice(index, index + size));
+  return out;
+}
 
 // ── Read page (read-only view) ────────────────────────────────────────────────
 // Same structured content as the editor, rendered as static text instead of

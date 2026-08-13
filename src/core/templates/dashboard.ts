@@ -57,6 +57,9 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
   /** All page-type slugs, used to build the filter dropdown. */
   pageTypeChoices?: string[];
   pagination?: DashboardPagination;
+  /** Drag-and-drop reorder, enabled only for a single page type with no status
+   *  filter — see POST /admin/pages/reorder for why the other lists are out. */
+  reorder?: boolean;
   /** Server-side UI translation for the page-list header and count summary. */
   t?: UiTranslator;
 }): Promise<string> {
@@ -78,6 +81,9 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
     pageTypeChoices = [],
     pagination,
   } = opts;
+  // The reorder POST replays the same window the list rendered, so it has to be
+  // told the effective (clamped) page and size, not what the query string asked.
+  const canReorder = !!opts.reorder && !!pageTypeFilter && !statusFilter && pages.length > 1;
   const translate = opts.t ?? ((_key: string, fallback: string) => fallback);
   const pageCount = pagination?.total ?? pages.length;
   const paginationStart = pagination && pageCount > 0
@@ -161,6 +167,11 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
     bulkAction,
     bulkTagGroups,
     hasBulkTagOptions: bulkTagGroups.some((group) => group.tags.length > 0),
+    canReorder,
+    reorderAction: canReorder ? '/admin/pages/reorder' : '',
+    reorderPageType: pageTypeFilter ?? '',
+    reorderPage: pagination?.currentPage ?? 1,
+    reorderPageSize: pagination?.pageSize ?? pages.length,
     showPagination: !!pagination && pagination.totalPages > 1,
     currentPage: pagination?.currentPage ?? 1,
     totalPages: pagination?.totalPages ?? 1,

@@ -2,13 +2,13 @@
 //
 // Hono matches in registration order, so a static path that also fits a
 // parameter pattern has to be registered first. In this router that is
-// POST /pages/batch-weight, which /pages/:id would otherwise swallow with
-// id="batch-weight" — silently turning a bulk reorder into an update of a
-// page that does not exist.
+// POST /pages/batch-weight and POST /pages/reorder, which /pages/:id would
+// otherwise swallow with id="batch-weight" — silently turning a bulk reorder
+// into an update of a page that does not exist.
 //
 // Splitting pages.ts into dashboard/crud/lifecycle modules is exactly the kind
-// of change that can reorder registrations, so this pins it. Both routes live
-// in crud.ts to keep the constraint local.
+// of change that can reorder registrations, so this pins it. All three routes
+// live in crud.ts to keep the constraint local.
 
 import { describe, expect, it } from 'vitest';
 import { pagesRoutes } from '../src/routes/admin/pages';
@@ -26,6 +26,7 @@ describe('admin page route order', () => {
       return index;
     };
     expect(firstOf('POST /pages/batch-weight')).toBeLessThan(firstOf('POST /pages/:id'));
+    expect(firstOf('POST /pages/reorder')).toBeLessThan(firstOf('POST /pages/:id'));
   });
 
   it('serves the whole page admin surface', () => {
@@ -48,6 +49,7 @@ describe('admin page route order', () => {
       'POST /pages/batch-weight',
       'POST /pages/new_post/:pageType',
       'POST /pages/pull/:uuid',
+      'POST /pages/reorder',
     ]);
   });
 });

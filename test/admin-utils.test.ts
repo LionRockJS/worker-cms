@@ -13,7 +13,7 @@ import {
   strParam,
 } from '../src/core/http/forms';
 import { validatePageBasics } from '../src/core/db/validation';
-import { publicationStatusForPage } from '../src/core/db/page-logic';
+import { planPageReorder, publicationStatusForPage } from '../src/core/db/page-logic';
 import {
   advancedSearchCondition,
   advancedSearchOperator,
@@ -203,5 +203,48 @@ describe('Chinese Simplified/Traditional search variants', () => {
     );
     expect(conditions).toEqual(['(json_extract(p.lect, ?) LIKE ? OR json_extract(p.lect, ?) LIKE ?)']);
     expect(params).toEqual(['$.name', '%苏玮%', '$.name', '%蘇瑋%']);
+  });
+});
+
+describe('planPageReorder', () => {
+  // A never-reordered list: everything sits at the default weight, so the
+  // rendered order is really name/id order and any drop has to normalize.
+  const flat = [1, 2, 3, 4, 5, 6].map((id) => ({ id, weight: 5 }));
+  // The same list once normalized.
+  const dense = [1, 2, 3, 4, 5, 6].map((id, index) => ({ id, weight: (index + 1) * 10 }));
+
+  it('renumbers the whole sequence on the first reorder of a window', () => {
+    const plan = planPageReorder(flat, 2, [3, 4], [4, 3]);
+    expect(plan.stale).toBe(false);
+    expect(plan.stale === false && plan.updates).toEqual([
+      { id: 1, weight: 10 }, { id: 2, weight: 20 }, { id: 4, weight: 30 },
+      { id: 3, weight: 40 }, { id: 5, weight: 50 }, { id: 6, weight: 60 },
+    ]);
+  });
+
+  it('writes only the rows that move once the sequence is dense', () => {
+    // Page 2 of a 2-per-page list: swap ids 3 and 4, leave 1/2/5/6 alone.
+    const plan = planPageReorder(dense, 2, [3, 4], [4, 3]);
+    expect(plan.stale === false && plan.updates).toEqual([
+      { id: 4, weight: 30 }, { id: 3, weight: 40 },
+    ]);
+  });
+
+  it('never renumbers a windowed drop into rows on another page', () => {
+    // Reordering the last window must leave the earlier pages untouched.
+    const plan = planPageReorder(dense, 4, [5, 6], [6, 5]);
+    expect(plan.stale === false && plan.updates.map((row) => row.id)).toEqual([6, 5]);
+  });
+
+  it('rejects a drop whose window no longer matches the stored order', () => {
+    expect(planPageReorder(dense, 2, [3, 9], [9, 3]).stale).toBe(true);
+    expect(planPageReorder(dense, 2, [4, 3], [3, 4]).stale).toBe(true);
+    // Past the end of the sequence — the list shrank under the tab.
+    expect(planPageReorder(dense, 6, [7, 8], [8, 7]).stale).toBe(true);
+  });
+
+  it('rejects a payload that is not a permutation of the window', () => {
+    expect(planPageReorder(dense, 0, [1, 2], [1, 5]).stale).toBe(true);
+    expect(planPageReorder(dense, 0, [1, 2], [1]).stale).toBe(true);
   });
 });

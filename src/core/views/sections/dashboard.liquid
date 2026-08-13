@@ -171,11 +171,11 @@
 
   <div class="mb-8 bg-white rounded-xl shadow-sm border border-gray-200">
     <div class="overflow-x-auto">
-      <table class="relative w-full text-left{% if hasPages %} min-w-[760px]{% endif %}"{% if privacyTable %} data-privacy-table{% endif %}>
+      <table class="relative w-full text-left{% if hasPages %} min-w-[760px]{% endif %}"{% if privacyTable %} data-privacy-table{% endif %}{% if canReorder %} data-reorder="{{ reorderAction }}" data-reorder-mode="sequence" data-reorder-handle-only data-reorder-page-type="{{ reorderPageType }}" data-reorder-page="{{ reorderPage }}" data-reorder-pagesize="{{ reorderPageSize }}"{% endif %}>
       {% if hasPages %}
       <thead class="bg-gray-50 border-b border-gray-200">
         <tr>
-          <th class="w-12 px-6 py-3">
+          <th class="{% if canReorder %}w-20 px-4{% else %}w-12 px-6{% endif %} py-3">
             {% if hasSelectablePages %}
               <input type="checkbox" data-dashboard-bulk-select-all
                      title="{{ "view_strings.shared_bulk_actions.select_all_visible_pages" | t }}"
@@ -192,13 +192,23 @@
       <tbody class="divide-y divide-gray-100">
         {% if hasPages %}
           {% for page in pages %}
-            <tr class="hover:bg-gray-50 transition-colors">
-              <td class="px-6 py-4 align-top">
-                {% if page.isSelectable %}
-                  <input type="checkbox" name="page_ids" value="{{ page.id }}" form="dashboard-bulk-form"
-                         data-dashboard-bulk-checkbox title="Select {{ page.name }}" aria-label="Select {{ page.name }}"
-                         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                {% endif %}
+            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}>
+              <td class="{% if canReorder %}px-4{% else %}px-6{% endif %} py-4 align-top">
+                <div class="flex items-center gap-1">
+                  {% if page.isSelectable %}
+                    <input type="checkbox" name="page_ids" value="{{ page.id }}" form="dashboard-bulk-form"
+                           data-dashboard-bulk-checkbox title="Select {{ page.name }}" aria-label="Select {{ page.name }}"
+                           class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                  {% endif %}
+                  {% if canReorder and page.isSelectable %}
+                    <span data-reorder-handle
+                          title="{{ "view_strings.sections_dashboard.drag_to_reorder" | t }}"
+                          aria-label="{{ "view_strings.sections_dashboard.drag_to_reorder" | t }}"
+                          class="inline-flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded-md text-gray-300 hover:bg-gray-100 hover:text-gray-500">
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#menu"></use></svg>
+                    </span>
+                  {% endif %}
+                </div>
               </td>
               <td class="px-6 py-4">
                 {% if page.isDraftMissing %}

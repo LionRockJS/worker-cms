@@ -234,6 +234,7 @@
     "sections_dashboard.bulk_selected_pages": "個已選頁面",
     "sections_dashboard.create_your_first_page": "建立第一個頁面",
     "sections_dashboard.draft": "草稿",
+    "sections_dashboard.drag_to_reorder": "拖曳以重新排序",
     "sections_dashboard.edit": "編輯",
     "sections_dashboard.export_csv": "匯出 CSV",
     "sections_dashboard.filter_by_type": "依類型篩選",

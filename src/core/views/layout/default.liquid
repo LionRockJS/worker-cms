@@ -685,10 +685,13 @@
                           hidden></div>{% endif %}
   <script nonce="{{ nonce }}">
   // Drag-and-drop reorder for tables with [data-reorder].
-  // Rows carry data-id (weight mode) or data-index (order mode).
+  // Rows carry data-id (weight / sequence mode) or data-index (order mode).
+  // [data-reorder-mode=sequence]: the table is one window of a paginated list,
+  // so the server is sent the window as rendered (before) and as dropped
+  // (after) plus the page it came from, and does the renumbering itself.
   // [data-reorder-handle-only]: drag may only start from [data-reorder-handle] cells.
   (function() {
-    var dragSrc = null, dragTable = null, mdTarget = null;
+    var dragSrc = null, dragTable = null, mdTarget = null, dragBefore = null;
     var markQueued = false;
     // Invisible 1×1 element used as the drag image so no ghost floats around.
     var ghost = document.createElement('span');
@@ -727,7 +730,7 @@
       if (table.hasAttribute('data-reorder-handle-only') && (!mdTarget || !mdTarget.closest('[data-reorder-handle]'))) {
         e.preventDefault(); return;
       }
-      dragSrc = tr; dragTable = table;
+      dragSrc = tr; dragTable = table; dragBefore = rowIds(table);
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setDragImage(ghost, 0, 0);
       setTimeout(function() { if (dragSrc) dragSrc.style.opacity = '0.4'; }, 0);
@@ -750,20 +753,51 @@
       if (!dragSrc) return;
       dragSrc.style.opacity = '';
       save(dragTable);
-      dragSrc = null; dragTable = null; mdTarget = null;
+      dragSrc = null; dragTable = null; mdTarget = null; dragBefore = null;
     });
+    function rowIds(table) {
+      return Array.from(table.querySelectorAll('tbody tr[data-id]')).map(function(r) {
+        return Number(r.getAttribute('data-id'));
+      });
+    }
+    function same(a, b) {
+      return a && b && a.length === b.length && a.every(function(v, i) { return v === b[i]; });
+    }
     function save(table) {
       var url = table.getAttribute('data-reorder');
       var key = table.getAttribute('data-reorder-key') || 'reorder';
       var mode = table.getAttribute('data-reorder-mode');
       var rows = Array.from(table.querySelectorAll('tbody tr[data-id],tbody tr[data-index]'));
       var body = {};
-      if (mode === 'order') {
+      if (mode === 'sequence') {
+        var after = rowIds(table);
+        if (same(dragBefore, after)) return;
+        body = {
+          pageType: table.getAttribute('data-reorder-page-type'),
+          page: Number(table.getAttribute('data-reorder-page')) || 1,
+          pagesize: Number(table.getAttribute('data-reorder-pagesize')) || after.length,
+          before: dragBefore,
+          after: after
+        };
+      } else if (mode === 'order') {
         body[key] = rows.map(function(r) { return parseInt(r.getAttribute('data-index'), 10); });
       } else {
         body[key] = rows.map(function(r, i) { return { id: Number(r.getAttribute('data-id')), weight: i * 10 }; });
       }
-      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(function() {});
+      // Accept: JSON so a permission failure comes back as a 403 to handle
+      // rather than a redirect to the login page that fetch follows silently.
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(body)
+      })
+        .then(function(res) {
+          // A refused drop means the stored order is not what this tab is
+          // showing (someone else moved a page, or the window went stale).
+          // Reloading is the only honest recovery: the DOM is now a lie.
+          if (!res.ok && mode === 'sequence') window.location.reload();
+        })
+        .catch(function() {});
     }
   })();
   </script>
