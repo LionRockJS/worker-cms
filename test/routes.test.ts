@@ -3091,6 +3091,12 @@ describe('permission-aware admin UI', () => {
       expect.objectContaining({ value: 'system', checked: true, locked: true }),
       expect.objectContaining({ value: 'trash', checked: true, weight: 5 }),
     ]));
+    expect((settingsData.mainSidebarOptions as Array<{ labelKey: string; weightName: string }>).map((option) => option.weightName)).toEqual([
+      'weight_trash',
+      'weight_tags',
+      'settings_group_weight',
+      'weight_pages',
+    ]);
   });
 
   it('falls back to the page dashboard for unsafe admin home paths', async () => {

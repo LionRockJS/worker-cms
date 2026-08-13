@@ -16,12 +16,28 @@ export interface SystemSettingsPluginOption {
   label: string;
   groupLabel: string;
   groupKey: string;
+  group: 'main' | 'settings';
   href: string;
   key: string;
   formKey: string;
   checked: boolean;
   weight: number;
   icon: string;
+}
+
+export interface SystemSettingsSidebarOption {
+  label: string;
+  labelKey: string;
+  description: string;
+  descriptionKey: string;
+  visibleName: string;
+  visibleValue: string;
+  checked: boolean;
+  locked: boolean;
+  weightName: string;
+  weight: number;
+  icon: string;
+  iconName: string;
 }
 
 export interface SystemSettingsIconOption {
@@ -43,6 +59,8 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
   settingsOptions: SystemSettingsMenuOption[];
   options: SystemSettingsMenuOption[];
   pluginOptions: SystemSettingsPluginOption[];
+  mainSidebarOptions: SystemSettingsSidebarOption[];
+  settingsSidebarOptions: SystemSettingsSidebarOption[];
   flashKey?: string;
   errorKey?: string;
 }): Promise<string> {
@@ -61,6 +79,8 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
     options: opts.options,
     pluginOptions: opts.pluginOptions,
     hasPluginOptions: opts.pluginOptions.length > 0,
+    mainSidebarOptions: opts.mainSidebarOptions,
+    settingsSidebarOptions: opts.settingsSidebarOptions,
     hasFlash: !!opts.flashKey,
     flashKey: opts.flashKey ?? '',
     hasError: !!opts.errorKey,

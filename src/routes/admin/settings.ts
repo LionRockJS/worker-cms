@@ -50,7 +50,7 @@ settingsRoutes.get('/settings/system', async (c) => {
   // An entry owned by a feature that is not installed has nothing to configure
   // — the chrome would hide it whatever this screen saved.
   const menuItems = installedMenuItems(featureInstalled);
-  const menuOption = (item: typeof SIDEBAR_MENU_ITEMS[number]) => ({
+  const menuOption = (item: typeof SIDEBAR_MENU_ITEMS[number], index: number) => ({
     value: item.key,
     label: item.label,
     description: item.description,
@@ -59,21 +59,83 @@ settingsRoutes.get('/settings/system', async (c) => {
     checked: sidebarSettings.items[item.key].visible,
     locked: item.key === 'system',
     weight: sidebarSettings.items[item.key].weight,
+    group: item.group,
+    icon: item.icon,
+    index,
   });
-  const pluginOptions = pluginItems.map((item) => {
+  const options = menuItems.map(menuOption);
+  const pluginOptions = pluginItems.map((item, index) => {
     const key = pluginSidebarKey(item);
     return {
       label: item.label,
       href: item.href,
       groupLabel: item.group === 'settings' ? 'Settings' : 'Main',
       groupKey: item.group === 'settings' ? 'settings.groups.settings' : 'settings.groups.main',
+      group: item.group === 'settings' ? 'settings' as const : 'main' as const,
       key,
       formKey: encodeURIComponent(key),
       checked: !sidebarSettings.hiddenPluginKeys.has(key),
       weight: sidebarSettings.pluginWeights[key] ?? defaultPluginNavWeight(item.group),
       icon: sidebarSettings.pluginIcons[key] ?? 'beaker',
+      index: SIDEBAR_MENU_ITEMS.length + index,
     };
   });
+  const coreSidebarOption = (option: typeof options[number]) => ({
+    label: '',
+    labelKey: option.labelKey,
+    description: '',
+    descriptionKey: option.descriptionKey,
+    visibleName: 'visible_items',
+    visibleValue: option.value,
+    checked: option.checked,
+    locked: option.locked,
+    weightName: `weight_${option.value}`,
+    weight: option.weight,
+    icon: option.icon,
+    iconName: '',
+    index: option.index,
+  });
+  const pluginSidebarOption = (option: typeof pluginOptions[number]) => ({
+    label: option.label,
+    labelKey: '',
+    description: option.href,
+    descriptionKey: '',
+    visibleName: 'plugin_visible_items',
+    visibleValue: option.key,
+    checked: option.checked,
+    locked: false,
+    weightName: `plugin_weight_${option.formKey}`,
+    weight: option.weight,
+    icon: option.icon,
+    iconName: `plugin_icon_${option.formKey}`,
+    index: option.index,
+  });
+  const byWeight = <T extends { weight: number; index: number }>(a: T, b: T) => a.weight - b.weight || a.index - b.index;
+  const mainSidebarOptions = [
+    ...options.filter((option) => option.group === 'main').map(coreSidebarOption),
+    ...pluginOptions.filter((option) => option.group === 'main').map(pluginSidebarOption),
+    {
+      label: '',
+      labelKey: 'nav.settings',
+      description: '',
+      descriptionKey: '',
+      visibleName: '',
+      visibleValue: '',
+      checked: true,
+      locked: true,
+      weightName: 'settings_group_weight',
+      weight: sidebarSettings.settingsGroupWeight,
+      icon: 'settings',
+      iconName: '',
+      // The chrome adds the group after contributed links, so keep that same
+      // tie-breaker when a plugin and the group share a weight.
+      index: SIDEBAR_MENU_ITEMS.length + pluginOptions.length,
+    },
+  ].sort(byWeight);
+  const settingsSidebarOptions = [
+    ...options.filter((option) => option.group === 'settings').map(coreSidebarOption),
+    ...pluginOptions.filter((option) => option.group === 'settings').map(pluginSidebarOption),
+  ].sort(byWeight);
   return renderPage(c, systemSettingsPage, {
     appName: branding.appName,
     appIcon: branding.appIcon,
@@ -91,10 +153,12 @@ settingsRoutes.get('/settings/system', async (c) => {
       selected: option.value === branding.appIcon,
     })),
     settingsGroupWeight: sidebarSettings.settingsGroupWeight,
-    mainOptions: menuItems.filter((item) => item.group === 'main').map(menuOption),
-    settingsOptions: menuItems.filter((item) => item.group === 'settings').map(menuOption),
-    options: menuItems.map(menuOption),
+    mainOptions: options.filter((option) => option.group === 'main'),
+    settingsOptions: options.filter((option) => option.group === 'settings'),
+    options,
     pluginOptions,
+    mainSidebarOptions,
+    settingsSidebarOptions,
     flashKey: c.req.query('flash') === 'saved' ? 'settings.system_saved' : '',
     errorKey: c.req.query('error') === 'invalid-timezone' ? 'settings.timezone_invalid' : '',
   });

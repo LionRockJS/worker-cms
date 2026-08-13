@@ -1,0 +1,83 @@
+<fieldset class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+  <legend class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ legendKey | t }}</legend>
+  <div class="mt-4 overflow-x-auto">
+    <table class="w-full min-w-[560px] text-left">
+      <thead class="text-xs uppercase tracking-wider text-gray-500">
+        <tr>
+          <th class="w-10 px-3 py-2"></th>
+          <th class="px-3 py-2 font-semibold">{{ "view_strings.sections_menu_settings.item" | t }}</th>
+          <th class="w-24 px-3 py-2 font-semibold">{{ "view_strings.sections_menu_settings.visible" | t }}</th>
+          <th class="w-28 px-3 py-2 font-semibold">{{ "view_strings.sections_menu_settings.weight" | t }}</th>
+          <th class="w-36 px-3 py-2 font-semibold">{{ "view_strings.sections_menu_settings.icon" | t }}</th>
+        </tr>
+      </thead>
+      <tbody data-weight-sortable class="divide-y divide-gray-200 text-sm">
+        {% for option in options %}
+          <tr data-weight-sortable-row>
+            <td class="px-3 py-3 text-gray-300">
+              <button type="button"
+                      data-weight-sortable-handle
+                      title="{{ "view_strings.sections_tags.drag_to_reorder" | t }}"
+                      aria-label="{{ "view_strings.sections_tags.drag_to_reorder" | t }}"
+                      class="inline-flex h-8 w-8 cursor-grab items-center justify-center rounded-md hover:bg-gray-100 hover:text-gray-500 active:cursor-grabbing">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#menu"></use></svg>
+              </button>
+            </td>
+            <td class="px-3 py-3">
+              {% if option.labelKey != blank %}
+                <p class="font-semibold text-gray-900">{{ option.labelKey | t }}</p>
+              {% else %}
+                <p class="font-semibold text-gray-900">{{ option.label }}</p>
+              {% endif %}
+              {% if option.descriptionKey != blank %}
+                <p class="mt-1 text-gray-500">{{ option.descriptionKey | t }}</p>
+              {% elsif option.description != blank %}
+                <p class="mt-1 truncate text-gray-500">{{ option.description }}</p>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {% if option.visibleName != blank %}
+                <input type="checkbox"
+                       name="{{ option.visibleName }}"
+                       value="{{ option.visibleValue }}"
+                       {% if option.checked %}checked{% endif %}
+                       {% if option.locked %}disabled{% endif %}
+                       aria-label="{{ "settings.actions.show_item" | t }}"
+                       class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                {% if option.locked %}
+                  <input type="hidden" name="{{ option.visibleName }}" value="{{ option.visibleValue }}">
+                {% endif %}
+              {% else %}
+                <input type="checkbox"
+                       checked
+                       disabled
+                       aria-label="{{ "settings.actions.show_item" | t }}"
+                       class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              <input data-weight-sortable-input
+                     type="number"
+                     name="{{ option.weightName }}"
+                     value="{{ option.weight }}"
+                     aria-label="{{ "settings.fields.item_weight" | t }}"
+                     class="block w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            </td>
+            <td class="px-3 py-3">
+              {% if option.iconName != blank %}
+                <select name="{{ option.iconName }}" aria-label="{{ "settings.fields.item_icon" | t }}"
+                        class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                  {% for icon in iconOptions %}
+                    <option value="{{ icon.value }}"{% if option.icon == icon.value %} selected{% endif %}>{{ icon.labelKey | t }}</option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                <svg class="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ option.icon }}"></use></svg>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</fieldset>

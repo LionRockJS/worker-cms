@@ -36,6 +36,7 @@ const CORE_VIEWS = [
   'snippets/structured-editor.liquid',
   'snippets/structured-item-group.liquid',
   'snippets/structured-item.liquid',
+  'snippets/menu-settings-links.liquid',
   'snippets/pagefield/text/basic.liquid',
   'snippets/pagefield/text/title.liquid',
   'assets/client-render.js',
@@ -108,6 +109,21 @@ describe('view assembly', () => {
     expect(advancedSearch).toContain('{{ iconHrefPrefix }}#warning');
     expect(advancedSearch).toContain('action="{{ page.publishAction }}"');
     expect(advancedSearch).toContain('{{ iconHrefPrefix }}#sync');
+  });
+
+  it('makes each sidebar group a drag surface backed by its weight inputs', async () => {
+    const [settings, links, renderer] = await Promise.all([
+      env.VIEWS.fetch('https://views.local/sections/menu-settings.liquid').then((response) => response.text()),
+      env.VIEWS.fetch('https://views.local/snippets/menu-settings-links.liquid').then((response) => response.text()),
+      env.VIEWS.fetch('https://views.local/assets/client-render.js').then((response) => response.text()),
+    ]);
+    expect(settings).toContain('options: mainSidebarOptions');
+    expect(settings).toContain('options: settingsSidebarOptions');
+    expect(links).toContain('data-weight-sortable');
+    expect(links).toContain('data-weight-sortable-row');
+    expect(links).toContain('data-weight-sortable-handle');
+    expect(links).toContain('data-weight-sortable-input');
+    expect(renderer).toContain('function syncWeights(scope)');
   });
 
   it('uses the trash icon for the host page delete action', async () => {
