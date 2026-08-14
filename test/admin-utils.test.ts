@@ -222,6 +222,14 @@ describe('planPageReorder', () => {
     ]);
   });
 
+  it('reports the visible window\'s final weights, not the whole rewrite', () => {
+    const plan = planPageReorder(flat, 2, [3, 4], [4, 3]);
+    // Just the two rows the client can see, so it can refresh their fields.
+    expect(plan.stale === false && plan.window).toEqual([
+      { id: 4, weight: 30 }, { id: 3, weight: 40 },
+    ]);
+  });
+
   it('writes only the rows that move once the sequence is dense', () => {
     // Page 2 of a 2-per-page list: swap ids 3 and 4, leave 1/2/5/6 alone.
     const plan = planPageReorder(dense, 2, [3, 4], [4, 3]);

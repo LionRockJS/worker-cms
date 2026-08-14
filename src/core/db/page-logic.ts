@@ -379,7 +379,14 @@ export type ReorderPlan =
   /** The rendered window no longer matches the stored order — the caller should
    *  reject the drop and let the client reload rather than write a guess. */
   | { stale: true }
-  | { stale: false; updates: ReorderSequenceRow[] };
+  | {
+      stale: false;
+      /** Rows to write: only those whose weight actually moves. */
+      updates: ReorderSequenceRow[];
+      /** Final weights for the rows the client can see, so it can refresh the
+       *  weight fields in place instead of reloading the list. */
+      window: ReorderSequenceRow[];
+    };
 
 /**
  * Splice `after` into `sequence` at `offset` and renumber the result.
@@ -413,10 +420,11 @@ export function planPageReorder(
   ];
 
   const updates: ReorderSequenceRow[] = [];
-  next.forEach((row, index) => {
+  const renumbered = next.map((row, index) => {
     const weight = (index + 1) * step;
     if (row.weight !== weight) updates.push({ id: row.id, weight });
+    return { id: row.id, weight };
   });
 
-  return { stale: false, updates };
+  return { stale: false, updates, window: renumbered.slice(offset, offset + after.length) };
 }

@@ -197,6 +197,7 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
         pageTypeHref: showPageTypeColumn && page.page_type ? `/admin/pages/list/${encodeURIComponent(page.page_type)}` : '',
         weight: page.weight,
         liveWeight: page.liveWeight,
+        hasLiveWeight: page.liveWeight !== undefined,
         hasLiveWeightDrift: !!page.hasLiveWeightDrift,
         hasLiveLectDrift: !!page.hasLiveLectDrift,
         isDraftMissing: !!page.isDraftMissing,

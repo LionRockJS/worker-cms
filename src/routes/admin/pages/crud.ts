@@ -320,7 +320,9 @@ pageCrudRoutes.post('/pages/reorder', requirePermission('content:write'), async 
     });
   }
 
-  return c.json({ success: true, renumbered: plan.updates.length });
+  // The window's final weights let the client refresh the weight fields (and
+  // the live-weight drift markers) without reloading the whole list.
+  return c.json({ success: true, renumbered: plan.updates.length, weights: plan.window });
 });
 
 /** Positive page ids, no duplicates, or null when the payload is not that. */

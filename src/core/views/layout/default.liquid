@@ -755,6 +755,24 @@
       save(dragTable);
       dragSrc = null; dragTable = null; mdTarget = null; dragBefore = null;
     });
+    // Write the server's post-reorder weights back into the rows so the weight
+    // fields stop showing pre-drag numbers. A reorder rewrites the draft weight
+    // only, so a row that matched its published copy may now drift — the marker
+    // is rendered hidden on every published row for exactly this moment.
+    function applyWeights(table, weights) {
+      (weights || []).forEach(function(row) {
+        var tr = table.querySelector('tbody tr[data-id="' + row.id + '"]');
+        if (!tr) return;
+        var input = tr.querySelector('input[name="weight"]');
+        if (input) input.value = row.weight;
+        var drift = tr.querySelector('[data-weight-drift]');
+        if (!drift) return;
+        var live = tr.getAttribute('data-live-weight');
+        var drifted = live !== null && Number(live) !== row.weight;
+        drift.classList.toggle('hidden', !drifted);
+        drift.classList.toggle('inline-flex', drifted);
+      });
+    }
     function rowIds(table) {
       return Array.from(table.querySelectorAll('tbody tr[data-id]')).map(function(r) {
         return Number(r.getAttribute('data-id'));
@@ -792,10 +810,12 @@
         body: JSON.stringify(body)
       })
         .then(function(res) {
+          if (mode !== 'sequence') return;
           // A refused drop means the stored order is not what this tab is
           // showing (someone else moved a page, or the window went stale).
           // Reloading is the only honest recovery: the DOM is now a lie.
-          if (!res.ok && mode === 'sequence') window.location.reload();
+          if (!res.ok) { window.location.reload(); return; }
+          return res.json().then(function(data) { applyWeights(table, data.weights); });
         })
         .catch(function() {});
     }

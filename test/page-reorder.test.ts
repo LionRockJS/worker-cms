@@ -45,6 +45,13 @@ describe('page list reorder', () => {
     // Page 2 of a 2-per-page list holds pages 3 and 4; swap them.
     const response = await post({ pageType: 'article', page: 2, pagesize: 2, before: [3, 4], after: [4, 3] });
     expect(response.status).toBe(200);
+    // The window's new weights come back so the list can update its fields
+    // in place rather than showing pre-drag numbers until the next reload.
+    expect(await response.json()).toEqual({
+      success: true,
+      renumbered: 6,
+      weights: [{ id: 4, weight: 30 }, { id: 3, weight: 40 }],
+    });
 
     expect(await order('article')).toEqual([1, 2, 4, 3, 5, 6]);
     // Dense and unique: the next drop only has to move what the user moved.

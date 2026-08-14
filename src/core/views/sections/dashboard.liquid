@@ -192,7 +192,7 @@
       <tbody class="divide-y divide-gray-100">
         {% if hasPages %}
           {% for page in pages %}
-            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}>
+            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}{% if page.hasLiveWeight %} data-live-weight="{{ page.liveWeight }}"{% endif %}>
               <td class="{% if canReorder %}px-4{% else %}px-6{% endif %} py-4 align-top">
                 <div class="flex items-center gap-1">
                   {% if page.isSelectable %}
@@ -301,21 +301,23 @@
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
                       </button>
                     </form>
-                    {% if page.hasLiveWeightDrift %}
-                      <span title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }} ({{ page.liveWeight }})"
-                            class="inline-flex items-center text-amber-600">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }}</span>
+                    {% if page.hasLiveWeight %}
+                      <span data-weight-drift class="{% if page.hasLiveWeightDrift %}inline-flex{% else %}hidden{% endif %} items-center gap-2">
+                        <span title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }} ({{ page.liveWeight }})"
+                              class="inline-flex items-center text-amber-600">
+                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
+                          <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }}</span>
+                        </span>
+                        <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
+                          <button type="submit"
+                                  title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
+                                  aria-label="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
+                                  class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+                            <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}</span>
+                          </button>
+                        </form>
                       </span>
-                      <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
-                                aria-label="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
-                                class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}</span>
-                        </button>
-                      </form>
                     {% endif %}
                   </div>
                 {% endif %}
