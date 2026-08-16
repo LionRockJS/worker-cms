@@ -13,7 +13,7 @@ import type { TypeAdminCopy, TypeFormModel, TypeFormOption } from './template';
 import { cmsConfig, type CmsConfig } from '../../cms-config';
 import type { Env, Variables, Permission } from '../../types';
 import { coreExtensions, type ContentTypeContributorInfo } from '../../core/extensions';
-import { num, slugify, str } from '../../core/http/forms';
+import { num, str } from '../../core/http/forms';
 import { logAudit } from '../../core/db/audit';
 import { requirePermission } from '../../core/auth/guards';
 import { renderPage } from '../../core/render/chrome';
@@ -122,7 +122,7 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
   routes.post(base, requirePermission(spec.permission), async (c) => {
     const form = await c.req.formData();
     const values = spec.formValues(form);
-    const slug = values.slug ? slugify(values.slug) : slugify(values.name);
+    const slug = values.slug ? typeSlugify(values.slug) : typeSlugify(values.name);
 
     const error = await validate(c, spec, values, slug);
     if (error) return renderForm(c, spec.modelFromValues('new', values, error));
@@ -175,7 +175,7 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
 
     const form = await c.req.formData();
     const values = spec.formValues(form);
-    const slug = values.slug ? slugify(values.slug) : slugify(values.name);
+    const slug = values.slug ? typeSlugify(values.slug) : typeSlugify(values.name);
 
     const error = await validate(c, spec, values, slug, id);
     if (error) return renderForm(c, { ...spec.modelFromValues('edit', values, error), id });
@@ -218,6 +218,16 @@ function validate<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
     configSlugs: spec.configSlugs,
     ignoreId,
   });
+}
+
+/** Type slugs support underscores; page/tag/media slugs keep the stricter shared normalizer. */
+function typeSlugify(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 // ── Page types ────────────────────────────────────────────────────────────────

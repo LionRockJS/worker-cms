@@ -923,6 +923,64 @@ describe('Plugin API create / read / list / update / delete', () => {
     expect(JSON.parse(stored?.lect ?? '{}')).toMatchObject({ status: 'confirmed', version: 1 });
   });
 
+  /**
+   * Forces `updated_at` into an earlier second than now.
+   *
+   * The `pages_updated_at` trigger fires `WHEN old.updated_at < CURRENT_TIMESTAMP`
+   * and rewrites `updated_at` itself, so a backdate can be undone by the very
+   * statement that applies it. When `old.updated_at` already equals the current
+   * second the trigger stays quiet, so a second pass always sticks.
+   */
+  async function backdate(id: number): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await env.DB.prepare("UPDATE pages SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").bind(id).run();
+      const row = await env.DB.prepare('SELECT updated_at FROM pages WHERE id = ?').bind(id).first<{ updated_at: string }>();
+      if (row?.updated_at === '2020-01-01 00:00:00') return;
+    }
+    throw new Error('could not backdate updated_at');
+  }
+
+  // Regression: the update route asserted `meta.changes === 1`, but the row is
+  // written more than once per statement — the trigger updates it again, and
+  // production D1 also counts index writes. Every update to a page last touched
+  // in an earlier second therefore 409'd *after* being written, which is every
+  // real save; only a second update inside the same second looked healthy,
+  // which is exactly what the tests above happened to do.
+  it('accepts an update to a page whose updated_at is older than the current second', async () => {
+    const created = (await (await cmsApi('POST', '/__cms/pages', {
+      page_type: 'guest', name: 'Backdated guest', lect: { status: 'invited' },
+    })).json() as { page: { id: number } }).page;
+    await backdate(created.id);
+
+    const res = await cmsApi('PUT', `/__cms/pages/${created.id}`, { lect: { status: 'confirmed' } });
+    expect(res.status).toBe(200);
+
+    const stored = await env.DB.prepare('SELECT lect FROM pages WHERE id = ?').bind(created.id).first<{ lect: string }>();
+    expect(JSON.parse(stored?.lect ?? '{}')).toMatchObject({ status: 'confirmed' });
+  });
+
+  it('still compare-and-swaps correctly when the trigger fires', async () => {
+    const created = (await (await cmsApi('POST', '/__cms/pages', {
+      page_type: 'guest', name: 'Backdated CAS guest', lect: { status: 'invited' },
+    })).json() as { page: { id: number; lect: Record<string, unknown> } }).page;
+    await backdate(created.id);
+
+    // A matching if_lect must still succeed on a triggered update...
+    const fresh = await cmsApi('PUT', `/__cms/pages/${created.id}`, {
+      lect: { status: 'confirmed' }, if_lect: created.lect,
+    });
+    expect(fresh.status).toBe(200);
+
+    // ...and a stale one must still be refused, which is the whole point of
+    // keeping a zero-row write a conflict.
+    await backdate(created.id);
+    const stale = await cmsApi('PUT', `/__cms/pages/${created.id}`, {
+      lect: { status: 'declined' }, if_lect: created.lect,
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: 'version_conflict' });
+  });
+
   it('soft-deletes a page to trash', async () => {
     const created = (await (await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest', name: 'Temp Guest',

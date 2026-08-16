@@ -3276,6 +3276,38 @@ describe('draft page slug uniqueness on save', () => {
 });
 
 describe('page type block/taxonomy multi-select', () => {
+  it('preserves underscores in page and block type slugs on create and update', async () => {
+    const pageResponse = await fetchWorker('/admin/page_types', {
+      method: 'POST',
+      body: form({ name: 'RSVP Response', slug: 'RSVP_Response', blueprint: '["name"]' }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: await authCookie() },
+    });
+    expect(pageResponse.status).toBe(302);
+
+    const page = await env.DB.prepare('SELECT id, slug FROM page_types WHERE name = ?')
+      .bind('RSVP Response')
+      .first<{ id: number; slug: string }>();
+    expect(page).toEqual({ id: expect.any(Number), slug: 'rsvp_response' });
+
+    const updateResponse = await fetchWorker(`/admin/page_types/${page!.id}`, {
+      method: 'POST',
+      body: form({ name: 'RSVP Response', slug: 'RSVP_Response_V2', blueprint: '["name"]' }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: await authCookie() },
+    });
+    expect(updateResponse.status).toBe(302);
+    await expect(env.DB.prepare('SELECT slug FROM page_types WHERE id = ?').bind(page!.id).first())
+      .resolves.toEqual({ slug: 'rsvp_response_v2' });
+
+    const blockResponse = await fetchWorker('/admin/block_types', {
+      method: 'POST',
+      body: form({ name: 'Mail Preview', slug: 'mail_preview', blueprint: '["subject"]' }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: await authCookie() },
+    });
+    expect(blockResponse.status).toBe(302);
+    await expect(env.DB.prepare('SELECT slug FROM block_types WHERE name = ?').bind('Mail Preview').first())
+      .resolves.toEqual({ slug: 'mail_preview' });
+  });
+
   it('stores checked blocks and taxonomies as JSON arrays', async () => {
     // seedBaseData provides config blocks (logos, paragraphs) and taxonomy 'categories'.
     const body = new URLSearchParams([

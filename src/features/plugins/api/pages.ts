@@ -943,7 +943,15 @@ async function updatePage(c: AppContext): Promise<Response> {
         'UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, lect=?, page_id=? WHERE id=? AND lect=?',
       ).bind(name, slug, weight, start, end, timezone, lectVal, parentId, id, expectedLect);
   const updateResult = await update.run();
-  if ((updateResult.meta?.changes ?? 0) !== 1) {
+  // Zero rows written is the conflict; more than one is not. `changes` counts
+  // more than the row this statement names: the `pages_updated_at` trigger
+  // performs its own UPDATE on the same row, and production D1 additionally
+  // counts internal index writes (the same reason chargeCredits detects
+  // success via RETURNING). Asserting exactly 1 therefore reported a spurious
+  // conflict for an update that had already been written — and, because the
+  // trigger only fires `WHEN old.updated_at < CURRENT_TIMESTAMP`, it did so
+  // for every update except a second one landing inside the same second.
+  if ((updateResult.meta?.changes ?? 0) < 1) {
     return c.json({ error: 'version_conflict' }, 409);
   }
 
