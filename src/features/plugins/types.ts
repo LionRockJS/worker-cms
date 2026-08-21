@@ -302,6 +302,18 @@ export type PluginPageTypeAccess = 'read' | 'write';
 
 /** An admin-approved delegated page-type scope (see PluginContentTypes
  *  readTypes/writeTypes), stored in the `plugin_page_type_approvals` table. */
+/** A registry row's pinned manifest id (see identity.ts), stored in
+ * `plugin_identity_approvals`. One manifest id belongs to exactly one row, so
+ * a plugin cannot assert an identity another plugin already owns. */
+export interface PluginIdentityApproval {
+  plugin_row_id: number;
+  manifest_id: string;
+  /** Admin who re-approved a changed identity; empty for an automatic pin. */
+  approved_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PluginPageTypeApproval {
   id: number;
   plugin_id: string;
@@ -353,4 +365,48 @@ export function pluginTrustLevel(manifest: PluginManifest): PluginTrustLevel {
   return manifest.trustLevel
     ?? manifest.trust_level
     ?? 'trusted-ui';
+}
+
+/** Longest permission list a manifest may contribute, before the rest is ignored. */
+export const MAX_PLUGIN_PERMISSIONS = 32;
+
+const PERMISSION_SUFFIX = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/**
+ * The permissions a manifest may actually contribute, namespaced to the
+ * plugin's own id.
+ *
+ * A permission value is a global name: it is what the Roles admin offers, what
+ * `role_permissions` stores, and what the plugin admin proxy accepts as proof
+ * that a non-admin may reach a plugin. Nothing in the manifest is verified, so
+ * an unrestricted value let a plugin declare `content:write` (and be granted it
+ * under a friendly label of its own choosing, next to the real checkbox in the
+ * role editor) or `events:manage` (and let every holder of another plugin's
+ * permission into its own admin UI).
+ *
+ * Restricting the namespace to `<manifest id>:<suffix>` makes the value say who
+ * owns it. Combined with the pinned identity (see identity.ts), which stops a
+ * plugin from asserting an id another row owns, a declared permission can no
+ * longer name anything but the declaring plugin's own capability. Entries that
+ * do not conform are dropped rather than failing the whole manifest, so one bad
+ * line cannot take a plugin's content types and hooks offline with it.
+ */
+export function pluginPermissions(manifest: PluginManifest): Array<{ value: string; label: string }> {
+  const declared = Array.isArray(manifest.permissions) ? manifest.permissions : [];
+  const permissions: Array<{ value: string; label: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of declared.slice(0, MAX_PLUGIN_PERMISSIONS)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const value = typeof entry.value === 'string' ? entry.value : '';
+    const label = typeof entry.label === 'string' ? entry.label : '';
+    const [namespace, suffix, ...extra] = value.split(':');
+    if (namespace !== manifest.id || extra.length > 0 || !PERMISSION_SUFFIX.test(suffix ?? '')) {
+      console.error(`Plugin ${manifest.id} declares permission "${value}" outside its own "${manifest.id}:" namespace; ignored`);
+      continue;
+    }
+    if (seen.has(value)) continue;
+    seen.add(value);
+    permissions.push({ value, label: label || value });
+  }
+  return permissions;
 }

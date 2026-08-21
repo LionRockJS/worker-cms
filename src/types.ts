@@ -27,7 +27,7 @@ export const PERMISSIONS = [
   'tag:write',        // create / edit / delete tags (terms)
   'taxonomy:write',   // create / edit / delete taxonomies
   'media:upload',     // upload media to R2
-  'plugin:access',    // reach the plugin admin proxy
+  'plugin:access',    // reach the plugin admin proxy (with the plugin's own permission)
   'plugin:manage',    // register / enable / disable / configure plugins
   'menu:manage',      // configure admin system/menu settings
   'pagetype:write',   // create / edit / delete database-defined page types
@@ -51,7 +51,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'tag:write': 'Create and edit tags',
   'taxonomy:write': 'Manage taxonomies',
   'media:upload': 'Upload media',
-  'plugin:access': 'Reach the plugin admin',
+  'plugin:access': 'Reach plugin admin pages (with that plugin\'s own permission)',
   'plugin:manage': 'Register and configure plugins',
   'menu:manage': 'Manage system settings',
   'pagetype:write': 'Manage page types',

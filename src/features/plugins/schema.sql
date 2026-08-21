@@ -25,6 +25,30 @@ CREATE TABLE IF NOT EXISTS plugins(
     secret TEXT
 );
 
+-- Pinned plugin identity — binds a registry row to the manifest id it first
+-- resolved with (trust on first use).
+--
+-- Everything else a plugin owns (asset, page-type and file-prefix approvals,
+-- plugin_state, tenant enrollment, limit/credit settings) is keyed by the
+-- MANIFEST id, which the plugin Worker asserts about itself and can change at
+-- any time. Without this table a second plugin could claim an id already in
+-- use — or one left behind by a deleted plugin — and inherit its approvals.
+-- The UNIQUE constraint makes a manifest id belong to exactly one row, and the
+-- registry refuses to resolve a plugin whose manifest stops matching its pin.
+CREATE TABLE IF NOT EXISTS plugin_identity_approvals(
+    -- plugins.id of the owning registry row (the row, not the manifest).
+    -- ON DELETE CASCADE so an unregistered plugin releases its id: the admin
+    -- delete route already does this explicitly, but a row removed any other
+    -- way must not leave a pin that blocks re-registering the same plugin.
+    plugin_row_id INTEGER PRIMARY KEY REFERENCES plugins(id) ON DELETE CASCADE,
+    manifest_id TEXT NOT NULL UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    -- Email of the admin who re-approved a changed identity; empty when the
+    -- pin was taken automatically on first resolution.
+    approved_by TEXT NOT NULL DEFAULT ''
+);
+
 -- Admin-approved, integrity-pinned plugin assets.
 CREATE TABLE IF NOT EXISTS plugin_asset_approvals(
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2706,7 +2706,7 @@ describe('capability enforcement', () => {
     expect(await response.text()).toBe('Forbidden: admin role required');
   });
 
-  it('lets a custom role reach a plugin that declares the permission it was granted, but not other plugins', async () => {
+  it('lets a custom role reach a plugin only with both plugin:access and the plugin\'s own permission', async () => {
     const pluginUrl = `https://plugin-${crypto.randomUUID()}.local`;
     const manifest = {
       id: 'checkin',
@@ -2727,6 +2727,17 @@ describe('capability enforcement', () => {
 
     await env.DB.prepare('INSERT INTO roles (name, label, builtin) VALUES (?, ?, 0)').bind('door-staff', 'Door Staff').run();
     await env.DB.prepare('INSERT INTO role_permissions (role, permission) VALUES (?, ?)').bind('door-staff', 'checkin:door').run();
+    clearRolePermissionsCache();
+
+    // The plugin's own permission is only half the gate: without the CMS-side
+    // plugin:access grant, a manifest would be deciding who runs code in the
+    // CMS origin.
+    const halfGranted = await fetchWorker('/admin/plugins/checkin/dashboard', {
+      headers: { Cookie: await authCookie('door-staff') },
+    });
+    expect(halfGranted.status).toBe(403);
+
+    await env.DB.prepare('INSERT INTO role_permissions (role, permission) VALUES (?, ?)').bind('door-staff', 'plugin:access').run();
     clearRolePermissionsCache();
 
     const allowed = await fetchWorker('/admin/plugins/checkin/dashboard', {

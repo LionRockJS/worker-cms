@@ -31,9 +31,23 @@
       "rotate_to_assign": "fallback — rotate to assign its own.",
       "rotated_flash": "Secret rotated. Update the plugin Worker to the new value — the old one no longer works."
     },
+    "identity": {
+      "already_ok": "This plugin's identity already matches.",
+      "approve": "Approve new identity",
+      "approved": "Identity approved. Re-grant the plugin's approvals as needed.",
+      "approved_id": "Approved id",
+      "claimed_flash": "That manifest id belongs to another registered plugin.",
+      "claimed_help": "Another registered plugin already owns this manifest id, so this one stays offline:",
+      "confirm": "Approve the new identity? This plugin's asset, page type and file prefix approvals will be revoked.",
+      "mismatch_help": "This plugin now reports a different manifest id than the one it was approved with. It stays offline until you approve the change, because its approvals, stored data and admin access all follow the manifest id. Approving revokes its asset, page type and file prefix approvals — grant them again once you are sure this is the same plugin.",
+      "served_id": "Reported id",
+      "title": "Plugin identity needs approval",
+      "unreachable_flash": "The plugin did not return a manifest, so its identity cannot be approved."
+    },
     "status": {
       "active": "Active",
       "disabled": "Disabled",
+      "identity": "Identity changed",
       "unreachable": "Unreachable"
     },
     "trust": {

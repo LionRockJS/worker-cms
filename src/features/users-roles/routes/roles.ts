@@ -31,8 +31,31 @@ async function canManagePermissions(c: AppContext, permissions: Iterable<string>
   return [...permissions].every((permission) => actorPermissions.has(permission as Permission));
 }
 
+const BUILTIN_PERMISSIONS = new Set<string>(PERMISSIONS);
+
+/**
+ * Contributed permissions that may be offered in the role editor.
+ *
+ * A contributor names its own permissions, so the value it hands back is not
+ * trusted here: a value colliding with a built-in would render a *second*
+ * checkbox for, say, `content:write` carrying the contributor's own label, and
+ * an admin ticking that friendly label would grant the real thing. The plugin
+ * platform already namespaces values to the declaring plugin; this drops any
+ * collision that gets past a contributor, and any duplicate value, so one row
+ * cannot silently relabel another.
+ */
+async function assignableContributedPermissions(env: Env): Promise<Array<{ value: string; label: string }>> {
+  const contributed = await (coreExtensions().contributedPermissions?.(env) ?? []);
+  const seen = new Set<string>();
+  return contributed.filter((permission) => {
+    if (BUILTIN_PERMISSIONS.has(permission.value) || seen.has(permission.value)) return false;
+    seen.add(permission.value);
+    return true;
+  });
+}
+
 async function buildPermissionOptions(env: Env, granted: Set<Permission | string>): Promise<Array<{ value: string; label: string; checked: boolean }>> {
-  const pluginPerms = await (coreExtensions().contributedPermissions?.(env) ?? []);
+  const pluginPerms = await assignableContributedPermissions(env);
   return [
     ...PERMISSIONS.map((permission) => ({
       value: permission,
@@ -50,7 +73,7 @@ async function buildPermissionOptions(env: Env, granted: Set<Permission | string
 rolesRoutes.get('/roles', async (c) => {
   const [roles, pluginPerms] = await Promise.all([
     listRolesForAdmin(c.env),
-    (coreExtensions().contributedPermissions?.(c.env) ?? []),
+    assignableContributedPermissions(c.env),
   ]);
   const totalPermCount = PERMISSIONS.length + pluginPerms.length;
   return renderPage(c, rolesPage, {
@@ -108,7 +131,9 @@ rolesRoutes.post('/roles', async (c) => {
 rolesRoutes.get('/roles/:name/edit', async (c) => {
   const role = await getRoleForEdit(c.env, c.req.param('name'));
   if (!role) return c.notFound();
-  const granted: Set<Permission | string> = role.locked ? new Set([...PERMISSIONS, ...(await (coreExtensions().contributedPermissions?.(c.env) ?? [])).map((p) => p.value)]) : role.permissions;
+  const granted: Set<Permission | string> = role.locked
+    ? new Set([...PERMISSIONS, ...(await assignableContributedPermissions(c.env)).map((p) => p.value)])
+    : role.permissions;
   return renderPage(c, roleFormPage, {
     isNew: false,
     name: role.name,
@@ -130,7 +155,7 @@ rolesRoutes.post('/roles/:name', async (c) => {
   const permissions = [...new Set(form.getAll('permissions').map(String))];
   const assignable = new Set<string>([
     ...PERMISSIONS,
-    ...(await (coreExtensions().contributedPermissions?.(c.env) ?? [])).map((permission) => permission.value),
+    ...(await assignableContributedPermissions(c.env)).map((permission) => permission.value),
   ]);
   if (permissions.some((permission) => !assignable.has(permission))) {
     return c.text('Invalid permission', 400);

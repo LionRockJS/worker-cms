@@ -31,9 +31,23 @@
       "rotate_to_assign": "后备密钥；请轮换以分配专用密钥。",
       "rotated_flash": "密钥已轮换。请将插件 Worker 更新为新值；旧密钥已失效。"
     },
+    "identity": {
+      "already_ok": "此插件的标识已匹配。",
+      "approve": "批准新标识",
+      "approved": "已批准标识，请按需重新授予插件授权。",
+      "approved_id": "已批准标识",
+      "claimed_flash": "该 manifest id 已属于另一个已注册的插件。",
+      "claimed_help": "另一个已注册的插件已拥有此 manifest id，因此这个插件保持离线：",
+      "confirm": "确定批准新标识？此插件的静态资源、页面类型与文件前缀授权将被撤销。",
+      "mismatch_help": "此插件当前上报的 manifest id 与当初批准的不同。在你批准变更前它会保持离线，因为它的授权、存储数据与管理界面访问都以 manifest id 为准。批准后会撤销它的静态资源、页面类型与文件前缀授权，确认是同一个插件后再重新授予。",
+      "served_id": "当前上报标识",
+      "title": "插件标识需要批准",
+      "unreachable_flash": "插件未返回 manifest，无法批准其标识。"
+    },
     "status": {
       "active": "已启用",
       "disabled": "已停用",
+      "identity": "标识变更",
       "unreachable": "无法连接"
     },
     "trust": {

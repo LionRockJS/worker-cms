@@ -10,12 +10,15 @@
 import type { Env } from '../../types';
 import {
   manifestDeclaresUi,
+  pluginPermissions,
   type PluginHookEvent,
+  type PluginIdentityApproval,
   type PluginManifest,
   type ResolvedPlugin,
   type PluginRecord,
 } from './types';
 import { listEnabledPlugins } from './store';
+import { claimIdentity, listIdentityApprovals } from './identity';
 
 /** Reserved prefix every plugin Worker serves its CMS-facing endpoints under. */
 export const PLUGIN_PREFIX = '/__plugin';
@@ -44,14 +47,18 @@ const manifestCache = new Map<string, { manifest: PluginManifest; expires: numbe
 // The enabled-plugins list also changes rarely; cache it so we don't hit D1 on
 // every request. Invalidated by clearManifestCache() after admin mutations.
 const PLUGINS_TTL_MS = 30_000;
-let pluginsCache: { records: PluginRecord[]; expires: number } | null = null;
+let pluginsCache: { records: PluginRecord[]; identities: PluginIdentityApproval[]; expires: number } | null = null;
 
-async function activePluginRecords(env: Env): Promise<PluginRecord[]> {
-  if (pluginsCache && pluginsCache.expires > Date.now()) return pluginsCache.records;
-  if (!env.DB) return [];
-  const records = await listEnabledPlugins(env.DB);
-  pluginsCache = { records, expires: Date.now() + PLUGINS_TTL_MS };
-  return records;
+/** The enabled rows plus their pinned manifest ids, from one cached read. */
+async function activePluginState(env: Env): Promise<{ records: PluginRecord[]; identities: PluginIdentityApproval[] }> {
+  if (pluginsCache && pluginsCache.expires > Date.now()) return pluginsCache;
+  if (!env.DB) return { records: [], identities: [] };
+  const [records, identities] = await Promise.all([
+    listEnabledPlugins(env.DB),
+    listIdentityApprovals(env.DB),
+  ]);
+  pluginsCache = { records, identities, expires: Date.now() + PLUGINS_TTL_MS };
+  return pluginsCache;
 }
 
 /**
@@ -212,22 +219,143 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Resolves every active plugin (enabled row + manifest reachable). */
+/** Why a reachable plugin was refused, for the manage screen. See getPlugins. */
+export type PluginIdentityStatus = 'ok' | 'mismatch' | 'claimed';
+
+export interface PluginIdentityState {
+  /** plugins.id of the registry row. */
+  rowId: number;
+  url: string;
+  /** Manifest id currently served by the plugin (empty when unreachable). */
+  servedId: string;
+  /** Manifest id this row is pinned to (empty when not pinned yet). */
+  pinnedId: string;
+  status: PluginIdentityStatus;
+}
+
+/**
+ * Binds each reachable manifest to the registry row that owns its id, dropping
+ * any plugin that fails.
+ *
+ * The row is identified by its URL; `manifest.id` is only ever asserted by the
+ * plugin. Since every approval, plugin_state row, enrollment and limit setting
+ * is keyed by the manifest id, an unbound id let a plugin adopt another
+ * plugin's — or a deleted plugin's — capabilities by serving its name. The pin
+ * is taken on first resolution (trust on first use) and enforced afterwards:
+ *
+ *   • 'mismatch' — the row is pinned to a different id than it now serves.
+ *     Legitimate after a rename; indistinguishable from a takeover, so the
+ *     plugin stays offline until an admin re-approves (which revokes the old
+ *     identity's approvals).
+ *   • 'claimed'  — another row already owns this id. The impostor is dropped;
+ *     the owner keeps working.
+ *
+ * Dropping is deliberate: a plugin that cannot prove which identity it is must
+ * not run with an identity's privileges.
+ */
+async function enforceIdentities(
+  env: Env,
+  entries: Array<{ record: PluginRecord; manifest: PluginManifest }>,
+  identities: PluginIdentityApproval[],
+): Promise<{ allowed: Set<number>; states: PluginIdentityState[] }> {
+  const pinnedByRow = new Map(identities.map((identity) => [identity.plugin_row_id, identity.manifest_id]));
+  const ownerByManifest = new Map(identities.map((identity) => [identity.manifest_id, identity.plugin_row_id]));
+  const allowed = new Set<number>();
+  const states: PluginIdentityState[] = [];
+
+  // Sequential: a claim taken here decides the next entry's outcome.
+  for (const { record, manifest } of entries) {
+    const pinnedId = pinnedByRow.get(record.id) ?? '';
+    const state = (status: PluginIdentityStatus): PluginIdentityState => (
+      { rowId: record.id, url: record.url, servedId: manifest.id, pinnedId, status }
+    );
+
+    if (pinnedId) {
+      if (pinnedId === manifest.id) {
+        allowed.add(record.id);
+        states.push(state('ok'));
+      } else {
+        console.error(
+          `Plugin ${record.url} is pinned to manifest id "${pinnedId}" but now serves "${manifest.id}"; `
+          + 'refusing to resolve it until an admin re-approves its identity.',
+        );
+        states.push(state('mismatch'));
+      }
+      continue;
+    }
+
+    const owner = ownerByManifest.get(manifest.id);
+    if (owner !== undefined && owner !== record.id) {
+      console.error(`Plugin ${record.url} claims manifest id "${manifest.id}", which is already pinned to another registered plugin; ignored.`);
+      states.push(state('claimed'));
+      continue;
+    }
+
+    if (!env.DB || await claimIdentity(env.DB, record.id, manifest.id)) {
+      pinnedByRow.set(record.id, manifest.id);
+      ownerByManifest.set(manifest.id, record.id);
+      // Keep the cached pins in step so the claim is not retried every call.
+      if (pluginsCache) pluginsCache.identities = [...pluginsCache.identities, {
+        plugin_row_id: record.id,
+        manifest_id: manifest.id,
+        approved_by: '',
+        created_at: '',
+        updated_at: '',
+      }];
+      allowed.add(record.id);
+      states.push(state('ok'));
+      continue;
+    }
+
+    console.error(`Plugin ${record.url} could not claim manifest id "${manifest.id}"; ignored.`);
+    states.push(state('claimed'));
+  }
+
+  return { allowed, states };
+}
+
+/** Every enabled row paired with its manifest, before identity enforcement. */
+async function resolveManifests(env: Env): Promise<{
+  entries: Array<{ record: PluginRecord; manifest: PluginManifest }>;
+  identities: PluginIdentityApproval[];
+}> {
+  const { records, identities } = await activePluginState(env);
+  const loaded = await Promise.all(
+    records.map(async (record) => ({ record, manifest: await loadManifest(record.url, fetcherForUrl(record.url)) })),
+  );
+  return {
+    entries: loaded.filter((entry): entry is { record: PluginRecord; manifest: PluginManifest } => entry.manifest !== null),
+    identities,
+  };
+}
+
+/** Resolves every active plugin (enabled row + manifest reachable + identity pinned to this row). */
 export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
-  const records = await activePluginRecords(env);
-  const resolved = await Promise.all(
-    records.map(async (record): Promise<ResolvedPlugin | null> => {
-      const fetcher = fetcherForUrl(record.url);
-      const manifest = await loadManifest(record.url, fetcher);
-      if (!manifest) return null;
+  const { entries, identities } = await resolveManifests(env);
+  const { allowed } = await enforceIdentities(env, entries, identities);
+  return entries
+    .filter(({ record }) => allowed.has(record.id))
+    .map(({ record, manifest }) => {
       // Legacy rows may keep the env fallback for outbound CMS → plugin calls,
       // but inbound /__cms authentication is deliberately per-plugin only.
       const apiSecret = record.secret || '';
       const secret = apiSecret || env.PLUGIN_SECRET || '';
-      return { binding: record.url, fetcher, manifest, secret, apiSecret, label: record.label || '' };
-    }),
-  );
-  return resolved.filter((plugin): plugin is ResolvedPlugin => plugin !== null);
+      return {
+        binding: record.url,
+        fetcher: fetcherForUrl(record.url),
+        manifest,
+        secret,
+        apiSecret,
+        label: record.label || '',
+      };
+    });
+}
+
+/** Identity status per registered plugin, for the manage screens. Uses the
+ *  cached manifests, so it costs no extra fetches. */
+export async function pluginIdentityStates(env: Env): Promise<PluginIdentityState[]> {
+  const { entries, identities } = await resolveManifests(env);
+  return (await enforceIdentities(env, entries, identities)).states;
 }
 
 /** Nav items contributed by all plugins, flattened with their plugin id. */
@@ -245,7 +373,7 @@ export async function pluginNav(env: Env): Promise<Array<{ pluginId: string; lab
       label: override || item.label,
       href: `/admin/plugins/${plugin.manifest.id}/${item.href.replace(/^\/+/, '')}`,
       roles: item.roles,
-      permissions: (plugin.manifest.permissions ?? []).map((permission) => permission.value),
+      permissions: pluginPermissions(plugin.manifest).map((permission) => permission.value),
       group: item.group,
       // Nav labels are only looked up in the translation catalog for plugins
       // that ship one (manifest `i18n: true`); others render their manifest
@@ -284,7 +412,9 @@ export async function pluginAutoPublishesPageType(env: Env, pageType: string): P
   ));
 }
 
-/** Resolves a plugin by its manifest id (used by the admin proxy). */
+/** Resolves a plugin by its manifest id (used by the admin proxy). Identity
+ *  pinning makes the id unique across resolved plugins, so this cannot be
+ *  shadowed by a second plugin serving the same id with a lower sort order. */
 export async function pluginById(env: Env, id: string): Promise<ResolvedPlugin | null> {
   const plugins = await getPlugins(env);
   return plugins.find((plugin) => plugin.manifest.id === id) ?? null;
@@ -296,13 +426,20 @@ export async function pluginsForHook(env: Env, event: PluginHookEvent): Promise<
   return plugins.filter((plugin) => (plugin.manifest.hooks ?? []).includes(event));
 }
 
-/** All permissions declared by active plugins, deduplicated by value. */
+/**
+ * All permissions declared by active plugins, deduplicated by value.
+ *
+ * Values are namespaced to the declaring plugin (see pluginPermissions) and a
+ * manifest id belongs to one registry row (see identity.ts), so two plugins can
+ * no longer contribute the same value — which previously let whichever sorted
+ * first replace the other's label in the role editor.
+ */
 export async function allPluginPermissions(env: Env): Promise<Array<{ value: string; label: string }>> {
   const plugins = await getPlugins(env);
   const seen = new Set<string>();
   const result: Array<{ value: string; label: string }> = [];
   for (const plugin of plugins) {
-    for (const perm of plugin.manifest.permissions ?? []) {
+    for (const perm of pluginPermissions(plugin.manifest)) {
       if (!seen.has(perm.value)) {
         seen.add(perm.value);
         result.push(perm);

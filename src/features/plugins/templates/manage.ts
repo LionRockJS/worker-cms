@@ -6,8 +6,10 @@ export interface PluginListItem {
   label: string;
   url: string;
   enabled: boolean;
-  /** Resolved from the live manifest, when the plugin is reachable. */
-  status: 'active' | 'unreachable' | 'disabled';
+  /** Resolved from the live manifest, when the plugin is reachable.
+   *  'identity' means the manifest resolved but its id is pinned elsewhere or
+   *  no longer matches this row's pin — see registry.pluginIdentityStates. */
+  status: 'active' | 'unreachable' | 'disabled' | 'identity';
   manifestId?: string;
   manifestName?: string;
   version?: string;
@@ -31,6 +33,7 @@ export interface PluginListItem {
 const STATUS_BADGE: Record<PluginListItem['status'], string> = {
   active: 'bg-green-100 text-green-800',
   unreachable: 'bg-red-100 text-red-800',
+  identity: 'bg-red-100 text-red-800',
   disabled: 'bg-gray-100 text-gray-600',
 };
 
@@ -99,6 +102,10 @@ function pluginFormFlashKey(flash: string | undefined): string {
     'disconnect-unreachable': 'plugins.form.connect_unreachable',
     'disconnect-rejected': 'plugins.form.disconnect_rejected',
     'disconnect-no-secret': 'plugins.form.connect_no_secret',
+    'identity-approved': 'plugins.identity.approved',
+    'identity-claimed': 'plugins.identity.claimed_flash',
+    'identity-unreachable': 'plugins.identity.unreachable_flash',
+    'identity-ok': 'plugins.identity.already_ok',
   };
   // Every rotate-then-connect failure carries the same advice: the secret DID
   // rotate, the plugin just did not take it.
@@ -115,6 +122,11 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
   sortOrder: number;
   config: string;
   secret?: string;
+  /** Pinned-identity state for this row (see registry.pluginIdentityStates). */
+  identityStatus?: 'ok' | 'mismatch' | 'claimed' | 'unreachable' | 'disabled';
+  identityPinnedId?: string;
+  identityServedId?: string;
+  identityAction?: string;
   tenantKvKey?: string;
   tenantVars?: Array<{ name: string; value: string }>;
   tenantConfigAvailable?: boolean;
@@ -132,6 +144,10 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     sortOrder,
     config,
     secret,
+    identityStatus,
+    identityPinnedId,
+    identityServedId,
+    identityAction,
     tenantKvKey,
     tenantVars,
     tenantConfigAvailable,
@@ -143,7 +159,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
   const heading = isNew ? 'Register Plugin' : 'Edit Plugin';
   const flashMessageKey = pluginFormFlashKey(flash);
   // A failed enrollment is a warning, not the usual informational flash.
-  const flashIsError = !!flash && /-(unreachable|rejected|not-supported|no-secret|no-canonical-origin)$/.test(flash);
+  const flashIsError = !!flash && /-(unreachable|rejected|not-supported|no-secret|no-canonical-origin|claimed)$/.test(flash);
 
   const body = await renderView(views, '/templates/plugin-form.json', {
     headingKey: isNew ? 'plugins.form.register_title' : 'plugins.form.edit_title',
@@ -161,6 +177,13 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     flashIsError,
     showSecret: !isNew,
     secret: secret ?? '',
+    // The panel only appears when there is something to act on: a pin that no
+    // longer matches, or an id another plugin already owns.
+    showIdentity: !isNew && (identityStatus === 'mismatch' || identityStatus === 'claimed'),
+    identityMismatch: identityStatus === 'mismatch',
+    identityPinnedId: identityPinnedId ?? '',
+    identityServedId: identityServedId ?? '',
+    identityAction: identityAction ?? '',
     tenantKvKey: tenantKvKey ?? '',
     tenantKvValue: JSON.stringify({ secret: secret ?? '' }),
     hasTenantVars: !!tenantVars?.length,

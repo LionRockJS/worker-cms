@@ -47,6 +47,24 @@
     </div>
   </form>
 
+  {% if showIdentity %}
+    <div class="bg-white rounded-xl shadow p-6 mt-6 border border-red-200">
+      <h2 class="text-sm font-semibold text-red-700 mb-1">{{ "plugins.identity.title" | t }}</h2>
+      {% if identityMismatch %}
+        <p class="text-xs text-gray-600 mb-3">{{ "plugins.identity.mismatch_help" | t }}</p>
+        <dl class="text-xs text-gray-700 mb-4 space-y-1">
+          <div class="flex gap-2"><dt class="w-28 text-gray-500">{{ "plugins.identity.approved_id" | t }}</dt><dd class="font-mono">{{ identityPinnedId }}</dd></div>
+          <div class="flex gap-2"><dt class="w-28 text-gray-500">{{ "plugins.identity.served_id" | t }}</dt><dd class="font-mono">{{ identityServedId }}</dd></div>
+        </dl>
+        <form method="post" action="{{ identityAction }}" data-confirm="{{ "plugins.identity.confirm" | t }}">
+          <button type="submit" class="px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm">{{ "plugins.identity.approve" | t }}</button>
+        </form>
+      {% else %}
+        <p class="text-xs text-gray-600">{{ "plugins.identity.claimed_help" | t }} <span class="font-mono">{{ identityServedId }}</span></p>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if showSecret %}
     <div class="bg-white rounded-xl shadow p-6 mt-6">
       <h2 class="text-sm font-semibold text-gray-700 mb-1">{{ "view_strings.sections_plugin_form.shared_secret" | t }}</h2>

@@ -12,7 +12,7 @@ import { requirePermission } from '../../../core/auth/guards';
 import { renderPage } from '../../../core/render/chrome';
 import { logAudit } from '../../../core/db/audit';
 import { str, num } from '../../../core/http/forms';
-import { getPlugins, clearManifestCache } from '../registry';
+import { getPlugins, clearManifestCache, pluginIdentityStates } from '../registry';
 import { clearConfigCache } from '../../../core/db/content-config';
 import {
   listPlugins,
@@ -45,6 +45,7 @@ import {
   revokeFilePrefix,
 } from '../file-prefixes';
 import { deleteAllPluginState } from '../state';
+import { getIdentityForRow, movePluginState, releaseIdentity, repinIdentity } from '../identity';
 import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from '../registry';
 import { pluginTenantId } from '../proxy';
 import { enrollPluginTenant, manifestAllowsAutoTenant, revokePluginTenant } from '../enroll';
@@ -212,18 +213,28 @@ function readForm(form: FormData): { input: PluginInput | null; error: string | 
 // ── List ──────────────────────────────────────────────────────────────────────
 
 pluginsManageRoutes.get('/plugins-manage', async (c) => {
-  const [rows, resolved] = await Promise.all([listPlugins(c.env.DB), getPlugins(c.env)]);
+  const [rows, resolved, identities] = await Promise.all([
+    listPlugins(c.env.DB),
+    getPlugins(c.env),
+    pluginIdentityStates(c.env),
+  ]);
   // resolved plugins are keyed by their base URL (ResolvedPlugin.binding).
   const byUrl = new Map(resolved.map((p) => [p.binding, p]));
+  // A plugin held back over its identity is reachable but deliberately not
+  // resolved, so it must not read as merely "unreachable" in the list.
+  const identityById = new Map(identities.map((state) => [state.rowId, state]));
 
   const plugins: PluginListItem[] = await Promise.all(rows.map(async (row) => {
     const plugin = byUrl.get(row.url);
     const manifest = plugin?.manifest;
+    const identity = identityById.get(row.id);
     const status: PluginListItem['status'] = !row.enabled
       ? 'disabled'
       : manifest
         ? 'active'
-        : 'unreachable';
+        : identity && identity.status !== 'ok'
+          ? 'identity'
+          : 'unreachable';
     const assetHealth = plugin && manifest?.assets?.length
       ? await inspectAssetHealth(c.env.DB, manifest.id, plugin.fetcher, manifest.assets)
       : undefined;
@@ -233,7 +244,7 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       url: row.url,
       enabled: !!row.enabled,
       status,
-      manifestId: manifest?.id,
+      manifestId: manifest?.id ?? identity?.servedId,
       manifestName: manifest?.name,
       version: manifest?.version,
       trustLevel: manifest ? pluginTrustLevel(manifest) : undefined,
@@ -296,9 +307,14 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
   const tenantId = pluginTenantId(c.env);
   const tenantVarNames = manifestTenantVars(resolved?.manifest);
   const tenantConfig = await readPluginTenantConfig(resolved, tenantId, tenantVarNames);
+  const identity = (await pluginIdentityStates(c.env)).find((state) => state.rowId === id);
   return renderPage(c, pluginFormPage, {
     isNew: false,
     id: plugin.id,
+    identityStatus: identity?.status ?? (plugin.enabled ? 'unreachable' : 'disabled'),
+    identityPinnedId: identity?.pinnedId ?? '',
+    identityServedId: identity?.servedId ?? '',
+    identityAction: `/admin/plugins-manage/${plugin.id}/identity`,
     label: plugin.label,
     url: plugin.url,
     enabled: !!plugin.enabled,
@@ -462,6 +478,42 @@ pluginsManageRoutes.post('/plugins-manage/:id/toggle', async (c) => {
   return c.redirect('/admin/plugins-manage');
 });
 
+/**
+ * Re-approves a plugin's identity after its manifest id changed.
+ *
+ * A changed id is either a rename or a takeover, and the CMS cannot tell them
+ * apart — so the plugin stays unresolved until an admin says which it is. The
+ * capabilities the previous identity held are NOT carried over: asset,
+ * page-type and file-prefix approvals were granted to that id and must be
+ * granted again deliberately. Host-held state moves, because it is the
+ * plugin's data rather than a privilege.
+ */
+pluginsManageRoutes.post('/plugins-manage/:id/identity', async (c) => {
+  const id = Number(c.req.param('id'));
+  const plugin = await getPlugin(c.env.DB, id);
+  if (!plugin) return c.notFound();
+
+  const state = (await pluginIdentityStates(c.env)).find((entry) => entry.rowId === id);
+  if (!state || !state.servedId) return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-unreachable`);
+  if (state.status === 'ok') return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-ok`);
+
+  const previousId = state.pinnedId;
+  if (!(await repinIdentity(c.env.DB, id, state.servedId, c.get('user').email))) {
+    return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-claimed`);
+  }
+  if (previousId && previousId !== state.servedId) {
+    await Promise.all([
+      revokeAllAssets(c.env.DB, previousId),
+      revokeAllPageTypeAccess(c.env.DB, previousId),
+      revokeAllFilePrefixes(c.env.DB, previousId),
+    ]);
+    await movePluginState(c.env.DB, previousId, state.servedId);
+  }
+  invalidate();
+  logAudit(c, 'plugin.identity.approve', 'plugin', plugin.url, { from: previousId, to: state.servedId });
+  return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-approved`);
+});
+
 pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
   const id = Number(c.req.param('id'));
   const found = await resolvedPluginFor(c.env, id);
@@ -473,11 +525,13 @@ pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
   // orphans it: invisible in the admin, yet silently inherited by whatever is
   // registered next under the same manifest id.
   //
-  // The manifest id comes from the resolved plugin, which needs the plugin to
-  // be enabled and reachable. A row that is disabled or offline is deleted
-  // anyway (an admin must be able to remove a dead plugin), and the leftovers
-  // are logged so they can be cleared by hand.
-  const manifestId = resolved?.manifest.id ?? '';
+  // The pinned identity is what makes that purge reliable: it is stored against
+  // the row, so a plugin that is disabled or offline right now (the common case
+  // when an admin is removing a dead plugin) still deletes with its approvals
+  // instead of leaving a claimable id behind. The live manifest is only a
+  // fallback for rows registered before identity pinning existed.
+  const pinned = await getIdentityForRow(c.env.DB, id);
+  const manifestId = pinned?.manifest_id || resolved?.manifest.id || '';
   if (manifestId) {
     await Promise.all([
       deleteAllPluginState(c.env.DB, manifestId),
@@ -487,10 +541,11 @@ pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
     ]);
   } else {
     console.warn(
-      `Deleted plugin ${plugin.url} without resolving its manifest; any approvals `
+      `Deleted plugin ${plugin.url} without a pinned identity or a resolvable manifest; any approvals `
       + 'and plugin_state rows it owned remain and must be cleared manually.',
     );
   }
+  await releaseIdentity(c.env.DB, id);
 
   await deletePlugin(c.env.DB, id);
   invalidate();

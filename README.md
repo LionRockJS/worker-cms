@@ -336,7 +336,11 @@ A plugin can add six things:
 - **Admin routes + nav** – add an admin page (proxied at
   `/admin/plugins/<id>/...`) and a navigation entry. A nav item may set
   `group: 'settings'` to nest under the sidebar's **Settings** group instead of
-  the top level; `roles` restricts who sees it.
+  the top level; `roles` restricts who sees it. Plugin admin pages render in the
+  CMS origin, so besides `admin` they are reachable only by a role holding both
+  `plugin:access` (granted in the CMS) and one of the permissions that plugin
+  declares — neither key alone opens the page, and a plugin that declares no
+  permissions stays admin-only.
 - **Publish targets** – declare `publishTarget: true` in the manifest to receive
   full page snapshots whenever a page is published or unpublished (pin to IPFS,
   push to a search index, trigger a static-site rebuild). Unlike hooks, publish
@@ -344,7 +348,9 @@ A plugin can add six things:
   [Publish targets](#publish-targets).
 
 A manifest may also declare, all admin-configured rather than plugin-enforced:
-`permissions` (extra permission types offered in the Roles admin), `assets`
+`permissions` (extra permission types offered in the Roles admin, each of which
+must be namespaced to the plugin's own id — `events:manage`, never
+`content:write` or another plugin's name), `assets`
 (JS/CSS the plugin wants to run inside CMS chrome — each path must be approved
 and content-hash pinned before it survives sanitization), `limits` (quotas the
 CMS enforces on page creation), `credits` (chargeable actions and their
@@ -419,6 +425,17 @@ plus that plugin's dedicated secret on outbound calls, and merges approved
 contributions into the editor. The reverse `/__cms` API requires `x-plugin-id`
 and the matching plugin row's own `x-plugin-secret`; the legacy environment
 `PLUGIN_SECRET` is never accepted for inbound authentication.
+
+A registry row is identified by its URL, but every capability the CMS grants a
+plugin — asset, page-type and file-prefix approvals, host-held `plugin_state`,
+tenant enrollment, limit and credit settings, and the admin proxy's permission
+gate — is keyed by the `manifest.id` the plugin asserts about itself. The CMS
+therefore **pins** that id to the row on first resolution and enforces it after:
+a second plugin serving an id another row owns is ignored, and a plugin whose id
+changes stops resolving until an admin re-approves it under Plugins → (plugin) →
+edit. Re-approval deliberately revokes the previous identity's approvals (its
+host-held state moves across), and deleting a plugin releases its id along with
+everything keyed to it — including when the plugin is offline at the time.
 
 ### Plugin edit views
 

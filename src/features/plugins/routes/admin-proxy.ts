@@ -39,7 +39,7 @@ import {
   releaseFormOnceToken,
 } from '../../../core/auth/form-once';
 import type { ApprovedPluginAssets } from '../../../core/render/layout';
-import { pluginTrustLevel, type PluginManifest } from '../types';
+import { pluginPermissions, pluginTrustLevel, type PluginManifest } from '../types';
 import { pluginViewRevision, pluginWorkerRevision } from '../revision';
 
 export const pluginAdminRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -57,17 +57,29 @@ pluginAdminRoutes.all('/plugins/:pluginId/*', (c) => proxyToPlugin(c));
 /**
  * Plugin admin pages render in the CMS origin (see proxyToPlugin), so a hostile
  * or compromised plugin would run with the CMS's same-origin authority. Until
- * plugins are served from a dedicated origin, only 'admin' passes by default —
- * unless the plugin manifest opts in by declaring its own permissions (see
- * PluginManifest.permissions), in which case a user holding any one of those
- * granted permissions is trusted to reach that specific plugin's admin routes
- * too. Plugins that declare no permissions stay admin-only (fail closed).
+ * plugins are served from a dedicated origin, only 'admin' passes by default.
+ *
+ * A non-admin needs BOTH keys, and neither alone is enough:
+ *
+ *   • the CMS-side `plugin:access` permission — the host's statement that this
+ *     role may reach plugin admin pages at all. Only an admin can grant it, and
+ *     no manifest can name it (see below);
+ *   • one of the permissions this plugin declares — the plugin's statement about
+ *     which of its permission-holders its own admin routes are for. A plugin
+ *     declaring none stays admin-only (fail closed).
+ *
+ * Requiring the CMS-side key is what keeps the opt-in from being a self-grant:
+ * on its own, the manifest half means a plugin decides who may run code in the
+ * CMS origin. The declared half is read through pluginPermissions(), so a
+ * manifest can only name values namespaced to its own pinned id — never
+ * `plugin:access`, never `content:read`, never another plugin's permission.
  */
-async function hasDeclaredPluginPermission(c: AppContext, manifestPermissions: Array<{ value: string }>): Promise<boolean> {
-  if (manifestPermissions.length === 0) return false;
+async function canReachPluginAdmin(c: AppContext, manifest: PluginManifest): Promise<boolean> {
+  const declared = pluginPermissions(manifest);
+  if (declared.length === 0) return false;
   const map = await resolveRolePermissions(c.env);
   const granted = effectivePermissions(map, c.get('user').role);
-  return manifestPermissions.some(({ value }) => granted.has(value as Permission));
+  return granted.has('plugin:access') && declared.some(({ value }) => granted.has(value as Permission));
 }
 
 function adminOnlyForbidden(c: AppContext): Response {
@@ -91,7 +103,7 @@ async function servePluginAsset(c: AppContext): Promise<Response> {
 
   const isAdmin = splitRoles(c.get('user').role).includes('admin');
   const plugin = await pluginById(c.env, pluginId);
-  if (!isAdmin && !(plugin && await hasDeclaredPluginPermission(c, plugin.manifest.permissions ?? []))) {
+  if (!isAdmin && !(plugin && await canReachPluginAdmin(c, plugin.manifest))) {
     return adminOnlyForbidden(c);
   }
   if (!plugin) return c.notFound();
@@ -150,7 +162,7 @@ async function servePluginView(c: AppContext): Promise<Response> {
 
   const isAdmin = splitRoles(c.get('user').role).includes('admin');
   const plugin = await pluginById(c.env, pluginId);
-  if (!isAdmin && !(plugin && await hasDeclaredPluginPermission(c, plugin.manifest.permissions ?? []))) {
+  if (!isAdmin && !(plugin && await canReachPluginAdmin(c, plugin.manifest))) {
     return adminOnlyForbidden(c);
   }
   if (!plugin) return c.notFound();
@@ -209,7 +221,7 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
   // Non-admins are rejected the same way whether the plugin is unregistered or
   // just doesn't grant them access — matching the prior route-level gate, which
   // never resolved the plugin at all for a non-admin.
-  if (!isAdmin && !(plugin && await hasDeclaredPluginPermission(c, plugin.manifest.permissions ?? []))) {
+  if (!isAdmin && !(plugin && await canReachPluginAdmin(c, plugin.manifest))) {
     return adminOnlyForbidden(c);
   }
 

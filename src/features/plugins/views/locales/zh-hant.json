@@ -31,9 +31,23 @@
       "rotate_to_assign": "後備密鑰；請輪換以分配專用密鑰。",
       "rotated_flash": "密鑰已輪換。請將外掛程式 Worker 更新為新值；舊密鑰已失效。"
     },
+    "identity": {
+      "already_ok": "此外掛的識別碼已相符。",
+      "approve": "核准新識別碼",
+      "approved": "已核准識別碼，請視需要重新授予外掛授權。",
+      "approved_id": "已核准識別碼",
+      "claimed_flash": "該 manifest id 已屬於另一個已註冊的外掛。",
+      "claimed_help": "另一個已註冊的外掛已擁有此 manifest id，因此這個外掛維持離線：",
+      "confirm": "確定核准新識別碼？此外掛的靜態資源、頁面類型與檔案前綴授權將被撤銷。",
+      "mismatch_help": "此外掛回報的 manifest id 與當初核准的不同。在你核准變更前它會維持離線，因為它的授權、儲存資料與管理介面存取都以 manifest id 為準。核准後會撤銷它的靜態資源、頁面類型與檔案前綴授權，確認是同一個外掛後再重新授予。",
+      "served_id": "目前回報識別碼",
+      "title": "外掛識別碼需要核准",
+      "unreachable_flash": "外掛未回傳 manifest，無法核准其識別碼。"
+    },
     "status": {
       "active": "已啟用",
       "disabled": "已停用",
+      "identity": "識別碼異動",
       "unreachable": "無法連接"
     },
     "trust": {
