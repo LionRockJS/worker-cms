@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
-import { createSign } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import process from 'node:process';
+import {
+  DEFAULT_EXPIRES_IN_DAYS,
+  MAX_EXPIRES_IN_DAYS,
+  createAppleClientSecret,
+  keyIdFromFileName,
+  loadApplePrivateKey,
+} from './apple-client-secret.mjs';
 
 const OPTION_NAMES = new Set([
   '--key-file',
@@ -22,12 +26,14 @@ Usage:
 Options:
   --key-file PATH          Downloaded Apple .p8 private key (required)
   --team-id ID             Apple Developer Team ID (required)
-  --key-id ID              Private key ID, from AuthKey_<ID>.p8 (required)
+  --key-id ID              Private key ID (default: read from AuthKey_<ID>.p8)
   --client-id ID           Apple Services ID (required)
-  --expires-in-days N      JWT lifetime, 1-180 days (default: 180)
+  --expires-in-days N      JWT lifetime, 1-${MAX_EXPIRES_IN_DAYS} days (default: ${DEFAULT_EXPIRES_IN_DAYS})
 
 The JWT is written to stdout. Keep it secret and store it with:
   npx wrangler secret put APPLE_CLIENT_SECRET
+
+npm run setup does all of this for you when apple is an enabled provider.
 `;
 }
 
@@ -58,14 +64,6 @@ function required(options, name) {
   return value;
 }
 
-function base64Url(value) {
-  return Buffer.from(value)
-    .toString('base64')
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/, '');
-}
-
 async function main() {
   const options = parseOptions(process.argv.slice(2));
   if (options.help) {
@@ -73,40 +71,19 @@ async function main() {
     return;
   }
 
-  const keyFile = resolve(required(options, '--key-file'));
-  const teamId = required(options, '--team-id');
-  const keyId = required(options, '--key-id');
-  const clientId = required(options, '--client-id');
-  const expiresInDays = Number(options['--expires-in-days'] ?? 180);
+  const keyFile = required(options, '--key-file');
+  const keyId = options['--key-id'] || keyIdFromFileName(keyFile);
+  if (!keyId) throw new Error(`Missing required option: --key-id\n\n${usage()}`);
 
-  if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 180) {
-    throw new Error('--expires-in-days must be an integer from 1 to 180');
-  }
+  const { token } = createAppleClientSecret({
+    privateKey: await loadApplePrivateKey(keyFile),
+    teamId: required(options, '--team-id'),
+    keyId,
+    clientId: required(options, '--client-id'),
+    expiresInDays: Number(options['--expires-in-days'] ?? DEFAULT_EXPIRES_IN_DAYS),
+  });
 
-  let privateKey;
-  try {
-    privateKey = await readFile(keyFile, 'utf8');
-  } catch {
-    throw new Error(`Unable to read Apple private key: ${keyFile}`);
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const header = base64Url(JSON.stringify({ alg: 'ES256', kid: keyId }));
-  const payload = base64Url(JSON.stringify({
-    iss: teamId,
-    iat: now,
-    exp: now + expiresInDays * 24 * 60 * 60,
-    aud: 'https://appleid.apple.com',
-    sub: clientId,
-  }));
-  const signingInput = `${header}.${payload}`;
-
-  const signer = createSign('SHA256');
-  signer.update(signingInput);
-  signer.end();
-  const signature = signer.sign({ key: privateKey, dsaEncoding: 'ieee-p1363' });
-
-  process.stdout.write(`${signingInput}.${base64Url(signature)}\n`);
+  process.stdout.write(`${token}\n`);
 }
 
 try {

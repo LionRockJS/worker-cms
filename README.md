@@ -244,15 +244,21 @@ not silently merge logged-out accounts just because their emails match.
    ```toml
    APPLE_CLIENT_ID = "<services-id>"
    ```
-4. Generate an Apple client-secret JWT for that Services ID and store it:
+4. Apple has no static client secret. `APPLE_CLIENT_SECRET` is an ES256 JWT
+   signed with the `.p8` key from
+   [Keys](https://developer.apple.com/account/resources/authkeys/list). `npm run setup`
+   asks for the key file, key ID, and team ID and uploads the signed JWT for you.
+   To mint one outside the wizard:
    ```bash
    npm run apple:client-secret -- \
      --key-file ./AuthKey_XXXXXXXXXX.p8 \
      --team-id <team-id> \
-     --key-id <key-id> \
      --client-id <services-id>
    npx wrangler secret put APPLE_CLIENT_SECRET
    ```
+   `--key-id` defaults to the ID in the `AuthKey_<key-id>.p8` filename. Apple caps
+   the lifetime at six months (`--expires-in-days`, default 180), so re-run this
+   and re-upload the secret before it expires or Apple sign-in starts failing.
 
 > **Note:** GitHub and Google users have their role defaulted from the database.
 > Promote accounts to `admin` / `editor` with the SQL command in step 7.

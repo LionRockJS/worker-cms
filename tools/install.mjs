@@ -5,6 +5,15 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
+import {
+  DEFAULT_EXPIRES_IN_DAYS,
+  MAX_EXPIRES_IN_DAYS,
+  createAppleClientSecret,
+  isAppleId,
+  isExpiresInDays,
+  keyIdFromFileName,
+  loadApplePrivateKey,
+} from './apple-client-secret.mjs';
 
 const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -267,6 +276,48 @@ async function updateConfig(settings) {
   console.log('Updated wrangler.toml.');
 }
 
+/**
+ * Apple has no static client secret: the secret is an ES256 JWT signed with the
+ * .p8 key downloaded from the developer portal. Collect the pieces and mint it
+ * here so nobody has to run a second tool mid-setup.
+ */
+async function appleClientSecret(clientId) {
+  console.log(`
+Apple does not issue a client secret string. It expects a signed JWT built from
+the .p8 key you download once from
+  https://developer.apple.com/account/resources/authkeys/list`);
+
+  let privateKey;
+  let keyFile;
+  while (!privateKey) {
+    keyFile = await ask('Path to the Apple .p8 private key');
+    try {
+      privateKey = await loadApplePrivateKey(keyFile);
+    } catch (error) {
+      console.log(error.message);
+    }
+  }
+
+  const keyId = await ask('Apple key ID', keyIdFromFileName(keyFile), isAppleId);
+  const teamId = await ask('Apple team ID', undefined, isAppleId);
+  const expiresInDays = await ask(
+    `Client secret lifetime in days (max ${MAX_EXPIRES_IN_DAYS})`,
+    String(DEFAULT_EXPIRES_IN_DAYS),
+    isExpiresInDays,
+  );
+
+  const { token, expiresAt } = createAppleClientSecret({
+    privateKey,
+    teamId,
+    keyId,
+    clientId,
+    expiresInDays: Number(expiresInDays),
+  });
+  console.log(`Signed an Apple client secret that expires ${expiresAt.toISOString()}.`);
+  console.log('Re-run "npm run apple:client-secret" before then to mint a replacement.');
+  return token;
+}
+
 async function main() {
   console.log('\n0xCMS Cloudflare setup\n');
 
@@ -359,6 +410,12 @@ async function main() {
   for (const provider of providers) {
     if (!deployed) break;
     if (!await confirm(`Upload ${PROVIDERS[provider].secret} now?`)) continue;
+    if (provider === 'apple') {
+      const secret = await appleClientSecret(clientIds.apple);
+      run(['secret', 'put', PROVIDERS[provider].secret], { input: `${secret}\n` });
+      console.log(`Uploaded ${PROVIDERS[provider].secret}.`);
+      continue;
+    }
     console.log(`Enter the ${provider} client secret at Wrangler's secure prompt.`);
     run(['secret', 'put', PROVIDERS[provider].secret]);
   }
