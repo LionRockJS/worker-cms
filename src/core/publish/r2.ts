@@ -77,37 +77,61 @@ export function r2Adapter(bucket: R2Bucket, prefix = ''): PublishAdapter {
     return new Map(entries.filter((entry): entry is [string, LivePageSnapshot] => entry !== null));
   }
 
+  /** The self-contained JSON object a reader fetches for one page. */
+  function pageDocument({ page, tags, publishedAt }: PublishSnapshot): Record<string, unknown> {
+    return {
+      uuid: page.uuid,
+      name: page.name,
+      slug: page.slug,
+      weight: page.weight,
+      start: page.start,
+      end: page.end,
+      timezone: page.timezone,
+      page_type: page.page_type,
+      lect: safeParseLect(page.lect),
+      tags: tags.map((tag) => ({ uuid: tag.uuid, tag_id: tag.tag_id, weight: tag.weight, slug: tag.slug, name: tag.name })),
+      published_at: publishedAt,
+    };
+  }
+
+  /** That page's line in the listing every reader starts from. */
+  function indexEntry({ page, publishedAt }: PublishSnapshot): IndexEntry {
+    return {
+      uuid: page.uuid,
+      name: page.name,
+      slug: page.slug,
+      page_type: page.page_type,
+      weight: page.weight,
+      published_at: publishedAt,
+    };
+  }
+
+  async function publishSlice(snapshots: PublishSnapshot[]): Promise<void> {
+    if (!snapshots.length) return;
+    // The page objects are the payload — one PUT each is irreducible. The index
+    // is not: read-modify-writing it per page moved the entire live listing
+    // across the wire twice for every page in the slice, so a bulk publish cost
+    // O(slice x site). Once for the whole slice is enough.
+    await Promise.all(snapshots.map((snapshot) => bucket.put(
+      pageKey(snapshot.page.uuid),
+      JSON.stringify(pageDocument(snapshot)),
+      JSON_HEADERS,
+    )));
+
+    const entries = snapshots.map(indexEntry);
+    const replacing = new Set(entries.map((entry) => entry.uuid));
+    const index = await readIndex();
+    await writeIndex([...index.pages.filter((existing) => !replacing.has(existing.uuid)), ...entries]);
+  }
+
   return {
     id: 'r2',
 
     async publish(snapshot: PublishSnapshot): Promise<void> {
-      const { page, tags, publishedAt } = snapshot;
-      const document = {
-        uuid: page.uuid,
-        name: page.name,
-        slug: page.slug,
-        weight: page.weight,
-        start: page.start,
-        end: page.end,
-        timezone: page.timezone,
-        page_type: page.page_type,
-        lect: safeParseLect(page.lect),
-        tags: tags.map((tag) => ({ uuid: tag.uuid, tag_id: tag.tag_id, weight: tag.weight, slug: tag.slug, name: tag.name })),
-        published_at: publishedAt,
-      };
-      await bucket.put(pageKey(page.uuid), JSON.stringify(document), JSON_HEADERS);
-
-      const index = await readIndex();
-      const entry: IndexEntry = {
-        uuid: page.uuid,
-        name: page.name,
-        slug: page.slug,
-        page_type: page.page_type,
-        weight: page.weight,
-        published_at: publishedAt,
-      };
-      await writeIndex([...index.pages.filter((existing) => existing.uuid !== page.uuid), entry]);
+      await publishSlice([snapshot]);
     },
+
+    publishMany: publishSlice,
 
     async unpublish(uuid: string): Promise<void> {
       await bucket.delete(pageKey(uuid));

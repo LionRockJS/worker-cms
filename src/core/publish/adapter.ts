@@ -66,6 +66,16 @@ export interface PublishAdapter {
   /** Create or replace the published copy of a page. Throw on failure. */
   publish(snapshot: PublishSnapshot): Promise<void>;
 
+  /** Optional: create or replace many published copies in one shot. Targets that
+   *  can write in bulk (D1 by folding the whole slice into batched statements,
+   *  R2 by rewriting its index once instead of once per page) implement this;
+   *  the registry falls back to publish() per snapshot for targets that can't
+   *  (e.g. plugin targets, which POST one page at a time). Throw on failure.
+   *
+   *  Snapshots are applied in the order given, and the batched form is NOT
+   *  atomic across the whole slice — same as calling publish() in a loop. */
+  publishMany?(snapshots: PublishSnapshot[]): Promise<void>;
+
   /** Remove the published copy of a page. Throw on failure. */
   unpublish(uuid: string): Promise<void>;
 

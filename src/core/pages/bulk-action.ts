@@ -11,14 +11,13 @@
 import { coreExtensions, type PageEvent, type PageEventPage } from '../extensions';
 import {
   listLiveByTypes,
-  publishPageToTargets,
-  unpublishPageFromTargets,
+  publishPagesToTargets,
   unpublishPagesFromTargets,
 } from '../publish';
 import type { Env, JWTPayload, Page } from '../../types';
 import { trashDraftPages, type TrashedPageRef } from '../db/admin-queries';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
-import { isSubmissionMirror } from '../db/submission-ingest';
+import { submissionMirrorIds } from '../db/submission-ingest';
 import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
 import { safeParseLect, stringifyLect, type Lect } from '../db/lect';
 
@@ -165,21 +164,32 @@ export async function applyBulkPageAction(
     return { updated, refused, failedTargets };
   }
 
+  // Publish and unpublish both fan out to every configured target, so both go
+  // through the set-based form: one submission-mirror check and one tag read
+  // for the slice, and one batch per target — not the ~6 round trips per page
+  // the per-page helpers cost, which is what put a full slice within reach of
+  // the 1000-subrequest limit.
   const pages = await draftPagesByIds(env.DB, ids);
   const succeeded: Page[] = [];
-  for (const page of pages) {
-    const outcome = action === 'publish'
-      ? await publishPageToTargets(env, page.id)
-      : await unpublishPageFromTargets(env, page.uuid, await isSubmissionMirror(env.DB, page.id));
-    if (!outcome) continue;
-    if (outcome.refused) {
-      refused += 1;
-      continue;
-    }
+
+  if (action === 'publish') {
+    const outcome = await publishPagesToTargets(env, pages);
     outcome.failures.forEach((target) => failedTargets.add(target));
-    succeeded.push(page);
-    updated += 1;
+    succeeded.push(...outcome.published);
+    updated += outcome.published.length;
+    refused += outcome.refused.length;
+  } else {
+    const mirrors = await submissionMirrorIds(env.DB, pages.map((page) => page.id));
+    const outcome = await unpublishPagesFromTargets(
+      env,
+      pages.map((page) => ({ uuid: page.uuid, submission_origin: mirrors.has(page.id) ? 1 : 0 })),
+    );
+    outcome.failures.forEach((target) => failedTargets.add(target));
+    succeeded.push(...pages.filter((page) => !mirrors.has(page.id)));
+    updated += succeeded.length;
+    refused += outcome.refusedCount;
   }
+
   await emitPageLifecycle(env, user, action, succeeded);
 
   return { updated, refused, failedTargets };

@@ -56,7 +56,7 @@ import { withDraftMetadata } from '../../../core/db/page-logic';
 import { ensureUniqueDraftSlug, savePageVersion, trashDraftPage, trashDraftPages } from '../../../core/db/admin-queries';
 import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
-import { liveMapForDraftPages, publishPageToTargets, unpublishPageFromTargets, unpublishPagesFromTargets } from '../../../core/publish';
+import { liveMapForDraftPages, publishPagesToTargets, unpublishPageFromTargets, unpublishPagesFromTargets } from '../../../core/publish';
 import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
 
 const DUPLICATE_BATCH = 100;
@@ -519,15 +519,18 @@ pagesApiRoutes.post('/pages/publish', async (c) => {
     publishable.push({ index: candidate.index, page });
   }
 
+  // One batched fan-out for the whole request rather than a publish per id: the
+  // per-page helper costs about six round trips each, which a MAX_BATCH request
+  // multiplies straight into the subrequest budget. Per-id outcomes are still
+  // reported — the batched call hands back which pages it refused, and target
+  // failures apply to the slice.
+  const outcome = await publishPagesToTargets(c.env, publishable.map((item) => item.page));
+  const refusedIds = new Set(outcome.refused.map((page) => page.id));
+
   const published: number[] = [];
   const hookPages: HookPage[] = [];
   for (const item of publishable) {
-    const outcome = await publishPageToTargets(c.env, item.page.id);
-    if (!outcome) {
-      errors.push({ index: item.index, id: item.page.id, error: 'not_found' });
-      continue;
-    }
-    if (outcome.refused) {
+    if (refusedIds.has(item.page.id)) {
       errors.push({ index: item.index, id: item.page.id, error: 'submission_publish_refused' });
       continue;
     }

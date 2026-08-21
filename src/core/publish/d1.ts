@@ -10,6 +10,9 @@ import type { LivePageSnapshot, PublishAdapter, PublishSnapshot, PublishedTag } 
  *  costs two of them (the conflict sweep and the upsert). */
 const BATCH_CHUNK = 90;
 
+/** Uuids per live-id lookup, under D1's cap on bound parameters. */
+const ID_LOOKUP_CHUNK = 90;
+
 export function d1Adapter(publishedDb: D1DatabaseClient): PublishAdapter {
   /** The pair of statements that makes one catalogue row match `DB.tags`,
    *  ids included — a published link is only resolvable if the id agrees. */
@@ -50,65 +53,129 @@ export function d1Adapter(publishedDb: D1DatabaseClient): PublishAdapter {
     }
   };
 
+  /** Upserts the live page row, ids included, so a republish under the same
+   *  uuid lands on the same row whatever its previous id was. */
+  const pageStatement = (page: PublishSnapshot['page']): D1PreparedStatement => publishedDb.prepare(
+    `INSERT INTO pages (id, uuid, name, slug, weight, start, end, timezone, page_type, lect, page_id, creator, editors)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(uuid) DO UPDATE SET
+       id = excluded.id,
+       name = excluded.name,
+       slug = excluded.slug,
+       weight = excluded.weight,
+       start = excluded.start,
+       end = excluded.end,
+       timezone = excluded.timezone,
+       page_type = excluded.page_type,
+       lect = excluded.lect,
+       page_id = excluded.page_id,
+       creator = excluded.creator,
+       editors = excluded.editors`,
+  ).bind(
+    page.id,
+    page.uuid,
+    page.name,
+    page.slug,
+    page.weight,
+    page.start,
+    page.end,
+    page.timezone,
+    page.page_type,
+    page.lect,
+    page.page_id,
+    page.creator,
+    page.editors,
+  );
+
+  const linkStatement = (pageId: number, tag: PublishSnapshot['tags'][number]): D1PreparedStatement => (
+    publishedDb.prepare('INSERT INTO page_tags (uuid, page_id, tag_id, weight) VALUES (?, ?, ?, ?)')
+      .bind(tag.uuid, pageId, tag.tag_id, tag.weight)
+  );
+
+  /**
+   * Runs groups of statements, packing as many whole groups into each batch as
+   * the statement cap allows. A group never straddles two round trips unless it
+   * is larger than the cap on its own, so a failure part way through a slice
+   * leaves whole pages written or not written — never a page stripped of its
+   * tag links and not given them back.
+   */
+  const runGrouped = async (groups: D1PreparedStatement[][]): Promise<void> => {
+    let pending: D1PreparedStatement[] = [];
+    for (const group of groups) {
+      if (!group.length) continue;
+      if (group.length > BATCH_CHUNK) {
+        // One page with more links than a batch can hold: flush what we have,
+        // then split this group alone (the per-page path split it too).
+        await runBatched(pending);
+        pending = [];
+        await runBatched(group);
+        continue;
+      }
+      if (pending.length + group.length > BATCH_CHUNK) {
+        await runBatched(pending);
+        pending = [];
+      }
+      pending.push(...group);
+    }
+    await runBatched(pending);
+  };
+
+  /**
+   * Writes a whole slice in two phases:
+   *
+   *   1. the tag catalogue, deduplicated across the slice
+   *   2. per page — clear its existing links, upsert the row, insert the links
+   *
+   * Catalogue first means a reader never sees a link whose tag id resolves to
+   * nothing, which is the guarantee the per-page path gives. Grouping phase 2
+   * by page means a slice that fails part way is a prefix of published pages,
+   * not a page in a half-written state.
+   */
+  const writeSlice = async (snapshots: PublishSnapshot[]): Promise<void> => {
+    if (!snapshots.length) return;
+
+    // One read for the whole slice: a live row under this uuid may carry an id
+    // other than the draft's, and its links are keyed by that older id.
+    const uuids = snapshots.map((snapshot) => snapshot.page.uuid);
+    const existingIds = new Map<string, number>();
+    for (let index = 0; index < uuids.length; index += ID_LOOKUP_CHUNK) {
+      const chunk = uuids.slice(index, index + ID_LOOKUP_CHUNK);
+      const { results } = await publishedDb.prepare(
+        `SELECT id, uuid FROM pages WHERE uuid IN (${chunk.map(() => '?').join(',')})`,
+      ).bind(...chunk).all<{ id: number; uuid: string }>();
+      for (const row of results) existingIds.set(row.uuid, row.id);
+    }
+
+    // Pages in one slice routinely share tags; the catalogue pair only has to
+    // run once per tag, not once per page that links it.
+    const catalogue = new Map<string, PublishedTag>();
+    for (const { tagCatalogue } of snapshots) {
+      for (const tag of tagCatalogue) if (!catalogue.has(tag.uuid)) catalogue.set(tag.uuid, tag);
+    }
+    await runGrouped([...catalogue.values()].map(catalogueStatements));
+
+    await runGrouped(snapshots.map(({ page, tags }) => {
+      const staleId = existingIds.get(page.uuid);
+      return [
+        ...(staleId !== undefined && staleId !== page.id
+          ? [publishedDb.prepare('DELETE FROM page_tags WHERE page_id = ?').bind(staleId)]
+          : []),
+        publishedDb.prepare('DELETE FROM page_tags WHERE page_id = ?').bind(page.id),
+        pageStatement(page),
+        ...tags.map((tag) => linkStatement(page.id, tag)),
+      ];
+    }));
+  };
+
   return {
     id: 'd1',
 
     async publish(snapshot: PublishSnapshot): Promise<void> {
-      const { page, tags, tagCatalogue } = snapshot;
-      const existingLivePage = await publishedDb.prepare('SELECT id FROM pages WHERE uuid = ?')
-        .bind(page.uuid)
-        .first<{ id: number }>();
+      await writeSlice([snapshot]);
+    },
 
-      if (existingLivePage) {
-        await publishedDb.prepare('DELETE FROM page_tags WHERE page_id = ?').bind(existingLivePage.id).run();
-      }
-      await publishedDb.prepare('DELETE FROM page_tags WHERE page_id = ?').bind(page.id).run();
-
-      await publishedDb.prepare(
-        `INSERT INTO pages (id, uuid, name, slug, weight, start, end, timezone, page_type, lect, page_id, creator, editors)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(uuid) DO UPDATE SET
-           id = excluded.id,
-           name = excluded.name,
-           slug = excluded.slug,
-           weight = excluded.weight,
-           start = excluded.start,
-           end = excluded.end,
-           timezone = excluded.timezone,
-           page_type = excluded.page_type,
-           lect = excluded.lect,
-           page_id = excluded.page_id,
-           creator = excluded.creator,
-           editors = excluded.editors`,
-      )
-        .bind(
-          page.id,
-          page.uuid,
-          page.name,
-          page.slug,
-          page.weight,
-          page.start,
-          page.end,
-          page.timezone,
-          page.page_type,
-          page.lect,
-          page.page_id,
-          page.creator,
-          page.editors,
-        )
-        .run();
-
-      // Catalogue rows first, then the links that point at them, in one batched
-      // pass: a reader never sees a link whose tag id resolves to nothing, and
-      // a tag renamed since the last publish is corrected here too. Batching
-      // also costs fewer round-trips than the old statement-per-link loop, which
-      // is what keeps a 100-page bulk publish inside the subrequest budget.
-      await runBatched([
-        ...tagCatalogue.flatMap(catalogueStatements),
-        ...tags.map((tag) => publishedDb.prepare(
-          'INSERT INTO page_tags (uuid, page_id, tag_id, weight) VALUES (?, ?, ?, ?)',
-        ).bind(tag.uuid, page.id, tag.tag_id, tag.weight)),
-      ]);
+    async publishMany(snapshots: PublishSnapshot[]): Promise<void> {
+      await writeSlice(snapshots);
     },
 
     async unpublish(uuid: string): Promise<void> {

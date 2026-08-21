@@ -25,7 +25,7 @@ import type {
 import { d1Adapter } from './d1';
 import { coreExtensions } from '../extensions';
 import { r2Adapter } from './r2';
-import { isSubmissionMirror } from '../db/submission-ingest';
+import { isSubmissionMirror, submissionMirrorIds } from '../db/submission-ingest';
 import { projectLect, publishLectRules } from './projection';
 
 export interface PublishOutcome {
@@ -78,35 +78,63 @@ async function buildSnapshot(env: Env, pageId: number): Promise<PublishSnapshot 
     .bind(pageId)
     .first<Page>();
   if (!page) return null;
+  return (await buildSnapshots(env, [page]))[0];
+}
+
+/**
+ * Snapshots for pages the caller already holds — the set-based form of
+ * buildSnapshot. Costs one projection-rule lookup and one tag read per chunk
+ * for the whole slice, where the per-page path costs two reads each.
+ *
+ * The input rows are never mutated: projection writes into a copy, so a caller
+ * that goes on to use the same Page objects (lifecycle hooks, audit) still sees
+ * the unthinned draft lect.
+ */
+async function buildSnapshots(env: Env, pages: Page[]): Promise<PublishSnapshot[]> {
+  if (!pages.length) return [];
 
   // Data minimization: project the lect BEFORE fan-out so every publish
   // target (D1, R2, plugin targets) receives the same thinned snapshot.
   const rules = await publishLectRules(env);
-  page.lect = projectLect(page.lect, rules[page.page_type ?? '']);
+  const tagsByPage = await readSnapshotTags(env, pages.map((page) => page.id));
+  const publishedAt = new Date().toISOString();
 
-  const { tags, tagCatalogue } = await readSnapshotTags(env, pageId);
-
-  return { page, tags, tagCatalogue, publishedAt: new Date().toISOString() };
+  return pages.map((page) => ({
+    page: { ...page, lect: projectLect(page.lect, rules[page.page_type ?? '']) },
+    ...(tagsByPage.get(page.id) ?? { tags: [], tagCatalogue: [] }),
+    publishedAt,
+  }));
 }
 
+/** Page ids per tag read, bounded by D1's cap on bound parameters. */
+const PAGE_ID_CHUNK = 90;
+
 /** The link fields publishing has always carried, without the tag row's own. */
-const TAG_LINKS_SQL = `SELECT pt.uuid, pt.tag_id, pt.weight, t.slug, t.name
+const tagLinksSql = (placeholders: string) => `SELECT pt.page_id, pt.uuid, pt.tag_id, pt.weight, t.slug, t.name
      FROM page_tags pt
      LEFT JOIN tags t ON t.id = pt.tag_id
-     WHERE pt.page_id = ?
-     ORDER BY pt.weight ASC, pt.id ASC`;
+     WHERE pt.page_id IN (${placeholders})
+     ORDER BY pt.page_id ASC, pt.weight ASC, pt.id ASC`;
+
+interface SnapshotTags {
+  tags: PublishSnapshotTag[];
+  tagCatalogue: PublishedTag[];
+}
 
 /**
- * A page's tag links, plus the catalogue rows behind them so a target that
+ * Tag links per page, plus the catalogue rows behind them so a target that
  * stores tags separately can upsert the pair in one publish. Both come from one
  * read: `tags` is the link list every target already receives, `tagCatalogue`
  * is the distinct tag rows, keyed by the same ids `DB.tags` uses.
+ *
+ * Pages with no tags are absent from the map; callers default them to empty.
  */
 async function readSnapshotTags(
   env: Env,
-  pageId: number,
-): Promise<{ tags: PublishSnapshotTag[]; tagCatalogue: PublishedTag[] }> {
+  pageIds: number[],
+): Promise<Map<number, SnapshotTags>> {
   type LinkRow = PublishSnapshotTag & {
+    page_id: number;
     tag_uuid: string | null;
     tag_weight: number | null;
     taxonomy_slug: string | null;
@@ -114,46 +142,77 @@ async function readSnapshotTags(
     lect: string | null;
   };
 
-  let rows: LinkRow[];
-  try {
-    rows = (await env.DB.prepare(
-      `SELECT pt.uuid, pt.tag_id, pt.weight, t.slug, t.name,
-              t.uuid AS tag_uuid, t.weight AS tag_weight, t.taxonomy_slug, t.parent_tag, t.lect
-       FROM page_tags pt
-       LEFT JOIN tags t ON t.id = pt.tag_id
-       WHERE pt.page_id = ?
-       ORDER BY pt.weight ASC, pt.id ASC`,
-    ).bind(pageId).all<LinkRow>()).results;
-  } catch (error) {
-    // A tags table predating weight / taxonomy_slug / parent_tag / lect — the
-    // legacy shape the tags admin probes for — cannot answer that query at all.
-    // Publish the links it has always published; the catalogue for those tags
-    // then arrives on the next tag edit or from Admin → Tags → Sync published.
-    console.error('Publish: tag catalogue unavailable for this schema', error);
-    const links = await env.DB.prepare(TAG_LINKS_SQL).bind(pageId).all<PublishSnapshotTag>();
-    return { tags: links.results, tagCatalogue: [] };
-  }
-
-  const tagCatalogue = new Map<number, PublishedTag>();
-  for (const row of rows) {
-    // A link whose tag row is gone (LEFT JOIN miss) has nothing to catalogue.
-    if (!row.tag_uuid || tagCatalogue.has(row.tag_id)) continue;
-    tagCatalogue.set(row.tag_id, toPublishedTag({
-      id: row.tag_id,
-      uuid: row.tag_uuid,
-      name: row.name,
-      slug: row.slug,
-      weight: row.tag_weight,
-      taxonomy_slug: row.taxonomy_slug,
-      parent_tag: row.parent_tag,
-      lect: row.lect,
-    }));
-  }
-
-  return {
-    tags: rows.map(({ uuid, tag_id, weight, slug, name }) => ({ uuid, tag_id, weight, slug, name })),
-    tagCatalogue: [...tagCatalogue.values()],
+  const byPage = new Map<number, SnapshotTags>();
+  const entry = (pageId: number): SnapshotTags => {
+    const existing = byPage.get(pageId);
+    if (existing) return existing;
+    const created: SnapshotTags = { tags: [], tagCatalogue: [] };
+    byPage.set(pageId, created);
+    return created;
   };
+
+  const unique = [...new Set(pageIds)];
+  for (let index = 0; index < unique.length; index += PAGE_ID_CHUNK) {
+    const chunk = unique.slice(index, index + PAGE_ID_CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+
+    let rows: LinkRow[];
+    try {
+      rows = (await env.DB.prepare(
+        `SELECT pt.page_id, pt.uuid, pt.tag_id, pt.weight, t.slug, t.name,
+                t.uuid AS tag_uuid, t.weight AS tag_weight, t.taxonomy_slug, t.parent_tag, t.lect
+         FROM page_tags pt
+         LEFT JOIN tags t ON t.id = pt.tag_id
+         WHERE pt.page_id IN (${placeholders})
+         ORDER BY pt.page_id ASC, pt.weight ASC, pt.id ASC`,
+      ).bind(...chunk).all<LinkRow>()).results;
+    } catch (error) {
+      // A tags table predating weight / taxonomy_slug / parent_tag / lect — the
+      // legacy shape the tags admin probes for — cannot answer that query at all.
+      // Publish the links it has always published; the catalogue for those tags
+      // then arrives on the next tag edit or from Admin → Tags → Sync published.
+      console.error('Publish: tag catalogue unavailable for this schema', error);
+      const links = await env.DB.prepare(tagLinksSql(placeholders))
+        .bind(...chunk)
+        .all<PublishSnapshotTag & { page_id: number }>();
+      for (const { page_id, uuid, tag_id, weight, slug, name } of links.results) {
+        entry(page_id).tags.push({ uuid, tag_id, weight, slug, name });
+      }
+      continue;
+    }
+
+    // Deduped per page, matching what the single-page read always returned: a
+    // page linking the same tag twice catalogues it once.
+    const catalogued = new Map<number, Set<number>>();
+    for (const row of rows) {
+      const target = entry(row.page_id);
+      target.tags.push({
+        uuid: row.uuid,
+        tag_id: row.tag_id,
+        weight: row.weight,
+        slug: row.slug,
+        name: row.name,
+      });
+      // A link whose tag row is gone (LEFT JOIN miss) has nothing to catalogue.
+      if (!row.tag_uuid) continue;
+      const seen = catalogued.get(row.page_id) ?? new Set<number>();
+      catalogued.set(row.page_id, seen);
+      if (seen.has(row.tag_id)) continue;
+      seen.add(row.tag_id);
+      target.tagCatalogue.push(toPublishedTag({
+        id: row.tag_id,
+        uuid: row.tag_uuid,
+        name: row.name,
+        slug: row.slug,
+        weight: row.tag_weight,
+        taxonomy_slug: row.taxonomy_slug,
+        parent_tag: row.parent_tag,
+        lect: row.lect,
+      }));
+    }
+  }
+
+  return byPage;
 }
 
 async function runOnAll(
@@ -178,6 +237,68 @@ export async function publishPageToTargets(env: Env, pageId: number): Promise<Pu
   if (await isSubmissionMirror(env.DB, pageId)) return REFUSED_OUTCOME;
   const adapters = await getPublishAdapters(env);
   return runOnAll(adapters, (adapter) => adapter.publish(snapshot));
+}
+
+/** Result of a bulk publish. `published` and `refused` are the input rows split
+ *  by whether they reached the targets, so callers can attribute per-page
+ *  outcomes without re-reading anything. `failures` is per-target for the whole
+ *  slice, matching how unpublishPagesFromTargets reports. */
+export interface BulkPublishOutcome {
+  targets: string[];
+  failures: string[];
+  /** Pages handed to the targets, in input order. */
+  published: Page[];
+  /** Submission mirrors, skipped before any adapter saw them. */
+  refused: Page[];
+}
+
+/**
+ * Publishes many draft pages to every target in as few round-trips as possible.
+ * Adapters that implement publishMany() write in bulk (D1: batched statements,
+ * with the tag catalogue deduplicated across the slice; R2: one index rewrite
+ * for the whole slice); the rest fall back to publish() per snapshot, in order.
+ *
+ * Callers pass pages they already hold, so nothing is re-read: the whole slice
+ * costs one submission-mirror check and one tag read per chunk, where the
+ * per-page path costs about six round trips each.
+ *
+ * Submission mirrors are refused exactly as in the single-page path — writing
+ * one would upsert the live row it shares a uuid with — and reported in
+ * `refused` instead of being sent to any adapter.
+ */
+export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<BulkPublishOutcome> {
+  const adapters = await getPublishAdapters(env);
+  const targets = adapters.map((adapter) => adapter.id);
+  if (!pages.length) return { targets, failures: [], published: [], refused: [] };
+
+  const mirrors = await submissionMirrorIds(env.DB, pages.map((page) => page.id));
+  const refused = pages.filter((page) => mirrors.has(page.id));
+  const publishable = pages.filter((page) => !mirrors.has(page.id));
+  // Without a configured target there is nothing to fan out to, but the pages
+  // still count as handled — the single-page path reports the same empty
+  // `targets` and leaves the caller to decide what that means.
+  if (!publishable.length || !adapters.length) {
+    return { targets, failures: [], published: publishable, refused };
+  }
+
+  const snapshots = await buildSnapshots(env, publishable);
+  const failures: string[] = [];
+  const results = await Promise.allSettled(adapters.map((adapter) => (
+    adapter.publishMany
+      ? adapter.publishMany(snapshots)
+      : snapshots.reduce<Promise<void>>(
+        (prior, snapshot) => prior.then(() => adapter.publish(snapshot)),
+        Promise.resolve(),
+      )
+  )));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      failures.push(adapters[index].id);
+      console.error(`Publish target ${adapters[index].id} bulk publish failed:`, result.reason);
+    }
+  });
+
+  return { targets, failures, published: publishable, refused };
 }
 
 /**
