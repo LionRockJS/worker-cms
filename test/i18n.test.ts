@@ -101,7 +101,7 @@ describe('database locale registry', () => {
     const viewPaths = [
       'layout/default.liquid',
       ...[
-        'advanced-search', 'block-type-form', 'bulk-replace-preview', 'content-list', 'credit-summary', 'dashboard', 'editor', 'error',
+        'advanced-search', 'block-type-form', 'bulk-replace-preview', 'content-list', 'credit-summary', 'dashboard', 'editor', 'error', 'viewer-home',
         'languages', 'login', 'menu-settings', 'page-type-form', 'plugin-assets', 'plugin-credits', 'plugin-form',
         'plugin-limits', 'plugin-page-types', 'plugins-manage', 'profile', 'role-form', 'roles', 'tag-form', 'tags',
         'taxonomies', 'taxonomy-form', 'translations', 'trash', 'type-list', 'user-form', 'users',
