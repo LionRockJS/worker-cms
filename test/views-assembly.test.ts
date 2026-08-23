@@ -111,6 +111,15 @@ describe('view assembly', () => {
     expect(advancedSearch).toContain('{{ iconHrefPrefix }}#sync');
   });
 
+  it('ships the viewer home lock icon used by the safe dashboard', async () => {
+    const [icons, viewerHome] = await Promise.all([
+      env.VIEWS.fetch('https://views.local/assets/icons.svg').then((response) => response.text()),
+      env.VIEWS.fetch('https://views.local/sections/viewer-home.liquid').then((response) => response.text()),
+    ]);
+    expect(icons).toContain('<symbol id="lock-closed"');
+    expect(viewerHome).toContain('{{ iconHrefPrefix }}#lock-closed');
+  });
+
   it('makes each sidebar group a drag surface backed by its weight inputs', async () => {
     const [settings, links, renderer] = await Promise.all([
       env.VIEWS.fetch('https://views.local/sections/menu-settings.liquid').then((response) => response.text()),
