@@ -21,7 +21,6 @@ import {
   refreshCookieName,
   setAuthCookie,
 } from '../core/auth/cookies';
-import { normalizeRoles } from '../core/auth/roles';
 import { loadAppBrandingSettings } from '../core/db/settings';
 import { viewRevision } from '../core/http/view-revision';
 import { buildTranslationCatalog, resolveUiLocale } from '../core/i18n';
@@ -94,7 +93,6 @@ interface NormalizedUser {
   email: string;
   name: string;
   avatarUrl: string;
-  role?: string;
 }
 
 interface OAuthStatePayload extends JWTPayload {
@@ -256,9 +254,6 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
     const email = typeof data['email'] === 'string' ? data['email'] : '';
     if (!sub || !email) return null;
 
-    const roles = Array.isArray(data['roles'])
-      ? data['roles'].filter((role): role is string => typeof role === 'string')
-      : [];
     return {
       provider,
       providerUserId: sub,
@@ -266,7 +261,6 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       email,
       name: String(data['preferred_username'] ?? sub),
       avatarUrl: '',
-      role: normalizeRoles(roles),
     };
   }
   if (provider === 'google') {
@@ -680,14 +674,13 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
       return c.redirect('/auth/login?error=identity_not_linked');
     }
 
-    // The IdP-supplied role provisions the account on FIRST login only. Later
-    // logins refresh profile fields but never overwrite the CMS role, so role
-    // changes made in the Users admin stick.
+    // New accounts always start as least-privilege viewers. Later logins only
+    // refresh profile fields, so role changes made in the Users admin stick.
     await c.env.DB.prepare(
       `INSERT INTO users (oauth_id, email, name, avatar_url, role)
-       VALUES (?, ?, ?, ?, COALESCE(?, 'viewer'))`,
+       VALUES (?, ?, ?, ?, 'viewer')`,
     )
-      .bind(normalized.oauthId, normalized.email, normalized.name, normalized.avatarUrl, normalized.role ?? null)
+      .bind(normalized.oauthId, normalized.email, normalized.name, normalized.avatarUrl)
       .run();
 
     dbUser = await c.env.DB.prepare(

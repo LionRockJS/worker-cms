@@ -260,8 +260,9 @@ not silently merge logged-out accounts just because their emails match.
    the lifetime at six months (`--expires-in-days`, default 180), so re-run this
    and re-upload the secret before it expires or Apple sign-in starts failing.
 
-> **Note:** GitHub and Google users have their role defaulted from the database.
-> Promote accounts to `admin` / `editor` with the SQL command in step 7.
+> **Note:** New accounts start as `viewer`, regardless of the OAuth provider's
+> role claims. Promote the first account to `admin` (or another role) with the
+> SQL command in step 7.
 
 ### 7. Set the first user's role
 

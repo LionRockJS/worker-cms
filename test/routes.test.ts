@@ -300,7 +300,7 @@ describe('auth routes', () => {
     expect(callback.headers.get('Set-Cookie')).toContain('access_token=');
     expect(await env.DB.prepare('SELECT role FROM users WHERE oauth_id = ?')
       .bind('eventuai:eventuai-user')
-      .first<{ role: string }>()).toEqual({ role: 'editor' });
+      .first<{ role: string }>()).toEqual({ role: 'viewer' });
     expect(await env.DB.prepare('SELECT user_id, provider, provider_user_id FROM user_oauth_identities WHERE oauth_id = ?')
       .bind('eventuai:eventuai-user')
       .first()).toMatchObject({ provider: 'eventuai', provider_user_id: 'eventuai-user' });
@@ -2677,6 +2677,17 @@ describe('capability enforcement', () => {
     const payload = renderPayload(await dashboard.text());
     expect(payload.bodyView?.viewPath).toBe('/templates/viewer-home.json');
     expect(payload.layoutData.showSidebarPages).toBe(false);
+
+    // The viewer shell is client-rendered after the authenticated HTML
+    // response. Its bundled view files must be readable by the same viewer.
+    const viewerTemplate = await fetchWorker('/admin/views/templates/viewer-home.json', {
+      headers: { Cookie: cookie },
+    });
+    expect(viewerTemplate.status).toBe(200);
+    const profileTemplate = await fetchWorker('/admin/views/templates/profile.json', {
+      headers: { Cookie: cookie },
+    });
+    expect(profileTemplate.status).toBe(200);
 
     const profile = await fetchWorker('/admin/profile', { headers: { Cookie: cookie } });
     expect(profile.status).toBe(200);

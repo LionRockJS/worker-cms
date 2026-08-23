@@ -172,12 +172,12 @@ describe('login page providers', () => {
 // ── §01 · First-login role provisioning ───────────────────────────────────────
 
 describe('first-login role provisioning', () => {
-  it('seeds the role from the IdP once and never overwrites it on later logins', async () => {
+  it('defaults new accounts to viewer and never overwrites it on later logins', async () => {
     const first = await completeMockedLogin({
       sub: 'newbie',
       email: 'newbie@example.com',
       preferred_username: 'Newbie',
-      roles: ['editor'],
+      roles: ['admin'],
     });
     expect(first.status).toBe(302);
     expect(first.headers.get('Location')).toBe('/admin');
@@ -185,7 +185,7 @@ describe('first-login role provisioning', () => {
     const created = await env.DB.prepare(
       "SELECT role, name FROM users WHERE oauth_id = 'eventuai:newbie'",
     ).first<{ role: string; name: string }>();
-    expect(created).toMatchObject({ role: 'editor', name: 'Newbie' });
+    expect(created).toMatchObject({ role: 'viewer', name: 'Newbie' });
 
     // An admin promotes the user in the Users admin…
     await env.DB.prepare("UPDATE users SET role = 'admin' WHERE oauth_id = 'eventuai:newbie'").run();

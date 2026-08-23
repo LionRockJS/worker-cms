@@ -101,7 +101,14 @@ export const authMiddleware = createMiddleware<{
  *  self-service profile. Everything else still needs at least one granted
  *  capability, followed by the route's own least-privilege check. */
 function isViewerSafeAdminRoute(path: string): boolean {
-  return path === '/admin' || path === '/admin/' || path.startsWith('/admin/profile');
+  return path === '/admin'
+    || path === '/admin/'
+    || path === '/admin/profile'
+    || path.startsWith('/admin/profile/')
+    // Client-rendered safe pages still need their authenticated view source.
+    // This route only serves bundled JSON/Liquid assets; content and mutation
+    // routes remain protected by the editor/permission guards.
+    || path.startsWith('/admin/views/');
 }
 
 export const editorGuard = createMiddleware<{
