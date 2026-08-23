@@ -589,6 +589,13 @@ describe('credit transfers', () => {
     const html = await res.text();
     expect(html).toContain('/admin/profile/credits/transfer');
   });
+
+  it('hides profile transfer and donation forms when the wallet is empty', async () => {
+    const profileView = await (await env.VIEWS.fetch('https://views.local/sections/profile.liquid')).text();
+    expect(profileView).toMatch(
+      /\{% if wallet\.balance > 0 %\}\s*<form method="POST" action="\{\{ wallet\.transferAction \}\}"[\s\S]*<form method="POST" action="\{\{ wallet\.donateAction \}\}"[\s\S]*<\/form>\s*\{% endif %\}/,
+    );
+  });
 });
 
 describe('profile and plugins-manage pages', () => {
