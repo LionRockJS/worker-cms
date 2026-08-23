@@ -110,3 +110,17 @@ CREATE INDEX IF NOT EXISTS idx_plugins_enabled ON plugins(enabled, sort_order);
 CREATE INDEX IF NOT EXISTS idx_plugin_asset_approvals_plugin ON plugin_asset_approvals(plugin_id);
 CREATE INDEX IF NOT EXISTS idx_plugin_page_type_approvals_plugin ON plugin_page_type_approvals(plugin_id);
 CREATE INDEX IF NOT EXISTS idx_plugin_file_prefix_approvals_plugin ON plugin_file_prefix_approvals(plugin_id);
+
+-- Preserve access for roles that could already reach plugin admin pages before
+-- the CMS-side `plugin:access` key was added to the gate. This is a no-op on a
+-- fresh install, where role_permissions has no plugin permissions yet, and is
+-- repeated by migrations/0004_enable_plugins_access.sql for existing installs.
+INSERT OR IGNORE INTO role_permissions (role, permission)
+SELECT DISTINCT role, 'plugin:access'
+FROM role_permissions
+WHERE permission NOT IN (
+    'content:read', 'content:write', 'content:publish', 'content:delete', 'content:import',
+    'trash:restore', 'trash:purge', 'tag:write', 'taxonomy:write', 'media:upload',
+    'plugin:access', 'plugin:manage', 'menu:manage', 'pagetype:write', 'blocktype:write',
+    'users:manage', 'roles:manage', 'credits:share'
+);
