@@ -31,6 +31,33 @@
     </section>
 
     <section class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.appearance.title" | t }}</h3>
+      <p class="mt-1 text-xs text-gray-500">{{ "settings.appearance.help" | t }}</p>
+      <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label class="block min-w-0">
+          <span class="block text-sm font-medium text-gray-700 mb-1">{{ "settings.appearance.primary_color" | t }}</span>
+          <span class="flex min-w-0 items-center gap-3">
+            <input type="color"
+                   name="primary_color"
+                   value="{{ primaryColor }}"
+                   class="h-10 w-16 shrink-0 rounded-lg border border-gray-300 bg-transparent p-1">
+            <span class="font-mono text-sm text-gray-500">{{ primaryColor }}</span>
+          </span>
+          <span class="mt-1 block text-xs text-gray-500">{{ "settings.appearance.primary_color_help" | t }}</span>
+        </label>
+        <label class="block min-w-0">
+          <span class="block text-sm font-medium text-gray-700 mb-1">{{ "settings.appearance.font" | t }}</span>
+          <select name="app_font" class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            {% for option in fontOptions %}
+              <option value="{{ option.value }}" style="font-family: {{ option.stack }}"{% if option.selected %} selected{% endif %}>{{ option.labelKey | t }}</option>
+            {% endfor %}
+          </select>
+          <span class="mt-1 block text-xs text-gray-500">{{ "settings.appearance.font_help" | t }}</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
       <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.regional.title" | t }}</h3>
       <label class="mt-4 block min-w-0 max-w-md">
         <span class="block text-sm font-medium text-gray-700 mb-1">{{ "settings.regional.timezone" | t }}</span>

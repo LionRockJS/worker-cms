@@ -124,6 +124,24 @@
     "actions": {
       "show_item": "Show item"
     },
+    "appearance": {
+      "font": "Interface font",
+      "font_help": "Body text of the admin interface. Only fonts already installed on the reader's device are used, so nothing is downloaded.",
+      "fonts": {
+        "geometric": "Geometric",
+        "grotesk": "Neo-grotesque",
+        "humanist": "Humanist",
+        "mono": "Monospace",
+        "rounded": "Rounded",
+        "serif": "Serif",
+        "slab": "Slab serif",
+        "system": "System"
+      },
+      "help": "Applies to the admin interface for everyone signed in to this CMS.",
+      "primary_color": "Primary colour",
+      "primary_color_help": "Buttons, links, focus rings and highlights follow this colour in both the light and dark theme.",
+      "title": "Appearance"
+    },
     "fields": {
       "item_icon": "Item icon",
       "item_weight": "Item weight"
@@ -408,9 +426,6 @@
     "shared_bulk_actions.bulk_action": "Bulk Action",
     "shared_bulk_actions.choose_tags": "Choose at least one tag.",
     "shared_bulk_actions.enter_text_to_find": "Enter text to find.",
-    "viewer_home.heading": "Welcome",
-    "viewer_home.message": "You are signed in. Content pages remain private until an administrator grants you content access.",
-    "viewer_home.apps_hint": "Use an available app from the navigation, or open your profile below.",
     "viewer_home.heading": "Welcome",
     "viewer_home.message": "You are signed in. Content pages remain private until an administrator grants you content access.",
     "viewer_home.apps_hint": "Use an available app from the navigation, or open your profile below.",

@@ -29,6 +29,8 @@ function providerIcon(provider: string, revisionQuery: string): string {
 export async function loginPage(views: Fetcher, opts: {
   siteTitle: string;
   appIcon: string;
+  appPrimaryColor: string;
+  appFont: string;
   providers: string[];
   error?: string;
   viewRevision?: string;
@@ -63,6 +65,8 @@ export async function loginPage(views: Fetcher, opts: {
     title: 'Sign In',
     siteTitle,
     appIcon: opts.appIcon,
+    appPrimaryColor: opts.appPrimaryColor,
+    appFont: opts.appFont,
     body,
     viewRevision: opts.viewRevision,
     uiLocale: opts.uiLocale,

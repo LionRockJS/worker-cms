@@ -40,6 +40,14 @@ export interface SystemSettingsSidebarOption {
   iconName: string;
 }
 
+export interface SystemSettingsFontOption {
+  value: string;
+  labelKey: string;
+  /** The font stack itself, so each <option> previews in its own face. */
+  stack: string;
+  selected: boolean;
+}
+
 export interface SystemSettingsIconOption {
   value: string;
   label: string;
@@ -50,6 +58,8 @@ export interface SystemSettingsIconOption {
 export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps & {
   appName: string;
   appIcon: string;
+  primaryColor: string;
+  fontOptions: SystemSettingsFontOption[];
   adminHomePath: string;
   systemTimezone: string;
   timezoneOptions: Array<{ value: string; label: string; selected: boolean }>;
@@ -67,6 +77,8 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
   const body = await renderView(views, '/templates/menu-settings.json', {
     appName: opts.appName,
     appIcon: opts.appIcon,
+    primaryColor: opts.primaryColor,
+    fontOptions: opts.fontOptions,
     adminHomePath: opts.adminHomePath,
     systemTimezone: opts.systemTimezone,
     timezoneOptions: opts.timezoneOptions,

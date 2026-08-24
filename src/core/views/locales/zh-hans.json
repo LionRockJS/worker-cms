@@ -124,6 +124,24 @@
     "actions": {
       "show_item": "显示项目"
     },
+    "appearance": {
+      "font": "界面字体",
+      "font_help": "管理界面的正文字体。只会使用读者设备上已安装的字体，不会下载任何字体文件。",
+      "fonts": {
+        "geometric": "几何体",
+        "grotesk": "新怪诞体",
+        "humanist": "人文体",
+        "mono": "等宽体",
+        "rounded": "圆体",
+        "serif": "衬线体",
+        "slab": "粗衬线体",
+        "system": "系统默认"
+      },
+      "help": "适用于此 CMS 所有已登录用户的管理界面。",
+      "primary_color": "主色",
+      "primary_color_help": "按钮、链接、聚焦框及重点标示会在浅色及深色主题中跟随此颜色。",
+      "title": "外观"
+    },
     "fields": {
       "item_icon": "项目图标",
       "item_weight": "项目权重"

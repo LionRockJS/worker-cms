@@ -122,9 +122,51 @@ export function installedMenuItems(
 }
 export type AppIcon = typeof APP_ICON_OPTIONS[number]['value'];
 
+/**
+ * Interface font choices. Every stack is composed of faces the operating
+ * system already has: the admin CSP is `default-src 'self'`, so a webfont
+ * host (Google Fonts and friends) would simply be blocked. `stack` lands in
+ * `--font-sans`, which admin.css uses for html/body and Tailwind uses for
+ * `font-sans`; monospaced captions keep their own face.
+ */
+export const APP_FONT_OPTIONS = [
+  { value: 'system', label: 'System', stack: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
+  { value: 'grotesk', label: 'Neo-grotesque', stack: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif' },
+  { value: 'geometric', label: 'Geometric', stack: 'Avenir, "Avenir Next", "Century Gothic", "URW Gothic", "Trebuchet MS", sans-serif' },
+  { value: 'humanist', label: 'Humanist', stack: 'Optima, Candara, "Gill Sans", "Gill Sans MT", "Segoe UI", sans-serif' },
+  { value: 'rounded', label: 'Rounded', stack: 'ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN", Quicksand, Verdana, sans-serif' },
+  { value: 'serif', label: 'Serif', stack: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif' },
+  { value: 'slab', label: 'Slab serif', stack: 'Rockwell, "Roboto Slab", "Bookman Old Style", Georgia, serif' },
+  { value: 'mono', label: 'Monospace', stack: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace' },
+] as const;
+
+export type AppFont = typeof APP_FONT_OPTIONS[number]['value'];
+
+export const DEFAULT_PRIMARY_COLOR = '#cbef34';
+export const DEFAULT_APP_FONT: AppFont = 'system';
+
+const APP_FONT_VALUES = new Set<string>(APP_FONT_OPTIONS.map((option) => option.value));
+
+/** The stack for a saved font key, falling back to the system one. */
+export function appFontStack(value: unknown): string {
+  return (APP_FONT_OPTIONS.find((option) => option.value === value) ?? APP_FONT_OPTIONS[0]).stack;
+}
+
+/** `#rgb` / `#rrggbb` (either case) normalized to lower-case `#rrggbb`. */
+export function normalizeHexColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const hex = value.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(hex)) return hex;
+  if (/^#[0-9a-f]{3}$/.test(hex)) return `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+  return null;
+}
+
 export interface AppBrandingSettings {
   appName: string;
   appIcon: AppIcon;
+  /** Accent colour every `indigo-*` / `brand-*` utility resolves to. */
+  primaryColor: string;
+  appFont: AppFont;
 }
 
 export interface AdminHomeSettings {
@@ -205,13 +247,17 @@ export async function loadAppBrandingSettings(env: Env, fallbackName = '0xCMS'):
     const appIcon = typeof saved?.appIcon === 'string' && APP_ICON_VALUES.has(saved.appIcon)
       ? saved.appIcon as AppIcon
       : defaults.appIcon;
-    return { appName, appIcon };
+    const primaryColor = normalizeHexColor(saved?.primaryColor) ?? defaults.primaryColor;
+    const appFont = typeof saved?.appFont === 'string' && APP_FONT_VALUES.has(saved.appFont)
+      ? saved.appFont as AppFont
+      : defaults.appFont;
+    return { appName, appIcon, primaryColor, appFont };
   } catch (error) {
     return defaults;
   }
 }
 
-export async function saveAppBrandingSettings(env: Env, input: { appName: unknown; appIcon: unknown }, fallbackName = '0xCMS'): Promise<AppBrandingSettings> {
+export async function saveAppBrandingSettings(env: Env, input: { appName: unknown; appIcon: unknown; primaryColor?: unknown; appFont?: unknown }, fallbackName = '0xCMS'): Promise<AppBrandingSettings> {
   const defaults = defaultAppBrandingSettings(fallbackName);
   const appName = typeof input.appName === 'string' && input.appName.trim()
     ? input.appName.trim().slice(0, 80)
@@ -219,7 +265,11 @@ export async function saveAppBrandingSettings(env: Env, input: { appName: unknow
   const appIcon = typeof input.appIcon === 'string' && APP_ICON_VALUES.has(input.appIcon)
     ? input.appIcon as AppIcon
     : defaults.appIcon;
-  const settings = { appName, appIcon };
+  const primaryColor = normalizeHexColor(input.primaryColor) ?? defaults.primaryColor;
+  const appFont = typeof input.appFont === 'string' && APP_FONT_VALUES.has(input.appFont)
+    ? input.appFont as AppFont
+    : defaults.appFont;
+  const settings = { appName, appIcon, primaryColor, appFont };
   await saveSetting(env, APP_BRANDING_SETTING_KEY, JSON.stringify(settings));
   return settings;
 }
@@ -354,7 +404,12 @@ export function defaultPluginNavWeight(keyOrGroup?: string): number {
 }
 
 function defaultAppBrandingSettings(fallbackName: string): AppBrandingSettings {
-  return { appName: fallbackName, appIcon: 'document' };
+  return {
+    appName: fallbackName,
+    appIcon: 'document',
+    primaryColor: DEFAULT_PRIMARY_COLOR,
+    appFont: DEFAULT_APP_FONT,
+  };
 }
 
 function defaultAdminHomeSettings(): AdminHomeSettings {

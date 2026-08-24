@@ -175,6 +175,8 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   return {
     siteTitle: branding.appName,
     appIcon: branding.appIcon,
+    appPrimaryColor: branding.primaryColor,
+    appFont: branding.appFont,
     userName: user.name,
     userRole: user.role,
     userAvatar: userAvatar ?? '',

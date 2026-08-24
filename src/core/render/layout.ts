@@ -1,4 +1,5 @@
 import { currentCspNonce } from '../http/request-context';
+import { appearanceStyleSheet } from './theme';
 import { builtinRoleTranslationKey } from '../auth/roles';
 import { isClientView, type RenderedView } from './liquid';
 
@@ -104,6 +105,9 @@ export function navFlags(opts: unknown): NavFlags {
 export interface BaseTemplateProps extends NavFlags {
   siteTitle: string;
   appIcon: string;
+  /** Saved admin accent colour (`#rrggbb`) and interface font key. */
+  appPrimaryColor: string;
+  appFont: string;
   userName: string;
   userRole: string;
   userAvatar: string;
@@ -162,6 +166,8 @@ export async function adminLayout(
     title: opts.title,
     siteTitle: base.siteTitle,
     appIcon: base.appIcon,
+    appPrimaryColor: base.appPrimaryColor,
+    appFont: base.appFont,
     body: opts.body,
     admin: true,
     userName: base.userName,
@@ -199,6 +205,10 @@ export interface LayoutOptions extends NavFlags {
   title: string;
   siteTitle: string;
   appIcon?: string;
+  /** Saved admin accent colour (`#rrggbb`); falls back to the built-in one. */
+  appPrimaryColor?: string;
+  /** Saved interface font key (see APP_FONT_OPTIONS). */
+  appFont?: string;
   body: RenderedView;
   /** Include the admin sidebar? */
   admin?: boolean;
@@ -313,6 +323,7 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(opts.title)} - ${escHtml(opts.siteTitle)}</title>
   <link rel="stylesheet" href="/assets/admin.css${escHtml(revisionQuery)}">
+  <style nonce="${escHtml(nonce)}">${appearanceStyleSheet(opts.appPrimaryColor, opts.appFont)}</style>
 </head>
 <body class="h-full overflow-x-hidden">
   <div id="cms-client-root" class="min-h-full">${loadingMarkup('100vh')}</div>

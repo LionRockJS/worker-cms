@@ -124,6 +124,24 @@
     "actions": {
       "show_item": "顯示項目"
     },
+    "appearance": {
+      "font": "介面字型",
+      "font_help": "管理介面的內文字型。只會使用讀者裝置上已安裝的字型，不會下載任何字型檔。",
+      "fonts": {
+        "geometric": "幾何體",
+        "grotesk": "新怪誕體",
+        "humanist": "人文體",
+        "mono": "等寬體",
+        "rounded": "圓體",
+        "serif": "襯線體",
+        "slab": "粗襯線體",
+        "system": "系統預設"
+      },
+      "help": "套用至此 CMS 所有已登入使用者的管理介面。",
+      "primary_color": "主色",
+      "primary_color_help": "按鈕、連結、聚焦框及重點標示會在淺色及深色主題中跟隨此顏色。",
+      "title": "外觀"
+    },
     "fields": {
       "item_icon": "項目圖示",
       "item_weight": "項目權重"

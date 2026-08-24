@@ -427,6 +427,8 @@ authRoutes.get('/login', async (c) => {
     await loginPage(c.env.VIEWS, {
       siteTitle: branding.appName,
       appIcon: branding.appIcon,
+      appPrimaryColor: branding.primaryColor,
+      appFont: branding.appFont,
       providers: providers.length > 0 ? providers : ['github'],
       error,
       viewRevision: viewRevision(c.env),

@@ -3121,6 +3121,46 @@ describe('permission-aware admin UI', () => {
     ]);
   });
 
+  it('applies the saved primary colour and interface font to every admin document', async () => {
+    const saved = await fetchWorker('/admin/settings/system', {
+      method: 'POST',
+      body: form({ primary_color: '#0A66C2', app_font: 'serif', system_timezone: '+0000' }),
+      headers: { Cookie: await authCookie() },
+    });
+    expect(saved.status).toBe(302);
+
+    const settingsData = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: await authCookie() } })).text());
+    expect(settingsData.primaryColor).toBe('#0a66c2');
+    expect(settingsData.fontOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'serif', selected: true }),
+      expect.objectContaining({ value: 'system', selected: false }),
+    ]));
+
+    // The skin ships as a <style> in the bootstrap head, which client-render.js
+    // leaves alone (it only swaps <body>), so one block covers every screen.
+    const dashboard = await (await fetchWorker('/admin?pagesize=100', { headers: { Cookie: await authCookie() } })).text();
+    expect(dashboard).toContain('--cms-primary: #0a66c2;');
+    expect(dashboard).toContain('--font-sans: ui-serif, Georgia');
+    // Dark ink on a dark blue would be unreadable, so the accent ink follows
+    // the chosen colour's luminance rather than the compiled lime assumption.
+    expect(dashboard).toContain('--cms-primary-ink: #ffffff;');
+
+    // The login screen is public and unstyled by the chrome, but still branded.
+    expect(await (await fetchWorker('/auth/login')).text()).toContain('--cms-primary: #0a66c2;');
+
+    const reset = await fetchWorker('/admin/settings/system', {
+      method: 'POST',
+      body: form({ primary_color: 'rebeccapurple', app_font: 'nonexistent', system_timezone: '+0000' }),
+      headers: { Cookie: await authCookie() },
+    });
+    expect(reset.status).toBe(302);
+    const afterInvalid = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: await authCookie() } })).text());
+    expect(afterInvalid.primaryColor).toBe('#cbef34');
+    expect(afterInvalid.fontOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'system', selected: true }),
+    ]));
+  });
+
   it('falls back to the page dashboard for unsafe admin home paths', async () => {
     const response = await fetchWorker('/admin/settings/system', {
       method: 'POST',

@@ -7,6 +7,7 @@ import type { Env, Variables } from '../../types';
 import { logAudit } from '../../core/db/audit';
 import { renderPage } from '../../core/render/chrome';
 import {
+  APP_FONT_OPTIONS,
   APP_ICON_OPTIONS,
   SIDEBAR_MENU_ITEMS,
   installedMenuItems,
@@ -139,6 +140,13 @@ settingsRoutes.get('/settings/system', async (c) => {
   return renderPage(c, systemSettingsPage, {
     appName: branding.appName,
     appIcon: branding.appIcon,
+    primaryColor: branding.primaryColor,
+    fontOptions: APP_FONT_OPTIONS.map((option) => ({
+      value: option.value,
+      labelKey: `settings.appearance.fonts.${option.value}`,
+      stack: option.stack,
+      selected: option.value === branding.appFont,
+    })),
     adminHomePath: adminHome.href,
     systemTimezone,
     timezoneOptions: [
@@ -200,6 +208,8 @@ settingsRoutes.post('/settings/system', async (c) => {
     saveAppBrandingSettings(c.env, {
       appName: form.get('app_name'),
       appIcon: form.get('app_icon'),
+      primaryColor: form.get('primary_color'),
+      appFont: form.get('app_font'),
     }, c.env.SITE_TITLE ?? '0xCMS'),
     saveAdminHomeSettings(c.env, {
       href: form.get('admin_home_path'),
