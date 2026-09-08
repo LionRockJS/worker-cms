@@ -32,11 +32,11 @@ import {
   REFRESH_TOKEN_TTL,
   capUserSessions,
   findRefreshSessionUserId,
-  issueAuthTokens,
+  createAuthSession,
+  validateAccessSession,
   purgeExpiredSessions,
   revokeRefreshSession,
   rotateAuthSession,
-  storeRefreshSession,
 } from '../core/auth/sessions';
 
 // ── OAuth provider config ─────────────────────────────────────────────────────
@@ -328,7 +328,8 @@ async function currentAuthenticatedUserId(c: AppContext): Promise<number | null>
   const accessToken = readAuthCookie(c, accessCookieName);
   if (accessToken) {
     const payload = await verifyJWT(accessToken, secret);
-    const id = Number(payload?.type === 'access' ? payload.sub : NaN);
+    const current = payload && await validateAccessSession(c.env.DB, payload);
+    const id = Number(current ? current.sub : NaN);
     if (Number.isInteger(id) && id > 0) return id;
   }
 
@@ -702,8 +703,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
     return c.redirect('/auth/login?error=db_error');
   }
 
-  const issued = await issueAuthTokens(dbUser, c.env.JWT_SECRET);
-  await storeRefreshSession(c.env.DB, dbUser.id, issued.refreshJti);
+  const issued = await createAuthSession(c.env.DB, dbUser, c.env.JWT_SECRET);
 
   // Session hygiene: cap concurrent sessions per user and purge expired rows.
   c.executionCtx.waitUntil(Promise.all([
@@ -734,6 +734,11 @@ authRoutes.post('/callback', async (c) => {
 // Logout is a state change: POST only, protected by the global
 // cross-site mutation check in index.ts.
 authRoutes.post('/logout', async (c) => {
+  const accessToken = readAuthCookie(c, accessCookieName);
+  const access = accessToken ? await verifyJWT(accessToken, c.env.JWT_SECRET) : null;
+  if (access?.type === 'access' && access.sid) {
+    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?').bind(access.sid, access.sub).run();
+  }
   const refreshToken = readAuthCookie(c, refreshCookieName);
   if (refreshToken) {
     await revokeRefreshSession(c.env.DB, c.env.JWT_SECRET, refreshToken);

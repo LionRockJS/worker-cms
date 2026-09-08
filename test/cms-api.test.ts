@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from '../src/features/plugins/registry';
+import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { restoreTrashedPages } from '../src/core/db/admin-queries';
 import { approvePageTypeAccess } from '../src/features/plugins/page-types';

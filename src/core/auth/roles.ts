@@ -1,3 +1,4 @@
+import { requestContext } from '../http/request-context';
 import { PERMISSIONS, USER_ROLES, type Env, type Permission, type UserRole } from '../../types';
 
 const VALID_ROLES = new Set<string>(USER_ROLES);
@@ -71,10 +72,9 @@ export function hasPermission(value: string, permission: Permission): boolean {
 //   • any role present in the `roles` table → exactly its role_permissions rows
 //     (so a customized built-in or a custom role can have an empty set)
 //   • 'admin' → always every permission (never editable; avoids lockout)
-// Cached per isolate with a short TTL, like resolveCmsConfig.
+// Cached only within one HTTP request; role changes take effect on the next request.
 
-const ROLE_TTL_MS = 60_000;
-let roleCache: { map: Map<string, Set<Permission>>; expires: number } | null = null;
+
 
 /** Splits a comma-separated role value without filtering to built-ins (custom roles allowed). */
 export function splitRoles(value: string): string[] {
@@ -83,7 +83,8 @@ export function splitRoles(value: string): string[] {
 
 /** Resolves the effective role → permission map from the database. */
 export async function resolveRolePermissions(env: Env): Promise<Map<string, Set<Permission>>> {
-  if (roleCache && roleCache.expires > Date.now()) return roleCache.map;
+  const context = requestContext.getStore();
+  if (context?.rolePermissions) return context.rolePermissions;
 
   const map = new Map<string, Set<Permission>>();
   // Seed built-in defaults.
@@ -105,13 +106,14 @@ export async function resolveRolePermissions(env: Env): Promise<Map<string, Set<
   // Admin is always all-powerful and never stored/editable.
   map.set('admin', new Set(PERMISSIONS));
 
-  roleCache = { map, expires: Date.now() + ROLE_TTL_MS };
+  if (context) context.rolePermissions = map;
   return map;
 }
 
-/** Test/dev helper — clears the per-isolate role-permission cache. */
+/** Clears the current request's role-permission cache after a mutation. */
 export function clearRolePermissionsCache(): void {
-  roleCache = null;
+  const context = requestContext.getStore();
+  if (context) delete context.rolePermissions;
 }
 
 /** Union of permissions granted to a comma-separated role value, per the resolved map. */

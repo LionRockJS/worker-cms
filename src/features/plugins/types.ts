@@ -341,6 +341,8 @@ export interface ResolvedPlugin {
   binding: string;
   fetcher: Fetcher;
   manifest: PluginManifest;
+  /** Untrusted declarations, for host approval screens only. */
+  requestedManifest?: PluginManifest;
   /** Effective secret for outbound CMS → plugin calls (own secret, or the
    *  legacy env fallback). Empty when neither is set. */
   secret: string;

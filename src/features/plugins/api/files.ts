@@ -17,7 +17,7 @@ export const filesApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>(
 
 type FilesContext = Context<{ Bindings: Env; Variables: Variables }>;
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_PATH_BYTES = 1024;
 const MAX_LIST_LIMIT = 1000;
 const NO_STORE = { 'cache-control': 'no-store' } as const;
@@ -175,6 +175,7 @@ filesApiRoutes.put('/files', async (c) => {
   }
 
   await access.bucket.put(key, bytes, {
+    customMetadata: { cmsPrivate: '1' },
     httpMetadata: {
       contentType: c.req.header('content-type') || 'application/octet-stream',
     },

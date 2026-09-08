@@ -1,3 +1,4 @@
+import { putPublicMedia } from './media-fixtures';
 // Feature routers are mounted through src/features/routers.ts rather than
 // explicitly in routes/admin/index.ts, and they now sit *after* the page
 // routes instead of before them. Nothing else asserts that each feature's
@@ -6,7 +7,7 @@
 
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import type { JWTPayload } from '../src/types';
 
@@ -73,7 +74,7 @@ describe('feature router mounting', () => {
     // admin stack — nothing else covers that path, and /media/* is served to
     // anonymous visitors, so a mounting mistake would not surface in any
     // admin test.
-    await env.MEDIA_BUCKET!.put('upload/probe.txt', 'hello');
+    await putPublicMedia('upload/probe.txt', 'hello');
     ipCounter += 1;
     const response = await worker.fetch(new IncomingRequest('http://localhost/media/upload/probe.txt', {
       redirect: 'manual',

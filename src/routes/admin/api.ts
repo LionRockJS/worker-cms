@@ -1,3 +1,4 @@
+import { rejectCrossSiteRequest } from '../../core/http/headers';
 // Admin JSON API endpoints.
 
 import { Hono } from 'hono';
@@ -225,6 +226,10 @@ async function draftPageExists(c: AppContext, pageId: number): Promise<boolean> 
 }
 
 apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c) => {
+  const origin = c.req.header('Origin');
+  if (!origin || origin !== new URL(c.req.url).origin) return c.text('Forbidden origin', 403);
+  const rejected = rejectCrossSiteRequest(c.req.raw);
+  if (rejected) return rejected;
   if (c.req.header('Upgrade')?.toLowerCase() !== 'websocket') {
     return c.text('Expected WebSocket upgrade', 426);
   }
@@ -240,6 +245,8 @@ apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c)
         Upgrade: 'websocket',
         'X-User-Id': String(user.sub),
         'X-User-Name': user.name,
+        'X-Session-Id': user.sid!,
+        'X-Session-Expires': String(user.exp),
       },
     }),
   );

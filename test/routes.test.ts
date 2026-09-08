@@ -1,10 +1,10 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cmsConfig } from '../src/cms-config';
-import { hashToken, signJWT } from '../src/core/auth/jwt';
+import { hashToken, signJWT } from './auth-fixtures';
 import { blueprintToLect, stringifyLect } from '../src/core/db/lect';
 import { clearConfigCache } from '../src/core/db/content-config';
-import { __injectPluginFetcher, clearManifestCache } from '../src/features/plugins/registry';
+import { __injectPluginFetcher, clearManifestCache } from './plugin-fixtures';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { CMS_ADMIN_JOB_KIND } from '../src/features/jobs/queue';
 import { coreExtensions, registerCoreExtensions, type CmsAdminJobMessage } from '../src/core/extensions';
@@ -1160,7 +1160,7 @@ describe('admin routes', () => {
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(1).first()).toEqual({ id: 1 });
   });
 
-  it('does not let an admin remove the last administrator', async () => {
+  it('does not let a demoted administrator remove the remaining administrator', async () => {
     const otherAdminCookie = `access_token=${await signTestToken({
       sub: '2',
       email: 'editor@example.com',
@@ -1168,13 +1168,13 @@ describe('admin routes', () => {
       role: 'admin',
     })}`;
 
+    await env.DB.prepare("UPDATE users SET role = 'editor' WHERE id = 2").run();
     const response = await fetchWorker('/admin/users/1/delete', {
       method: 'POST',
       headers: { Cookie: otherAdminCookie },
     });
 
-    expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/users?error=Cannot+remove+the+last+administrator');
+    expect(response.status).toBe(403);
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(1).first()).toEqual({ id: 1 });
   });
 
@@ -2984,7 +2984,7 @@ describe('capability enforcement', () => {
     expect(writePresence.headers.get('X-CMS-Error')).toBe('insufficient-permissions');
 
     const sync = await fetchWorker('/admin/api/sync/999999', {
-      headers: { Cookie: await authCookie(), Upgrade: 'websocket' },
+      headers: { Cookie: await authCookie(), Upgrade: 'websocket', Origin: 'http://localhost' },
     });
     expect(sync.status).toBe(404);
     expect(await sync.text()).toBe('Page not found');

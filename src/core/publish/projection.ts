@@ -53,13 +53,13 @@ export function projectLect(lect: string | null, rule: PublishLectRule | undefin
   if (!rule || !lect) return lect;
   const keep = rule.keep;
   const drop = rule.drop;
-  if (!keep?.length && !drop?.length) return lect;
+  if (!keep && !drop?.length) return lect;
 
   const parsed = safeParseLect(lect);
-  if (keep?.length) {
+  if (keep) {
     const allowed = new Set(keep);
     for (const key of Object.keys(parsed)) {
-      if (!key.startsWith('_') && !allowed.has(key)) delete parsed[key];
+      if (!['_type', '_pointers', '_draft'].includes(key) && !allowed.has(key)) delete parsed[key];
     }
   } else if (drop?.length) {
     for (const key of drop) delete parsed[key];

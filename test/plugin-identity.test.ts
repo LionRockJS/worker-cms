@@ -14,12 +14,12 @@ import {
   allPluginPermissions,
   clearManifestCache,
   getPlugins,
-} from '../src/features/plugins/registry';
+} from './plugin-fixtures';
 import { approveAsset, listApprovals } from '../src/features/plugins/assets';
 import { getIdentityForRow } from '../src/features/plugins/identity';
 import { getPluginState, putPluginState } from '../src/features/plugins/state';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import type { Env } from '../src/types';
 
 const worker = (exports as unknown as { default: Fetcher }).default;

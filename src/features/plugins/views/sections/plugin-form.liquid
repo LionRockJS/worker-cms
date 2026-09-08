@@ -25,6 +25,11 @@
              class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
     </label>
 
+    <label class="block text-sm text-gray-700">
+      <input name="trusted_ui" type="checkbox" value="1"{% if trustedUi %} checked{% endif %}>
+      {{ "plugins.security.trusted_ui" | t }}
+      <span class="block text-xs text-gray-500 mt-1">{{ "plugins.security.trusted_ui_help" | t }}</span>
+    </label>
     <div class="flex gap-4">
       <label class="flex items-center gap-2 text-sm text-gray-700">
         <input name="enabled" type="checkbox" value="1"{% if enabled %} checked{% endif %}> {{ "view_strings.sections_plugin_form.enabled" | t }}

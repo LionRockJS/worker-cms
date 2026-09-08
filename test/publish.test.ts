@@ -12,7 +12,7 @@ import {
   unpublishPageFromTargets,
   unpublishPagesFromTargets,
 } from '../src/core/publish';
-import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from '../src/features/plugins/registry';
+import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import type { PublishSnapshot, PublishedTag } from '../src/core/publish/adapter';
 import type { Env, Page } from '../src/types';
 import type { ResolvedPlugin } from '../src/features/plugins/types';

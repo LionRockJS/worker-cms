@@ -24,6 +24,8 @@ mediaUploadRoutes.post('/upload', async (c) => {
   }
 
   const form = await c.req.formData();
+  const uploadedFiles = [...form.values()].filter((value) => typeof value !== 'string');
+  if (uploadedFiles.length > 10) return c.json({ success: false, error: 'too_many_files' }, 413);
   const uploadDirectory = slugify(str(form.get('dir')) || 'upload') || 'upload';
   const now = new Date();
   const datePath = `${now.getUTCFullYear()}/${now.getUTCMonth() + 1}/${now.getUTCDate()}`;

@@ -8,7 +8,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import '../src/index';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import type { JWTPayload } from '../src/types';
 
 const worker = (exports as unknown as { default: Fetcher }).default;

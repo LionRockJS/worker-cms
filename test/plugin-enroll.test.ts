@@ -1,12 +1,12 @@
 import { env, exports } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers, getPlugins } from '../src/features/plugins/registry';
+import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers, getPlugins } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { cmsTenantRoutes } from '../src/features/plugins/api/tenant';
 import { claimEnrollmentTicket, enrollPluginTenant, revokePluginTenant } from '../src/features/plugins/enroll';
 import { getSetting } from '../src/core/db/settings';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import type { Env } from '../src/types';
 
 const CMS_ORIGIN = 'https://cms.example.com';

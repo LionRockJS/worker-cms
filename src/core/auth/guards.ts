@@ -28,6 +28,7 @@ import {
   REFRESH_TOKEN_TTL,
   purgeExpiredSessions,
   rotateAuthSession,
+  validateAccessSession,
 } from './sessions';
 
 export function wantsJsonResponse(request: Request): boolean {
@@ -56,7 +57,7 @@ export const authMiddleware = createMiddleware<{
     if (!token) return null;
     const payload = await verifyJWT(token, secret);
     if (!payload || payload.type !== 'access') return null;
-    return payload;
+    return validateAccessSession(c.env.DB, payload);
   };
 
   // Helper: perform refresh flow

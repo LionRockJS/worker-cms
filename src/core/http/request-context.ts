@@ -5,10 +5,12 @@
 // through every render function.
 // ============================================================
 
+import type { Permission } from '../../types';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 interface RequestContext {
   cspNonce: string;
+  rolePermissions?: Map<string, Set<Permission>>;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();

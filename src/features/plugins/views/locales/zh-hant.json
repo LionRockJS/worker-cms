@@ -54,6 +54,10 @@
       "sandboxed_ui": "沙箱介面",
       "server_only": "僅伺服器端",
       "trusted_ui": "受信任介面"
+    },
+    "security": {
+      "trusted_ui": "批准可信外掛介面",
+      "trusted_ui_help": "可信外掛程式碼可使用您的 CMS 權限執行操作。保持未勾選以隔離此外掛。"
     }
   },
   "view_strings": {

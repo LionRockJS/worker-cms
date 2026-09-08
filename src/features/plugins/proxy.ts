@@ -95,9 +95,9 @@ export function pluginDocumentResponse(upstreamResponse: Response, documentUrl =
 
   response.headers.delete('x-cms-frame');
   if (allowFraming) response.headers.set('X-Frame-Options', 'SAMEORIGIN');
-  if (!response.headers.has('Content-Security-Policy')) {
-    response.headers.set('Content-Security-Policy', buildPluginDocumentCsp(allowFraming, documentUrl));
-  }
+  response.headers.delete('Set-Cookie');
+  response.headers.set('Cache-Control', 'no-store');
+  response.headers.set('Content-Security-Policy', buildPluginDocumentCsp(allowFraming, documentUrl));
   return response;
 }
 
@@ -118,6 +118,7 @@ function buildPluginDocumentCsp(allowFraming: boolean, documentUrl: string): str
     `img-src ${imageSources.join(' ')}`,
     "object-src 'none'",
     "base-uri 'none'",
+    "form-action 'self'",
     allowFraming ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
   ].join('; ');
 }

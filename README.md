@@ -707,10 +707,19 @@ stored" is never confused with "could not ask".
   credentials.
 - Set `CANONICAL_ORIGIN` and use HTTPS. Configure `ALLOWED_EMAIL_DOMAINS` when
   the CMS is not intended to allow open viewer registration.
-- Access JWTs are intentionally short-lived (15 minutes). Refresh sessions can
-  be revoked immediately, but an already-issued access token can retain its
-  embedded role until it expires; use a shorter TTL or a per-request session /
-  authorization-version check for deployments that require immediate demotion.
+- Access JWTs last 15 minutes and reference a revocable database session. Each
+  authenticated request checks the session and current user role. Refresh
+  sessions expire after seven idle days, with an absolute 30-day lifetime.
+  Existing sockets recheck authorization before messages and deliveries, and
+  sweep idle connections every 60 seconds.
+- Public media delivery requires a `media_files` registration. Plugin file API
+  writes are private, including files whose keys overlap an existing media row.
+- All plugin blueprint types require explicit write approval under Plugins →
+  Page types. Trusted plugin UI also requires host approval in the plugin edit
+  form. Unapproved UI is sandboxed; custom page editors remain unavailable
+  until both UI trust and page access are approved.
+- See [security update rollout](docs/security-update-2026-09-07.md) before
+  deploying this update, especially for cache invalidation and plugin setup.
 - Plugin URL validation rejects obvious private-address literals, but it is not
   a complete DNS-rebinding defense. Only users with `plugin:manage` should
   register audited plugin origins.

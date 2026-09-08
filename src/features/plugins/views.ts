@@ -11,6 +11,7 @@
 //   2. each active plugin's GET /__plugin/views/<path>
 // ============================================================
 
+import { pluginTrustLevel } from './types';
 import type { Env } from '../../types';
 import { getPlugins, PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
 
@@ -29,6 +30,7 @@ export function viewsFor(env: Env): Fetcher {
 
     const path = new URL(url).pathname;
     for (const plugin of await getPlugins(env)) {
+      if (pluginTrustLevel(plugin.manifest) !== 'trusted-ui') continue;
       const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/views${path}`);
       if (response.ok) return markViewSource(response, 'plugin');
     }
@@ -41,6 +43,11 @@ export function viewsFor(env: Env): Fetcher {
 
 function markViewSource(response: Response, source: 'core' | 'plugin'): Response {
   const marked = new Response(response.body, response);
+  if (source === 'plugin') {
+    marked.headers.delete('Set-Cookie');
+    marked.headers.delete('Content-Security-Policy');
+    marked.headers.set('Cache-Control', 'no-store');
+  }
   marked.headers.set('X-CMS-View-Source', source);
   return marked;
 }

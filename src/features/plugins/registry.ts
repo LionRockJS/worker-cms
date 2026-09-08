@@ -1,3 +1,5 @@
+import { listPageTypeApprovals, pageTypeScopeAllows } from './page-types';
+import { cmsConfig } from '../../cms-config';
 // ============================================================
 // Plugin registry — resolves active plugins from the `plugins` D1 table
 // (URL transport) and fetches/caches their manifests.
@@ -17,7 +19,7 @@ import {
   type ResolvedPlugin,
   type PluginRecord,
 } from './types';
-import { listEnabledPlugins } from './store';
+import { listEnabledPlugins, getPlugin } from './store';
 import { claimIdentity, listIdentityApprovals } from './identity';
 
 /** Reserved prefix every plugin Worker serves its CMS-facing endpoints under. */
@@ -44,21 +46,16 @@ const RESERVED_TENANT_VARS = new Set([
 ]);
 const manifestCache = new Map<string, { manifest: PluginManifest; expires: number }>();
 
-// The enabled-plugins list also changes rarely; cache it so we don't hit D1 on
-// every request. Invalidated by clearManifestCache() after admin mutations.
-const PLUGINS_TTL_MS = 30_000;
-let pluginsCache: { records: PluginRecord[]; identities: PluginIdentityApproval[]; expires: number } | null = null;
-
-/** The enabled rows plus their pinned manifest ids, from one cached read. */
+// Authorization records are read afresh. Only remote manifest documents are
+// cached; a cached manifest cannot preserve a revoked host grant or credential.
 async function activePluginState(env: Env): Promise<{ records: PluginRecord[]; identities: PluginIdentityApproval[] }> {
-  if (pluginsCache && pluginsCache.expires > Date.now()) return pluginsCache;
+  // Credentials, enablement and host approvals must observe revocation on every request.
   if (!env.DB) return { records: [], identities: [] };
   const [records, identities] = await Promise.all([
     listEnabledPlugins(env.DB),
     listIdentityApprovals(env.DB),
   ]);
-  pluginsCache = { records, identities, expires: Date.now() + PLUGINS_TTL_MS };
-  return pluginsCache;
+  return { records, identities };
 }
 
 /**
@@ -78,7 +75,7 @@ function urlFetcher(baseUrl: string): Fetcher {
     // Never follow redirects server-side: the SSRF guard validates the
     // registered URL only, so a redirecting plugin could otherwise bounce the
     // request (and its secret headers) to a host that was never vetted.
-    return globalThis.fetch(`${base}${pathname}${search}`, { ...init, redirect: 'manual' });
+    return globalThis.fetch(`${base}${pathname}${search}`, { ...init, redirect: 'manual', signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
   };
   return { fetch } as unknown as Fetcher;
 }
@@ -199,6 +196,9 @@ function isPluginManifest(value: unknown): value is PluginManifest {
   if (value.contentTypes !== undefined) {
     if (!isRecord(value.contentTypes)) return false;
     const contentTypes = value.contentTypes;
+    if (isRecord(contentTypes.blueprint) && Object.keys(contentTypes.blueprint).some((key) =>
+      !/^[a-z][a-z0-9_-]{0,63}$/.test(key) || ['__proto__', 'constructor', 'prototype'].includes(key)
+    )) return false;
     for (const key of ['blueprint', 'blocks', 'blockLists', 'publishLect', 'taxonomies', 'taxonomyLists']) {
       if (contentTypes[key] !== undefined && !isRecord(contentTypes[key])) return false;
     }
@@ -294,14 +294,6 @@ async function enforceIdentities(
     if (!env.DB || await claimIdentity(env.DB, record.id, manifest.id)) {
       pinnedByRow.set(record.id, manifest.id);
       ownerByManifest.set(manifest.id, record.id);
-      // Keep the cached pins in step so the claim is not retried every call.
-      if (pluginsCache) pluginsCache.identities = [...pluginsCache.identities, {
-        plugin_row_id: record.id,
-        manifest_id: manifest.id,
-        approved_by: '',
-        created_at: '',
-        updated_at: '',
-      }];
       allowed.add(record.id);
       states.push(state('ok'));
       continue;
@@ -333,22 +325,43 @@ async function resolveManifests(env: Env): Promise<{
 export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
   const { entries, identities } = await resolveManifests(env);
   const { allowed } = await enforceIdentities(env, entries, identities);
-  return entries
-    .filter(({ record }) => allowed.has(record.id))
-    .map(({ record, manifest }) => {
-      // Legacy rows may keep the env fallback for outbound CMS → plugin calls,
-      // but inbound /__cms authentication is deliberately per-plugin only.
-      const apiSecret = record.secret || '';
-      const secret = apiSecret || env.PLUGIN_SECRET || '';
-      return {
-        binding: record.url,
-        fetcher: fetcherForUrl(record.url),
-        manifest,
-        secret,
-        apiSecret,
-        label: record.label || '',
-      };
-    });
+  const resolved = await Promise.all(entries.filter(({ record }) => allowed.has(record.id)).map(async ({ record, manifest }) => {
+    const current = await getPlugin(env.DB, record.id);
+    if (!current?.enabled || current.url !== record.url) return null;
+    record = current;
+    const approvals = await listPageTypeApprovals(env.DB, manifest.id);
+    const write = new Set(approvals.filter((entry) => entry.access === 'write').map((entry) => entry.page_type));
+    const read = new Set([...write, ...approvals.filter((entry) => entry.access === 'read').map((entry) => entry.page_type)]);
+    // Blueprint declarations are requests, not grants. Wildcard delegation
+    // never grants ownership of a schema; each contributed type is approved.
+    const blueprint = Object.fromEntries(Object.entries(manifest.contentTypes?.blueprint ?? {}).filter(([type]) =>
+      write.has(type) && !Object.hasOwn(cmsConfig.blueprint, type),
+    ));
+    const owned = new Set(Object.keys(blueprint));
+    let trustedUi = false;
+    try { trustedUi = JSON.parse(record.config || '{}').cmsTrustedUi === true; } catch { /* isolated by default */ }
+    const requestedTrust = manifest.trustLevel ?? manifest.trust_level ?? 'trusted-ui';
+    const effective: PluginManifest = {
+      ...manifest,
+      trustLevel: requestedTrust === 'server-only' ? 'server-only' : trustedUi ? requestedTrust : 'sandboxed-ui',
+      fieldTypes: trustedUi ? manifest.fieldTypes : [],
+      editViews: trustedUi ? (manifest.editViews ?? []).filter((type) => pageTypeScopeAllows(write, type)) : [],
+      newViews: trustedUi ? (manifest.newViews ?? []).filter((type) => pageTypeScopeAllows(write, type)) : [],
+      readViews: trustedUi ? (manifest.readViews ?? []).filter((type) => pageTypeScopeAllows(read, type)) : [],
+      autoPublishTypes: (manifest.autoPublishTypes ?? []).filter((type) => owned.has(type)),
+      contentTypes: manifest.contentTypes ? {
+        ...manifest.contentTypes,
+        blueprint,
+        publishLect: Object.fromEntries(Object.entries(manifest.contentTypes.publishLect ?? {}).filter(([type]) => owned.has(type))),
+      } : undefined,
+    };
+    return {
+      binding: record.url, fetcher: fetcherForUrl(record.url), manifest: effective,
+      requestedManifest: manifest, secret: record.secret || env.PLUGIN_SECRET || '',
+      apiSecret: record.secret || '', label: record.label || '',
+    };
+  }));
+  return resolved.filter((plugin): plugin is NonNullable<typeof plugin> => plugin !== null);
 }
 
 /** Identity status per registered plugin, for the manage screens. Uses the
@@ -449,8 +462,7 @@ export async function allPluginPermissions(env: Env): Promise<Array<{ value: str
   return result;
 }
 
-/** Clears the per-isolate manifest + plugin-list caches (after admin mutations / in tests). */
+/** Clears the per-isolate manifest cache (after admin mutations / in tests). */
 export function clearManifestCache(): void {
   manifestCache.clear();
-  pluginsCache = null;
 }

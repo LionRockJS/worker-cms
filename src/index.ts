@@ -1,3 +1,4 @@
+import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
 // ============================================================
 // 0xCMS - main entry point
 //
@@ -78,6 +79,8 @@ app.use('*', async (c, next) => {
   return undefined;
 });
 
+app.use('*', limitRequestBody);
+
 // ── Auth (OAuth 2.1 + JWT) ────────────────────────────────────────────────────
 app.route('/auth', authRoutes);
 
@@ -151,6 +154,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof BodyTooLargeError) return c.json({ error: 'body_too_large' }, 413);
   console.error(err);
   return c.html(
     await errorPage(c.env.VIEWS, {

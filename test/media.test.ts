@@ -1,8 +1,9 @@
+import { putPublicMedia } from './media-fixtures';
 // Security tests for media upload validation and /media/* serving headers.
 
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import { MAX_UPLOAD_BYTES } from '../src/features/media/security';
 import type { JWTPayload } from '../src/types';
 
@@ -93,7 +94,7 @@ describe('upload validation', () => {
 
 describe('media serving headers', () => {
   it('serves every media object with a sandboxing CSP', async () => {
-    await env.MEDIA_BUCKET.put('test/safe.png', PNG_BYTES, {
+    await putPublicMedia('test/safe.png', PNG_BYTES, {
       httpMetadata: { contentType: 'image/png' },
     });
 
@@ -107,10 +108,10 @@ describe('media serving headers', () => {
 
   it('forces download for objects that are not inline-safe media', async () => {
     // Simulate a legacy object uploaded before validation existed.
-    await env.MEDIA_BUCKET.put('test/legacy.svg', '<svg onload="alert(1)"/>', {
+    await putPublicMedia('test/legacy.svg', '<svg onload="alert(1)"/>', {
       httpMetadata: { contentType: 'image/svg+xml' },
     });
-    await env.MEDIA_BUCKET.put('test/legacy.html', '<script>alert(1)</script>', {
+    await putPublicMedia('test/legacy.html', '<script>alert(1)</script>', {
       httpMetadata: { contentType: 'text/html' },
     });
 

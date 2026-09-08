@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearManifestCache, __clearInjectedFetchers, __injectPluginFetcher } from '../src/features/plugins/registry';
+import { clearManifestCache, __clearInjectedFetchers, __injectPluginFetcher } from './plugin-fixtures';
 import { approveFilePrefix, revokeFilePrefix } from '../src/features/plugins/file-prefixes';
 
 const worker = (exports as unknown as { default: Fetcher }).default;

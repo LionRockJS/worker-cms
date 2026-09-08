@@ -14,8 +14,8 @@
 //   • a row whose manifest id changes stops resolving until an admin
 //     re-approves, which revokes the old identity's capability approvals.
 //
-// Reads tolerate a missing table (pre-migration databases) by reporting "no
-// pins", which keeps an un-migrated install working exactly as before.
+// Reads report no pins when the table is missing; claiming then fails closed.
+// Apply the security schema before enabling plugin operations.
 // ============================================================
 
 import type { PluginIdentityApproval } from './types';
@@ -74,7 +74,7 @@ export async function claimIdentity(
     const pinned = await getIdentityForRow(db, rowId);
     return pinned?.manifest_id === manifestId;
   } catch (error) {
-    if (missingTable(error)) return true; // enforcement unavailable — see module header
+    if (missingTable(error)) return false; // Never grant identity without the security schema.
     throw error;
   }
 }

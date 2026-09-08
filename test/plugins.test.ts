@@ -1,11 +1,11 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveCmsConfig, clearConfigCache } from '../src/core/db/content-config';
-import { clearManifestCache, getPlugins, __injectPluginFetcher, __clearInjectedFetchers } from '../src/features/plugins/registry';
+import { clearManifestCache, getPlugins, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import { deliverHook } from '../src/features/plugins/hooks';
 import { viewsFor } from '../src/features/plugins/views';
 import { cmsConfig } from '../src/cms-config';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import { CMS_ADMIN_JOB_KIND } from '../src/features/jobs/queue';
 import type { CmsAdminJobMessage } from '../src/core/extensions';
 import { approveAsset, computeIntegrity } from '../src/features/plugins/assets';
@@ -167,7 +167,7 @@ describe('resolveCmsConfig', () => {
       contentTypes: { blueprint },
     })));
 
-    expect(config.blueprint.event).toEqual(['name']);
+    expect(config.blueprint.event).toBeUndefined();
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(Object.hasOwn(config.blueprint, '__proto__')).toBe(false);
   });
@@ -1915,13 +1915,13 @@ describe('plugin asset proxy', () => {
       headers: { Cookie: await adminCookie(), 'Sec-Fetch-Site': 'same-origin' },
     }));
     expect(json.status).toBe(200);
-    expect(json.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(json.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
 
     const liquid = await worker.fetch(new Request('http://localhost/admin/plugins/checkin/views/sections/kiosk-search.liquid?r=deploy-123', {
       headers: { Cookie: await adminCookie(), 'Sec-Fetch-Site': 'same-origin' },
     }));
     expect(liquid.status).toBe(200);
-    expect(liquid.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(liquid.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
     expect(liquid.headers.get('content-type')).toContain('text/plain');
   });
 

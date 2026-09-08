@@ -121,6 +121,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
   enabled: boolean;
   sortOrder: number;
   config: string;
+  trustedUi?: boolean;
   secret?: string;
   /** Pinned-identity state for this row (see registry.pluginIdentityStates). */
   identityStatus?: 'ok' | 'mismatch' | 'claimed' | 'unreachable' | 'disabled';
@@ -143,6 +144,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     enabled,
     sortOrder,
     config,
+    trustedUi,
     secret,
     identityStatus,
     identityPinnedId,
@@ -170,6 +172,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     enabled,
     sortOrder,
     config,
+    trustedUi,
     hasError: !!error,
     error: error ?? '',
     hasFlash: !!flashMessageKey,

@@ -1,3 +1,4 @@
+import { limitedBytes } from '../../../core/http/body-limit';
 // ============================================================
 // Plugin admin proxy — forwards /admin/plugins/<id>/* to the
 // plugin Worker's /__plugin/admin/* handler.
@@ -123,7 +124,7 @@ async function servePluginAsset(c: AppContext): Promise<Response> {
 
   const upstream = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${assetPath}`);
   if (!upstream.ok) return c.text('Asset unavailable', 502);
-  const bytes = await upstream.arrayBuffer();
+  const bytes = await limitedBytes(upstream);
   const integrity = await computeIntegrity(bytes);
   if (integrity !== approval.integrity) {
     // The plugin's file changed since approval — do not serve unreviewed bytes.
@@ -189,7 +190,9 @@ async function servePluginView(c: AppContext): Promise<Response> {
   const response = new Response(upstreamResponse.body, upstreamResponse);
   if (upstreamResponse.status === 200) {
     const revisioned = url.searchParams.has('r');
-    response.headers.set('cache-control', revisioned ? 'public, max-age=31536000, immutable' : 'no-store');
+    response.headers.delete('set-cookie');
+    response.headers.delete('content-security-policy');
+    response.headers.set('cache-control', revisioned ? 'private, max-age=31536000, immutable' : 'no-store');
   }
   return response;
 }
@@ -314,11 +317,13 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
   if (insideSandbox) {
     const framedHeaders = new Headers(upstreamResponse.headers);
     framedHeaders.set('x-cms-frame', '1');
-    return pluginDocumentResponse(new Response(upstreamResponse.body, {
+    const isolated = pluginDocumentResponse(new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
       headers: framedHeaders,
     }), c.req.url);
+    isolated.headers.set('Content-Security-Policy', isolated.headers.get('Content-Security-Policy') + '; sandbox allow-scripts allow-forms allow-downloads allow-popups');
+    return isolated;
   }
 
   // Opt-in chrome: a plugin that returns an HTML *fragment* with `x-cms-chrome: 1`

@@ -54,6 +54,10 @@
       "sandboxed_ui": "Sandboxed UI",
       "server_only": "Server only",
       "trusted_ui": "Trusted UI"
+    },
+    "security": {
+      "trusted_ui": "Approve trusted plugin UI",
+      "trusted_ui_help": "Trusted plugin code can act with your CMS permissions. Leave unchecked to isolate this plugin."
     }
   },
   "view_strings": {

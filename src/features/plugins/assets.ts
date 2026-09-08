@@ -1,3 +1,4 @@
+import { limitedBytes } from '../../core/http/body-limit';
 // ============================================================
 // Admin-approved plugin static assets (JS/CSS) — see PluginManifest.assets.
 //
@@ -67,7 +68,7 @@ export async function inspectAssetHealth(
     try {
       const upstream = await fetcher.fetch(`${PLUGIN_ORIGIN}${asset.path}`);
       if (!upstream.ok) return { needsApproval: false, needsUpdate: false, fetchError: true };
-      const currentIntegrity = await computeIntegrity(await upstream.arrayBuffer());
+      const currentIntegrity = await computeIntegrity(await limitedBytes(upstream));
       return {
         needsApproval: false,
         needsUpdate: currentIntegrity !== approval.integrity,

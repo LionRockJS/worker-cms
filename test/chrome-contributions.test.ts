@@ -9,7 +9,7 @@
 
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { signJWT } from '../src/core/auth/jwt';
+import { signJWT } from './auth-fixtures';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { features } from '../src/features';
 import { installedMenuItems, menuItemFeature, SIDEBAR_MENU_ITEMS } from '../src/core/db/settings';

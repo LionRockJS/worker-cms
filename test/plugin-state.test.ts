@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from '../src/features/plugins/registry';
+import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { MAX_STATE_VALUE_BYTES } from '../src/features/plugins/state';
 import type { PluginManifest } from '../src/features/plugins/types';

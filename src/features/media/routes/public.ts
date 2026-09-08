@@ -6,20 +6,28 @@ export const mediaPublicRoutes = new Hono<{ Bindings: Env; Variables: Variables 
 
 /** Square thumbnail edge, in pixels, for the admin media pickers. */
 const PREVIEW_SIZE = 100;
+
+async function isPublicMedia(env: Env, key: string): Promise<boolean> {
+  if (!await env.DB.prepare('SELECT 1 FROM media_files WHERE key = ?').bind(key).first()) return false;
+  const object = await env.MEDIA_BUCKET?.head(key);
+  return !!object && object.customMetadata?.cmsPrivate !== '1';
+}
 /** Images binding input ceiling; larger objects are served untransformed. */
 const MAX_TRANSFORM_BYTES = 20 * 1024 * 1024;
 
 mediaPublicRoutes.get('/media-preview/*', async (c) => {
   if (!c.env.MEDIA_BUCKET) return c.notFound();
   const key = c.req.path.replace(/^\/media-preview\//, '');
+  if (!await isPublicMedia(c.env, key)) return c.notFound();
 
   const cache = caches.default;
-  const cached = await cache.match(c.req.raw);
+  const cacheKey = new Request(c.req.url + (c.req.url.includes('?') ? '&' : '?') + '__media_policy=2');
+  const cached = await cache.match(cacheKey);
   if (cached) return cached;
 
   const thumbnail = await thumbnailResponse(c.env, key);
   if (thumbnail) {
-    c.executionCtx.waitUntil(cache.put(c.req.raw, thumbnail.clone()));
+    c.executionCtx.waitUntil(cache.put(cacheKey, thumbnail.clone()));
     return thumbnail;
   }
 
@@ -29,6 +37,7 @@ mediaPublicRoutes.get('/media-preview/*', async (c) => {
 mediaPublicRoutes.get('/media/*', async (c) => {
   if (!c.env.MEDIA_BUCKET) return c.notFound();
   const key = c.req.path.replace(/^\/media\//, '');
+  if (!await isPublicMedia(c.env, key)) return c.notFound();
   return await mediaObjectResponse(c.env.MEDIA_BUCKET, key) ?? c.notFound();
 });
 

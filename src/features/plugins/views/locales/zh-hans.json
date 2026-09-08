@@ -54,6 +54,10 @@
       "sandboxed_ui": "沙箱界面",
       "server_only": "仅服务端",
       "trusted_ui": "受信任界面"
+    },
+    "security": {
+      "trusted_ui": "批准可信插件界面",
+      "trusted_ui_help": "可信插件代码可使用您的 CMS 权限执行操作。保持未勾选以隔离此插件。"
     }
   },
   "view_strings": {

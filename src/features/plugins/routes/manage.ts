@@ -1,3 +1,4 @@
+import { limitedBytes } from '../../../core/http/body-limit';
 // ============================================================
 // Plugin management — register / enable / disable / configure plugins,
 // stored in the `plugins` D1 table (URL transport). Gated by plugin:manage.
@@ -197,13 +198,14 @@ async function readPluginTenantConfig(
   }
 }
 
-function readForm(form: FormData): { input: PluginInput | null; error: string | null; raw: { label: string; url: string; enabled: boolean; sortOrder: number; config: string } } {
+function readForm(form: FormData): { input: PluginInput | null; error: string | null; raw: { label: string; url: string; enabled: boolean; sortOrder: number; config: string; trustedUi?: boolean } } {
   const label = str(form.get('label'));
   const [url, urlError] = normalizeUrl(str(form.get('url')));
   const enabled = form.get('enabled') != null;
   const sortOrder = num(form.get('sort_order'), 0);
-  const [config, configError] = normalizeConfig(str(form.get('config')));
-  const raw = { label, url, enabled, sortOrder, config: str(form.get('config')) };
+  let [config, configError] = normalizeConfig(str(form.get('config')));
+  if (!configError) config = JSON.stringify({ ...JSON.parse(config || '{}'), cmsTrustedUi: form.get('trusted_ui') === '1' });
+  const raw = { label, url, enabled, sortOrder, trustedUi: form.get('trusted_ui') === '1', config: str(form.get('config')) };
 
   const error = urlError ?? configError;
   if (error) return { input: null, error, raw };
@@ -226,7 +228,7 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
 
   const plugins: PluginListItem[] = await Promise.all(rows.map(async (row) => {
     const plugin = byUrl.get(row.url);
-    const manifest = plugin?.manifest;
+    const manifest = plugin?.requestedManifest ?? plugin?.manifest;
     const identity = identityById.get(row.id);
     const status: PluginListItem['status'] = !row.enabled
       ? 'disabled'
@@ -247,7 +249,7 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       manifestId: manifest?.id ?? identity?.servedId,
       manifestName: manifest?.name,
       version: manifest?.version,
-      trustLevel: manifest ? pluginTrustLevel(manifest) : undefined,
+      trustLevel: plugin ? pluginTrustLevel(plugin.manifest) : undefined,
       hasAssets: !!manifest?.assets?.length,
       hasFilePrefixes: !!manifest?.filePrefixes?.length,
       hasPageTypes: !!(
@@ -320,6 +322,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
     enabled: !!plugin.enabled,
     sortOrder: plugin.sort_order,
     config: plugin.config ?? '',
+    trustedUi: (() => { try { return JSON.parse(plugin.config || '{}').cmsTrustedUi === true; } catch { return false; } })(),
     secret: plugin.secret ?? '',
     tenantKvKey: `tenant:${tenantId}`,
     tenantVars: tenantVarNames.map((name) => ({ name, value: tenantConfig.values[name] ?? '' })),
@@ -459,6 +462,7 @@ pluginsManageRoutes.post('/plugins-manage/:id', async (c) => {
   if (!input) {
     return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: error ?? undefined });
   }
+  if (input.url !== plugin.url) input.config = JSON.stringify({ ...JSON.parse(input.config || '{}'), cmsTrustedUi: false });
   const dbError = await updatePlugin(c.env.DB, id, input);
   if (dbError) {
     return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: dbError });
@@ -589,7 +593,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/assets', async (c) => {
     let fetchError = false;
     try {
       const upstream = await resolved.fetcher.fetch(`${PLUGIN_ORIGIN}${asset.path}`);
-      if (upstream.ok) currentIntegrity = await computeIntegrity(await upstream.arrayBuffer());
+      if (upstream.ok) currentIntegrity = await computeIntegrity(await limitedBytes(upstream));
       else fetchError = true;
     } catch {
       fetchError = true;
@@ -631,7 +635,7 @@ pluginsManageRoutes.post('/plugins-manage/:id/assets/approve', async (c) => {
 
   const upstream = await resolved.fetcher.fetch(`${PLUGIN_ORIGIN}${path}`);
   if (!upstream.ok) return c.redirect(`/admin/plugins-manage/${id}/assets?flash=fetch-failed`);
-  const integrity = await computeIntegrity(await upstream.arrayBuffer());
+  const integrity = await computeIntegrity(await limitedBytes(upstream));
   await approveAsset(c.env.DB, resolved.manifest.id, path, integrity, c.get('user').email);
   logAudit(c, 'plugin.asset.approve', 'plugin', resolved.manifest.id, { path, integrity });
   return c.redirect(`/admin/plugins-manage/${id}/assets?flash=approved`);
@@ -958,7 +962,7 @@ function declaredPageTypeAccess(
   const declared = access === 'read'
     ? manifest.contentTypes?.readTypes ?? []
     : manifest.contentTypes?.writeTypes ?? [];
-  return declared.includes(pageType);
+  return declared.includes(pageType) || (access === 'write' && Object.hasOwn(manifest.contentTypes?.blueprint ?? {}, pageType));
 }
 
 function pageTypeAccess(value: string): PluginPageTypeAccess | null {
@@ -982,16 +986,17 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
     });
   }
 
-  const readTypes = new Set(resolved.manifest.contentTypes?.readTypes ?? []);
-  const writeTypes = new Set(resolved.manifest.contentTypes?.writeTypes ?? []);
-  const definedPageTypes = Object.entries(resolved.manifest.contentTypes?.blueprint ?? {})
+  const declaredManifest = resolved.requestedManifest ?? resolved.manifest;
+  const readTypes = new Set(declaredManifest.contentTypes?.readTypes ?? []);
+  const writeTypes = new Set([...(declaredManifest.contentTypes?.writeTypes ?? []), ...Object.keys(declaredManifest.contentTypes?.blueprint ?? {})]);
+  const definedPageTypes = Object.entries((resolved.requestedManifest ?? resolved.manifest).contentTypes?.blueprint ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([slug, blueprint]) => ({
       slug,
       fieldCount: Array.isArray(blueprint) ? blueprint.length : 0,
       viewHref: `/admin/page_types/view/${encodeURIComponent(slug)}`,
     }));
-  const definedTaxonomies = Object.entries(resolved.manifest.contentTypes?.taxonomies ?? {})
+  const definedTaxonomies = Object.entries((resolved.requestedManifest ?? resolved.manifest).contentTypes?.taxonomies ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([slug, name]) => ({
       slug,
@@ -999,7 +1004,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
       viewHref: `/admin/taxonomies/view/${encodeURIComponent(slug)}`,
     }));
   const pageTypeNames = [...new Set([...readTypes, ...writeTypes])].sort();
-  const approvals = await listPageTypeApprovals(c.env.DB, resolved.manifest.id);
+  const approvals = await listPageTypeApprovals(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id);
   const approvalByKey = new Map(approvals.map((approval) => [`${approval.page_type}:${approval.access}`, approval]));
 
   const pageTypes = pageTypeNames.map((pageType) => {
@@ -1023,7 +1028,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
 
   return renderPage(c, pluginPageTypesPage, {
     pluginId: id,
-    pluginLabel: resolved.manifest.name || row.label || row.url,
+    pluginLabel: (resolved.requestedManifest ?? resolved.manifest).name || row.label || row.url,
     unreachable: false,
     definedPageTypes,
     definedTaxonomies,
@@ -1041,12 +1046,13 @@ pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve', async (c) => 
   const form = await c.req.formData();
   const pageType = str(form.get('page_type'));
   const access = pageTypeAccess(str(form.get('access')));
-  if (!access || !declaredPageTypeAccess(resolved.manifest, pageType, access)) {
+  if (!access || !declaredPageTypeAccess((resolved.requestedManifest ?? resolved.manifest), pageType, access)) {
     return c.text('Unknown page type access', 400);
   }
 
-  await approvePageTypeAccess(c.env.DB, resolved.manifest.id, pageType, access, c.get('user').email);
-  logAudit(c, 'plugin.page_type.approve', 'plugin', resolved.manifest.id, { page_type: pageType, access });
+  await approvePageTypeAccess(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id, pageType, access, c.get('user').email);
+  invalidate();
+  logAudit(c, 'plugin.page_type.approve', 'plugin', (resolved.requestedManifest ?? resolved.manifest).id, { page_type: pageType, access });
   return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=approved`);
 });
 
@@ -1061,10 +1067,11 @@ pluginsManageRoutes.post('/plugins-manage/:id/page-types/revoke', async (c) => {
   const access = pageTypeAccess(str(form.get('access')));
   if (!access) return c.text('Unknown page type access', 400);
 
-  const existing = await getPageTypeApproval(c.env.DB, resolved.manifest.id, pageType, access);
+  const existing = await getPageTypeApproval(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id, pageType, access);
   if (existing) {
-    await revokePageTypeAccess(c.env.DB, resolved.manifest.id, pageType, access);
-    logAudit(c, 'plugin.page_type.revoke', 'plugin', resolved.manifest.id, { page_type: pageType, access });
+    await revokePageTypeAccess(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id, pageType, access);
+    invalidate();
+    logAudit(c, 'plugin.page_type.revoke', 'plugin', (resolved.requestedManifest ?? resolved.manifest).id, { page_type: pageType, access });
   }
   return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=revoked`);
 });

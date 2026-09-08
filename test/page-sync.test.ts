@@ -1,3 +1,5 @@
+import { signJWT } from './auth-fixtures';
+import { verifyJWT } from '../src/core/auth/jwt';
 // Multi-user live-sync tests for the PageSyncDO Durable Object.
 //
 // These connect several real WebSocket clients to one DO instance and exercise
@@ -65,9 +67,12 @@ function freshPage(): string {
 }
 
 async function connect(page: string, userId: string, userName = userId): Promise<Client> {
+  const exp = Math.floor(Date.now() / 1000) + 900;
+  const token = await signJWT({ sub: userId, name: userName, email: `${userId}@example.invalid`, role: 'admin', type: 'access', exp }, env.JWT_SECRET);
+  const payload = (await verifyJWT(token, env.JWT_SECRET))!;
   const stub = env.PAGE_SYNC.get(env.PAGE_SYNC.idFromName(page));
   const res = await stub.fetch('https://page-sync/api/sync', {
-    headers: { Upgrade: 'websocket', 'X-User-Id': userId, 'X-User-Name': userName },
+    headers: { Upgrade: 'websocket', 'X-User-Id': userId, 'X-User-Name': userName, 'X-Session-Id': payload.sid!, 'X-Session-Expires': String(exp) },
   });
   const ws = res.webSocket;
   if (!ws) throw new Error('expected a WebSocket from the Durable Object');
@@ -165,7 +170,7 @@ function base64ToBytes(value: string): Uint8Array {
 
 /** Pull a fresh full snapshot from the DO via a throwaway client. */
 async function snapshotOf(page: string): Promise<Json[]> {
-  const probe = await connect(page, 'probe');
+  const probe = await connect(page, '105');
   probe.send({ type: 'sync' });
   // The probe is an ordinary client, so another editor's op can reach it
   // before its own snapshot does — match on the type, don't take message #1.
@@ -177,7 +182,7 @@ async function snapshotOf(page: string): Promise<Json[]> {
 describe('PageSyncDO multi-user sync', () => {
   it('merges concurrent edits within one richtext field with a sequence CRDT', async () => {
     const page = freshPage();
-    const [a, b] = await Promise.all([connect(page, 'A'), connect(page, 'B')]);
+    const [a, b] = await Promise.all([connect(page, '101'), connect(page, '102')]);
     const path = '.body|en';
 
     a.send({ type: 'text-sync', path, baseline: 'Hello' });
@@ -213,7 +218,7 @@ describe('PageSyncDO multi-user sync', () => {
     expect(merged).toContain('Alice');
     expect(merged).toContain('Bob');
 
-    const late = await connect(page, 'late');
+    const late = await connect(page, '106');
     late.send({ type: 'text-sync', path, baseline: 'ignored' });
     const lateSync = await late.waitFor({ type: 'text-sync', path });
     const lateDoc = new Y.Doc();
@@ -225,7 +230,7 @@ describe('PageSyncDO multi-user sync', () => {
     expect(saved.status).toBe(200);
     await Promise.all([a, b, late].map((client) => client.waitFor({ type: 'saved' })));
 
-    const afterSave = await connect(page, 'after-save');
+    const afterSave = await connect(page, '107');
     afterSave.send({ type: 'text-sync', path, baseline: 'Committed baseline' });
     const resetSync = await afterSave.waitFor({ type: 'text-sync', path });
     const resetDoc = new Y.Doc();
@@ -238,14 +243,14 @@ describe('PageSyncDO multi-user sync', () => {
   it('broadcasts one user\'s op to all other connected users, never the sender (4 users)', async () => {
     const page = freshPage();
     const [a, b, c, d] = await Promise.all([
-      connect(page, 'A'), connect(page, 'B'), connect(page, 'C'), connect(page, 'D'),
+      connect(page, '101'), connect(page, '102'), connect(page, '103'), connect(page, '104'),
     ]);
 
-    a.send(op('.title|en', 'Hello', hlc(1000, 1, 'A')));
+    a.send(op('.title|en', 'Hello', hlc(1000, 1, '101')));
 
     for (const peer of [b, c, d]) {
       const msg = await peer.waitFor({ type: 'op' });
-      expect(msg).toMatchObject({ type: 'op', path: '.title|en', value: 'Hello', userId: 'A' });
+      expect(msg).toMatchObject({ type: 'op', path: '.title|en', value: 'Hello', userId: '101' });
     }
     // Sender is excluded from its own broadcast. The peers above already have
     // the op, so the fan-out for that turn is done: A's copy would be here too.
@@ -256,7 +261,7 @@ describe('PageSyncDO multi-user sync', () => {
 
   it('fans every user\'s edits out to the other three (full mesh)', async () => {
     const page = freshPage();
-    const clients = await Promise.all(['A', 'B', 'C', 'D'].map((u) => connect(page, u)));
+    const clients = await Promise.all(['101', '102', '103', '104'].map((u) => connect(page, u)));
 
     // Each of the four users edits a distinct field.
     clients.forEach((client, i) => client.send(op(`.f${i}|en`, `v${i}`, hlc(2000 + i, 1, client.userId))));
@@ -276,14 +281,14 @@ describe('PageSyncDO multi-user sync', () => {
 
   it('converges to the highest-HLC write when 4 users edit the same field', async () => {
     const page = freshPage();
-    const users = ['A', 'B', 'C', 'D'];
+    const users = ['101', '102', '103', '104'];
     const clients = await Promise.all(users.map((u) => connect(page, u)));
 
     // All four write the same path; D has the newest HLC and must win.
-    clients[0].send(op('.headline|en', 'from A', hlc(5000, 1, 'A')));
-    clients[1].send(op('.headline|en', 'from B', hlc(5001, 1, 'B')));
-    clients[2].send(op('.headline|en', 'from C', hlc(5002, 1, 'C')));
-    clients[3].send(op('.headline|en', 'from D', hlc(5003, 1, 'D')));
+    clients[0].send(op('.headline|en', 'from A', hlc(5000, 1, '101')));
+    clients[1].send(op('.headline|en', 'from B', hlc(5001, 1, '102')));
+    clients[2].send(op('.headline|en', 'from C', hlc(5002, 1, '103')));
+    clients[3].send(op('.headline|en', 'from D', hlc(5003, 1, '104')));
 
     // Barrier: once every client has seen the other three ops, all four have
     // been applied and the snapshot below cannot race ahead of them.
@@ -293,20 +298,20 @@ describe('PageSyncDO multi-user sync', () => {
     const ops = (await snapshotOf(page)).filter((o) => o.path === '.headline|en');
     expect(ops).toHaveLength(4);
     const winner = ops.reduce((best, o) => (o.hlc > best.hlc ? o : best));
-    expect(winner).toMatchObject({ value: 'from D', userId: 'D' });
+    expect(winner).toMatchObject({ value: 'from D', userId: '104' });
 
     clients.forEach((client) => client.close());
   });
 
   it('ignores and does not rebroadcast a stale (older-HLC) op from the same user', async () => {
     const page = freshPage();
-    const [a, b] = await Promise.all([connect(page, 'A'), connect(page, 'B')]);
+    const [a, b] = await Promise.all([connect(page, '101'), connect(page, '102')]);
 
-    a.send(op('.note|en', 'current', hlc(7000, 2, 'A')));
+    a.send(op('.note|en', 'current', hlc(7000, 2, '101')));
     expect(await b.waitFor({ type: 'op' })).toMatchObject({ value: 'current' });
 
     // A's older edit for the same field must be dropped — no broadcast.
-    a.send(op('.note|en', 'stale', hlc(6000, 1, 'A')));
+    a.send(op('.note|en', 'stale', hlc(6000, 1, '101')));
 
     // Round-trip on A's own socket: the DO handles one connection's messages in
     // order, so the returned snapshot proves the stale op has been processed —
@@ -325,23 +330,23 @@ describe('PageSyncDO multi-user sync', () => {
 
   it('gives a late-joining 4th user the full current state via snapshot', async () => {
     const page = freshPage();
-    const [a, b, c] = await Promise.all([connect(page, 'A'), connect(page, 'B'), connect(page, 'C')]);
+    const [a, b, c] = await Promise.all([connect(page, '101'), connect(page, '102'), connect(page, '103')]);
 
-    a.send(op('.f1|en', 'A1', hlc(8000, 1, 'A')));
-    b.send(op('.f2|en', 'B2', hlc(8001, 1, 'B')));
-    c.send(op('.f3|en', 'C3', hlc(8002, 1, 'C')));
+    a.send(op('.f1|en', 'A1', hlc(8000, 1, '101')));
+    b.send(op('.f2|en', 'B2', hlc(8001, 1, '102')));
+    c.send(op('.f3|en', 'C3', hlc(8002, 1, '103')));
     // Each editor sees the two ops it didn't send — all three are now applied.
     await Promise.all([a, b, c].map((client) => client.waitForAll({ type: 'op' }, 2)));
 
     // The fourth editor joins and requests a sync.
-    const d = await connect(page, 'D');
+    const d = await connect(page, '104');
     d.send({ type: 'sync' });
     const snapshot = await d.waitFor({ type: 'snapshot' });
 
     const byPath = Object.fromEntries((snapshot.ops as Json[]).map((o) => [o.path, o]));
-    expect(byPath['.f1|en']).toMatchObject({ value: 'A1', userId: 'A' });
-    expect(byPath['.f2|en']).toMatchObject({ value: 'B2', userId: 'B' });
-    expect(byPath['.f3|en']).toMatchObject({ value: 'C3', userId: 'C' });
+    expect(byPath['.f1|en']).toMatchObject({ value: 'A1', userId: '101' });
+    expect(byPath['.f2|en']).toMatchObject({ value: 'B2', userId: '102' });
+    expect(byPath['.f3|en']).toMatchObject({ value: 'C3', userId: '103' });
 
     [a, b, c, d].forEach((client) => client.close());
   });
@@ -349,16 +354,16 @@ describe('PageSyncDO multi-user sync', () => {
   it('reverts only the leaving user\'s abandoned fields, keeping co-editors\' work (4 users)', async () => {
     const page = freshPage();
     const [a, b, c, d] = await Promise.all([
-      connect(page, 'A'), connect(page, 'B'), connect(page, 'C'), connect(page, 'D'),
+      connect(page, '101'), connect(page, '102'), connect(page, '103'), connect(page, '104'),
     ]);
 
     // A edits F1, F2. B also edits F1 (newer) and F3. C edits F4, D edits F5.
-    a.send(op('.f1|en', 'A-f1', hlc(9000, 1, 'A')));
-    a.send(op('.f2|en', 'A-f2', hlc(9001, 2, 'A')));
-    b.send(op('.f1|en', 'B-f1', hlc(9100, 1, 'B'))); // newer than A's f1
-    b.send(op('.f3|en', 'B-f3', hlc(9101, 2, 'B')));
-    c.send(op('.f4|en', 'C-f4', hlc(9200, 1, 'C')));
-    d.send(op('.f5|en', 'D-f5', hlc(9300, 1, 'D')));
+    a.send(op('.f1|en', 'A-f1', hlc(9000, 1, '101')));
+    a.send(op('.f2|en', 'A-f2', hlc(9001, 2, '101')));
+    b.send(op('.f1|en', 'B-f1', hlc(9100, 1, '102'))); // newer than A's f1
+    b.send(op('.f3|en', 'B-f3', hlc(9101, 2, '102')));
+    c.send(op('.f4|en', 'C-f4', hlc(9200, 1, '103')));
+    d.send(op('.f5|en', 'D-f5', hlc(9300, 1, '104')));
 
     // Six ops in total; each editor receives the ones it didn't send. Waiting
     // for all of them guarantees every write landed before A leaves.
@@ -373,7 +378,7 @@ describe('PageSyncDO multi-user sync', () => {
     a.close();
 
     // Remaining editors get A's highlight cleared AND a reset for A's paths.
-    expect(await b.waitFor({ type: 'blur', clearAll: true })).toMatchObject({ userId: 'A' });
+    expect(await b.waitFor({ type: 'blur', clearAll: true })).toMatchObject({ userId: '101' });
     const reset = await b.waitFor({ type: 'reset' });
     const entries = Object.fromEntries((reset.entries as Json[]).map((e) => [e.path, e]));
     expect(Object.keys(entries).sort()).toEqual(['.f1|en', '.f2|en']);
@@ -389,11 +394,11 @@ describe('PageSyncDO multi-user sync', () => {
 
     // Surviving server state: A's solo field is gone; everyone else's remains.
     const ops = Object.fromEntries((await snapshotOf(page)).map((o) => [o.path, o]));
-    expect(ops['.f1|en']).toMatchObject({ value: 'B-f1', userId: 'B' });
+    expect(ops['.f1|en']).toMatchObject({ value: 'B-f1', userId: '102' });
     expect(ops['.f2|en']).toBeUndefined();
-    expect(ops['.f3|en']).toMatchObject({ value: 'B-f3', userId: 'B' });
-    expect(ops['.f4|en']).toMatchObject({ value: 'C-f4', userId: 'C' });
-    expect(ops['.f5|en']).toMatchObject({ value: 'D-f5', userId: 'D' });
+    expect(ops['.f3|en']).toMatchObject({ value: 'B-f3', userId: '102' });
+    expect(ops['.f4|en']).toMatchObject({ value: 'C-f4', userId: '103' });
+    expect(ops['.f5|en']).toMatchObject({ value: 'D-f5', userId: '104' });
 
     [b, c, d].forEach((client) => client.close());
   });
@@ -401,10 +406,10 @@ describe('PageSyncDO multi-user sync', () => {
   it('does NOT revert when a user closes one tab but keeps another open (multi-tab)', async () => {
     const page = freshPage();
     const [a1, a2, b] = await Promise.all([
-      connect(page, 'A', 'Alice'), connect(page, 'A', 'Alice'), connect(page, 'B'),
+      connect(page, '101', 'Alice'), connect(page, '101', 'Alice'), connect(page, '102'),
     ]);
 
-    a1.send(op('.f1|en', 'A-f1', hlc(11000, 1, 'A')));
+    a1.send(op('.f1|en', 'A-f1', hlc(11000, 1, '101')));
     // Only the sending socket is excluded, so A's other tab sees it too.
     await Promise.all([a2.waitFor({ type: 'op' }), b.waitFor({ type: 'op' })]);
 
@@ -415,7 +420,7 @@ describe('PageSyncDO multi-user sync', () => {
     await b.expectSilent(120);
     const ops = (await snapshotOf(page)).filter((o) => o.path === '.f1|en');
     expect(ops).toHaveLength(1);
-    expect(ops[0]).toMatchObject({ value: 'A-f1', userId: 'A' });
+    expect(ops[0]).toMatchObject({ value: 'A-f1', userId: '101' });
 
     a2.close();
     b.close();
@@ -424,20 +429,20 @@ describe('PageSyncDO multi-user sync', () => {
   it('relays focus/blur editing signals to other users but not the sender', async () => {
     const page = freshPage();
     const [a, b, c, d] = await Promise.all([
-      connect(page, 'A', 'Alice'), connect(page, 'B'), connect(page, 'C'), connect(page, 'D'),
+      connect(page, '101', 'Alice'), connect(page, '102'), connect(page, '103'), connect(page, '104'),
     ]);
 
     a.send({ type: 'focus', path: '.title|en', userAvatar: 'https://img/a.png' });
     for (const peer of [b, c, d]) {
       expect(await peer.waitFor({ type: 'focus' })).toMatchObject({
-        type: 'focus', path: '.title|en', userId: 'A', userName: 'Alice',
+        type: 'focus', path: '.title|en', userId: '101', userName: 'Alice',
       });
     }
     await a.expectSilent();
 
     a.send({ type: 'blur', path: '.title|en' });
     for (const peer of [b, c, d]) {
-      expect(await peer.next()).toMatchObject({ type: 'blur', path: '.title|en', userId: 'A' });
+      expect(await peer.next()).toMatchObject({ type: 'blur', path: '.title|en', userId: '101' });
     }
 
     [a, b, c, d].forEach((client) => client.close());
@@ -445,7 +450,7 @@ describe('PageSyncDO multi-user sync', () => {
 
   it('tells remaining users to clear a leaving user\'s highlights (clearAll)', async () => {
     const page = freshPage();
-    const [a, b, c] = await Promise.all([connect(page, 'A'), connect(page, 'B'), connect(page, 'C')]);
+    const [a, b, c] = await Promise.all([connect(page, '101'), connect(page, '102'), connect(page, '103')]);
 
     a.send({ type: 'focus', path: '.title|en', userAvatar: '' });
     // Wait for the relay itself: a focus still in flight would otherwise be
@@ -455,7 +460,7 @@ describe('PageSyncDO multi-user sync', () => {
     a.close();
 
     for (const peer of [b, c]) {
-      expect(await peer.next()).toMatchObject({ type: 'blur', userId: 'A', clearAll: true });
+      expect(await peer.next()).toMatchObject({ type: 'blur', userId: '101', clearAll: true });
     }
 
     b.close();
@@ -465,11 +470,11 @@ describe('PageSyncDO multi-user sync', () => {
   it('commits on save: clears the overlay, broadcasts "saved", and a later leave reverts nothing', async () => {
     const page = freshPage();
     const [a, b, c, d] = await Promise.all([
-      connect(page, 'A'), connect(page, 'B'), connect(page, 'C'), connect(page, 'D'),
+      connect(page, '101'), connect(page, '102'), connect(page, '103'), connect(page, '104'),
     ]);
 
-    a.send(op('.f1|en', 'A-f1', hlc(12000, 1, 'A')));
-    b.send(op('.f2|en', 'B-f2', hlc(12001, 1, 'B')));
+    a.send(op('.f1|en', 'A-f1', hlc(12000, 1, '101')));
+    b.send(op('.f2|en', 'B-f2', hlc(12001, 1, '102')));
     // Both ops delivered before the save, so "saved" is the next message below.
     await Promise.all([
       a.waitFor({ type: 'op' }),

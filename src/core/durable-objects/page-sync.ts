@@ -1,3 +1,5 @@
+import { validateAccessSession } from '../auth/sessions';
+import { effectivePermissions, resolveRolePermissions } from '../auth/roles';
 // Durable Object: one instance per page, handles hybrid WebSocket live sync.
 //
 // Model: a live overlay of *uncommitted* edits on top of the last-saved page.
@@ -36,6 +38,10 @@ function strField(msg: Record<string, unknown>, key: string): string {
 interface WsAttachment {
   userId: string;
   userName: string;
+  sid: string;
+  exp: number;
+  window?: number;
+  messages?: number;
 }
 
 interface LwwFieldRow {
@@ -81,7 +87,7 @@ interface PresenceRow {
 export class PageSyncDO implements DurableObject {
   private readonly sql: SqlStorage;
 
-  constructor(private readonly state: DurableObjectState, _env: Env) {
+  constructor(private readonly state: DurableObjectState, private readonly env: Env) {
     this.sql = state.storage.sql;
 
     // The old name overclaimed what this table did. Its rows are an ephemeral
@@ -128,7 +134,7 @@ export class PageSyncDO implements DurableObject {
     if (url.searchParams.get('action') === 'saved') {
       this.sql.exec(`DELETE FROM lww_field_ops`);
       this.sql.exec(`DELETE FROM crdt_text_docs`);
-      this.broadcast(JSON.stringify({ type: 'saved' }));
+      await this.broadcast(JSON.stringify({ type: 'saved' }));
       return new Response('ok');
     }
 
@@ -143,9 +149,13 @@ export class PageSyncDO implements DurableObject {
     const userId = request.headers.get('X-User-Id') ?? '';
     const userName = request.headers.get('X-User-Name') ?? '';
 
+    const attachment: WsAttachment = { userId, userName, sid: request.headers.get('X-Session-Id') ?? '', exp: Number(request.headers.get('X-Session-Expires')) };
+    if (!await this.validSession(attachment)) return new Response('Unauthorized', { status: 401 });
+    if (this.state.getWebSockets().length >= 32) return new Response('Too many connections', { status: 429 });
     const { 0: client, 1: server } = new WebSocketPair();
     this.state.acceptWebSocket(server);
-    server.serializeAttachment({ userId, userName } satisfies WsAttachment);
+    server.serializeAttachment(attachment);
+    await this.state.storage.setAlarm(Date.now() + 60_000);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -212,7 +222,17 @@ export class PageSyncDO implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    const { userId, userName } = ws.deserializeAttachment() as WsAttachment;
+    if (!await this.authorize(ws)) return;
+    const attachment = ws.deserializeAttachment() as WsAttachment;
+    const window = Math.floor(Date.now() / 1000);
+    attachment.messages = attachment.window === window ? (attachment.messages ?? 0) + 1 : 1;
+    attachment.window = window;
+    ws.serializeAttachment(attachment);
+    if (attachment.messages > 60 || (typeof message === 'string' ? new TextEncoder().encode(message).byteLength : message.byteLength) > 2_100_000) {
+      ws.close(1009, 'Message budget exceeded');
+      return;
+    }
+    const { userId, userName } = attachment;
 
     let msg: Record<string, unknown>;
     try {
@@ -221,6 +241,7 @@ export class PageSyncDO implements DurableObject {
       return;
     }
 
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
     if (msg.type === 'sync') {
       const ops = this.sql.exec(
         `SELECT path, value, hlc,
@@ -239,15 +260,15 @@ export class PageSyncDO implements DurableObject {
     // it from the presence API to avoid echoing client-supplied URLs.
     if (msg.type === 'focus') {
       const path = strField(msg, 'path');
-      if (!path) return;
-      this.broadcast(JSON.stringify({ type: 'focus', path, userId, userName }), ws);
+      if (!this.validTextPath(path)) return;
+      await this.broadcast(JSON.stringify({ type: 'focus', path, userId, userName }), ws);
       return;
     }
 
     if (msg.type === 'blur') {
       const path = strField(msg, 'path');
-      if (!path) return;
-      this.broadcast(JSON.stringify({ type: 'blur', path, userId }), ws);
+      if (!this.validTextPath(path)) return;
+      await this.broadcast(JSON.stringify({ type: 'blur', path, userId }), ws);
       return;
     }
 
@@ -255,7 +276,8 @@ export class PageSyncDO implements DurableObject {
       const path = strField(msg, 'path');
       const baseline = strField(msg, 'baseline');
       if (!this.validTextPath(path) || baseline.length > MAX_TEXT_BASELINE) return;
-      const doc = this.loadTextDoc(path, baseline);
+      let doc: Y.Doc;
+      try { doc = this.loadTextDoc(path, baseline); } catch { ws.close(1009, 'Text budget exceeded'); return; }
       ws.send(JSON.stringify({ type: 'text-sync', path, update: bytesToBase64(Y.encodeStateAsUpdate(doc)) }));
       return;
     }
@@ -266,14 +288,15 @@ export class PageSyncDO implements DurableObject {
       if (!this.validTextPath(path) || !encoded || encoded.length > MAX_TEXT_UPDATE_BASE64) return;
       const update = base64ToBytes(encoded);
       if (!update) return;
-      const doc = this.loadTextDoc(path, '');
+      let doc: Y.Doc;
       try {
+        doc = this.loadTextDoc(path, '');
         Y.applyUpdate(doc, update);
+        this.storeTextDoc(path, doc);
       } catch {
         return;
       }
-      this.storeTextDoc(path, doc);
-      this.broadcast(JSON.stringify({ type: 'text-update', path, update: encoded, userId, userName }), ws);
+      await this.broadcast(JSON.stringify({ type: 'text-update', path, update: encoded, userId, userName }), ws);
       return;
     }
 
@@ -283,7 +306,9 @@ export class PageSyncDO implements DurableObject {
       const hlc   = strField(msg, 'hlc');
       const opId  = strField(msg, 'opId') || crypto.randomUUID();
 
-      if (!path || !hlc) return;
+      if (!this.validTextPath(path) || !hlc || hlc.length > 100 || opId.length > 100 || value.length > 1_000_000) return;
+      const budget = this.sql.exec('SELECT COUNT(*) AS n, COALESCE(SUM(length(value) + length(path)), 0) AS bytes FROM lww_field_ops WHERE NOT (path = ? AND user_id = ?)', path, userId).one();
+      if (Number(budget.n) >= 256 || Number(budget.bytes) + value.length + path.length > 4_000_000) { ws.close(1009, 'Field budget exceeded'); return; }
 
       const existing = this.sql.exec(
         `SELECT hlc FROM lww_field_ops WHERE path = ? AND user_id = ?`, path, userId,
@@ -297,24 +322,24 @@ export class PageSyncDO implements DurableObject {
         );
 
         const broadcast = JSON.stringify({ type: 'op', path, value, hlc, userId, userName, opId });
-        this.broadcast(broadcast, ws);
+        await this.broadcast(broadcast, ws);
       }
     }
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
-    this.handleDisconnect(ws);
+    await this.handleDisconnect(ws);
     try { ws.close(1000, 'Closing'); } catch { /* already closed */ }
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
-    this.handleDisconnect(ws);
+    await this.handleDisconnect(ws);
     try { ws.close(1011, 'Error'); } catch { /* already closed */ }
   }
 
   // When an editor's last connection drops without saving, discard their
   // uncommitted ops and tell remaining clients what each field reverts to.
-  private handleDisconnect(ws: WebSocket): void {
+  private async handleDisconnect(ws: WebSocket): Promise<void> {
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
     const userId = attachment?.userId;
     if (!userId) return;
@@ -326,7 +351,7 @@ export class PageSyncDO implements DurableObject {
     if (stillConnected) return;
 
     // Remove the leaving user's editing highlights from every other client.
-    this.broadcast(JSON.stringify({ type: 'blur', userId, clearAll: true }), ws);
+    await this.broadcast(JSON.stringify({ type: 'blur', userId, clearAll: true }), ws);
 
     const paths = this.sql.exec(
       `SELECT DISTINCT path FROM lww_field_ops WHERE user_id = ?`, userId,
@@ -342,15 +367,37 @@ export class PageSyncDO implements DurableObject {
       return winner ? { path, value: winner.value, hlc: winner.hlc } : { path, baseline: true };
     });
 
-    this.broadcast(JSON.stringify({ type: 'reset', entries }), ws);
+    await this.broadcast(JSON.stringify({ type: 'reset', entries }), ws);
   }
 
-  private broadcast(payload: string, except?: WebSocket): void {
+  private async broadcast(payload: string, except?: WebSocket): Promise<void> {
     for (const other of this.state.getWebSockets()) {
-      if (other !== except) {
+      if (other !== except && await this.authorize(other)) {
         try { other.send(payload); } catch { /* already closed */ }
       }
     }
+  }
+
+  private async validSession(attachment: WsAttachment | null): Promise<boolean> {
+    if (!attachment || !Number.isFinite(attachment.exp)) return false;
+    const user = await validateAccessSession(this.env.DB, {
+      sub: attachment.userId, sid: attachment.sid, exp: attachment.exp,
+      type: 'access', iat: 0, name: '', email: '', role: '',
+    });
+    return !!user && effectivePermissions(await resolveRolePermissions(this.env), user.role).has('content:write');
+  }
+
+  private async authorize(ws: WebSocket): Promise<boolean> {
+    try {
+      if (await this.validSession(ws.deserializeAttachment() as WsAttachment | null)) return true;
+    } catch { /* Fail closed if authorization storage is unavailable. */ }
+    try { ws.close(1008, 'Session expired or revoked'); } catch { /* already closed */ }
+    return false;
+  }
+
+  async alarm(): Promise<void> {
+    for (const ws of this.state.getWebSockets()) await this.authorize(ws);
+    if (this.state.getWebSockets().length) await this.state.storage.setAlarm(Date.now() + 60_000);
   }
 
   private validTextPath(path: string): boolean {
@@ -361,6 +408,7 @@ export class PageSyncDO implements DurableObject {
     const row = this.sql.exec(
       `SELECT state FROM crdt_text_docs WHERE path = ?`, path,
     ).toArray()[0];
+    if (!row && (this.sql.exec('SELECT COUNT(*) AS n FROM crdt_text_docs').one().n as number) >= 64) throw new Error('Text field budget exceeded');
     const doc = new Y.Doc();
     if (row && typeof row.state === 'string') {
       const state = base64ToBytes(row.state);
@@ -374,6 +422,8 @@ export class PageSyncDO implements DurableObject {
 
   private storeTextDoc(path: string, doc: Y.Doc): void {
     const state = bytesToBase64(Y.encodeStateAsUpdate(doc));
+    const otherBytes = this.sql.exec('SELECT COALESCE(SUM(length(state)), 0) AS bytes FROM crdt_text_docs WHERE path != ?', path).one().bytes;
+    if (state.length + Number(otherBytes) > 4_000_000) throw new Error('Text document budget exceeded');
     this.sql.exec(
       `INSERT INTO crdt_text_docs (path, state, updated_at)
        VALUES (?, ?, ?)

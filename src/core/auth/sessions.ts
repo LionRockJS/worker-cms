@@ -30,10 +30,10 @@ export type RotateAuthSessionResult =
     }
   | { ok: false; error: 'invalid_refresh_token' | 'session_revoked' | 'user_not_found' };
 
-export async function issueAuthTokens(user: AuthDbUser, jwtSecret: string): Promise<IssuedAuthTokens> {
+export async function issueAuthTokens(user: AuthDbUser, jwtSecret: string, sessionId?: string): Promise<IssuedAuthTokens> {
   const now = Math.floor(Date.now() / 1000);
   const refreshJti = generateTokenId();
-  const accessPayload = authPayload(user, 'access', now + ACCESS_TOKEN_TTL, now);
+  const accessPayload = { ...authPayload(user, 'access', now + ACCESS_TOKEN_TTL, now), sid: sessionId };
   const refreshPayload = authPayload(user, 'refresh', now + REFRESH_TOKEN_TTL, now, refreshJti);
   const [accessToken, refreshToken] = await Promise.all([
     signJWT(accessPayload, jwtSecret),
@@ -43,13 +43,15 @@ export async function issueAuthTokens(user: AuthDbUser, jwtSecret: string): Prom
   return { accessPayload, accessToken, refreshToken, refreshJti };
 }
 
-export async function storeRefreshSession(db: D1DatabaseClient, userId: number, refreshJti: string): Promise<void> {
-  await db.prepare(
+export async function storeRefreshSession(db: D1DatabaseClient, userId: number, refreshJti: string): Promise<number> {
+  const row = await db.prepare(
     `INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
-     VALUES (?, ?, datetime('now', '+7 days'))`,
+     VALUES (?, ?, datetime('now', '+7 days')) RETURNING id`,
   )
     .bind(userId, await hashToken(refreshJti))
-    .run();
+    .first<{ id: number }>();
+  if (!row) throw new Error("Session creation failed");
+  return row.id;
 }
 
 export async function rotateAuthSession(
@@ -83,17 +85,17 @@ export async function rotateAuthSession(
   // refresh, not a revoked session. Give it a fresh access token but do not
   // rotate or set a refresh cookie: the winning response owns the new token.
   if (session.is_previous) {
-    const access = await issueAccessToken(user, jwtSecret);
+    const access = await issueAccessToken(user, jwtSecret, String(session.id));
     return { ok: true, ...access };
   }
 
-  const issued = await issueAuthTokens(user, jwtSecret);
+  const issued = await issueAuthTokens(user, jwtSecret, String(session.id));
   const update = await db.prepare(
     `UPDATE sessions
         SET previous_refresh_token_hash = refresh_token_hash,
             refresh_token_hash = ?,
             rotated_at = CURRENT_TIMESTAMP,
-            expires_at = datetime('now', '+7 days')
+            expires_at = MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days'))
       WHERE id = ? AND refresh_token_hash = ?`,
   )
     .bind(await hashToken(issued.refreshJti), session.id, refreshHash)
@@ -106,7 +108,7 @@ export async function rotateAuthSession(
     if (!racedSession || !racedSession.is_previous || racedSession.id !== session.id) {
       return { ok: false, error: 'session_revoked' };
     }
-    const access = await issueAccessToken(user, jwtSecret);
+    const access = await issueAccessToken(user, jwtSecret, String(session.id));
     return { ok: true, ...access };
   }
 
@@ -185,7 +187,7 @@ async function findRefreshSession(db: D1DatabaseClient, refreshHash: string): Pr
             user_id,
             CASE WHEN refresh_token_hash = ?1 THEN 0 ELSE 1 END AS is_previous
        FROM sessions
-      WHERE expires_at > CURRENT_TIMESTAMP
+      WHERE expires_at > CURRENT_TIMESTAMP AND created_at > datetime('now', '-30 days')
         AND (
           refresh_token_hash = ?1
           OR (
@@ -201,11 +203,32 @@ async function findRefreshSession(db: D1DatabaseClient, refreshHash: string): Pr
 async function issueAccessToken(
   user: AuthDbUser,
   jwtSecret: string,
+  sessionId: string,
 ): Promise<Pick<IssuedAuthTokens, 'accessPayload' | 'accessToken'>> {
   const now = Math.floor(Date.now() / 1000);
-  const accessPayload = authPayload(user, 'access', now + ACCESS_TOKEN_TTL, now);
+  const accessPayload = { ...authPayload(user, 'access', now + ACCESS_TOKEN_TTL, now), sid: sessionId };
   return {
     accessPayload,
     accessToken: await signJWT(accessPayload, jwtSecret),
   };
+}
+
+/** Create the revocable session before issuing its access token. */
+export async function createAuthSession(db: D1DatabaseClient, user: AuthDbUser, secret: string): Promise<IssuedAuthTokens> {
+  const issued = await issueAuthTokens(user, secret);
+  const id = await storeRefreshSession(db, user.id, issued.refreshJti);
+  issued.accessPayload.sid = String(id);
+  issued.accessToken = await signJWT(issued.accessPayload, secret);
+  return issued;
+}
+
+/** Authorization always uses the current account, never a cached JWT role. */
+export async function validateAccessSession(db: D1DatabaseClient, payload: JWTPayload): Promise<JWTPayload | null> {
+  if (payload.type !== 'access' || !payload.sid || !/^\d+$/.test(payload.sid)
+      || payload.exp <= Math.floor(Date.now() / 1000)) return null;
+  const user = await db.prepare(
+    `SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.id = ? AND s.user_id = ? AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')`,
+  ).bind(payload.sid, payload.sub).first<AuthDbUser>();
+  return user ? { ...payload, email: user.email, name: user.name, role: user.role } : null;
 }
