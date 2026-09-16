@@ -30,7 +30,8 @@
     "no_permission": "You do not have permission to access the admin panel.",
     "provider_fallback": "your sign-in provider",
     "redirecting_to": "Redirecting to",
-    "signup_notice": "is free to sign up for with your everyday account, but access is restricted to authorized users."
+    "signup_notice": "is free to sign up for with your everyday account, but access is restricted to authorized users.",
+    "version": "Version"
   },
   "nav": {
     "blockTypes": "Block Types",

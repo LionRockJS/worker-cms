@@ -5,7 +5,8 @@
   "scripts": {
     "setup": "node tools/install.mjs",
     "dev": "npm run build && wrangler dev --local",
-    "build": "npm run build:features && npm run build:migrations && npm run build:views && npm run build:css && npm run build:js",
+    "build": "npm run build:version && npm run build:features && npm run build:migrations && npm run build:views && npm run build:css && npm run build:js",
+    "build:version": "node tools/build-version.mjs",
     "build:migrations": "node tools/build-migrations.mjs",
     "build:views": "node tools/build-views.mjs",
     "build:css": "tailwindcss -i assets-source/admin.css -o dist/views/assets/admin.css --minify",

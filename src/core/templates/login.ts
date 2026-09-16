@@ -1,5 +1,6 @@
 import { assetRevisionQuery, layout } from '../render/layout';
 import { renderView } from '../render/liquid';
+import { BUILD_VERSION } from '../../generated/build-info';
 
 function providerLabel(provider: string): string {
   if (provider === 'google') return 'Google';
@@ -44,6 +45,7 @@ export async function loginPage(views: Fetcher, opts: {
   const body = await renderView(views, '/templates/login.json', {
     siteTitle,
     appIcon: opts.appIcon,
+    buildVersion: BUILD_VERSION,
     error,
     isForbidden: error === 'forbidden',
     providers: providers.map((provider) => {

@@ -30,7 +30,8 @@
     "no_permission": "您沒有權限存取管理後台。",
     "provider_fallback": "您的登入服務供應商",
     "redirecting_to": "正在前往以下服務供應商登入：",
-    "signup_notice": "可使用您的常用帳戶免費註冊，但只限獲授權使用者存取。"
+    "signup_notice": "可使用您的常用帳戶免費註冊，但只限獲授權使用者存取。",
+    "version": "版本"
   },
   "nav": {
     "blockTypes": "區塊類型",

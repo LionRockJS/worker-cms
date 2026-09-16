@@ -30,7 +30,8 @@
     "no_permission": "您没有权限访问管理后台。",
     "provider_fallback": "您的登录服务商",
     "redirecting_to": "正在前往以下服务商登录：",
-    "signup_notice": "可使用您的常用账户免费注册，但仅限获授权用户访问。"
+    "signup_notice": "可使用您的常用账户免费注册，但仅限获授权用户访问。",
+    "version": "版本"
   },
   "nav": {
     "blockTypes": "区块类型",

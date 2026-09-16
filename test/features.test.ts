@@ -19,6 +19,7 @@ import { cmsConfig } from '../src/cms-config';
 import { signJWT } from './auth-fixtures';
 import { blueprintToLect, stringifyLect } from '../src/core/db/lect';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
+import { BUILD_VERSION } from '../src/generated/build-info';
 import type { JWTPayload } from '../src/types';
 
 const IncomingRequest = Request;
@@ -166,6 +167,12 @@ describe('login page providers', () => {
 
     for (const position of positions) expect(position).toBeGreaterThan(-1);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it('passes the deployed Git revision to the pre-login view', async () => {
+    const payload = renderPayload(await (await fetchWorker('/auth/login')).text());
+
+    expect(payload.bodyView?.data.buildVersion).toBe(BUILD_VERSION);
   });
 });
 
