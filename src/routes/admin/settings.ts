@@ -18,12 +18,14 @@ import {
   loadAdminHomeSettings,
   loadSidebarChromeSettings,
   loadSystemTimezone,
+  loadShowCredits,
   normalizeSystemTimezone,
   pluginSidebarKey,
   saveAdminHomeSettings,
   saveAppBrandingSettings,
   saveSidebarMenuSettings,
   saveSystemTimezone,
+  saveShowCredits,
 } from '../../core/db/settings';
 
 export const settingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -41,21 +43,22 @@ settingsRoutes.get('/settings/menu', (c) => c.redirect('/admin/settings/system')
 // Shared row comparator: group by plugin, then by human label, then key.
 settingsRoutes.get('/settings/system', async (c) => {
   const fallbackName = c.env.SITE_TITLE ?? '0xCMS';
-  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone] = await Promise.all([
+  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, showCredits] = await Promise.all([
     loadSidebarChromeSettings(c.env),
     loadAppBrandingSettings(c.env, fallbackName),
     loadAdminHomeSettings(c.env),
     coreExtensions().sidebarNav?.(c.env) ?? [],
     loadSystemTimezone(c.env),
+    loadShowCredits(c.env),
   ]);
   // An entry owned by a feature that is not installed has nothing to configure
   // — the chrome would hide it whatever this screen saved.
   const menuItems = installedMenuItems(featureInstalled);
   const menuOption = (item: typeof SIDEBAR_MENU_ITEMS[number], index: number) => ({
     value: item.key,
-    label: item.label,
+    label: item.key === 'users' && !showCredits ? 'Users' : item.label,
     description: item.description,
-    labelKey: `nav.${item.key}`,
+    labelKey: item.key === 'users' && !showCredits ? 'nav.users_without_credits' : `nav.${item.key}`,
     descriptionKey: `settings.menu.${item.key}_description`,
     checked: sidebarSettings.items[item.key].visible,
     locked: item.key === 'system',
@@ -148,6 +151,8 @@ settingsRoutes.get('/settings/system', async (c) => {
       selected: option.value === branding.appFont,
     })),
     adminHomePath: adminHome.href,
+    hasCreditsFeature: featureInstalled('credits'),
+    showCredits,
     systemTimezone,
     timezoneOptions: [
       ...(SYSTEM_TIMEZONE_OPTIONS.some((option) => option.value === systemTimezone)
@@ -215,6 +220,10 @@ settingsRoutes.post('/settings/system', async (c) => {
       href: form.get('admin_home_path'),
     }),
     saveSystemTimezone(c.env, systemTimezone),
+    // A missing field (older form or a build without credits) preserves the preference.
+    ...(featureInstalled('credits') && form.has('show_credits')
+      ? [saveShowCredits(c.env, form.get('show_credits') === 'true')]
+      : []),
     saveSidebarMenuSettings(c.env, visibleKeys, weights, {
       settingsGroupWeight: form.get('settings_group_weight'),
       pluginWeights,

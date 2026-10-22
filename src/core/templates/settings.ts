@@ -61,6 +61,8 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
   primaryColor: string;
   fontOptions: SystemSettingsFontOption[];
   adminHomePath: string;
+  hasCreditsFeature: boolean;
+  showCredits: boolean;
   systemTimezone: string;
   timezoneOptions: Array<{ value: string; label: string; selected: boolean }>;
   iconOptions: SystemSettingsIconOption[];
@@ -80,6 +82,8 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
     primaryColor: opts.primaryColor,
     fontOptions: opts.fontOptions,
     adminHomePath: opts.adminHomePath,
+    hasCreditsFeature: opts.hasCreditsFeature,
+    showCredits: opts.showCredits,
     systemTimezone: opts.systemTimezone,
     timezoneOptions: opts.timezoneOptions,
     iconOptions: opts.iconOptions,

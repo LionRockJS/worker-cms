@@ -9,6 +9,7 @@ import type { CreditPricingRow } from './contracts';
 import type { AppContext } from '../../core/http/context';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 import type { Env } from '../../types';
+import { loadShowCredits } from '../../core/db/settings';
 import { creditLedgerRowForView } from './ledger-view';
 import {
   adminAction,
@@ -97,6 +98,7 @@ export const creditsServices: FeatureServiceEntry = {
   },
 
   async adminScreenProps(c: AppContext, target): Promise<Record<string, unknown>> {
+    if (!await loadShowCredits(c.env)) return { showCreditsPanel: false };
     if (target.screen === 'profile') return profileCreditProps(c);
     if (target.screen === 'users') return sharedPoolProps(c.env);
     if (target.screen === 'user') return userCreditProps(c, target.userId);

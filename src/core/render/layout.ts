@@ -113,6 +113,8 @@ export interface BaseTemplateProps extends NavFlags {
   userAvatar: string;
   /** Optional feature-contributed balances shown in the sidebar footer. */
   sidebarWallets?: SidebarWallet[];
+  /** Whether the installed credits feature's interface is visible. */
+  showCredits?: boolean;
   currentUserId: string;
   /** Navigation entries contributed by active plugins, filtered to the user's roles. */
   pluginNav: Array<{ label: string; href: string }>;

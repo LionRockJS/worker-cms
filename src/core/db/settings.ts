@@ -4,6 +4,7 @@ export const SIDEBAR_MENU_SETTING_KEY = 'admin.sidebar_menu.hidden_items';
 export const APP_BRANDING_SETTING_KEY = 'admin.app_branding';
 export const ADMIN_HOME_SETTING_KEY = 'admin.home';
 export const SYSTEM_TIMEZONE_SETTING_KEY = 'admin.system_timezone';
+export const SHOW_CREDITS_SETTING_KEY = 'admin.show_credits';
 export const DEFAULT_SYSTEM_TIMEZONE = '+0000';
 
 const FIXED_OFFSET_MINUTES = [
@@ -201,6 +202,15 @@ export async function saveSystemTimezone(env: Env, value: unknown): Promise<stri
   if (!timeZone) throw new Error('Invalid system timezone');
   await saveSetting(env, SYSTEM_TIMEZONE_SETTING_KEY, timeZone);
   return timeZone;
+}
+
+/** Display preference only; pricing and charging remain independent. */
+export async function loadShowCredits(env: Env): Promise<boolean> {
+  return await getSetting(env, SHOW_CREDITS_SETTING_KEY) !== 'false';
+}
+
+export async function saveShowCredits(env: Env, show: boolean): Promise<void> {
+  await saveSetting(env, SHOW_CREDITS_SETTING_KEY, String(show));
 }
 
 export interface SidebarChromeSettings {

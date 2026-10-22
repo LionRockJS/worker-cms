@@ -71,7 +71,7 @@ export async function pluginsManagePage(views: Fetcher, opts: BaseTemplateProps 
       pageTypesHref: `/admin/plugins-manage/${plugin.id}/page-types`,
       hasLimits: !!plugin.hasLimits,
       limitsHref: `/admin/plugins-manage/${plugin.id}/limits`,
-      hasCredits: !!plugin.hasCredits,
+      hasCredits: !!opts.showCredits && !!plugin.hasCredits,
       creditsHref: `/admin/plugins-manage/${plugin.id}/credits`,
     })),
   });

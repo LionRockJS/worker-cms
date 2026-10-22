@@ -47,7 +47,8 @@
     "tags": "Tags",
     "taxonomies": "Taxonomies",
     "trash": "Trash",
-    "users": "Users & Credits"
+    "users": "Users & Credits",
+    "users_without_credits": "Users"
   },
   "pages": {
     "count": {
@@ -222,7 +223,14 @@
       "title": "Regional settings"
     },
     "system_saved": "System settings saved",
-    "timezone_invalid": "Select a valid UTC offset."
+    "timezone_invalid": "Select a valid UTC offset.",
+    "credits": {
+      "title": "Credits",
+      "show": "Show credits",
+      "visible": "Show",
+      "hidden": "Hide",
+      "help": "Show balances, credit panels, and credit links in the admin interface. Hide them for installations without credits or with unlimited credits. This display setting does not change prices or charges."
+    }
   },
   "shell": {
     "close_menu": "Close menu",

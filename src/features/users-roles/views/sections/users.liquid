@@ -36,7 +36,7 @@
               </td>
               <td class="px-6 py-3 text-right">
                 <div class="flex items-center justify-end gap-3">
-                  <a href="{{ user.editHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_users.roles_and_credits" | t }}</a>
+                  <a href="{{ user.editHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{% if showCreditsPanel %}{{ "view_strings.sections_users.roles_and_credits" | t }}{% else %}{{ "nav.roles" | t }}{% endif %}</a>
                   {% if user.canDelete %}
                     <form method="POST" action="{{ user.deleteAction }}" data-confirm="{{ "view_strings.sections_users.remove_this_user_and_all_linked_sign_in_identities" | t }}">
                       <button type="submit" class="text-sm font-medium text-red-600 hover:text-red-700">{{ "view_strings.sections_users.delete" | t }}</button>

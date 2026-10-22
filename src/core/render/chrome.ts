@@ -93,7 +93,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     if (key === 'plugins') return permissions.has('plugin:manage');
     // Credit summary is read-only and visible to content/plugin operators; only the
     // configure links inside it require plugin:manage.
-    if (key === 'credits') return permissions.has('content:read') || permissions.has('plugin:manage');
+    if (key === 'credits') return !!contributed.showCredits && (permissions.has('content:read') || permissions.has('plugin:manage'));
     if (key === 'languages') return permissions.has('menu:manage');
     if (key === 'system') return permissions.has('menu:manage');
     if (key === 'content') return permissions.has('content:read') || permissions.has('media:upload');
@@ -111,8 +111,8 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     .filter((entry) => entry.item.group === 'settings')
     .map((entry) => ({
       item: {
-        label: entry.item.label,
-        translationKey: `nav.${entry.item.key}`,
+        label: entry.item.key === 'users' && !contributed.showCredits ? 'Users' : entry.item.label,
+        translationKey: entry.item.key === 'users' && !contributed.showCredits ? 'nav.users_without_credits' : `nav.${entry.item.key}`,
         href: entry.item.href,
         icon: entry.item.icon,
       },

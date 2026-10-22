@@ -1,6 +1,7 @@
 import type { CmsFeature } from '../../core/feature';
 import { getCreditBalances, getSharedCreditBalances } from './service';
 import { userIdFromContext } from '../../core/http/forms';
+import { loadShowCredits } from '../../core/db/settings';
 import {
   CREDIT_CURRENCIES,
   creditCurrencyDefinition,
@@ -24,11 +25,13 @@ export const creditsFeature: CmsFeature = {
   // still work.
   navKeys: ['credits'],
   async baseProps(c) {
+    if (!await loadShowCredits(c.env)) return { showCredits: false, sidebarWallets: [] };
     const [balances, shared] = await Promise.all([
       getCreditBalances(c.env, userIdFromContext(c)),
       getSharedCreditBalances(c.env),
     ]);
     return {
+      showCredits: true,
       sidebarWallets: CREDIT_CURRENCIES.flatMap((currency) => {
         const definition = creditCurrencyDefinition(currency);
         const userBalance = balances?.[currency] ?? 0;

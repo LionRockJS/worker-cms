@@ -47,7 +47,8 @@
     "tags": "索引",
     "taxonomies": "分類法",
     "trash": "垃圾桶",
-    "users": "使用者與點數"
+    "users": "使用者與點數",
+    "users_without_credits": "使用者"
   },
   "pages": {
     "count": {
@@ -222,7 +223,14 @@
       "title": "地區設定"
     },
     "system_saved": "系統設定已儲存",
-    "timezone_invalid": "請選擇有效的 UTC 時差。"
+    "timezone_invalid": "請選擇有效的 UTC 時差。",
+    "credits": {
+      "title": "點數",
+      "show": "顯示點數",
+      "visible": "顯示",
+      "hidden": "隱藏",
+      "help": "在管理介面顯示餘額、點數面板和點數連結。不使用點數或擁有無限點數的部署可將其隱藏。此顯示設定不會變更價格或扣費。"
+    }
   },
   "shell": {
     "close_menu": "關閉選單",

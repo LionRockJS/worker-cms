@@ -18,6 +18,7 @@ import {
   transferSharedCredits,
 } from '../src/features/credits/service';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
+import { saveShowCredits, SHOW_CREDITS_SETTING_KEY } from '../src/core/db/settings';
 import type { JWTPayload } from '../src/types';
 import type { PluginManifest } from '../src/features/plugins/types';
 import type { CreditContributor } from '../src/features/credits/contracts';
@@ -176,6 +177,7 @@ async function sharedLedgerRows(): Promise<Array<{ delta: number; balance_after:
 let savedSecret: unknown;
 
 beforeEach(async () => {
+  await env.DB.prepare('DELETE FROM settings WHERE key = ?').bind(SHOW_CREDITS_SETTING_KEY).run();
   clearConfigCache();
   clearManifestCache();
   __clearInjectedFetchers();
@@ -652,6 +654,20 @@ describe('profile and plugins-manage pages', () => {
     });
     expect(save.status).toBe(302);
     expect(await loadCreditValues(env, PLUGIN_ID)).toEqual({ create_event: 10, send_edm: 0 });
+  });
+
+  it('hides plugin credit links without changing configured prices', async () => {
+    await saveCreditValues(env, PLUGIN_ID, { create_event: 10 });
+    expect(await (await adminFetch('/admin/plugins-manage')).text()).toContain('"hasCredits":true');
+
+    await saveShowCredits(env, false);
+    const hidden = await adminFetch('/admin/plugins-manage');
+    expect(hidden.status).toBe(200);
+    expect(await hidden.text()).toContain('"hasCredits":false');
+    expect(await loadCreditValues(env, PLUGIN_ID)).toEqual({ create_event: 10 });
+
+    await saveShowCredits(env, true);
+    expect(await (await adminFetch('/admin/plugins-manage')).text()).toContain('"hasCredits":true');
   });
 
   it('summarizes chargeable actions across plugins', async () => {

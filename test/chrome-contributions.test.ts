@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { signJWT } from './auth-fixtures';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { features } from '../src/features';
-import { installedMenuItems, menuItemFeature, SIDEBAR_MENU_ITEMS } from '../src/core/db/settings';
+import { installedMenuItems, menuItemFeature, SIDEBAR_MENU_ITEMS, SHOW_CREDITS_SETTING_KEY } from '../src/core/db/settings';
 import type { JWTPayload } from '../src/types';
 
 const IncomingRequest = Request;
@@ -25,7 +25,7 @@ function layoutData(html: string): Record<string, unknown> {
   return (JSON.parse(match[1]) as { layoutData: Record<string, unknown> }).layoutData;
 }
 
-async function adminGet(path: string): Promise<Response> {
+async function adminGet(path: string, init: RequestInit = {}): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const token = await signJWT({
     sub: '1',
@@ -38,6 +38,7 @@ async function adminGet(path: string): Promise<Response> {
   } as JWTPayload, env.JWT_SECRET);
   ipCounter += 1;
   return worker.fetch(new IncomingRequest(new URL(path, 'http://localhost'), {
+    ...init,
     redirect: 'manual',
     headers: {
       'Sec-Fetch-Site': 'same-origin',
@@ -49,6 +50,7 @@ async function adminGet(path: string): Promise<Response> {
 
 beforeEach(async () => {
   clearRolePermissionsCache();
+  await env.DB.prepare('DELETE FROM settings WHERE key = ?').bind(SHOW_CREDITS_SETTING_KEY).run();
   await env.DB.prepare('DELETE FROM users').run();
   await env.DB.prepare(
     'INSERT INTO users (id, oauth_id, email, name, avatar_url, role) VALUES (?, ?, ?, ?, ?, ?)',
@@ -59,6 +61,60 @@ beforeEach(async () => {
 });
 
 describe('admin chrome feature contributions', () => {
+  it('saves credit visibility and restores balances when credits are shown again', async () => {
+    const payload = async (path: string) => {
+      const response = await adminGet(path);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      const match = html.match(/<script id="cms-render-payload"[^>]*>(.*?)<\/script>/s)!;
+      return JSON.parse(match[1]) as {
+        layoutData: Record<string, unknown>;
+        bodyView: { data: Record<string, unknown> };
+      };
+    };
+    expect((await payload('/admin/settings/system')).bodyView.data).toMatchObject({
+      hasCreditsFeature: true, showCredits: true,
+    });
+
+    const save = (show?: boolean) => adminGet('/admin/settings/system', {
+      method: 'POST',
+      body: new URLSearchParams([
+        ['visible_items', 'users'], ['visible_items', 'credits'],
+        ...(show === undefined ? [] : [['show_credits', String(show)]]),
+      ]),
+    });
+    expect((await save(false)).status).toBe(302);
+    // Older forms without the new field must preserve the saved preference.
+    expect((await save()).status).toBe(302);
+    const settings = await payload('/admin/settings/system');
+    expect(settings.bodyView.data.showCredits).toBe(false);
+    expect(settings.layoutData.sidebarWallets).toEqual([]);
+    expect(settings.layoutData.sidebarSettingsNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Users', translationKey: 'nav.users_without_credits' }),
+    ]));
+    expect(settings.layoutData.sidebarSettingsNav).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: '/admin/settings/credits' }),
+    ]));
+    for (const path of ['/admin/profile', '/admin/users', '/admin/users/1/edit']) {
+      const data = (await payload(path)).bodyView.data;
+      expect(data.showCreditsPanel).toBe(false);
+      expect(data.creditWallets).toBeUndefined();
+      expect(data.sharedWallets).toBeUndefined();
+    }
+
+    expect((await save(true)).status).toBe(302);
+    const restored = await payload('/admin/settings/system');
+    expect(restored.bodyView.data.showCredits).toBe(true);
+    expect(restored.layoutData.sidebarWallets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currency: 'credit', userBalance: 42 }),
+    ]));
+    expect(restored.layoutData.sidebarSettingsNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Users & Credits' }),
+      expect.objectContaining({ href: '/admin/settings/credits' }),
+    ]));
+    expect((await payload('/admin/profile')).bodyView.data.showCreditsPanel).toBe(true);
+  });
+
   it('merges the credits contributor into every admin render', async () => {
     const response = await adminGet('/admin/trash');
     expect(response.status).toBe(200);

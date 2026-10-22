@@ -47,7 +47,8 @@
     "tags": "索引",
     "taxonomies": "分类法",
     "trash": "回收站",
-    "users": "用户与点数"
+    "users": "用户与点数",
+    "users_without_credits": "用户"
   },
   "pages": {
     "count": {
@@ -222,7 +223,14 @@
       "title": "区域设置"
     },
     "system_saved": "系统设置已保存",
-    "timezone_invalid": "请选择有效的 UTC 时差。"
+    "timezone_invalid": "请选择有效的 UTC 时差。",
+    "credits": {
+      "title": "点数",
+      "show": "显示点数",
+      "visible": "显示",
+      "hidden": "隐藏",
+      "help": "在管理界面显示余额、点数面板和点数链接。不使用点数或拥有无限点数的部署可将其隐藏。此显示设置不会更改价格或扣费。"
+    }
   },
   "shell": {
     "close_menu": "关闭菜单",
