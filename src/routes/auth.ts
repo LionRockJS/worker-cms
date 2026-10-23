@@ -382,12 +382,18 @@ async function updateUserProfileFromOAuth(
   userId: number,
   user: NormalizedUser,
 ): Promise<AuthDbUser | null> {
+  // The linked provider identity authenticates this user. An email owned by
+  // another account must not block sign-in or change either account's owner.
+  // Keep the collision check in the UPDATE so concurrent logins cannot race it.
   await db.prepare(
     `UPDATE users
-        SET email = ?, name = ?, avatar_url = ?
+        SET email = CASE
+              WHEN EXISTS (SELECT 1 FROM users WHERE email = ? AND id <> ?)
+              THEN email ELSE ? END,
+            name = ?, avatar_url = ?
       WHERE id = ?`,
   )
-    .bind(user.email, user.name, user.avatarUrl, userId)
+    .bind(user.email, userId, user.email, user.name, user.avatarUrl, userId)
     .run();
   return db.prepare('SELECT id, email, name, role FROM users WHERE id = ?')
     .bind(userId)
@@ -657,11 +663,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
       return c.redirect('/auth/login?error=identity_already_linked');
     }
   } else if (linkedUser) {
-    try {
-      dbUser = await updateUserProfileFromOAuth(c.env.DB, linkedUser.id, normalized);
-    } catch {
-      return c.redirect('/auth/login?error=email_in_use');
-    }
+    dbUser = await updateUserProfileFromOAuth(c.env.DB, linkedUser.id, normalized);
   } else {
     // Optional registration allowlist: when ALLOWED_EMAIL_DOMAINS is set, only
     // matching emails may create a new account. Existing linked users always

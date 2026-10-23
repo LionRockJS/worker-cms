@@ -385,6 +385,55 @@ describe('auth routes', () => {
     expect(callback.status).toBe(302);
     expect(callback.headers.get('Location')).toBe('/admin');
     expect(await env.DB.prepare('SELECT user_id FROM sessions').first()).toEqual({ user_id: 1 });
+    expect(await env.DB.prepare('SELECT email FROM users WHERE id = 1').first())
+      .toEqual({ email: 'admin-github@example.com' });
+  });
+
+  it.each(['github', 'google'])('signs in a linked %s identity when its provider email belongs to another account', async (provider) => {
+    await env.DB.prepare(
+      `INSERT INTO user_oauth_identities (user_id, provider, provider_user_id, oauth_id)
+       VALUES (?, ?, ?, ?)`,
+    ).bind(1, provider, '12345', `${provider}:12345`).run();
+    const before = await env.DB.prepare('SELECT id, email, role FROM users ORDER BY id').all();
+
+    const start = await fetchWorker(`/auth/start?provider=${provider}`);
+    const state = new URL(start.headers.get('Location') ?? '').searchParams.get('state') ?? '';
+    const stateCookie = cookieValue(start.headers.get('Set-Cookie'), 'oauth_state');
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === 'https://github.com/login/oauth/access_token' || url === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ access_token: 'provider-token' });
+      }
+      if (url === 'https://api.github.com/user' || url === 'https://www.googleapis.com/oauth2/v3/userinfo') {
+        return Response.json({ id: 12345, sub: '12345', email: 'editor@example.com', name: 'Updated Profile' });
+      }
+      return new Response('Unexpected fetch', { status: 500 });
+    }));
+
+    const callback = await fetchWorker(`/auth/callback?code=abc&state=${encodeURIComponent(state)}`, {
+      headers: { Cookie: `oauth_state=${stateCookie}` },
+    });
+
+    expect(callback.headers.get('Location')).toBe('/admin');
+    expect(callback.headers.get('Set-Cookie')).toContain('access_token=');
+    expect((await env.DB.prepare('SELECT id, email, role FROM users ORDER BY id').all()).results).toEqual(before.results);
+    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Updated Profile' });
+    expect(await env.DB.prepare('SELECT user_id FROM sessions').first()).toEqual({ user_id: 1 });
+    expect(await env.DB.prepare('SELECT user_id FROM user_oauth_identities WHERE oauth_id = ?')
+      .bind(`${provider}:12345`).first()).toEqual({ user_id: 1 });
+  });
+
+  it('does not sign in an unlinked OAuth identity just because its email matches', async () => {
+    await env.DB.prepare("UPDATE users SET email = 'eventuai@example.com' WHERE id = 1").run();
+
+    const callback = await completeMockedOAuthLogin();
+
+    expect(callback.headers.get('Location')).toBe('/auth/login?error=identity_not_linked');
+    expect(callback.headers.get('Set-Cookie')).not.toContain('access_token=');
+    expect((await env.DB.prepare('SELECT id FROM sessions').all()).results).toHaveLength(0);
+    expect(await env.DB.prepare('SELECT user_id FROM user_oauth_identities WHERE oauth_id = ?')
+      .bind('eventuai:eventuai-user').first()).toBeNull();
   });
 
   it('treats login-page OAuth starts as sign-in even when old refresh cookies remain valid', async () => {
