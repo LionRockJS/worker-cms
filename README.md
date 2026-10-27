@@ -697,6 +697,35 @@ The `@lionrockjs/worker-cms-plugin` SDK wraps this as `PluginState`
 tenant. A missing key reads as `null`; an unreachable host throws, so "nothing
 stored" is never confused with "could not ask".
 
+### Plugin sequences
+
+Atomic counters for document numbers (`PO-2026-0001`). Plugin KV and
+`/__cms/state` cannot do this safely — two concurrent callers would read the
+same value — so the advance is one D1 upsert with `RETURNING`:
+
+```http
+GET  /__cms/sequences/po.2026       → { key, value }  (0 if never advanced)
+POST /__cms/sequences/po.2026/next  → { key, value }  (first call returns 1)
+```
+
+Counters are namespaced by the caller's manifest id like state, keys share the
+state-key shape, and a plugin may hold 1000. They are **not** dropped when a
+plugin is unregistered, so re-registering never reissues a number.
+
+### List filters on lect fields
+
+Besides `pointer_key`/`pointer_value(s)`, `GET /__cms/pages` filters on one
+top-level lect scalar:
+
+- `field_key=status&field_value=issued` or `field_values=issued,acknowledged`
+  (text comparison, up to 50 values);
+- `range_key=deadline&range_from=2026-01-01&range_to=2026-12-31` (inclusive;
+  numeric bounds compare as numbers, anything else as text).
+
+Keys match `^[a-z][a-z0-9_]{0,63}$`. These filters run after the `page_type`
+index narrows the rows, so they need no index of their own at ordinary
+volumes.
+
 ---
 
 ## Security model and release checklist

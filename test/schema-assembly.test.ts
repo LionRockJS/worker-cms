@@ -21,6 +21,7 @@ const FEATURE_MARKERS: Record<string, string[]> = {
     'CREATE TABLE IF NOT EXISTS plugins(',
     'CREATE TABLE IF NOT EXISTS plugin_asset_approvals(',
     'CREATE TABLE IF NOT EXISTS plugin_file_prefix_approvals(',
+    'CREATE TABLE IF NOT EXISTS plugin_sequences(',
   ],
   'plugin-pointer-indexes': ['idx_pages_pointer_event'],
   'jobs': ['CREATE TABLE IF NOT EXISTS admin_jobs('],

@@ -587,6 +587,49 @@ describe('Plugin API create / read / list / update / delete', () => {
     expect(body.pages.map((page) => page.name).sort()).toEqual(['陳家豪', '陳美玲']);
   });
 
+  it('filters a list by one or several values of a top-level lect field', async () => {
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Ada', lect: { status: 'issued', _pointers: { mail_list: '12' } } });
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Bob', lect: { status: 'acknowledged', _pointers: { mail_list: '12' } } });
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Cy', lect: { status: 'closed', _pointers: { mail_list: '12' } } });
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Di', lect: { status: 'issued', _pointers: { mail_list: '99' } } });
+
+    const one = await (await cmsApi('GET', '/__cms/pages?page_type=guest&field_key=status&field_value=issued')).json() as { total: number; pages: Array<{ name: string }> };
+    expect(one.pages.map((page) => page.name).sort()).toEqual(['Ada', 'Di']);
+
+    const several = await (await cmsApi('GET', '/__cms/pages?page_type=guest&pointer_key=mail_list&pointer_value=12&field_key=status&field_values=issued,acknowledged')).json() as { total: number; pages: Array<{ name: string }> };
+    expect(several.total).toBe(2);
+    expect(several.pages.map((page) => page.name).sort()).toEqual(['Ada', 'Bob']);
+  });
+
+  it('filters a list by an inclusive range on a top-level lect field', async () => {
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Early', lect: { deadline: '2026-01-15', total: 900 } });
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Mid', lect: { deadline: '2026-06-30', total: 5000 } });
+    await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Late', lect: { deadline: '2027-02-01', total: 12000 } });
+
+    const dates = await (await cmsApi('GET', '/__cms/pages?page_type=guest&range_key=deadline&range_from=2026-01-15&range_to=2026-12-31')).json() as { pages: Array<{ name: string }> };
+    expect(dates.pages.map((page) => page.name).sort()).toEqual(['Early', 'Mid']);
+
+    // Numeric bounds compare numerically: as text, '900' would sort above '5000'.
+    const amounts = await (await cmsApi('GET', '/__cms/pages?page_type=guest&range_key=total&range_from=1000')).json() as { pages: Array<{ name: string }> };
+    expect(amounts.pages.map((page) => page.name).sort()).toEqual(['Late', 'Mid']);
+  });
+
+  it('rejects malformed field and range filters', async () => {
+    for (const [query, error] of [
+      ['field_key=status', 'field_key_and_value_required_together'],
+      ['field_value=issued', 'field_key_and_value_required_together'],
+      ["field_key=status')%20OR%20('1&field_value=x", 'invalid_field_key'],
+      ['field_key=_pointers.mail_list&field_value=12', 'invalid_field_key'],
+      ['range_key=deadline', 'range_key_and_bound_required_together'],
+      ['range_from=2026-01-01', 'range_key_and_bound_required_together'],
+      ['range_key=a.b&range_to=1', 'invalid_range_key'],
+    ]) {
+      const res = await cmsApi('GET', `/__cms/pages?page_type=guest&${query}`);
+      expect(res.status, query).toBe(400);
+      expect(await res.json(), query).toMatchObject({ error });
+    }
+  });
+
   it('skips the COUNT(*) when count=0 (paginating callers fetch the total once)', async () => {
     await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Ada', lect: { _pointers: { mail_list: '12' } } });
     await cmsApi('POST', '/__cms/pages', { page_type: 'guest', name: 'Bob', lect: { _pointers: { mail_list: '12' } } });

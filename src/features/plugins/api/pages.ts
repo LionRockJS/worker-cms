@@ -69,6 +69,14 @@ const MAX_LIST_BATCH_QUERIES = 20;
 const MAX_LIST_BATCH_PAGES = 500;
 const PAGE_TYPE_TOKEN = /^[a-z][a-z0-9_-]{0,63}$/;
 const TAXONOMY_TOKEN = /^[a-z][a-z0-9_-]{0,63}$/;
+// A top-level lect scalar the list route may filter on. Interpolated into the
+// JSON path literal, so it must never admit quotes, dots or brackets.
+const LECT_FIELD_KEY = /^[a-z][a-z0-9_]{0,63}$/;
+const NUMERIC_BOUND = /^-?\d+(\.\d+)?$/;
+
+function rangeBound(value: string): string | number {
+  return NUMERIC_BOUND.test(value) ? Number(value) : value;
+}
 const LIST_BATCH_SORTS = {
   weight: 'weight',
   name: 'name COLLATE NOCASE',
@@ -159,6 +167,39 @@ pagesApiRoutes.get('/pages', async (c) => {
     return c.json({ error: 'too_many_pointer_values' }, 400);
   }
 
+  // Optional top-level scalar filter: field_key=status&field_value=issued
+  // or field_key=status&field_values=issued,acknowledged. Values compare as
+  // text, which is how editor and Plugin API writes store lect attributes.
+  const fieldKey = (c.req.query('field_key') ?? '').trim();
+  const fieldValue = (c.req.query('field_value') ?? '').trim();
+  const fieldValues = [
+    ...(fieldValue ? [fieldValue] : []),
+    ...stringList(c.req.query('field_values')),
+  ].filter((value, index, values) => values.indexOf(value) === index);
+  if ((fieldKey && fieldValues.length === 0) || (!fieldKey && fieldValues.length > 0)) {
+    return c.json({ error: 'field_key_and_value_required_together' }, 400);
+  }
+  if (fieldKey && !LECT_FIELD_KEY.test(fieldKey)) {
+    return c.json({ error: 'invalid_field_key' }, 400);
+  }
+  if (fieldValues.length > 50) {
+    return c.json({ error: 'too_many_field_values' }, 400);
+  }
+
+  // Optional inclusive range on one top-level scalar:
+  // range_key=deadline&range_from=2026-01-01&range_to=2026-12-31. Numeric
+  // bounds bind as numbers so they compare with numeric lect values; anything
+  // else (ISO dates) compares as text.
+  const rangeKey = (c.req.query('range_key') ?? '').trim();
+  const rangeFrom = (c.req.query('range_from') ?? '').trim();
+  const rangeTo = (c.req.query('range_to') ?? '').trim();
+  if ((rangeKey && !rangeFrom && !rangeTo) || (!rangeKey && (rangeFrom || rangeTo))) {
+    return c.json({ error: 'range_key_and_bound_required_together' }, 400);
+  }
+  if (rangeKey && !LECT_FIELD_KEY.test(rangeKey)) {
+    return c.json({ error: 'invalid_range_key' }, 400);
+  }
+
   // Optional direct lookup: ids=1,2&slugs=a,b matches pages whose id OR slug is
   // listed — bulk import target resolution without one GET per row.
   const idsParam = stringList(c.req.query('ids'));
@@ -203,6 +244,24 @@ pagesApiRoutes.get('/pages', async (c) => {
       where += ` AND json_extract(lect, ${pointerPath}) IN (${pointerValues.map(() => '?').join(',')})`;
     }
     params.push(...pointerValues);
+  }
+  if (fieldKey) {
+    // Inlined like the pointer path above, so a deployment that adds an
+    // expression index on this field gets it used.
+    const fieldPath = `'$.${fieldKey}'`;
+    where += ` AND json_extract(lect, ${fieldPath}) IN (SELECT value FROM json_each(?))`;
+    params.push(JSON.stringify(fieldValues));
+  }
+  if (rangeKey) {
+    const rangePath = `'$.${rangeKey}'`;
+    if (rangeFrom) {
+      where += ` AND json_extract(lect, ${rangePath}) >= ?`;
+      params.push(rangeBound(rangeFrom));
+    }
+    if (rangeTo) {
+      where += ` AND json_extract(lect, ${rangePath}) <= ?`;
+      params.push(rangeBound(rangeTo));
+    }
   }
   if (q) {
     const terms = chineseSearchVariants(q).map((variant) => `%${variant.replaceAll(' ', '%')}%`);

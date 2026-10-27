@@ -42,7 +42,7 @@ describe('flattened migration contract', () => {
       'locale_messages', 'locales', 'media_files', 'page_tags', 'page_types',
       'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_file_prefix_approvals',
       'plugin_identity_approvals', 'plugin_page_type_approvals',
-      'plugin_state', 'plugins', 'role_permissions', 'roles', 'sessions', 'settings',
+      'plugin_sequences', 'plugin_state', 'plugins', 'role_permissions', 'roles', 'sessions', 'settings',
       'shared_credit_ledger', 'shared_credits', 'tags', 'taxonomies',
       'trash_page_tags', 'trash_page_versions', 'trash_pages',
       'user_oauth_identities', 'users',

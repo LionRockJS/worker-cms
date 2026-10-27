@@ -106,6 +106,20 @@ CREATE TABLE IF NOT EXISTS plugin_state(
     PRIMARY KEY (plugin_id, key)
 );
 
+-- Host-owned atomic counters, advanced by the plugin Worker over
+-- /__cms/sequences (document numbers such as PO-2026-0001). Kept apart from
+-- plugin_state because a counter must be advanced in one statement, and
+-- deliberately NOT dropped when a plugin is unregistered: re-registering it
+-- must never hand out a number that was already issued.
+CREATE TABLE IF NOT EXISTS plugin_sequences(
+    plugin_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (plugin_id, key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_plugins_enabled ON plugins(enabled, sort_order);
 CREATE INDEX IF NOT EXISTS idx_plugin_asset_approvals_plugin ON plugin_asset_approvals(plugin_id);
 CREATE INDEX IF NOT EXISTS idx_plugin_page_type_approvals_plugin ON plugin_page_type_approvals(plugin_id);

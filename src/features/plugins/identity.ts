@@ -123,18 +123,20 @@ export async function releaseIdentity(db: D1DatabaseClient, rowId: number): Prom
   }
 }
 
-/** Moves host-held plugin state from a retired manifest id to the new one.
- *  `UPDATE OR REPLACE` keeps the (plugin_id, key) primary key intact when a
- *  key already exists under the new id. */
+/** Moves host-held plugin state and sequences from a retired manifest id to
+ *  the new one. `UPDATE OR REPLACE` keeps the (plugin_id, key) primary key
+ *  intact when a key already exists under the new id. */
 export async function movePluginState(db: D1DatabaseClient, fromId: string, toId: string): Promise<void> {
   if (!fromId || !toId || fromId === toId) return;
-  try {
-    await db
-      .prepare('UPDATE OR REPLACE plugin_state SET plugin_id = ? WHERE plugin_id = ?')
-      .bind(toId, fromId)
-      .run();
-  } catch (error) {
-    if (error instanceof Error && /no such table: plugin_state/i.test(error.message)) return;
-    throw error;
+  for (const table of ['plugin_state', 'plugin_sequences']) {
+    try {
+      await db
+        .prepare(`UPDATE OR REPLACE ${table} SET plugin_id = ? WHERE plugin_id = ?`)
+        .bind(toId, fromId)
+        .run();
+    } catch (error) {
+      if (error instanceof Error && new RegExp(`no such table: ${table}`, 'i').test(error.message)) continue;
+      throw error;
+    }
   }
 }
