@@ -23,7 +23,7 @@ import { flattenMessages } from '../../core/i18n';
 import type { AppContext } from '../../core/http/context';
 import type { Env, JWTPayload } from '../../types';
 import { allPluginPermissions, getPlugins, pluginAutoPublishesPageType, pluginById, pluginNav, PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
-import { pluginTenantId, setPluginAuthHeaders } from './proxy';
+import { pluginTenantId, pluginUserHeader, pluginUserPermissions, setPluginAuthHeaders } from './proxy';
 import { deliverHooks } from './hooks';
 import { pluginAdapter } from './publish-adapter';
 import { checkCreateLimits, createCandidate, effectiveLimitsForPlugin, limitViolationMessage } from './limits';
@@ -93,12 +93,7 @@ registerCoreExtensions({
     if (!plugin.secret) throw new Error(`Plugin ${job.pluginId} has no secret configured`);
 
     const headers = new Headers();
-    headers.set('x-cms-user', JSON.stringify({
-      id: job.user.sub,
-      email: job.user.email,
-      name: job.user.name,
-      role: job.user.role,
-    }));
+    headers.set('x-cms-user', pluginUserHeader(job.user, await pluginUserPermissions(env, plugin.manifest, job.user.role)));
     setPluginAuthHeaders(headers, plugin.secret, pluginTenantId(env));
     headers.set('x-cms-background-job', '1');
     if (job.contentType) headers.set('content-type', job.contentType);

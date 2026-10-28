@@ -2873,13 +2873,15 @@ describe('capability enforcement', () => {
       id: 'checkin',
       name: 'Check-in',
       version: '1.0.0',
-      permissions: [{ value: 'checkin:door', label: 'Check-in door access' }],
+      permissions: [{ value: 'checkin:door', label: 'Check-in door access' }, { value: 'checkin:admin', label: 'Check-in settings' }],
     };
+    const forwarded: Array<Record<string, unknown>> = [];
     __injectPluginFetcher(pluginUrl, {
-      fetch: async (input: RequestInfo | URL) => {
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
         const path = new URL(url).pathname;
         if (path === '/__plugin/manifest') return Response.json(manifest);
+        forwarded.push(JSON.parse(new Headers(init?.headers).get('x-cms-user') ?? '{}'));
         return new Response('ok', { headers: { 'content-type': 'text/plain' } });
       },
     } as unknown as Fetcher);
@@ -2905,6 +2907,12 @@ describe('capability enforcement', () => {
       headers: { Cookie: await authCookie('door-staff') },
     });
     expect(allowed.status).toBe(200);
+    // The plugin enforces its own duties from the permissions forwarded in
+    // x-cms-user: only this plugin's, never host ones such as plugin:access.
+    expect(forwarded.at(-1)).toMatchObject({ role: 'door-staff', permissions: ['checkin:door'] });
+
+    await fetchWorker('/admin/plugins/checkin/dashboard', { headers: { Cookie: await authCookie('admin') } });
+    expect(forwarded.at(-1)).toMatchObject({ role: 'admin', permissions: ['checkin:door', 'checkin:admin'] });
 
     // The granted permission is namespaced to the checkin plugin — it must not
     // unlock a different (unregistered, in this test) plugin id.

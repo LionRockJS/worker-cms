@@ -1,7 +1,9 @@
 import { timingSafeEqualStr } from '../../core/http/crypto';
 export { timingSafeEqualStr };
-import type { JWTPayload } from '../../types';
+import type { Env, JWTPayload, Permission } from '../../types';
+import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 import { sanitizePluginHtmlResponse } from './sanitize';
+import { pluginPermissions, type PluginManifest } from './types';
 
 const FORWARD_HEADERS = [
   'accept',
@@ -35,17 +37,31 @@ export function setPluginAuthHeaders(headers: Headers, pluginSecret: string, ten
   if (tenantId) headers.set('x-cms-tenant', tenantId);
 }
 
-/** Constant-time string equality for secret comparison. */
-export function buildPluginProxyHeaders(source: Headers, user: JWTPayload, pluginSecret: string, tenantId = ''): Headers {
+/**
+ * The signed-in user's permissions among those this plugin declares — what
+ * `x-cms-user.permissions` carries, so the plugin can enforce its own duties
+ * for roles granted them in the Roles admin. Admin holds every declared one;
+ * host permissions (plugin:access, content:*, …) are never forwarded.
+ */
+export async function pluginUserPermissions(env: Env, manifest: PluginManifest, role: string): Promise<string[]> {
+  const declared = pluginPermissions(manifest).map(({ value }) => value);
+  if (splitRoles(role).includes('admin')) return declared;
+  const granted = effectivePermissions(await resolveRolePermissions(env), role);
+  return declared.filter((value) => granted.has(value as Permission));
+}
+
+/** The `x-cms-user` header value for a plugin request on behalf of `user`. */
+export function pluginUserHeader(user: { sub: string | number; email: string; name: string; role: string }, permissions: string[]): string {
+  return JSON.stringify({ id: user.sub, email: user.email, name: user.name, role: user.role, permissions });
+}
+
+export function buildPluginProxyHeaders(source: Headers, user: JWTPayload, pluginSecret: string, tenantId = '', permissions: string[] = []): Headers {
   const headers = new Headers();
   for (const name of FORWARD_HEADERS) {
     const value = source.get(name);
     if (value) headers.set(name, value);
   }
-  headers.set(
-    'x-cms-user',
-    JSON.stringify({ id: user.sub, email: user.email, name: user.name, role: user.role }),
-  );
+  headers.set('x-cms-user', pluginUserHeader(user, permissions));
   setPluginAuthHeaders(headers, pluginSecret, tenantId);
   return headers;
 }

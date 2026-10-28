@@ -29,7 +29,7 @@ import { pluginClientView } from '../../core/render/liquid';
 import { buildBaseProps } from '../../core/render/chrome';
 import { viewsFor } from './views';
 import { sanitizePluginHtmlFragment } from './sanitize';
-import { isPluginClientViewResponse, pluginTenantId, readPluginClientViewData, setPluginAuthHeaders } from './proxy';
+import { isPluginClientViewResponse, pluginTenantId, pluginUserHeader, pluginUserPermissions, readPluginClientViewData, setPluginAuthHeaders } from './proxy';
 import { listApprovals } from './assets';
 import { pluginViewRevision, pluginWorkerRevision } from './revision';
 import { resolveUiLocale } from '../../core/i18n';
@@ -115,7 +115,7 @@ async function dispatchPluginView(
   const localizedContext = { ...context, uiLocale: uiLocale.code, uiDirection: uiLocale.direction };
   const headers = new Headers({
     'content-type': 'application/json',
-    'x-cms-user': JSON.stringify({ id: user.sub, email: user.email, name: user.name, role: user.role }),
+    'x-cms-user': pluginUserHeader(user, await pluginUserPermissions(c.env, plugin.manifest, user.role)),
   });
   setPluginAuthHeaders(headers, plugin.secret, pluginTenantId(c.env));
 
