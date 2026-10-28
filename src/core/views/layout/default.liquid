@@ -516,7 +516,7 @@
     <aside id="admin-mobile-menu"
            class="fixed inset-0 z-50 hidden max-h-screen min-h-screen flex-col overflow-hidden bg-gray-900 text-white shadow-xl md:fixed md:inset-y-0 md:left-0 md:flex md:min-h-0 md:w-64"
            data-admin-sidebar>
-      <div class="flex items-center justify-between gap-3 border-b border-gray-700 px-4 py-3 md:px-6 md:py-5">
+      <div class="flex shrink-0 items-center justify-between gap-3 border-b border-gray-700 px-4 py-3 md:px-6 md:py-5">
         <a href="/admin"
            aria-label="{{ "shell.go_to_dashboard" | t }}"
            class="flex min-w-0 items-center gap-3"
@@ -625,8 +625,8 @@
         </form>
         </div>
 
-        <div class="flex shrink-0 items-center gap-3 mb-3" data-sidebar-footer-controls>
-          <form method="post" action="{{ uiLocaleAction }}" class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-gray-700 px-2.5 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+        <div class="flex min-w-0 flex-wrap items-center gap-3 mb-3" data-sidebar-footer-controls>
+          <form method="post" action="{{ uiLocaleAction }}" class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-gray-700 px-2.5 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
                 data-sidebar-locale
                 data-sidebar-tooltip
                 data-sidebar-label="{{ "profile.interface_language" | t }}">

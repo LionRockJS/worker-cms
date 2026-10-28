@@ -274,6 +274,7 @@ th,
 }
 
 [data-admin-sidebar-footer] {
+  flex-shrink: 0;
   padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 }
 
@@ -287,8 +288,6 @@ th,
 
 @media (min-width: 48rem) {
   [data-admin-sidebar] {
-    height: 100vh;
-    max-height: 100vh;
     min-height: 0;
     transition: width 180ms ease;
   }
