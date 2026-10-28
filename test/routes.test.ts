@@ -3170,6 +3170,69 @@ describe('permission-aware admin UI', () => {
     ]);
   });
 
+  it('renames sidebar links per interface language and restores defaults when cleared', async () => {
+    const cookie = await authCookie();
+    const save = (fields: Record<string, string>) => fetchWorker('/admin/settings/system', {
+      method: 'POST',
+      body: new URLSearchParams([['visible_items', 'pages'], ...Object.entries(fields)]),
+      headers: { Cookie: cookie },
+    });
+    expect((await save({
+      sidebar_label_pages_en: '  Articles & News  ',
+      'sidebar_label_pages_zh-hant': '文章',
+      sidebar_label_settings_en: 'Administration',
+      sidebar_label_system_en: 'Preferences',
+    })).status).toBe(302);
+
+    const english = renderPayload(await (await fetchWorker('/admin/pages/list', {
+      headers: { Cookie: `${cookie}; cms_ui_locale=en` },
+    })).text()).layoutData;
+    expect(english.sidebarNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Articles & News', href: '/admin/pages/list' }),
+      expect.objectContaining({ label: 'Administration', isSettingsGroup: true }),
+    ]));
+    expect((english.sidebarNav as Array<{ href: string; translationKey?: string }>).find((item) => item.href === '/admin/pages/list')?.translationKey).toBeUndefined();
+    expect(english.sidebarSettingsNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Preferences', href: '/admin/settings/system' }),
+    ]));
+
+    const chinese = renderPayload(await (await fetchWorker('/admin/pages/list', {
+      headers: { Cookie: `${cookie}; cms_ui_locale=zh-hant` },
+    })).text()).layoutData;
+    expect(chinese.sidebarNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '文章', href: '/admin/pages/list' }),
+      expect.objectContaining({ translationKey: 'nav.settings', isSettingsGroup: true }),
+    ]));
+    const fallback = renderPayload(await (await fetchWorker('/admin/pages/list', {
+      headers: { Cookie: `${cookie}; cms_ui_locale=zh-hans` },
+    })).text()).layoutData;
+    expect(fallback.sidebarNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Pages', translationKey: 'nav.pages' }),
+    ]));
+
+    // An older form that omits labels must preserve them.
+    await save({ app_name: 'Control Room' });
+    const data = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: cookie } })).text());
+    expect(data.mainSidebarOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        weightName: 'weight_pages',
+        labelFields: expect.arrayContaining([
+          expect.objectContaining({ name: 'sidebar_label_pages_en', value: 'Articles & News' }),
+          expect.objectContaining({ name: 'sidebar_label_pages_zh-hant', value: '文章' }),
+        ]),
+      }),
+    ]));
+
+    await save({ sidebar_label_pages_en: '   ' });
+    const reset = renderPayload(await (await fetchWorker('/admin/pages/list', { headers: { Cookie: `${cookie}; cms_ui_locale=en` } })).text()).layoutData;
+    expect(reset.sidebarNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Pages', translationKey: 'nav.pages' }),
+    ]));
+    const saved = await env.DB.prepare('SELECT value FROM settings WHERE key = ?')
+      .bind('admin.sidebar_menu.hidden_items').first<{ value: string }>();
+    expect(JSON.parse(saved!.value).labels.pages).toEqual({ 'zh-hant': '文章' });
+  });
+
   it('applies the saved primary colour and interface font to every admin document', async () => {
     const saved = await fetchWorker('/admin/settings/system', {
       method: 'POST',

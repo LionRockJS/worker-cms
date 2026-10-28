@@ -215,7 +215,10 @@
       "tags_description": "Tag terms shown in the main sidebar.",
       "taxonomies_description": "Taxonomy settings link.",
       "trash_description": "Deleted content review link.",
-      "users_description": "User and credit management link for permitted roles."
+      "users_description": "User and credit management link for permitted roles.",
+      "labels": "Labels by language",
+      "labels_help": "Shown in the selected interface language. Leave blank to use the default label.",
+      "default_label": "Default label"
     },
     "regional": {
       "timezone": "System timezone",

@@ -34,6 +34,21 @@
               {% elsif option.description != blank %}
                 <p class="mt-1 truncate text-gray-500">{{ option.description }}</p>
               {% endif %}
+              <details class="mt-2">
+                <summary class="cursor-pointer text-xs font-medium text-indigo-600">{{ "settings.menu.labels" | t }}</summary>
+                <p class="mt-2 text-xs text-gray-500">{{ "settings.menu.labels_help" | t }}</p>
+                <div class="mt-2 space-y-2">
+                  {% for field in option.labelFields %}
+                    <label class="block">
+                      <span class="mb-1 block text-xs text-gray-500">{{ field.label }}</span>
+                      <input type="text" name="{{ field.name }}" value="{{ field.value }}"
+                             lang="{{ field.code }}" dir="{{ field.direction }}" maxlength="120"
+                             placeholder="{{ "settings.menu.default_label" | t }}"
+                             class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
             </td>
             <td class="px-3 py-3">
               {% if option.visibleName != blank %}

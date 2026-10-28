@@ -215,7 +215,10 @@
       "tags_description": "顯示於主側邊欄的索引詞條。",
       "taxonomies_description": "分類法設定連結。",
       "trash_description": "已刪除內容檢視連結。",
-      "users_description": "供獲授權角色使用的使用者及點數管理連結。"
+      "users_description": "供獲授權角色使用的使用者及點數管理連結。",
+      "labels": "各語言標籤",
+      "labels_help": "依所選介面語言顯示。留空即可使用預設標籤。",
+      "default_label": "預設標籤"
     },
     "regional": {
       "timezone": "系統時區",

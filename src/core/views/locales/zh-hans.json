@@ -215,7 +215,10 @@
       "tags_description": "显示在主侧边栏中的索引词条。",
       "taxonomies_description": "分类法设置链接。",
       "trash_description": "已删除内容查看链接。",
-      "users_description": "供获授权角色使用的用户和点数管理链接。"
+      "users_description": "供获授权角色使用的用户和点数管理链接。",
+      "labels": "各语言标签",
+      "labels_help": "依所选界面语言显示。留空即可使用默认标签。",
+      "default_label": "默认标签"
     },
     "regional": {
       "timezone": "系统时区",

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { requirePermission } from '../../core/auth/guards';
 import { coreExtensions } from '../../core/extensions';
+import { localeRegistry } from '../../core/i18n';
 import { featureInstalled } from '../../features';
 import { systemSettingsPage } from '../../core/templates/settings';
 import type { Env, Variables } from '../../types';
@@ -43,13 +44,14 @@ settingsRoutes.get('/settings/menu', (c) => c.redirect('/admin/settings/system')
 // Shared row comparator: group by plugin, then by human label, then key.
 settingsRoutes.get('/settings/system', async (c) => {
   const fallbackName = c.env.SITE_TITLE ?? '0xCMS';
-  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, showCredits] = await Promise.all([
+  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, showCredits, { uiLocales }] = await Promise.all([
     loadSidebarChromeSettings(c.env),
     loadAppBrandingSettings(c.env, fallbackName),
     loadAdminHomeSettings(c.env),
     coreExtensions().sidebarNav?.(c.env) ?? [],
     loadSystemTimezone(c.env),
     loadShowCredits(c.env),
+    localeRegistry(c.env),
   ]);
   // An entry owned by a feature that is not installed has nothing to configure
   // — the chrome would hide it whatever this screen saved.
@@ -84,6 +86,13 @@ settingsRoutes.get('/settings/system', async (c) => {
       index: SIDEBAR_MENU_ITEMS.length + index,
     };
   });
+  const labelFields = (key: string) => uiLocales.map((locale) => ({
+    name: `sidebar_label_${encodeURIComponent(key)}_${locale.code}`,
+    label: locale.label,
+    code: locale.code,
+    direction: locale.direction,
+    value: sidebarSettings.labels[key]?.[locale.code] ?? '',
+  }));
   const coreSidebarOption = (option: typeof options[number]) => ({
     label: '',
     labelKey: option.labelKey,
@@ -93,6 +102,7 @@ settingsRoutes.get('/settings/system', async (c) => {
     visibleValue: option.value,
     checked: option.checked,
     locked: option.locked,
+    labelFields: labelFields(option.value),
     weightName: `weight_${option.value}`,
     weight: option.weight,
     icon: option.icon,
@@ -108,6 +118,7 @@ settingsRoutes.get('/settings/system', async (c) => {
     visibleValue: option.key,
     checked: option.checked,
     locked: false,
+    labelFields: labelFields(option.key),
     weightName: `plugin_weight_${option.formKey}`,
     weight: option.weight,
     icon: option.icon,
@@ -127,6 +138,7 @@ settingsRoutes.get('/settings/system', async (c) => {
       visibleValue: '',
       checked: true,
       locked: true,
+      labelFields: labelFields('settings'),
       weightName: 'settings_group_weight',
       weight: sidebarSettings.settingsGroupWeight,
       icon: 'settings',
@@ -208,6 +220,18 @@ settingsRoutes.post('/settings/system', async (c) => {
     const key = pluginSidebarKey(item);
     return [key, form.get(`plugin_icon_${encodeURIComponent(key)}`)];
   }));
+  const { uiLocales } = await localeRegistry(c.env);
+  const labels = { ...saved.labels };
+  const labelKeys = [...installedMenuItems(featureInstalled).map((item) => item.key), 'settings', ...pluginItems.map(pluginSidebarKey)];
+  for (const key of labelKeys) {
+    const translations = { ...labels[key] };
+    for (const locale of uiLocales) {
+      const value = form.get(`sidebar_label_${encodeURIComponent(key)}_${locale.code}`);
+      // Missing fields belong to older forms or disabled languages/features.
+      if (typeof value === 'string') translations[locale.code] = value;
+    }
+    labels[key] = translations;
+  }
   const pluginVisibleKeys = form.getAll('plugin_visible_items').map(String);
   await Promise.all([
     saveAppBrandingSettings(c.env, {
@@ -225,6 +249,7 @@ settingsRoutes.post('/settings/system', async (c) => {
       ? [saveShowCredits(c.env, form.get('show_credits') === 'true')]
       : []),
     saveSidebarMenuSettings(c.env, visibleKeys, weights, {
+      labels,
       settingsGroupWeight: form.get('settings_group_weight'),
       pluginWeights,
       pluginIcons,

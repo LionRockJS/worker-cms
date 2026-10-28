@@ -213,7 +213,10 @@ export async function saveShowCredits(env: Env, show: boolean): Promise<void> {
   await saveSetting(env, SHOW_CREDITS_SETTING_KEY, String(show));
 }
 
+export type SidebarLabels = Record<string, Record<string, string>>;
+
 export interface SidebarChromeSettings {
+  labels: SidebarLabels;
   items: SidebarMenuSettings;
   settingsGroupWeight: number;
   pluginWeights: Record<string, number>;
@@ -308,8 +311,9 @@ export async function loadSidebarChromeSettings(env: Env): Promise<SidebarChrome
   let pluginWeights: Record<string, number> = {};
   let pluginIcons: Record<string, AppIcon> = {};
   let hiddenPluginKeys = new Set<string>();
+  let labels: SidebarLabels = {};
   const raw = await getSetting(env, SIDEBAR_MENU_SETTING_KEY);
-  if (!raw) return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys };
+  if (!raw) return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels };
 
   try {
     const saved = JSON.parse(raw);
@@ -332,6 +336,7 @@ export async function loadSidebarChromeSettings(env: Env): Promise<SidebarChrome
       }
     }
     if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      labels = normalizeSidebarLabels(saved.labels);
       settingsGroupWeight = finiteWeight(saved.groupWeights?.settings, DEFAULT_SETTINGS_GROUP_WEIGHT);
       if (saved.pluginWeights && typeof saved.pluginWeights === 'object') {
         pluginWeights = Object.fromEntries(Object.entries(saved.pluginWeights)
@@ -347,18 +352,19 @@ export async function loadSidebarChromeSettings(env: Env): Promise<SidebarChrome
     }
     settings.system.visible = true;
   } catch (error) {
-    return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys };
+    return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels };
   }
 
-  return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys };
+  return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels };
 }
 
 export async function saveSidebarMenuSettings(
   env: Env,
   visibleKeys: string[],
   weights: Record<string, unknown> = {},
-  options: { settingsGroupWeight?: unknown; pluginWeights?: Record<string, unknown>; pluginIcons?: Record<string, unknown>; pluginVisibleKeys?: string[] } = {},
+  options: { labels?: SidebarLabels; settingsGroupWeight?: unknown; pluginWeights?: Record<string, unknown>; pluginIcons?: Record<string, unknown>; pluginVisibleKeys?: string[] } = {},
 ): Promise<SidebarChromeSettings> {
+  const labels = normalizeSidebarLabels(options.labels ?? (await loadSidebarChromeSettings(env)).labels);
   const visible = new Set(visibleKeys.map(legacySidebarMenuKey).filter((key): key is SidebarMenuItemKey => !!key));
   visible.add('system');
   const settings = defaultSidebarMenuSettings();
@@ -399,8 +405,22 @@ export async function saveSidebarMenuSettings(
     pluginWeights,
     pluginIcons,
     hiddenPlugins: [...hiddenPluginKeys],
+    labels,
   }));
-  return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys };
+  return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels };
+}
+
+function normalizeSidebarLabels(value: unknown): SidebarLabels {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, translations]) => {
+    if (!translations || typeof translations !== 'object' || Array.isArray(translations)) return [];
+    const labels = Object.fromEntries(Object.entries(translations).flatMap(([code, label]) => {
+      if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(code) || typeof label !== 'string') return [];
+      const text = label.trim().slice(0, 120);
+      return text ? [[code, text]] : [];
+    }));
+    return Object.keys(labels).length ? [[key, labels]] : [];
+  }));
 }
 
 export function pluginSidebarKey(item: { pluginId: string; href: string; group?: 'settings' }): string {

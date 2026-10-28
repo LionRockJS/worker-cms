@@ -26,6 +26,7 @@ export interface SystemSettingsPluginOption {
 }
 
 export interface SystemSettingsSidebarOption {
+  labelFields: Array<{ name: string; label: string; code: string; direction: string; value: string }>;
   label: string;
   labelKey: string;
   description: string;

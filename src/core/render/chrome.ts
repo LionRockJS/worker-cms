@@ -60,6 +60,10 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   ]);
   const sidebarSettings = await loadSidebarChromeSettings(c.env);
   const menuSettings = sidebarSettings.items;
+  const sidebarLabel = (key: string, label: string, translationKey?: string) => {
+    const customLabel = sidebarSettings.labels[key]?.[uiLocale.code];
+    return customLabel ? { label: customLabel, translationKey: undefined } : { label, translationKey };
+  };
   const isAdmin = userRoles.includes('admin');
   const visible = navItems
     .filter((item) => !item.roles?.length || item.roles.some((role) => userRoles.includes(role)))
@@ -111,8 +115,9 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     .filter((entry) => entry.item.group === 'settings')
     .map((entry) => ({
       item: {
-        label: entry.item.key === 'users' && !contributed.showCredits ? 'Users' : entry.item.label,
-        translationKey: entry.item.key === 'users' && !contributed.showCredits ? 'nav.users_without_credits' : `nav.${entry.item.key}`,
+        ...sidebarLabel(entry.item.key,
+          entry.item.key === 'users' && !contributed.showCredits ? 'Users' : entry.item.label,
+          entry.item.key === 'users' && !contributed.showCredits ? 'nav.users_without_credits' : `nav.${entry.item.key}`),
         href: entry.item.href,
         icon: entry.item.icon,
       },
@@ -123,8 +128,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     .filter((entry) => entry.item.group === 'main')
     .map((entry) => ({
       item: {
-        label: entry.item.label,
-        translationKey: `nav.${entry.item.key}`,
+        ...sidebarLabel(entry.item.key, entry.item.label, `nav.${entry.item.key}`),
         href: entry.item.href,
         icon: entry.item.icon,
       },
@@ -136,8 +140,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     if (sidebarSettings.hiddenPluginKeys.has(key)) return;
     const entry = {
       item: {
-        label: item.label,
-        translationKey: pluginTranslationKey(item),
+        ...sidebarLabel(key, item.label, pluginTranslationKey(item)),
         href: item.href,
         icon: sidebarSettings.pluginIcons[key] ?? 'beaker',
       },
@@ -153,8 +156,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   if (unorderedSidebarSettingsNav.length > 0) {
     sidebarNavEntries.push({
       item: {
-        label: 'Settings',
-        translationKey: 'nav.settings',
+        ...sidebarLabel('settings', 'Settings', 'nav.settings'),
         href: '',
         icon: 'settings',
         isSettingsGroup: true,
