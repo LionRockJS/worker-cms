@@ -25,19 +25,18 @@
     "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check"
   },
   "dependencies": {
-    "hono": "^4.12.34",
-    "yjs": "^13.6.32"
+    "hono": "^4.13.14",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.20.1",
-    "@cloudflare/workers-types": "^5.20260801.1",
+    "@cloudflare/vitest-plugin": "^1.4.9",
+    "@cloudflare/workers-types": "^5.20261028.1",
     "@tailwindcss/cli": "^4.3.3",
-    "esbuild": "^0.28.1",
-    "marked": "^18.0.7",
+    "esbuild": "^0.28.2",
+    "marked": "^18.1.2",
     "tailwindcss": "^4.3.3",
     "turndown": "^7.2.4",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10",
-    "wrangler": "^4.118.0"
+    "wrangler": "^4.154.0"
   }
 }
