@@ -81,6 +81,11 @@
           <h3 class="text-lg font-bold text-gray-900">{{ "view_strings.sections_plugin_page_types.delegated_access" | t }}</h3>
           <p class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.access_requested_through_readtypes_and_writetypes_approving_a_scope_lets" | t }}</p>
         </div>
+        {% if hasPendingApprovals %}
+          <form method="post" action="{{ approveAllAction }}" class="shrink-0">
+            <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "view_strings.sections_plugin_page_types.approve_all" | t }}</button>
+          </form>
+        {% endif %}
       </div>
       <div class="overflow-x-auto w-full">
         <table class="w-full min-w-[680px] text-left text-sm">

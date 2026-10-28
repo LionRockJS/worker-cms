@@ -434,11 +434,13 @@ export async function pluginPageTypesPage(views: Fetcher, opts: BaseTemplateProp
   flash?: string;
 }): Promise<string> {
   const { pluginLabel, unreachable, definedPageTypes, definedTaxonomies, pageTypes, flash } = opts;
-  const flashMessageKey = flash === 'approved'
-    ? 'view_strings.sections_plugin_page_types.flash_approved'
-    : flash === 'revoked'
-      ? 'view_strings.sections_plugin_page_types.flash_revoked'
-      : '';
+  const flashMessageKey = flash === 'approved-all'
+    ? 'view_strings.sections_plugin_page_types.flash_approved_all'
+    : flash === 'approved'
+      ? 'view_strings.sections_plugin_page_types.flash_approved'
+      : flash === 'revoked'
+        ? 'view_strings.sections_plugin_page_types.flash_revoked'
+        : '';
 
   const body = await renderView(views, '/templates/plugin-page-types.json', {
     pluginLabel,
@@ -448,6 +450,8 @@ export async function pluginPageTypesPage(views: Fetcher, opts: BaseTemplateProp
     hasDefinedTaxonomies: definedTaxonomies.length > 0,
     definedTaxonomies,
     hasPageTypes: pageTypes.length > 0,
+    hasPendingApprovals: pageTypes.some((row) => (row.readDeclared && !row.readApproved) || (row.writeDeclared && !row.writeApproved)),
+    approveAllAction: `/admin/plugins-manage/${opts.pluginId}/page-types/approve-all`,
     pageTypes: pageTypes.map((row) => ({
       ...row,
       pageTypeLabelKey: row.pageType === '*' ? 'view_strings.sections_plugin_page_types.all_page_types' : '',

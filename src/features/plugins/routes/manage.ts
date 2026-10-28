@@ -30,6 +30,7 @@ import {
 import { approveAsset, computeIntegrity, getAssetApproval, inspectAssetHealth, listApprovals, revokeAllAssets, revokeAsset } from '../assets';
 import {
   approvePageTypeAccess,
+  approvePageTypeAccessBatch,
   getPageTypeApproval,
   isPageTypeWildcard,
   listPageTypeApprovals,
@@ -1035,6 +1036,27 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
     pageTypes,
     flash: c.req.query('flash') ?? undefined,
   });
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve-all', async (c) => {
+  const id = Number(c.req.param('id'));
+  const found = await resolvedPluginFor(c.env, id);
+  if (!found?.resolved) return c.notFound();
+  const manifest = found.resolved.requestedManifest ?? found.resolved.manifest;
+  const scopes: Array<{ pageType: string; access: PluginPageTypeAccess }> = [
+    ...new Set(manifest.contentTypes?.readTypes ?? []),
+  ].map((pageType) => ({ pageType, access: 'read' }));
+  for (const pageType of new Set([
+    ...(manifest.contentTypes?.writeTypes ?? []),
+    ...Object.keys(manifest.contentTypes?.blueprint ?? {}),
+  ])) {
+    scopes.push({ pageType, access: 'write' });
+  }
+
+  await approvePageTypeAccessBatch(c.env.DB, manifest.id, scopes, c.get('user').email);
+  invalidate();
+  logAudit(c, 'plugin.page_type.approve_all', 'plugin', manifest.id, { scopes });
+  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=approved-all`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve', async (c) => {

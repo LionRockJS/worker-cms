@@ -86,6 +86,24 @@ export async function revokePageTypeAccess(
     .run();
 }
 
+/** Approve declared scopes together, preserving existing approval attribution. */
+export async function approvePageTypeAccessBatch(
+  db: D1DatabaseClient,
+  pluginId: string,
+  scopes: Array<{ pageType: string; access: PluginPageTypeAccess }>,
+  approvedBy: string,
+): Promise<void> {
+  for (let offset = 0; offset < scopes.length; offset += 100) {
+    await db.batch(scopes.slice(offset, offset + 100).map(({ pageType, access }) => db
+      .prepare(
+        `INSERT INTO plugin_page_type_approvals (plugin_id, page_type, access, approved_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT(plugin_id, page_type, access) DO NOTHING`,
+      )
+      .bind(pluginId, pageType, access, approvedBy)));
+  }
+}
+
 /**
  * Drops every page-type approval a plugin holds — for unregistering it. Like
  * asset approvals these are keyed by manifest id, so deleting the registry row

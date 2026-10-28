@@ -2,6 +2,7 @@ import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveCmsConfig, clearConfigCache } from '../src/core/db/content-config';
 import { clearManifestCache, getPlugins, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
+import { __injectPluginFetcher as injectUnapprovedPluginFetcher } from '../src/features/plugins/registry';
 import { deliverHook } from '../src/features/plugins/hooks';
 import { viewsFor } from '../src/features/plugins/views';
 import { cmsConfig } from '../src/cms-config';
@@ -1616,6 +1617,73 @@ describe('plugin admin proxy', () => {
       'SELECT approved_by FROM plugin_page_type_approvals WHERE plugin_id = ? AND page_type = ? AND access = ?',
     ).bind('checkin', 'guest', 'write').first<{ approved_by: string }>();
     expect(approved?.approved_by).toBe('admin@example.com');
+  });
+
+  it('approves all currently declared page-type scopes without changing existing approvals', async () => {
+    const url = 'https://plugin-page-type-bulk-approvals.local';
+    await env.DB.prepare('INSERT INTO plugins (id, label, url, enabled) VALUES (?, ?, ?, 1)')
+      .bind(44, 'Check-in', url).run();
+    const plugin = makePlugin({
+      id: 'checkin', name: 'Check-in', version: '1.0.0',
+      contentTypes: {
+        blueprint: { checkin_session: ['event'] },
+        readTypes: ['event', '*'],
+        writeTypes: ['guest', 'checkin_session'],
+      },
+    });
+    injectUnapprovedPluginFetcher(url, plugin.fetcher);
+    await env.DB.prepare(
+      `INSERT INTO plugin_page_type_approvals (plugin_id, page_type, access, approved_by, created_at, updated_at)
+       VALUES ('checkin', 'guest', 'write', 'original@example.com', '2026-01-01', '2026-01-01')`,
+    ).run();
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJWT({
+      sub: '1', email: 'admin@example.com', name: 'Admin User', role: 'admin',
+      type: 'access', exp: now + 900, iat: now,
+    }, env.JWT_SECRET);
+    const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
+    const pageUrl = 'http://localhost/admin/plugins-manage/44/page-types';
+    const before = bodyData(await (await worker.fetch(new Request(pageUrl, { headers }))).text());
+    expect(before.hasPendingApprovals).toBe(true);
+    expect(before.approveAllAction).toBe('/admin/plugins-manage/44/page-types/approve-all');
+
+    const moderatorToken = await signJWT({
+      sub: '2', email: 'mod@example.com', name: 'Mod', role: 'moderator',
+      type: 'access', exp: now + 900, iat: now,
+    }, env.JWT_SECRET);
+    const denied = await worker.fetch(new Request(`${pageUrl}/approve-all`, {
+      method: 'POST', headers: { ...headers, Cookie: `access_token=${moderatorToken}` },
+    }));
+    expect(denied.status).toBe(403);
+    expect((await env.DB.prepare('SELECT * FROM plugin_page_type_approvals').all()).results).toHaveLength(1);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await worker.fetch(new Request(`${pageUrl}/approve-all`, {
+        method: 'POST',
+        headers,
+        // Submitted scopes cannot expand the manifest's declarations.
+        body: new URLSearchParams({ page_type: 'undeclared', access: 'write' }),
+        redirect: 'manual',
+      }));
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('/admin/plugins-manage/44/page-types?flash=approved-all');
+      const { results } = await env.DB.prepare(
+        'SELECT page_type, access, approved_by FROM plugin_page_type_approvals WHERE plugin_id = ? ORDER BY page_type, access',
+      ).bind('checkin').all();
+      expect(results).toEqual([
+        { page_type: '*', access: 'read', approved_by: 'admin@example.com' },
+        { page_type: 'checkin_session', access: 'write', approved_by: 'admin@example.com' },
+        { page_type: 'event', access: 'read', approved_by: 'admin@example.com' },
+        { page_type: 'guest', access: 'write', approved_by: 'original@example.com' },
+      ]);
+    }
+    const after = bodyData(await (await worker.fetch(new Request(`${pageUrl}?flash=approved-all`, { headers }))).text());
+    expect(after.hasPendingApprovals).toBe(false);
+    expect(after.flashMessageKey).toBe('view_strings.sections_plugin_page_types.flash_approved_all');
+    const original = await env.DB.prepare(
+      "SELECT updated_at FROM plugin_page_type_approvals WHERE plugin_id = 'checkin' AND page_type = 'guest' AND access = 'write'",
+    ).first<{ updated_at: string }>();
+    expect(original?.updated_at).toBe('2026-01-01');
   });
 
   it('manages host file-prefix approvals and exposes them on the plugin list', async () => {
