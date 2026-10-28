@@ -106,6 +106,9 @@ function isViewerSafeAdminRoute(path: string): boolean {
     || path === '/admin/'
     || path === '/admin/profile'
     || path.startsWith('/admin/profile/')
+    // Every admin page loads its UI translations before rendering, including
+    // the viewer landing page and profile. This grants no locale-edit access.
+    || /^\/admin\/i18n\/catalog\/[^/]+$/.test(path)
     // Client-rendered safe pages still need their authenticated view source.
     // This route only serves bundled JSON/Liquid assets; content and mutation
     // routes remain protected by the editor/permission guards.

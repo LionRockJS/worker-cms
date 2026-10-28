@@ -2727,6 +2727,25 @@ describe('capability enforcement', () => {
     expect(payload.bodyView?.viewPath).toBe('/templates/viewer-home.json');
     expect(payload.layoutData.showSidebarPages).toBe(false);
 
+    // Rendering starts by loading translations; a blocked catalog prevents
+    // even the permission message and self-service profile from rendering.
+    const catalog = await fetchWorker(payload.catalogHref!, {
+      headers: { Cookie: cookie, Accept: 'application/json' },
+    });
+    expect(catalog.status).toBe(200);
+    expect(await catalog.json()).toMatchObject({
+      'view_strings.viewer_home.heading': 'Permission required',
+      'view_strings.viewer_home.message': 'You are signed in, but your account does not have permission to access CMS content. Contact an administrator to request access.',
+    });
+    const anonymousCatalog = await fetchWorker(payload.catalogHref!, {
+      headers: { Accept: 'application/json' },
+    });
+    expect(anonymousCatalog.status).toBe(401);
+    for (const path of ['/admin/settings/languages', '/admin/settings/translations']) {
+      const settings = await fetchWorker(path, { headers: { Cookie: cookie, Accept: 'application/json' } });
+      expect(settings.status).toBe(403);
+    }
+
     // The viewer shell is client-rendered after the authenticated HTML
     // response. Its bundled view files must be readable by the same viewer.
     const viewerTemplate = await fetchWorker('/admin/views/templates/viewer-home.json', {
