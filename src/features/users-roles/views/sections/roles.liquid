@@ -13,7 +13,7 @@
         {% if hasRoles %}
           {% for role in roles %}
             <tr class="hover:bg-gray-50">
-              <td class="px-6 py-3 text-sm font-medium text-gray-900">{% if role.labelKey %}{{ role.labelKey | t }}{% else %}{{ role.label }}{% endif %} <span class="text-gray-400 font-mono text-xs">{{ role.name }}</span></td>
+              <td class="px-6 py-3 text-sm font-medium text-gray-900">{% if role.labelKey != blank %}{{ role.labelKey | t }}{% else %}{{ role.label }}{% endif %} <span class="text-gray-400 font-mono text-xs">{{ role.name }}</span></td>
               <td class="px-6 py-3 text-sm">
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{{ role.badgeKey | t }}</span>
               </td>

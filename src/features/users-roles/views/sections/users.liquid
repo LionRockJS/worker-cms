@@ -32,7 +32,7 @@
                 </div>
               </td>
               <td class="px-6 py-3 text-sm text-gray-700">
-                {% for role in user.roles %}{% if role.labelKey %}{{ role.labelKey | t }}{% else %}{{ role.label }}{% endif %}{% unless forloop.last %}, {% endunless %}{% endfor %}
+                {% for role in user.roles %}{% if role.labelKey != blank %}{{ role.labelKey | t }}{% else %}{{ role.label }}{% endif %}{% unless forloop.last %}, {% endunless %}{% endfor %}
               </td>
               <td class="px-6 py-3 text-right">
                 <div class="flex items-center justify-end gap-3">

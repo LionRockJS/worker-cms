@@ -12,7 +12,7 @@
         {% for option in roleOptions %}
           <label class="inline-flex items-center gap-2 rounded-md bg-white border border-gray-200 px-3 py-1.5 text-sm">
             <input type="checkbox" name="roles" value="{{ option.value }}"{% if option.checked %} checked{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-            <span>{% if option.labelKey %}{{ option.labelKey | t }}{% else %}{{ option.label }}{% endif %}</span>
+            <span>{% if option.labelKey != blank %}{{ option.labelKey | t }}{% else %}{{ option.label }}{% endif %}</span>
           </label>
         {% endfor %}
       </div>
