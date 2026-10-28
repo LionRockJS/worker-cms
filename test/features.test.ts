@@ -197,8 +197,8 @@ describe('first-login role provisioning', () => {
     // An admin promotes the user in the Users admin…
     await env.DB.prepare("UPDATE users SET role = 'admin' WHERE oauth_id = 'eventuai:newbie'").run();
 
-    // …and a later login refreshes profile fields but keeps the CMS role,
-    // even though the IdP now reports a weaker role.
+    // …and a later login keeps the CMS name and role, even though the IdP
+    // now reports a different name and a weaker role.
     const second = await completeMockedLogin({
       sub: 'newbie',
       email: 'newbie@example.com',
@@ -210,7 +210,7 @@ describe('first-login role provisioning', () => {
     const after = await env.DB.prepare(
       "SELECT role, name FROM users WHERE oauth_id = 'eventuai:newbie'",
     ).first<{ role: string; name: string }>();
-    expect(after).toMatchObject({ role: 'admin', name: 'Newbie Renamed' });
+    expect(after).toMatchObject({ role: 'admin', name: 'Newbie' });
   });
 });
 

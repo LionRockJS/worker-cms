@@ -6,7 +6,8 @@ import { ROLE_LABELS } from '../../core/auth/roles';
 import { allRoleOptions } from '../../core/auth/role-store';
 import { featureAdminScreenProps } from '../../features/services';
 import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i18n';
-import { appendQuery, safeAdminReturnPath } from '../../core/http/forms';
+import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';
+import { logAudit } from '../../core/db/audit';
 
 
 export const profileRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -127,6 +128,21 @@ profileRoutes.get('/profile', async (c) => {
     })),
     uiLocaleAction: '/admin/profile/locale',
   });
+});
+
+profileRoutes.post('/profile', async (c) => {
+  const userId = Number(c.get('user').sub);
+  const form = await c.req.formData();
+  const name = str(form.get('name'));
+  if (!name || name.length > 100) {
+    return c.redirect('/admin/profile?error=profile.invalid_name', 303);
+  }
+
+  await c.env.DB.prepare('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(name, userId)
+    .run();
+  logAudit(c, 'profile.update', 'user', userId);
+  return c.redirect('/admin/profile?flash=profile.name_saved', 303);
 });
 
 profileRoutes.post('/profile/locale', async (c) => {

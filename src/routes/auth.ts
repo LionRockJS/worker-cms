@@ -385,12 +385,14 @@ async function updateUserProfileFromOAuth(
   // The linked provider identity authenticates this user. An email owned by
   // another account must not block sign-in or change either account's owner.
   // Keep the collision check in the UPDATE so concurrent logins cannot race it.
+  // The provider seeds missing names; existing names belong to the CMS profile
+  // so later sign-ins never overwrite a user's chosen display name.
   await db.prepare(
     `UPDATE users
         SET email = CASE
               WHEN EXISTS (SELECT 1 FROM users WHERE email = ? AND id <> ?)
               THEN email ELSE ? END,
-            name = ?, avatar_url = ?
+            name = CASE WHEN trim(name) = '' THEN ? ELSE name END, avatar_url = ?
       WHERE id = ?`,
   )
     .bind(user.email, userId, user.email, user.name, user.avatarUrl, userId)

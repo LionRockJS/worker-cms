@@ -418,7 +418,7 @@ describe('auth routes', () => {
     expect(callback.headers.get('Location')).toBe('/admin');
     expect(callback.headers.get('Set-Cookie')).toContain('access_token=');
     expect((await env.DB.prepare('SELECT id, email, role FROM users ORDER BY id').all()).results).toEqual(before.results);
-    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Updated Profile' });
+    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Admin User' });
     expect(await env.DB.prepare('SELECT user_id FROM sessions').first()).toEqual({ user_id: 1 });
     expect(await env.DB.prepare('SELECT user_id FROM user_oauth_identities WHERE oauth_id = ?')
       .bind(`${provider}:12345`).first()).toEqual({ user_id: 1 });
@@ -1007,6 +1007,88 @@ describe('admin routes', () => {
       expect.objectContaining({ provider: 'google', connected: true }),
       expect.objectContaining({ provider: 'microsoft', connected: false, connectHref: '/auth/start?provider=microsoft&link=1' }),
     ]));
+  });
+
+  it.each(['admin', 'viewer'])('lets a signed-in %s update only their own display name', async (role) => {
+    const cookie = await authCookie(role);
+    const otherUser = await env.DB.prepare('SELECT * FROM users WHERE id = 2').first();
+    const saved = await fetchWorker('/admin/profile', {
+      method: 'POST',
+      headers: { Cookie: cookie },
+      body: form({ name: '  陳大文 & Co  ', id: '2', role: 'admin', email: 'other@example.com' }),
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.name_saved');
+    expect(await env.DB.prepare('SELECT name, role, email FROM users WHERE id = 1').first()).toEqual({
+      name: '陳大文 & Co', role, email: 'admin@example.com',
+    });
+    expect(await env.DB.prepare('SELECT * FROM users WHERE id = 2').first()).toEqual(otherUser);
+
+    const profile = await fetchWorker('/admin/profile?flash=profile.name_saved', { headers: { Cookie: cookie } });
+    const payload = renderPayload(await profile.text());
+    expect(payload.bodyView?.data.name).toBe('陳大文 & Co');
+    expect(payload.bodyView?.data.flash).toBe('profile.name_saved');
+    expect(payload.layoutData.userName).toBe('陳大文 & Co');
+  });
+
+  it.each([
+    "O'Connor",
+    "x', role='admin' WHERE id=1 --",
+    "x' WHERE 1=1 --",
+    "x'; DROP TABLE users; --",
+    "x'); DELETE FROM users; --",
+  ])('stores SQL-looking profile display names as literal text (%j)', async (name) => {
+    const cookie = await authCookie('viewer');
+    const before = await env.DB.prepare('SELECT id, oauth_id, email, name, role FROM users ORDER BY id').all();
+    const saved = await fetchWorker('/admin/profile', {
+      method: 'POST', headers: { Cookie: cookie }, body: form({ name }),
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.name_saved');
+
+    // The payload is only this account's name. Both accounts, their email
+    // addresses and roles, and the users table itself must remain intact.
+    const after = await env.DB.prepare('SELECT id, oauth_id, email, name, role FROM users ORDER BY id').all();
+    expect(after.results).toEqual(before.results.map((user) => user.id === 1 ? { ...user, name } : user));
+    const profile = await fetchWorker('/admin/profile', { headers: { Cookie: cookie } });
+    expect(profile.status).toBe(200);
+    expect(bodyData(await profile.text()).name).toBe(name);
+  });
+
+  it.each(['', '   ', 'a'.repeat(101)])('rejects an invalid profile display name (%j)', async (name) => {
+    const cookie = await authCookie('viewer');
+    const saved = await fetchWorker('/admin/profile', {
+      method: 'POST', headers: { Cookie: cookie }, body: form({ name }),
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('Location')).toBe('/admin/profile?error=profile.invalid_name');
+    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Admin User' });
+  });
+
+  it('requires authentication to update a profile display name', async () => {
+    const saved = await fetchWorker('/admin/profile', { method: 'POST', body: form({ name: 'Someone else' }) });
+    expect(saved.headers.get('Location')).toBe('/auth/login');
+    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Admin User' });
+  });
+
+  it('preserves a saved profile display name on the next OAuth sign-in', async () => {
+    const cookie = await authCookie('viewer');
+    await env.DB.prepare(
+      'INSERT INTO user_oauth_identities (user_id, provider, provider_user_id, oauth_id) VALUES (?, ?, ?, ?)',
+    ).bind(1, 'eventuai', 'eventuai-user', 'eventuai:eventuai-user').run();
+    await fetchWorker('/admin/profile', {
+      method: 'POST', headers: { Cookie: cookie }, body: form({ name: 'My CMS Name' }),
+    });
+    const callback = await completeMockedOAuthLogin();
+    expect(callback.headers.get('Location')).toBe('/admin');
+    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'My CMS Name' });
+  });
+
+  it('fills a missing display name from the OAuth provider', async () => {
+    await env.DB.prepare("UPDATE users SET oauth_id = 'eventuai:eventuai-user', name = '' WHERE id = 1").run();
+    const callback = await completeMockedOAuthLogin();
+    expect(callback.headers.get('Location')).toBe('/admin');
+    expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Eventuai User' });
   });
 
   it('persists the selected interface locale and serves its translated profile catalog', async () => {
