@@ -154,6 +154,34 @@ no `IMAGES` binding, a missing object, a non-image content type, an input over
 20 MB, or a decode failure. Remove the binding to always serve full-size
 originals.
 
+#### Optional: the audit archive bucket
+
+The `audit` feature's cron sweep seals audit events to R2 as gzipped NDJSON and
+is also the only thing that **prunes** them from D1. Without the bucket the
+audit log is still written and still queryable at `/admin/audit` — it is just
+never archived or trimmed, so `audit_events` grows for the life of the
+deployment.
+
+`npm run setup` offers to create it. By hand:
+
+```bash
+npx wrangler r2 bucket create worker-cms-audit
+```
+
+Then uncomment the binding `wrangler.toml` ships commented out:
+
+```toml
+[[r2_buckets]]
+binding = "AUDIT_BUCKET"
+bucket_name = "worker-cms-audit"
+```
+
+It ships commented out on purpose: an active binding to a bucket that does not
+exist fails the deploy, and the sweep is inert without one — so unset is safe
+rather than silently lossy. Enable **Object Lock** on the bucket if the
+retention has to be one an operator cannot shorten; the seal chain makes
+tampering detectable, Object Lock makes it impossible.
+
 ### 5. Configure secrets
 
 ```bash
@@ -1020,7 +1048,7 @@ from the bundle without deleting anything.
 What deletion does not clean up: the feature's `test/*.test.ts`. Remove those by
 hand.
 
-### CMS database (`DB`) — 30 tables
+### CMS database (`DB`) — 36 tables
 
 The private schema is divided into five feature categories:
 
@@ -1033,10 +1061,10 @@ The private schema is divided into five feature categories:
   - `users`, `user_oauth_identities`, `sessions`, `roles`, `role_permissions`
 - **Credits (5)**
   - `credit_wallets`, `credit_ledger`, `shared_credits`, `shared_credit_ledger`, `credit_subscriptions`
-- **Plugin (7)**
-  - `plugins`, `plugin_asset_approvals`, `plugin_file_prefix_approvals`, `plugin_page_type_approvals`, `plugin_state`, `settings`, `admin_jobs`
-- **Compliance (1)**
-  - `audit_log`
+- **Plugin (9)**
+  - `plugins`, `plugin_asset_approvals`, `plugin_file_prefix_approvals`, `plugin_identity_approvals`, `plugin_page_type_approvals`, `plugin_sequences`, `plugin_state`, `settings`, `admin_jobs`
+- **Compliance (4)**
+  - `audit_events`, `data_classes`, `audit_seals`, `audit_log`
 
 `admin_jobs` is grouped with Plugin because it coordinates long-running plugin
 admin actions, although it also runs advanced-search bulk actions. The general

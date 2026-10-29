@@ -219,6 +219,35 @@ function setBindingValues(lines, section, binding, values) {
   }
 }
 
+/**
+ * Activates a binding that ships commented out, by stripping the leading `# `
+ * from its `[[section]]` header, its `binding` line and the key=value lines
+ * under it. The prose comment above the block is left alone.
+ *
+ * AUDIT_BUCKET ships commented out because an active binding to a bucket that
+ * does not exist fails the deploy, and the audit sweep is inert without one.
+ * Turning it on is therefore part of provisioning, not of the checked-in
+ * config. Returns false when there is nothing commented out to activate.
+ */
+function uncommentBinding(lines, section, binding) {
+  const bindingIndex = lines.findIndex((line) =>
+    new RegExp(`^#\\s*binding\\s*=\\s*["']${binding}["']\\s*$`).test(line));
+  if (bindingIndex === -1) return false;
+
+  const headerIndex = bindingIndex - 1;
+  if (lines[headerIndex]?.trim() !== `# [[${section}]]`) {
+    throw new Error(`Expected "# [[${section}]]" directly above the commented ${binding} binding.`);
+  }
+  const uncomment = (index) => { lines[index] = lines[index].replace(/^#\s?/, ''); };
+  uncomment(headerIndex);
+  uncomment(bindingIndex);
+  for (let index = bindingIndex + 1; index < lines.length; index += 1) {
+    if (!/^#\s*[a-z_]+\s*=/.test(lines[index])) break;
+    uncomment(index);
+  }
+  return true;
+}
+
 function setFirstSectionValue(lines, section, key, value) {
   const [range] = sectionRanges(lines, section);
   if (!range) throw new Error(`Could not find [[${section}]].`);
@@ -257,6 +286,12 @@ async function updateConfig(settings) {
   setBindingValues(lines, 'r2_buckets', 'MEDIA_BUCKET', {
     bucket_name: settings.bucketName,
   });
+  if (settings.auditBucketName) {
+    uncommentBinding(lines, 'r2_buckets', 'AUDIT_BUCKET');
+    setBindingValues(lines, 'r2_buckets', 'AUDIT_BUCKET', {
+      bucket_name: settings.auditBucketName,
+    });
+  }
   setBindingValues(lines, 'queues.producers', 'ADMIN_JOBS_QUEUE', {
     queue: settings.queueName,
   });
@@ -340,6 +375,15 @@ async function main() {
   );
   const bucketName = await ask('Private R2 media bucket name', 'worker-cms-media', resourceName);
   const queueName = await ask('Admin job Queue name', 'cms-admin-jobs', resourceName);
+  // Default on: the sweep is what archives *and* prunes audit_events, so
+  // declining leaves that table growing in D1 with nothing to trim it.
+  console.log(
+    '\nThe audit archive seals audit events to R2 and is what prunes them from D1.\n'
+    + 'Without it the audit log is still written, but never archived or trimmed.',
+  );
+  const auditBucketName = await confirm('Enable the audit archive?')
+    ? await ask('Audit archive R2 bucket name', `${workerName}-audit`, resourceName)
+    : null;
   const canonicalOrigin = (await ask(
     'Public HTTPS origin (custom domain or workers.dev URL)',
     undefined,
@@ -371,6 +415,7 @@ async function main() {
   const databaseId = await ensureD1(databaseName);
   const publishedDatabaseId = await ensureD1(publishedDatabaseName);
   ensureR2(bucketName);
+  if (auditBucketName) ensureR2(auditBucketName);
   ensureQueue(queueName);
 
   await updateConfig({
@@ -380,6 +425,7 @@ async function main() {
     publishedDatabaseName,
     publishedDatabaseId,
     bucketName,
+    auditBucketName,
     queueName,
     canonicalOrigin,
     providers,
