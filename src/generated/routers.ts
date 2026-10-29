@@ -4,6 +4,7 @@
 // To add or drop a feature, edit that file and run `npm run build:features`.
 
 import type { FeatureRouterEntry } from '../features/routers';
+import { auditRoutes } from '../features/audit/routes';
 import { creditApiRoutes } from '../features/credits/routes/contributor-api';
 import { creditPanelRoutes } from '../features/credits/routes/panels';
 import { creditSettingsRoutes } from '../features/credits/routes/settings';
@@ -22,6 +23,7 @@ import { usersRoutes } from '../features/users-roles/routes/users';
 
 /** Mounted under /admin, in registry order. */
 export const adminRouterEntries: readonly FeatureRouterEntry[] = [
+  { id: 'audit', router: auditRoutes },
   { id: 'credits', router: creditPanelRoutes },
   { id: 'credits', router: creditSettingsRoutes },
   { id: 'i18n', router: i18nRoutes },

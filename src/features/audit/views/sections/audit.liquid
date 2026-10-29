@@ -1,0 +1,110 @@
+<div class="my-4 px-4 sm:px-6 lg:px-8">
+  <form method="GET" action="{{ filterAction }}" class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div class="flex flex-wrap items-center gap-2">
+      <select name="class" aria-label="{{ "audit.event_class" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
+        <option value=""{% unless eventClass %} selected{% endunless %}>{{ "audit.all_classes" | t }}</option>
+        {% for option in classOptions %}
+          <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.value }}</option>
+        {% endfor %}
+      </select>
+      <select name="outcome" aria-label="{{ "audit.outcome" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
+        <option value=""{% unless outcome %} selected{% endunless %}>{{ "audit.all_outcomes" | t }}</option>
+        {% for option in outcomeOptions %}
+          <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.value }}</option>
+        {% endfor %}
+      </select>
+      <input type="search" name="action" value="{{ action }}" placeholder="{{ "audit.action_prefix" | t }}"
+             aria-label="{{ "audit.action_prefix" | t }}"
+             class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
+      <button type="submit" title="{{ "audit.filter" | t }}" aria-label="{{ "audit.filter" | t }}"
+              class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "audit.filter" | t }}</button>
+      <a href="{{ filterAction }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "audit.reset" | t }}</a>
+    </div>
+    <a href="/admin" class="text-sm text-indigo-600 hover:underline">{{ "common.back" | t }}</a>
+  </form>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+    <table class="w-full min-w-[560px] text-left">
+      <thead class="bg-gray-50 border-b border-gray-200">
+        <tr>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "common.when" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "common.action" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.actor" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.target" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.source" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.detail" | t }}</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% if hasEvents %}
+          {% for event in events %}
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-6 py-4 text-sm text-gray-400">{{ event.occurredAt | l10n_date }}</td>
+              <td class="px-6 py-4">
+                <div class="font-medium text-gray-900">{{ event.action }}</div>
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">{{ event.eventClass }}</span>
+                  {% if event.isDenied %}
+                    <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">{{ event.outcome }}</span>
+                  {% endif %}
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <div class="text-sm text-gray-900">{{ event.actorLabel }}</div>
+                {% if event.hasActorRoles %}
+                  <div class="text-xs text-gray-500">{{ event.actorRoles }}</div>
+                {% endif %}
+              </td>
+              <td class="px-6 py-4 text-sm text-gray-500">{{ event.targetLabel }}</td>
+              <td class="px-6 py-4 text-xs text-gray-500 font-mono">{{ event.sourceIp }}</td>
+              <td class="px-6 py-4">
+                {% if event.hasDetail %}
+                  <code class="block max-w-xs truncate text-xs text-gray-500" title="{{ event.detail }}">{{ event.detail }}</code>
+                {% else %}
+                  <span class="text-xs text-gray-400">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="6" class="px-6 py-12 text-center text-gray-400">{{ "audit.no_events" | t }}</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if showPagination %}
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
+      <div class="text-xs font-medium text-gray-500">
+        {{ "common.showing" | t }} {{ rangeFrom }}-{{ rangeTo }} {{ "common.of" | t }} {{ total }}
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        {% if hasPreviousPage %}
+          <a href="{{ previousHref }}" class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+            {{ "common.previous" | t }}
+          </a>
+        {% else %}
+          <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
+            <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+            {{ "common.previous" | t }}
+          </span>
+        {% endif %}
+        <span class="text-xs font-medium text-gray-500">{{ "common.page" | t }} {{ currentPage }} {{ "common.of" | t }} {{ totalPages }}</span>
+        {% if hasNextPage %}
+          <a href="{{ nextHref }}" class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            {{ "common.next" | t }}
+            <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+          </a>
+        {% else %}
+          <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
+            {{ "common.next" | t }}
+            <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+          </span>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>

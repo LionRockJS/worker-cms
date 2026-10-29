@@ -8,6 +8,7 @@
 
 @source "../src/core";
 @source "../src/routes/**/*.ts";
+@source "../src/features/audit";
 @source "../src/features/credits";
 @source "../src/features/i18n";
 @source "../src/features/jobs";

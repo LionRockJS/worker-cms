@@ -305,6 +305,13 @@ describe('auth routes', () => {
       .bind('eventuai:eventuai-user')
       .first()).toMatchObject({ provider: 'eventuai', provider_user_id: 'eventuai-user' });
     expect((await env.DB.prepare('SELECT id FROM sessions').all()).results).toHaveLength(1);
+    // The sign-in is recorded against the account it resolved, by internal id.
+    await expect.poll(async () => env.DB.prepare(
+      "SELECT actor_user_id, outcome, detail FROM audit_events WHERE action = 'auth.login' ORDER BY seq DESC LIMIT 1",
+    ).first<{ actor_user_id: string; outcome: string; detail: string }>(), { timeout: 2000 }).toMatchObject({
+      outcome: 'success',
+      detail: JSON.stringify({ provider: 'eventuai' }),
+    });
   });
 
   it('links another OAuth identity to the currently signed-in user', async () => {

@@ -16,6 +16,7 @@ describe('feature registry', () => {
     // Deliberately explicit: adding or dropping a feature is a decision, so it
     // should show up as a change here rather than passing silently.
     expect(features.map((feature) => feature.id).sort()).toEqual([
+      'audit',
       'credits',
       'i18n',
       'jobs',

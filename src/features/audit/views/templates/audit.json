@@ -1,0 +1,18 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "title": "{{ 'view_strings.sections_audit.audit_log' | t }}",
+        "description": "{{ eventCountLabel }}"
+      }
+    },
+    "content": {
+      "type": "audit"
+    }
+  },
+  "order": [
+    "header",
+    "content"
+  ]
+}

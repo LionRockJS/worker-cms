@@ -34,6 +34,7 @@
     "version": "Version"
   },
   "nav": {
+    "audit": "Audit Log",
     "blockTypes": "Block Types",
     "content": "Files",
     "credits": "Credit Summary",
@@ -206,6 +207,7 @@
       "x": "Close"
     },
     "menu": {
+      "audit_description": "Who did what, when — admin mutations, sign-ins and refused access.",
       "blockTypes_description": "Database-defined block settings link.",
       "content_description": "Media files in the bucket and the pages that reference them.",
       "credits_description": "Chargeable actions and effective prices across plugins.",

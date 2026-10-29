@@ -34,6 +34,7 @@
     "version": "版本"
   },
   "nav": {
+    "audit": "审计日志",
     "blockTypes": "区块类型",
     "content": "文件",
     "credits": "点数摘要",
@@ -206,6 +207,7 @@
       "x": "关闭"
     },
     "menu": {
+      "audit_description": "谁在何时做了什么——管理变更、登录与被拒绝的访问。",
       "blockTypes_description": "数据库区块设置链接。",
       "content_description": "存储桶中的媒体文件及引用它们的页面。",
       "credits_description": "各插件的收费操作和实际价格。",

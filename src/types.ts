@@ -35,6 +35,7 @@ export const PERMISSIONS = [
   'users:manage',     // view users and assign their roles
   'roles:manage',     // create / edit / delete roles and their permissions
   'credits:share',    // transfer a shared wallet balance to a user
+  'audit:read',       // read the audit log (the reading is itself audited)
 ] as const;
 
 export type Permission = typeof PERMISSIONS[number];
@@ -59,6 +60,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'users:manage': 'Manage users and their roles',
   'roles:manage': 'Manage roles and permissions',
   'credits:share': 'Transfer a shared wallet balance to a user',
+  'audit:read': 'Read the audit log',
 };
 
 export interface User {

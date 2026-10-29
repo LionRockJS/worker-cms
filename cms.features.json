@@ -1,6 +1,7 @@
 {
   "//": "Feature profile for this deployment. One switch per feature: `true` includes its schema fragment (the src/**/schema.sql declaring `-- feature: <id>`) and its code (src/features/<id>/). Run `npm run build` after editing. Turning a feature OFF never drops existing tables \u2014 it only stops creating them on fresh installs. To remove a feature's source too, delete src/features/<id>/ AND its key here; a key with neither a directory nor a fragment fails the build rather than being ignored. Features do not depend on each other in code: they cooperate through generated registries in src/features/, so each installs alone and an absent one is simply inert. WARNING: turning off `plugins` removes the /__cms write-back API that installed plugin Workers call, the plugin admin proxy and the manage screen \u2014 any registered plugin stops working, and `plugin-pointer-indexes` must go with it. Turning off `credits` stops every declared cost from being charged; balances, the ledger and the shared pool go with it. Turning off `jobs` makes long plugin actions and bulk page actions run inline instead of in the background \u2014 a bulk action then applies one slice of 100 pages per submit.",
   "features": {
+    "audit": true,
     "credits": true,
     "i18n": true,
     "jobs": true,

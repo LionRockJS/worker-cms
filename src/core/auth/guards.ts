@@ -12,6 +12,8 @@
 // ============================================================
 
 import { createMiddleware } from 'hono/factory';
+import { logAuthEvent } from '../db/audit';
+import type { AppContext } from '../http/context';
 import { verifyJWT } from './jwt';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from './roles';
 import type { Permission } from '../../types';
@@ -131,6 +133,20 @@ export const editorGuard = createMiddleware<{
   return next();
 });
 
+/** Records a refused capability check. The path is what makes the row useful —
+ *  which screen was reached for — and is capped because it comes from the
+ *  request. editorGuard denials are deliberately not recorded: a viewer
+ *  bouncing off every editor route would drown the log in expected noise. */
+function logDenial(c: AppContext, user: JWTPayload, detail: Record<string, string>): void {
+  logAuthEvent(c, 'permission.denied', {
+    outcome: 'denied',
+    userId: user.sub,
+    roles: user.role,
+    sessionSid: user.sid ?? null,
+    detail: { ...detail, path: c.req.path.slice(0, 256) },
+  });
+}
+
 /**
  * Middleware factory that enforces a specific capability. Accepts both built-in
  * permissions and plugin-declared permission strings. The admin role always
@@ -145,6 +161,7 @@ export function requirePermission(permission: Permission | string) {
     if (splitRoles(user.role).includes('admin')) return next();
     const map = await resolveRolePermissions(c.env);
     if (!effectivePermissions(map, user.role).has(permission as Permission)) {
+      logDenial(c, user, { permission });
       if (wantsJsonResponse(c.req.raw)) {
         return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
       }
@@ -164,6 +181,7 @@ export function requireAnyPermission(...permissions: Array<Permission | string>)
     const map = await resolveRolePermissions(c.env);
     const effective = effectivePermissions(map, user.role);
     if (!permissions.some((permission) => effective.has(permission as Permission))) {
+      logDenial(c, user, { permissions: permissions.join(',') });
       if (wantsJsonResponse(c.req.raw)) {
         return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
       }

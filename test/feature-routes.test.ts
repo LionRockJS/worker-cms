@@ -48,6 +48,7 @@ beforeEach(async () => {
 describe('feature router mounting', () => {
   // One entry point per feature that owns admin routes.
   const entryPoints: Array<[string, string]> = [
+    ['audit', '/admin/audit'],
     ['trash', '/admin/trash'],
     ['runtime-content-types', '/admin/page_types'],
     ['runtime-content-types', '/admin/block_types'],

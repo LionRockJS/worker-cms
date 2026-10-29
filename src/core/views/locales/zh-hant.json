@@ -34,6 +34,7 @@
     "version": "版本"
   },
   "nav": {
+    "audit": "審計日誌",
     "blockTypes": "區塊類型",
     "content": "檔案",
     "credits": "點數摘要",
@@ -206,6 +207,7 @@
       "x": "關閉"
     },
     "menu": {
+      "audit_description": "誰在何時做了什麼——管理變更、登入與被拒絕的存取。",
       "blockTypes_description": "資料庫區塊設定連結。",
       "content_description": "儲存桶中的媒體檔案及引用它們的頁面。",
       "credits_description": "各外掛程式的收費操作及實際價格。",

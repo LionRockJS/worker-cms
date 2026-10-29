@@ -162,7 +162,7 @@ failure mode is a vague record, never a missing one.
 |---|---|---|
 | Login success/failure | `src/routes/auth.ts:728` (`handleOAuthCallback`) | `auth.login` |
 | Logout | `src/routes/auth.ts:740` | `auth.logout` |
-| Token refresh | `src/routes/auth.ts:760` | `auth.refresh` |
+| Rejected token refresh | `src/routes/auth.ts:760` | `auth.refresh` |
 | Permission denial | `requirePermission`, `src/core/auth/guards.ts:142` | `*.denied` |
 | Page read | `src/routes/admin/pages/crud.ts:347` (`/pages/:id/read`) | `page.read` |
 | Page editor open | `src/routes/admin/pages/crud.ts:407` (`/pages/:id/edit`) | `page.read` |
@@ -180,6 +180,13 @@ alerting on for a `phi` container.
 
 Search records a `query_fingerprint` (hash) and a result count, never the raw
 terms — a search string is frequently the identifier itself.
+
+Only *failed* token refreshes are recorded. A successful 15-minute rotation is
+not a new sign-on, and one row per active user per quarter-hour would bury the
+rejections that matter — a replayed or revoked refresh token. `editorGuard`
+denials are skipped for the same reason: a viewer bouncing off every editor
+route is expected noise, while a refused `requirePermission` check is a real
+signal.
 
 ## 5. Storage and transport
 
@@ -240,10 +247,17 @@ because no container is classified until phase 2.
 *Verify:* mutations still produce one row each; no email in any new row;
 `npm run type-check` and `npm test` pass.
 
-**Phase 1 — auth events and a viewer**
-Auth hooks, `audit:read`, the `audit` feature with a filterable list.
-*Verify:* a login, a failed login, a logout and a denied permission each appear;
-the screen 403s without `audit:read`.
+**Phase 1 — auth events and a viewer** — done 2026-10-30.
+Auth hooks, `audit:read`, the `audit` feature with a filterable list
+(`/admin/audit`, event class / outcome / action prefix). The sign-in wrapper
+reads the failure reason off the redirect rather than instrumenting each of the
+twenty exits, so a branch added later is recorded without touching it.
+*Verified* in `test/audit-log.test.ts`: a refused sign-in with its reason, a
+sign-out against the session it ended, a refused capability check with the
+permission and path, the screen 403ing without `audit:read` (and recording that
+refusal), the read recording its own filters, filtering, rejected filter values,
+and that the table has no column an email could be written into. Login success
+is covered in `test/routes.test.ts`.
 
 **Phase 2 — classification and read logging**
 `data_classes`, the settings screen for it, read middleware, `recordRead`.

@@ -21,6 +21,7 @@ import {
   refreshCookieName,
   setAuthCookie,
 } from '../core/auth/cookies';
+import { logAuthEvent } from '../core/db/audit';
 import { loadAppBrandingSettings } from '../core/db/settings';
 import { viewRevision } from '../core/http/view-revision';
 import { buildTranslationCatalog, resolveUiLocale } from '../core/i18n';
@@ -718,16 +719,39 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
   setAuthCookie(c, accessCookieName, issued.accessToken, ACCESS_TOKEN_TTL);
   setAuthCookie(c, refreshCookieName, issued.refreshToken, REFRESH_TOKEN_TTL);
 
+  logAuthEvent(c, 'auth.login', {
+    userId: dbUser.id,
+    roles: dbUser.role,
+    sessionSid: issued.accessPayload.sid ?? null,
+    detail: { provider: providerName },
+  });
   return c.redirect('/admin');
 }
 
+/**
+ * Records the sign-in attempt around handleOAuthCallback. Every failure exit
+ * from it is a redirect to /auth/login?error=<reason>, so the reason is read
+ * off the response rather than by instrumenting twenty branches — and a branch
+ * added later is recorded without touching this wrapper. Success is logged
+ * inside the handler, where the account it resolved is in scope.
+ */
+async function auditedOAuthCallback(c: AppContext, params: OAuthCallbackParams): Promise<Response> {
+  const response = await handleOAuthCallback(c, params);
+  const location = response.headers.get('Location') ?? '';
+  if (location.startsWith('/auth/login?error=')) {
+    const reason = new URLSearchParams(location.slice(location.indexOf('?') + 1)).get('error');
+    logAuthEvent(c, 'auth.login', { outcome: 'denied', detail: { reason: reason ?? 'unknown' } });
+  }
+  return response;
+}
+
 // GET /auth/callback – handle provider redirects that return query params
-authRoutes.get('/callback', (c) => handleOAuthCallback(c, c.req.query() as OAuthCallbackParams));
+authRoutes.get('/callback', (c) => auditedOAuthCallback(c, c.req.query() as OAuthCallbackParams));
 
 // POST /auth/callback – Apple commonly returns form_post responses.
 authRoutes.post('/callback', async (c) => {
   const body = await c.req.parseBody();
-  return handleOAuthCallback(c, {
+  return auditedOAuthCallback(c, {
     code: typeof body['code'] === 'string' ? body['code'] : undefined,
     state: typeof body['state'] === 'string' ? body['state'] : undefined,
     error: typeof body['error'] === 'string' ? body['error'] : undefined,
@@ -751,6 +775,11 @@ authRoutes.post('/logout', async (c) => {
   clearAuthCookie(c, accessCookieName);
   clearAuthCookie(c, refreshCookieName);
 
+  // Only a sign-out that resolved a session is worth a row; an unauthenticated
+  // POST here is noise, not an event.
+  if (access?.type === 'access') {
+    logAuthEvent(c, 'auth.logout', { userId: access.sub, roles: access.role, sessionSid: access.sid ?? null });
+  }
   return c.redirect('/auth/login');
 });
 
@@ -765,6 +794,10 @@ authRoutes.post('/refresh', async (c) => {
 
   const rotated = await rotateAuthSession(c.env.DB, c.env.JWT_SECRET, refreshToken);
   if (!rotated.ok) {
+    // Only failures are recorded. A successful 15-minute rotation is not a new
+    // sign-on, and one row per user per quarter-hour would bury the rejections
+    // that matter — a replayed or revoked refresh token.
+    logAuthEvent(c, 'auth.refresh', { outcome: 'denied', detail: { reason: rotated.error } });
     return c.json({ error: rotated.error }, 401);
   }
 

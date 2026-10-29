@@ -4,6 +4,7 @@
 // To add or drop a feature, edit that file and run `npm run build:features`.
 
 import type { CmsFeature } from '../core/feature';
+import { auditFeature } from '../features/audit/feature';
 import { creditsFeature } from '../features/credits/feature';
 import { i18nFeature } from '../features/i18n/feature';
 import { jobsFeature } from '../features/jobs/feature';
@@ -16,6 +17,7 @@ import { usersRolesFeature } from '../features/users-roles/feature';
 
 /** Installed features, in cms.features.json order. */
 export const featureManifests: readonly CmsFeature[] = [
+  auditFeature,
   creditsFeature,
   i18nFeature,
   jobsFeature,

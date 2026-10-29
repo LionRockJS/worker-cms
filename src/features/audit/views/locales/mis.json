@@ -1,0 +1,19 @@
+{
+  "audit": {
+    "action_prefix": "Action prefix",
+    "actor": "Actor",
+    "all_classes": "All classes",
+    "all_outcomes": "All outcomes",
+    "detail": "Detail",
+    "event_class": "Event class",
+    "filter": "Filter",
+    "no_events": "No audit events.",
+    "outcome": "Outcome",
+    "reset": "Reset",
+    "source": "Source",
+    "target": "Target"
+  },
+  "view_strings": {
+    "sections_audit.audit_log": "Audit Log"
+  }
+}

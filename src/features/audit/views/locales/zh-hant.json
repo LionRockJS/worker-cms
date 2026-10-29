@@ -1,0 +1,19 @@
+{
+  "audit": {
+    "action_prefix": "動作前綴",
+    "actor": "操作者",
+    "all_classes": "所有類別",
+    "all_outcomes": "所有結果",
+    "detail": "詳情",
+    "event_class": "事件類別",
+    "filter": "篩選",
+    "no_events": "沒有審計事件。",
+    "outcome": "結果",
+    "reset": "重設",
+    "source": "來源",
+    "target": "目標"
+  },
+  "view_strings": {
+    "sections_audit.audit_log": "審計日誌"
+  }
+}

@@ -45,6 +45,7 @@ export const SIDEBAR_MENU_ITEMS = [
   { key: 'system', label: 'System', description: 'App branding, menu visibility, and menu order.', href: '/admin/settings/system', icon: 'settings', group: 'settings', defaultWeight: 70 },
   { key: 'content', label: 'Files', description: 'Media files in the bucket and the pages that reference them.', href: '/admin/settings/content', icon: 'folder', group: 'settings', defaultWeight: 80, feature: 'media' },
   { key: 'trash', label: 'Trash', description: 'Deleted content review link.', href: '/admin/trash', icon: 'trash', group: 'main', defaultWeight: 40, feature: 'trash' },
+  { key: 'audit', label: 'Audit Log', description: 'Who did what, when — admin mutations, sign-ins and refused access.', href: '/admin/audit', icon: 'clock', group: 'settings', defaultWeight: 75, feature: 'audit' },
 ] as const;
 
 export const APP_ICON_OPTIONS = [
