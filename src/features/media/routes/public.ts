@@ -1,6 +1,28 @@
 import { Hono } from 'hono';
 import { applyMediaResponseHeaders, mediaObjectResponse } from '../security';
+import { recordRead } from '../../../core/http/access-log';
 import type { Env, Variables } from '../../../types';
+
+/**
+ * Announces a delivery of one object. Recorded before the edge-cache check, so
+ * a cached hit is still accounted for.
+ *
+ * These routes are public and unauthenticated, so a recorded row carries the
+ * source IP and the key but no actor. That is a limit of the surface, not of
+ * the log: classifying a media prefix makes its deliveries traceable, it does
+ * not make serving ePHI from a public, cacheable URL acceptable. Regulated
+ * objects belong behind an authenticated route.
+ */
+function announceMediaRead(key: string): void {
+  recordRead({
+    action: 'media.read',
+    kind: 'media_prefix',
+    key,
+    targetType: 'media',
+    ids: [key],
+    count: 1,
+  });
+}
 
 export const mediaPublicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -19,6 +41,7 @@ mediaPublicRoutes.get('/media-preview/*', async (c) => {
   if (!c.env.MEDIA_BUCKET) return c.notFound();
   const key = c.req.path.replace(/^\/media-preview\//, '');
   if (!await isPublicMedia(c.env, key)) return c.notFound();
+  announceMediaRead(key);
 
   const cache = caches.default;
   const cacheKey = new Request(c.req.url + (c.req.url.includes('?') ? '&' : '?') + '__media_policy=2');
@@ -38,6 +61,7 @@ mediaPublicRoutes.get('/media/*', async (c) => {
   if (!c.env.MEDIA_BUCKET) return c.notFound();
   const key = c.req.path.replace(/^\/media\//, '');
   if (!await isPublicMedia(c.env, key)) return c.notFound();
+  announceMediaRead(key);
   return await mediaObjectResponse(c.env.MEDIA_BUCKET, key) ?? c.notFound();
 });
 

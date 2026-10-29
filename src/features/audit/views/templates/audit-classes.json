@@ -1,0 +1,18 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "title": "{{ 'audit.classification' | t }}",
+        "description": "{{ countLabel }}"
+      }
+    },
+    "content": {
+      "type": "audit-classes"
+    }
+  },
+  "order": [
+    "header",
+    "content"
+  ]
+}

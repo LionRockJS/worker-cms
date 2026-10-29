@@ -25,6 +25,7 @@ import { requirePermission } from '../../../core/auth/guards';
 import { userCan } from '../../../core/auth/permissions';
 import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
 import { logAudit } from '../../../core/db/audit';
+import { recordPageReads } from '../../../core/http/access-log';
 import { publishFlash } from './lifecycle';
 import {
   defaultTimezone,
@@ -353,6 +354,7 @@ pageCrudRoutes.get('/pages/:id/read', requirePermission('content:read'), async (
 
   const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
   if (!page) return c.notFound();
+  recordPageReads('page.read', [page]);
 
   const data = await editorPageData(c, page, page.page_id, requestedVersionId);
   const pageType = page.page_type ?? 'default';
@@ -423,6 +425,7 @@ pageCrudRoutes.get('/pages/:id/edit', requirePermission('content:read'), async (
 
   const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
   if (!page) return c.notFound();
+  recordPageReads('page.read', [page]);
 
   const data = await editorPageData(c, page, page.page_id, requestedVersionId);
   const pageType = page.page_type ?? 'default';

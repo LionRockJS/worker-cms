@@ -102,3 +102,43 @@ export async function auditPage(views: Fetcher, opts: BaseTemplateProps & {
 
   return adminLayout(views, opts, { title: 'Audit Log', body });
 }
+
+interface DataClassRow {
+  id: number;
+  container_kind: string;
+  container_key: string;
+  class: string;
+  note: string | null;
+  created_at: string;
+}
+
+export async function auditClassesPage(views: Fetcher, opts: BaseTemplateProps & {
+  classes: DataClassRow[];
+  flash?: string;
+  canManage?: boolean;
+}): Promise<string> {
+  const { classes, flash, canManage = false } = opts;
+  const body = await renderView(views, '/templates/audit-classes.json', {
+    flash,
+    hasFlash: !!flash,
+    canManage,
+    hasClasses: classes.length > 0,
+    countLabel: `${classes.length} classified container${classes.length === 1 ? '' : 's'}`,
+    addAction: '/admin/audit/classes',
+    auditHref: '/admin/audit',
+    kindOptions: ['page_type', 'taxonomy', 'media_prefix', 'plugin', 'table'].map((value) => ({ value })),
+    classOptions: ['pii', 'phi'].map((value) => ({ value })),
+    classes: classes.map((row) => ({
+      kind: row.container_kind,
+      key: row.container_key,
+      class: row.class,
+      isPhi: row.class === 'phi',
+      note: row.note ?? '',
+      hasNote: !!row.note,
+      createdAt: row.created_at,
+      deleteAction: `/admin/audit/classes/${row.id}/delete`,
+    })),
+  });
+
+  return adminLayout(views, opts, { title: 'Data Classification', body });
+}

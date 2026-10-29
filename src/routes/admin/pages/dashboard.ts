@@ -17,6 +17,7 @@ import { lectFromForm, publicationStatusForPage, withDraftMetadata, withLiveStat
 import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages, listDashboardDraftPageUuids, listDashboardDraftPagesByUuids, savePageVersion } from '../../../core/db/admin-queries';
 import { liveMapForDraftPages } from '../../../core/publish';
 import { draftLectProjector } from '../../../core/publish/projection';
+import { recordPageReads } from '../../../core/http/access-log';
 import { dashboardPagination, renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { userCan } from '../../../core/auth/permissions';
@@ -257,10 +258,11 @@ async function dashboardPagesForRequest(
     });
   }
 
-  return {
-    ...result,
-    results: await addDashboardPageTags(c, result.results),
-  };
+  const results = await addDashboardPageTags(c, result.results);
+  // Both list routes come through here, so one announcement covers them. A
+  // mixed list is recorded as one row per page type, not one per row.
+  recordPageReads('page.list', results);
+  return { ...result, results };
 }
 
 // Escape hatch: `?native=1` (or `?editor=cms`) forces the built-in CMS editor

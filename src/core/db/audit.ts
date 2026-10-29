@@ -47,20 +47,27 @@ export interface AuditEntry {
 }
 
 /** A fully resolved row, after class and retention have been decided. */
-interface AuditRow {
+export interface AuditRow {
   action: string;
   eventClass: EventClass;
   retentionClass: string;
   outcome: Outcome;
+  /** 'none' until a classified container is involved. */
+  dataClass: 'none' | 'pii' | 'phi';
   targetType: string | null;
+  /** The single target, kept scalar so it is indexable. */
   targetId: string | null;
+  /** Several targets, capped; targetCount stays authoritative. */
+  targetIds: string[] | null;
   targetCount: number | null;
+  containerKey: string | null;
+  queryFingerprint: string | null;
   detail: Record<string, unknown> | null;
 }
 
 /** Who the action is attributed to. A contributor acting on its own behalf, or
  *  a sign-in that never identified anyone, has no user — hence the nulls. */
-interface AuditActor {
+export interface AuditActor {
   userId: string | null;
   roles: string | null;
   sessionSid: string | null;
@@ -79,16 +86,17 @@ const NO_REQUEST: AuditRequest = { requestId: null, sourceIp: null, userAgent: n
 const NO_ACTOR: AuditActor = { userId: null, roles: null, sessionSid: null, via: null };
 
 const INSERT = `INSERT INTO audit_events
-    (event_id, occurred_at, event_class, retention_class, action, outcome,
+    (event_id, occurred_at, event_class, data_class, retention_class, action, outcome,
      actor_user_id, actor_roles, acting_via, session_sid, request_id, source_ip, user_agent,
-     target_type, target_id, target_count, detail)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+     target_type, target_id, target_ids, target_count, container_key, query_fingerprint, detail)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest) {
   return env.DB.prepare(INSERT).bind(
     crypto.randomUUID(),
     new Date().toISOString(),
     row.eventClass,
+    row.dataClass,
     row.retentionClass,
     row.action,
     row.outcome,
@@ -101,7 +109,10 @@ function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditReq
     request.userAgent,
     row.targetType,
     row.targetId,
+    row.targetIds ? JSON.stringify(row.targetIds) : null,
     row.targetCount,
+    row.containerKey,
+    row.queryFingerprint,
     row.detail ? JSON.stringify(row.detail) : null,
   );
 }
@@ -115,9 +126,13 @@ function mutationRow(entry: AuditEntry): AuditRow {
     eventClass,
     retentionClass: eventClass === 'admin' ? 'admin_config' : 'content_mutation',
     outcome: entry.outcome ?? 'success',
+    dataClass: 'none',
     targetType: entry.entityType,
     targetId: hasTarget ? String(entry.entityId) : null,
+    targetIds: null,
     targetCount: hasTarget ? 1 : null,
+    containerKey: null,
+    queryFingerprint: null,
     detail: entry.detail ?? null,
   };
 }
@@ -225,10 +240,45 @@ export function logAuthEvent(
     eventClass: 'auth',
     retentionClass: 'auth',
     outcome: opts.outcome ?? 'success',
+    dataClass: 'none',
     targetType: null,
     targetId: null,
+    targetIds: null,
     targetCount: null,
+    containerKey: null,
+    queryFingerprint: null,
     detail: opts.detail ?? null,
   };
   afterResponse(c, statement(c.env, row, actor, requestFrom(c)).run());
+}
+
+/** The signed-in user as an audit actor, or an actor-less one off an
+ *  unauthenticated route. */
+export function contextActor(c: AppContext, via: string | null = null): AuditActor {
+  return actorFromUser(c.get('user') as JWTPayload | undefined, via);
+}
+
+/**
+ * Writes pre-resolved rows in one batch. Used by the access-log middleware,
+ * which has already decided each row's class and retention.
+ *
+ * `strict` is what makes ePHI fail closed: it rethrows so the caller can refuse
+ * to serve a record it could not account for. Without it the write is
+ * best-effort, like every other audit write.
+ */
+export async function writeAuditRows(
+  c: AppContext,
+  rows: AuditRow[],
+  actor: AuditActor,
+  strict = false,
+): Promise<void> {
+  if (!rows.length) return;
+  const request = requestFrom(c);
+  const statements = rows.map((row) => statement(c.env, row, actor, request));
+  try {
+    await c.env.DB.batch(statements);
+  } catch (error) {
+    if (strict) throw error;
+    console.error('audit log failed', error);
+  }
 }

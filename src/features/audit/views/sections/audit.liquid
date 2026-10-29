@@ -20,7 +20,10 @@
               class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "audit.filter" | t }}</button>
       <a href="{{ filterAction }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "audit.reset" | t }}</a>
     </div>
-    <a href="/admin" class="text-sm text-indigo-600 hover:underline">{{ "common.back" | t }}</a>
+    <div class="flex items-center gap-4">
+      <a href="/admin/audit/classes" class="text-sm text-indigo-600 hover:underline">{{ "audit.classification" | t }}</a>
+      <a href="/admin" class="text-sm text-indigo-600 hover:underline">{{ "common.back" | t }}</a>
+    </div>
   </form>
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">

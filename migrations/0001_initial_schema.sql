@@ -208,6 +208,28 @@ CREATE TABLE IF NOT EXISTS audit_events (
     detail TEXT                              -- small JSON (slug, filename); never content bodies
 );
 
+-- 9c. Data classification – which containers hold regulated data.
+--     Empty by default, which is what makes read logging inert: core resolves
+--     this table on any request that read something and records nothing when
+--     the container is unclassified. Policy lives in data rather than in the
+--     build profile, so an install cannot drop its audit control by editing
+--     cms.features.json. Classification is per container, never per row: a row
+--     test fails the moment a container that was clean starts holding
+--     regulated data.
+CREATE TABLE IF NOT EXISTS data_classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- 'page_type' | 'taxonomy' | 'media_prefix' | 'plugin' | 'table'
+    container_kind TEXT NOT NULL,
+    -- the page type slug, R2 key prefix, contributor id or table name
+    container_key TEXT NOT NULL,
+    -- 'pii' | 'phi'. 'phi' additionally makes a failed audit write fail the
+    -- request, so ePHI is never served without a record of who received it.
+    class TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (container_kind, container_key)
+);
+
 -- 10. Roles – custom roles, plus built-in roles once their permissions are
 --     customized. Built-in roles (admin/editor/moderator/viewer) are implicit
 --     in code (USER_ROLES) and only appear here after being edited.

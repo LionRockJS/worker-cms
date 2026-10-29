@@ -3982,6 +3982,7 @@ async function resetData(): Promise<void> {
     'users',
     'audit_log',
     'audit_events',
+    'data_classes',
   ];
   for (const table of adminTables) {
     await env.DB.prepare(`DELETE FROM ${table}`).run();

@@ -20,6 +20,7 @@ import {
   withSensitiveCacheHeaders,
   withSecurityHeaders,
 } from './core/http/headers';
+import { accessLog } from './core/http/access-log';
 import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
@@ -80,6 +81,12 @@ app.use('*', async (c, next) => {
 });
 
 app.use('*', limitRequestBody);
+
+// Reads announced by handlers are classified and written here, after the
+// response is built. Mounted inside the requestContext scope above, and before
+// the routes, so it covers the admin screens, the contributor API and the
+// public media routes alike.
+app.use('*', accessLog);
 
 // ── Auth (OAuth 2.1 + JWT) ────────────────────────────────────────────────────
 app.route('/auth', authRoutes);

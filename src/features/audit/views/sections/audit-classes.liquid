@@ -1,0 +1,95 @@
+<div class="my-4 px-4 sm:px-6 lg:px-8">
+  <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <p class="text-sm text-gray-500">{{ "audit.classification_help" | t }}</p>
+    <a href="{{ auditHref }}" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_audit.audit_log" | t }}</a>
+  </div>
+
+  {% if hasFlash %}
+    <div id="flash" class="mb-4 rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">{{ flash | t }}</div>
+  {% endif %}
+
+  {% if canManage %}
+    <form method="POST" action="{{ addAction }}" class="mb-4 flex flex-wrap items-end gap-2 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        {{ "audit.container_kind" | t }}
+        <select name="container_kind" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case text-gray-900">
+          {% for option in kindOptions %}
+            <option value="{{ option.value }}">{{ option.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        {{ "audit.container_key" | t }}
+        <input type="text" name="container_key" required placeholder="patient_note"
+               class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case text-gray-900">
+      </label>
+      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        {{ "audit.data_class" | t }}
+        <select name="class" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case text-gray-900">
+          {% for option in classOptions %}
+            <option value="{{ option.value }}">{{ option.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        {{ "audit.note" | t }}
+        <input type="text" name="note"
+               class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case text-gray-900">
+      </label>
+      <button type="submit" class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.add" | t }}</button>
+    </form>
+  {% endif %}
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+    <table class="w-full min-w-[560px] text-left">
+      <thead class="bg-gray-50 border-b border-gray-200">
+        <tr>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.container_kind" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.container_key" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.data_class" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.note" | t }}</th>
+          <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "common.when" | t }}</th>
+          {% if canManage %}
+            <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "common.action" | t }}</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% if hasClasses %}
+          {% for row in classes %}
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-6 py-4 text-sm text-gray-500 font-mono">{{ row.kind }}</td>
+              <td class="px-6 py-4 text-sm font-medium text-gray-900 font-mono">{{ row.key }}</td>
+              <td class="px-6 py-4">
+                {% if row.isPhi %}
+                  <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">{{ row.class }}</span>
+                {% else %}
+                  <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">{{ row.class }}</span>
+                {% endif %}
+              </td>
+              <td class="px-6 py-4 text-sm text-gray-500">{% if row.hasNote %}{{ row.note }}{% else %}—{% endif %}</td>
+              <td class="px-6 py-4 text-sm text-gray-400">{{ row.createdAt | l10n_date }}</td>
+              {% if canManage %}
+                <td class="px-6 py-4">
+                  <form method="POST" action="{{ row.deleteAction }}" class="inline"
+                        data-confirm="{{ "audit.confirm_declassify" | t }}">
+                    <button type="submit" class="text-red-500 hover:text-red-700 text-sm font-medium">{{ "common.delete" | t }}</button>
+                  </form>
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="6" class="px-6 py-12 text-center text-gray-400">{{ "audit.no_classes" | t }}</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script nonce="{{ nonce }}">
+  const flash = document.getElementById('flash');
+  if (flash) setTimeout(() => flash.remove(), 4000);
+</script>
