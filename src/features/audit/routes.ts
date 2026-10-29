@@ -5,12 +5,21 @@
 // use to edit their own trail.
 
 import { Hono } from 'hono';
-import { auditPage } from './template';
+import { auditClassesPage, auditPage } from './template';
 import type { Env, Variables } from '../../types';
 import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
 import { logAudit } from '../../core/db/audit';
+import {
+  CONTAINER_KINDS,
+  DATA_CLASSES,
+  clearDataClassCache,
+  type ContainerKind,
+  type DataClass,
+  type DataClassRow,
+} from '../../core/db/data-classes';
 import { requirePermission } from '../../core/auth/guards';
+import { userCan } from '../../core/auth/permissions';
 
 export const auditRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -106,4 +115,59 @@ auditRoutes.get('/audit', requirePermission('audit:read'), async (c) => {
     outcome,
     action,
   });
+});
+
+// ── Container classification ──────────────────────────────────────────────────
+// Viewing the policy needs audit:read; changing it is a system setting and
+// needs menu:manage, because classifying a container is what turns read
+// logging — and, for phi, fail-closed serving — on for it.
+
+auditRoutes.get('/audit/classes', requirePermission('audit:read'), async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT id, container_kind, container_key, class, note, created_at FROM data_classes ORDER BY container_kind, container_key',
+  ).all<DataClassRow>();
+
+  return renderPage(c, auditClassesPage, {
+    classes: rows.results,
+    flash: c.req.query('flash') ?? undefined,
+    canManage: await userCan(c, 'menu:manage'),
+  });
+});
+
+auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) => {
+  const form = await c.req.formData();
+  const kind = String(form.get('container_kind') ?? '');
+  const key = String(form.get('container_key') ?? '').trim();
+  const dataClass = String(form.get('class') ?? '');
+  const note = String(form.get('note') ?? '').trim();
+
+  if (!CONTAINER_KINDS.includes(kind as ContainerKind) || !DATA_CLASSES.includes(dataClass as DataClass) || !key) {
+    return c.redirect('/admin/audit/classes?flash=audit.flash.invalid');
+  }
+
+  // Re-classifying a container updates it rather than failing: an operator
+  // correcting pii to phi should not have to delete the row first.
+  await c.env.DB.prepare(
+    `INSERT INTO data_classes (container_kind, container_key, class, note) VALUES (?, ?, ?, ?)
+     ON CONFLICT(container_kind, container_key) DO UPDATE SET class = excluded.class, note = excluded.note`,
+  ).bind(kind, key, dataClass, note || null).run();
+  clearDataClassCache();
+
+  logAudit(c, 'data_class.set', 'settings', `${kind}:${key}`, { class: dataClass });
+  return c.redirect('/admin/audit/classes?flash=audit.flash.saved');
+});
+
+auditRoutes.post('/audit/classes/:id/delete', requirePermission('menu:manage'), async (c) => {
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT container_kind, container_key FROM data_classes WHERE id = ?')
+    .bind(id)
+    .first<{ container_kind: string; container_key: string }>();
+  if (!row) return c.redirect('/admin/audit/classes?flash=audit.flash.invalid');
+
+  await c.env.DB.prepare('DELETE FROM data_classes WHERE id = ?').bind(id).run();
+  clearDataClassCache();
+
+  // Declassifying stops reads being recorded, so the act itself is recorded.
+  logAudit(c, 'data_class.clear', 'settings', `${row.container_kind}:${row.container_key}`);
+  return c.redirect('/admin/audit/classes?flash=audit.flash.removed');
 });

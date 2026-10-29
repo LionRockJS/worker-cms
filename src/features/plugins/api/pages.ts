@@ -19,6 +19,8 @@ import type {
 } from './types';
 import type { AppContext } from '../../../core/http/context';
 import { authenticatePlugin, forbiddenPageType } from './auth';
+import { recordPageReads, recordRead } from '../../../core/http/access-log';
+import type { AuditActor } from '../../../core/db/audit';
 import {
   asFiniteNumber,
   asPositiveSafeInteger,
@@ -119,6 +121,42 @@ interface PageResourceRow extends Page {
 }
 
 export const pagesApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/**
+ * The audit actor for a contributor read: the user the plugin is acting for,
+ * with the plugin itself in acting_via. A read with no acting user is recorded
+ * as the plugin acting alone, which on a classified container is worth
+ * reviewing in its own right.
+ */
+function apiActor(c: AppContext, pluginId: string): AuditActor {
+  const userId = actingUserId(c);
+  return {
+    userId: userId === null ? null : String(userId),
+    roles: null,
+    sessionSid: null,
+    via: pluginId,
+  };
+}
+
+/** Announces a read of one known page type. Used where the response may be a
+ *  column projection, so the rows cannot be trusted to carry page_type. */
+function announceTypeRead(
+  c: AppContext,
+  pluginId: string,
+  pageType: string,
+  rows: ReadonlyArray<{ id?: number }>,
+): void {
+  if (!rows.length) return;
+  recordRead({
+    action: 'page.read',
+    kind: 'page_type',
+    key: pageType,
+    targetType: 'page',
+    ids: rows.map((row) => row.id).filter((id): id is number => typeof id === 'number').map(String).slice(0, 100),
+    count: rows.length,
+    actor: apiActor(c, pluginId),
+  });
+}
 
 pagesApiRoutes.get('/pages', async (c) => {
   const auth = await authenticatePlugin(c);
@@ -291,6 +329,7 @@ pagesApiRoutes.get('/pages', async (c) => {
   const tagsMap = c.req.query('include_tags') === '1' && !fields
     ? await pageTagsByPageId(c.env.DB, rows.results.map((row) => row.id))
     : null;
+  announceTypeRead(c, auth.pluginId, pageType, rows.results);
   return c.json({
     pages: fields
       ? rows.results.map((row) => serializePartialPage(row, fields))
@@ -405,6 +444,7 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
     ).bind(query.pageType, query.limit, query.groupBy.tagTaxonomy);
   }));
 
+  queries.forEach((query, index) => announceTypeRead(c, auth.pluginId, query.pageType, results[index].results));
   return c.json({
     pages_by_type: Object.fromEntries(queries.map((query, index) => [
       query.key,
@@ -505,6 +545,8 @@ pagesApiRoutes.post('/pages/search', async (c) => {
     sort,
     order,
   });
+
+  recordPageReads('page.search', result.results, { actor: apiActor(c, auth.pluginId) });
 
   const tagsMap = (body as { include_tags?: unknown }).include_tags === true
     ? await pageTagsByPageId(c.env.DB, result.results.map((row) => row.id))
@@ -636,6 +678,7 @@ pagesApiRoutes.get('/pages/:id', async (c) => {
   const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(id).first<Page>();
   if (!page) return c.json({ error: 'not_found' }, 404);
   if (!pageTypeScopeAllows(auth.readableTypes, page.page_type ?? '')) return forbiddenPageType(c, auth, page.page_type ?? '');
+  recordPageReads('page.read', [page], { actor: apiActor(c, auth.pluginId) });
 
   const tags = await c.env.DB.prepare('SELECT tag_id FROM page_tags WHERE page_id = ?')
     .bind(id)

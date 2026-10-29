@@ -7,6 +7,7 @@
 import type { AppContext } from '../../core/http/context';
 import { advancedSearchPage, bulkReplacePreviewPage } from './template';
 import { num } from '../../core/http/forms';
+import { queryFingerprint, recordRead } from '../../core/http/access-log';
 import {
   advancedSearchFormCriteria,
   advancedSearchOperator,
@@ -72,6 +73,33 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
           limit: pageSize,
         },
       };
+
+  // A search over a classified page type is a read of it, recorded against the
+  // types that were *searched* rather than the types that happened to match: a
+  // search returning nothing still asked the container a question, and that is
+  // the shape a probe takes. The criteria are hashed, never stored — in a CMS
+  // holding regulated data the search term is frequently the identifier being
+  // searched for.
+  if (hasSearch) {
+    const idsByType = new Map<string, string[]>();
+    for (const row of result.results) {
+      const type = row.page_type ?? 'default';
+      idsByType.set(type, [...(idsByType.get(type) ?? []), String(row.id)]);
+    }
+    const fingerprint = await queryFingerprint(JSON.stringify(criteria));
+    for (const pageType of pageTypes) {
+      const ids = idsByType.get(pageType) ?? [];
+      recordRead({
+        action: 'page.search',
+        kind: 'page_type',
+        key: pageType,
+        targetType: 'page',
+        ids: ids.slice(0, 100),
+        count: ids.length,
+        queryFingerprint: fingerprint,
+      });
+    }
+  }
 
   const [livePages, projectDraft] = await Promise.all([
     listLiveByTypes(c.env, pageTypes),

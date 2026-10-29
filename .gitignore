@@ -10,3 +10,9 @@ wrangler.production.toml
 /.claude
 src/core/views/locales/en.default.json
 *.p8
+
+# A bare `db` pattern in a global gitignore (e.g. ~/.gitignore_global) matches
+# this source directory, which silently kept src/core/db/data-classes.ts out of
+# a commit while it still built locally. Re-include it explicitly.
+!src/core/db/
+!src/core/db/**

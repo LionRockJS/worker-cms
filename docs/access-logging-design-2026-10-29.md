@@ -179,7 +179,18 @@ acting user is recorded as the plugin acting alone, which is itself worth
 alerting on for a `phi` container.
 
 Search records a `query_fingerprint` (hash) and a result count, never the raw
-terms — a search string is frequently the identifier itself.
+terms — a search string is frequently the identifier itself. It is recorded
+against the page types that were *searched*, not the ones that happened to
+match, so a search returning nothing still leaves a row: asking a container a
+question is what a probe looks like.
+
+**The media routes are public.** `/media/*` and `/media-preview/*` are
+unauthenticated and edge-cached, so a row from them carries the key and the
+source IP but no actor. The read is announced before the cache lookup, so a
+cached hit is still accounted for — but classifying a media prefix makes
+deliveries traceable, it does not make serving ePHI from a public, cacheable
+URL acceptable. Regulated objects need an authenticated route, which this
+design does not add.
 
 Only *failed* token refreshes are recorded. A successful 15-minute rotation is
 not a new sign-on, and one row per active user per quarter-hour would bury the
@@ -230,6 +241,12 @@ holding.
 - New permission `audit:read`, added to `PERMISSIONS` and
   `PERMISSION_DESCRIPTIONS` in `src/types.ts:19,43`. `admin` holds every
   permission in code, so it needs no grant.
+- Reading the classification policy needs `audit:read`; changing it needs
+  `menu:manage`, the existing system-settings capability. They are separate
+  because classifying a container is what switches read logging — and, for
+  `phi`, fail-closed serving — on for it, which is a different act from
+  reviewing the trail. Both changes are recorded (`data_class.set`,
+  `data_class.clear`), or the policy could be moved around a read unnoticed.
 - The viewer is read-only. No route mutates or deletes `audit_events`; pruning
   belongs to the cron sweep alone.
 - Reading the audit log emits `audit.read`.
@@ -259,11 +276,20 @@ refusal), the read recording its own filters, filtering, rejected filter values,
 and that the table has no column an email could be written into. Login success
 is covered in `test/routes.test.ts`.
 
-**Phase 2 — classification and read logging**
-`data_classes`, the settings screen for it, read middleware, `recordRead`.
-*Verify:* with nothing classified, a page read writes zero rows; classify one
-page type and the same read writes exactly one; a 200-row list writes one row
-with `target_count = 200`; a `phi` write failure fails the request.
+**Phase 2 — classification and read logging** — done 2026-10-30.
+`data_classes`, the classification screen at `/admin/audit/classes`, the
+`accessLog` middleware mounted globally in `src/index.ts`, and `recordRead` /
+`recordPageReads` in `src/core/http/access-log.ts`. Handlers announce what they
+returned; the middleware resolves classification once per request and writes
+the classified reads in one batch, so a handler cannot forget to check and a
+list costs one row.
+*Verified* in `test/access-log.test.ts`: an unclassified container records
+nothing at all; a classified page type records exactly one row with its
+container; a sibling unclassified type stays silent; a 120-page listing capped
+at 100 records one row with `target_count` 100 and 100 capped ids; a search
+records a fingerprint and no term; a `phi` read whose audit write fails returns
+503 and serves nothing, while a `pii` read in the same situation still serves;
+and the classification screen gates, records and validates its changes.
 
 **Phase 3 — seal, archive, retention**
 Cron sweep, R2 segments, `audit_seals`, pruning.
