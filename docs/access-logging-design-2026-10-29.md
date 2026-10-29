@@ -291,10 +291,32 @@ records a fingerprint and no term; a `phi` read whose audit write fails returns
 503 and serves nothing, while a `pii` read in the same situation still serves;
 and the classification screen gates, records and validates its changes.
 
-**Phase 3 — seal, archive, retention**
-Cron sweep, R2 segments, `audit_seals`, pruning.
-*Verify:* a sealed segment's recomputed hash matches; a tampered row is
-detected; rows past retention are gone from D1 and present in R2.
+**Phase 3 — seal, archive, retention** — done 2026-10-30.
+`audit_seals`, and the sweep in `src/features/audit/sweep.ts` run from the
+feature's `scheduled` service on the existing 5-minute cron. Each tick archives
+one bounded segment (1000 events) as gzipped NDJSON to `AUDIT_BUCKET`, seals it,
+then prunes only rows at or below the highest sealed seq whose class is past its
+hot window. `verifyAuditArchive()` recomputes every seal from the archived
+bytes.
+
+Three orderings the sweep exists to keep: nothing is pruned that was not
+archived (no bucket means no sweep at all, not a sweep that frees space);
+the object is written before the seal, so a crash between them re-archives the
+same range to the same key rather than sealing a range with no object; and
+seals chain, so a segment cannot be replaced in isolation.
+
+`audit_seals` lives in the **feature's** schema fragment, not the core schema,
+because only the sweep touches it — which means it ships as the runner-applied
+`migrations/0006_enable_audit.sql` instead of a third hand-applied file. That is
+the delivery fix for the problem Phase 2 hit in production (see below).
+
+*Verified* in `test/audit-sweep.test.ts`: a segment is archived, sealed and
+left queryable; the next tick resumes from the seal rather than re-archiving,
+and the seq ranges join end to end; every seal recomputes from its bytes; a
+replaced object fails `contentOk` while its chain stays intact; a deleted object
+is reported missing; a rewritten seal breaks the chain for itself and everything
+after it; rows past their class window are pruned while hotter classes stay; and
+with no bucket nothing is archived *and* nothing is pruned.
 
 **Phase 4 — shipping and alerting**
 Tail Worker or direct OTLP, plus alerts on bulk export, after-hours access and
@@ -326,6 +348,22 @@ mass reads.
 - `npm run check:boundaries`, `check:profiles`, `check:generated` must pass with
   `audit` both on and off.
 
+**What went wrong in production, and the rule it produced.** Phase 0 and Phase 2
+each added a *core* table, which `migrations/` cannot carry (it holds the
+baseline and `*_enable_*` files only), so both shipped as hand-applied files
+under `migrations/manual/`. Three of the four tenant databases never got them:
+`/admin/audit` returned 500 on the deployment that was missing `audit_events`,
+and — worse, because it was silent — `logAudit()` had been failing on every
+mutation there since Phase 0, so those installs had no audit trail at all while
+appearing to work.
+
+The rule that follows: **a new table goes in a feature fragment whenever only
+that feature touches it**, so `--enable` carries it to every database through
+the migration runner. Core-schema tables are the exception, not the default, and
+each one is an operational task across every deployment. `audit_seals` follows
+this; `audit_events` and `data_classes` could not, because core writes to them
+and a feature-owned table written by core would break droppability.
+
 ## 10. Out of scope
 
 These are real gaps this design does not close. Each needs its own decision.
@@ -337,6 +375,13 @@ These are real gaps this design does not close. Each needs its own decision.
 - **Direct infrastructure access.** D1 or R2 reached through the Cloudflare
   dashboard, Wrangler or the API bypasses the Worker entirely. That is
   Cloudflare account-level audit logging plus access control, not this.
+- **Shipping to an external sink.** The archive lands in R2; replicating it to
+  S3 or Azure Blob, and any real-time SIEM feed, is not built.
+- **Surfacing verification.** `verifyAuditArchive()` exists and is tested but
+  has no screen or route, so today an operator cannot run it from the admin.
+- **Object Lock.** The sweep writes to a plain bucket. Hash chaining makes
+  tampering *detectable*; only Object Lock in compliance mode makes it
+  impossible, and that is configured on the bucket, not in this code.
 - **BAA coverage.** Confirm Cloudflare will sign a BAA covering Workers, D1, R2
   and KV on the current plan, and that every sink is covered too. If the
   platform is not in scope, none of the above produces a compliant system.

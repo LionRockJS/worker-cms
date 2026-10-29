@@ -198,6 +198,9 @@ export interface Env {
   /** Optional manual fallback for local/dev environments without version metadata. */
   VIEW_REVISION?: string;
   MEDIA_BUCKET?: R2Bucket;
+  /** Where the audit sweep writes sealed archive segments. Without it the
+   *  sweep does nothing at all — it never prunes what it could not archive. */
+  AUDIT_BUCKET?: R2Bucket;
   /** Cloudflare Images binding used for media thumbnails; falls back to the original when unbound. */
   IMAGES?: ImagesBinding;
   /** Comma-separated built-in publish targets ("d1", "r2"). Defaults to "d1".

@@ -28,6 +28,11 @@ export default defineConfig({
     cloudflareTest(async () => ({
       wrangler: { configPath: './wrangler.toml' },
       miniflare: {
+        // AUDIT_BUCKET is commented out in wrangler.toml, because the bucket
+        // has to be created per deployment and the sweep is inert without it.
+        // The tests still have to exercise the enabled path, so the harness
+        // provides it; the disabled path is covered by passing it as undefined.
+        r2Buckets: ['AUDIT_BUCKET'],
         bindings: {
           JWT_SECRET: 'test-jwt-secret-0123456789abcdef0123456789abcdef',
           ENABLED_PROVIDERS: 'eventuai,github,google,microsoft,apple',

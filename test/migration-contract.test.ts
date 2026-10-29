@@ -38,7 +38,7 @@ describe('flattened migration contract', () => {
 
   it('creates the complete private schema without transitional tables', async () => {
     expect(await objectNames(env.DB, 'table')).toEqual([
-      'admin_jobs', 'audit_events', 'audit_log', 'block_types', 'credit_ledger', 'credit_subscriptions', 'credit_wallets',
+      'admin_jobs', 'audit_events', 'audit_log', 'audit_seals', 'block_types', 'credit_ledger', 'credit_subscriptions', 'credit_wallets',
       'data_classes', 'locale_messages', 'locales', 'media_files', 'page_tags', 'page_types',
       'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_file_prefix_approvals',
       'plugin_identity_approvals', 'plugin_page_type_approvals',

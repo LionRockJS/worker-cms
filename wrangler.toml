@@ -38,6 +38,17 @@ database_name = "cms-published"
 database_id = "94cc01db-8028-48eb-923f-e440423aeb3f"
 migrations_dir = "migrations/published"
 
+# The audit feature's sealed archive: gzipped NDJSON segments of
+# audit_events, written by the cron sweep before it prunes anything. Without
+# this binding the sweep does nothing at all — it never prunes rows it could
+# not archive first, so leaving it unset is safe, not silently lossy.
+# Create the bucket per deployment, then uncomment:
+#   wrangler r2 bucket create worker-cms-audit
+# Enable Object Lock on it for retention that an operator cannot shorten.
+# [[r2_buckets]]
+# binding = "AUDIT_BUCKET"
+# bucket_name = "worker-cms-audit"
+
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "worker-cms-media"
