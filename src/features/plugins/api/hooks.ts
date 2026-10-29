@@ -2,6 +2,7 @@
 // is the calling plugin, not a signed-in user, so these never read c.get('user').
 
 import type { AppContext } from '../../../core/http/context';
+import { logAuditBatchVia } from '../../../core/db/audit';
 import { deliverHooks, type HookEvent, type HookPage } from '../hooks';
 
 // ── Lifecycle hook + audit (plugin actor, no signed-in user) ──────────────────
@@ -9,8 +10,8 @@ import { deliverHooks, type HookEvent, type HookPage } from '../hooks';
 /**
  * Fires the lifecycle hook to subscribed plugins and records an audit row, both
  * best-effort via waitUntil. Mirrors dispatchHook but attributes the action to
- * the calling plugin instead of a CMS user (logAudit needs a user, so we can't
- * reuse it here).
+ * the calling plugin instead of a CMS user, which the audit envelope carries as
+ * a null actor plus the plugin id in acting_via.
  */
 export function emitPluginHook(c: AppContext, event: HookEvent, page: HookPage, pluginId: string): void {
   emitPluginHooks(c, event, [page], pluginId);
@@ -19,20 +20,12 @@ export function emitPluginHook(c: AppContext, event: HookEvent, page: HookPage, 
 export function emitPluginHooks(c: AppContext, event: HookEvent, pages: HookPage[], pluginId: string): void {
   if (!pages.length) return;
 
-  const auditPromise = c.env.DB.batch(
-    pages.map((page) => c.env.DB.prepare(
-      `INSERT INTO audit_log (user_id, user_email, action, entity_type, entity_id, detail)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        '0',
-        `plugin:${pluginId}`,
-        `page.${event}`,
-        'page',
-        String(page.id),
-        JSON.stringify({ name: page.name, slug: page.slug, page_type: page.page_type, via: `plugin:${pluginId}` }),
-      )),
-  ).catch((error) => console.error('audit log failed', error));
+  const auditPromise = logAuditBatchVia(c, pluginId, pages.map((page) => ({
+    action: `page.${event}`,
+    entityType: 'page',
+    entityId: page.id,
+    detail: { name: page.name, slug: page.slug, page_type: page.page_type },
+  })));
 
   // deliverHooks tolerates a null user (passes user: null in the payload) and
   // chunks the pages so a bulk delete costs a fetch per hundred, not per page.

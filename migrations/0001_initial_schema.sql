@@ -173,6 +173,41 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 9b. Audit events – supersedes audit_log. One stream for mutations, reads,
+--     authentication and exports, carrying the request context a compliance
+--     audit asks for. See docs/access-logging-design-2026-10-29.md.
+--     audit_log is left in place as history; nothing writes to it any more.
+CREATE TABLE IF NOT EXISTS audit_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,   -- orders events written in the same millisecond
+    event_id TEXT NOT NULL UNIQUE,           -- uuid; the same id in D1, the archive and any SIEM
+    occurred_at TEXT NOT NULL,               -- ISO-8601 UTC with ms, set in code, never CURRENT_TIMESTAMP
+    event_class TEXT NOT NULL,               -- 'auth' | 'read' | 'mutation' | 'export' | 'admin'
+    data_class TEXT NOT NULL DEFAULT 'none', -- 'none' | 'pii' | 'phi'; set once containers are classified
+    retention_class TEXT NOT NULL,           -- what the retention sweep goes by
+    action TEXT NOT NULL,                    -- e.g. 'page.create', 'auth.login', 'media.upload'
+    outcome TEXT NOT NULL DEFAULT 'success', -- 'success' | 'denied' | 'error'
+    -- Internal user id only, never an email: the viewer joins users for a
+    -- display name, so an erased account leaves the row intact with nothing
+    -- left to resolve. NULL means no signed-in user — a contributor acting on
+    -- its own, or an unauthenticated request.
+    actor_user_id TEXT,
+    actor_roles TEXT,                        -- role snapshot at the time; forensic, not identifying
+    acting_via TEXT,                         -- contributor/plugin id when one is acting
+    session_sid TEXT,                        -- JWTPayload.sid, so a session can be traced or revoked
+    request_id TEXT,                         -- CF-Ray
+    source_ip TEXT,
+    user_agent TEXT,
+    target_type TEXT,                        -- 'page' | 'media' | 'tag' | 'user' | 'query' | ...
+    -- One target, the common case, kept scalar so it is indexable: "everything
+    -- that touched page 101" is the question an investigation starts from.
+    target_id TEXT,
+    target_ids TEXT,                         -- JSON array when there are many, capped
+    target_count INTEGER,                    -- authoritative even when target_ids is capped
+    container_key TEXT,                      -- the classified container this touched
+    query_fingerprint TEXT,                  -- hash of search criteria; never the raw terms
+    detail TEXT                              -- small JSON (slug, filename); never content bodies
+);
+
 -- 10. Roles – custom roles, plus built-in roles once their permissions are
 --     customized. Built-in roles (admin/editor/moderator/viewer) are implicit
 --     in code (USER_ROLES) and only appear here after being edited.
@@ -213,6 +248,10 @@ CREATE INDEX IF NOT EXISTS idx_tags_taxonomy_slug_weight_name ON tags(taxonomy_s
 CREATE INDEX IF NOT EXISTS idx_tags_parent_tag ON tags(parent_tag);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log (created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_occurred ON audit_events (occurred_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events (actor_user_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_target ON audit_events (target_type, target_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_retention ON audit_events (retention_class, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_user_oauth_identities_user_id ON user_oauth_identities(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_previous_refresh ON sessions(previous_refresh_token_hash);
 

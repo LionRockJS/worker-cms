@@ -1275,9 +1275,9 @@ describe('admin routes', () => {
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(2).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE user_id = ?').bind(2).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM sessions WHERE user_id = ?').bind(2).first()).toBeNull();
-    expect(await env.DB.prepare('SELECT action, entity_type, entity_id FROM audit_log WHERE action = ?')
+    expect(await env.DB.prepare('SELECT action, target_type, target_id FROM audit_events WHERE action = ?')
       .bind('user.delete')
-      .first()).toEqual({ action: 'user.delete', entity_type: 'user', entity_id: '2' });
+      .first()).toEqual({ action: 'user.delete', target_type: 'user', target_id: '2' });
   });
 
   it('does not let an admin remove their own user', async () => {
@@ -1761,7 +1761,7 @@ describe('admin routes', () => {
     expect(await env.DB.prepare('SELECT action, lect FROM page_versions WHERE page_id = ? ORDER BY rowid DESC LIMIT 1')
       .bind(101)
       .first<{ action: string; lect: string }>()).toMatchObject({ action: 'bulk-replace', lect: page?.lect });
-    expect(await env.DB.prepare("SELECT COUNT(*) AS total FROM audit_log WHERE action = 'page.update' AND entity_id = '101'")
+    expect(await env.DB.prepare("SELECT COUNT(*) AS total FROM audit_events WHERE action = 'page.update' AND target_id = '101'")
       .first<{ total: number }>()).toEqual({ total: 1 });
   });
 
@@ -1880,7 +1880,7 @@ describe('admin routes', () => {
       .first<{ id: number }>()).not.toBeNull();
     // Audit rows are written for every deleted page in one batched insert.
     expect(await env.DB.prepare(
-      "SELECT COUNT(*) AS total FROM audit_log WHERE action = 'page.delete' AND entity_id IN ('103', '104')",
+      "SELECT COUNT(*) AS total FROM audit_events WHERE action = 'page.delete' AND target_id IN ('103', '104')",
     ).first<{ total: number }>()).toEqual({ total: 2 });
   });
 
@@ -2596,12 +2596,13 @@ describe('admin routes', () => {
 
     expect(response.status).toBe(302);
     await expect.poll(async () => {
-      return env.DB.prepare("SELECT user_email, action, entity_type FROM audit_log WHERE action = 'page.create' ORDER BY id DESC LIMIT 1")
-        .first<{ user_email: string; action: string; entity_type: string }>();
+      return env.DB.prepare("SELECT actor_user_id, actor_roles, action, target_type FROM audit_events WHERE action = 'page.create' ORDER BY seq DESC LIMIT 1")
+        .first<{ actor_user_id: string; actor_roles: string; action: string; target_type: string }>();
     }, { timeout: 2000 }).toMatchObject({
-      user_email: 'admin@example.com',
+      actor_user_id: '1',
+      actor_roles: 'admin',
       action: 'page.create',
-      entity_type: 'page',
+      target_type: 'page',
     });
   });
 
@@ -3973,6 +3974,7 @@ async function resetData(): Promise<void> {
     'user_oauth_identities',
     'users',
     'audit_log',
+    'audit_events',
   ];
   for (const table of adminTables) {
     await env.DB.prepare(`DELETE FROM ${table}`).run();

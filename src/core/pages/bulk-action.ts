@@ -17,6 +17,7 @@ import {
 import type { Env, JWTPayload, Page } from '../../types';
 import { trashDraftPages, type TrashedPageRef } from '../db/admin-queries';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
+import { logAuditBatch } from '../db/audit';
 import { submissionMirrorIds } from '../db/submission-ingest';
 import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
 import { safeParseLect, stringifyLect, type Lect } from '../db/lect';
@@ -293,18 +294,12 @@ async function emitPageLifecycle(
   pages: PageEventPage[],
 ): Promise<void> {
   if (!pages.length) return;
-  const auditPromise = env.DB.batch(
-    pages.map((page) => env.DB.prepare(
-      `INSERT INTO audit_log (user_id, user_email, action, entity_type, entity_id, detail)
-       VALUES (?, ?, ?, 'page', ?, ?)`,
-    ).bind(
-      String(user.sub),
-      user.email,
-      `page.${event}`,
-      String(page.id),
-      JSON.stringify({ name: page.name, slug: page.slug, page_type: page.page_type }),
-    )),
-  );
+  const auditPromise = logAuditBatch(env, user, pages.map((page) => ({
+    action: `page.${event}`,
+    entityType: 'page',
+    entityId: page.id,
+    detail: { name: page.name, slug: page.slug, page_type: page.page_type },
+  })));
   const hooksPromise = coreExtensions().notifyPageEvent?.(env, user, event, pages) ?? Promise.resolve();
   await Promise.allSettled([auditPromise, hooksPromise]);
 }
