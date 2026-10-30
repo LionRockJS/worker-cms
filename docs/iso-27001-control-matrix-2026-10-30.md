@@ -149,6 +149,8 @@ Control labels are concise paraphrases for navigation, not the standard's normat
 
 ## Practical distinction for remediation
 
+Implementation sequencing, shared fixes, owners and acceptance tests are in the [shared implementation plan](compliance-implementation-plan-2026-10-30.md).
+
 - **Confirmed engineering work:** F1 publication policy, F2 classification failure behavior, F3 classified public-media behavior, F4 logging coverage/durability, and application inactivity controls where the chosen session policy requires them.
 - **Confirmed repository configuration issue:** F5 has no active audit archive binding in the checked production file. Verify the deployed configuration before concluding production also lacks it.
 - **Evidence collection first:** MFA/IdP enforcement, independent backups, actual storage/transport encryption, account permissions, supplier contracts, workforce controls, incident procedures and ISMS governance. Do not label these absent or rebuild them before checking existing controls.
