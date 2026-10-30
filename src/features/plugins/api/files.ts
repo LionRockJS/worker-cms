@@ -12,6 +12,9 @@ import type { Context } from 'hono';
 import type { Env, Variables } from '../../../types';
 import { authenticatePlugin } from './auth';
 import { listFilePrefixApprovals } from '../file-prefixes';
+import { resolveDataClasses } from '../../../core/db/data-classes';
+import { auditReads, auditUnavailable, type PendingRead } from '../../../core/http/access-log';
+import { actingUserId } from './create';
 
 export const filesApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -114,9 +117,57 @@ function listOptions(
   };
 }
 
-filesApiRoutes.get('/files', async (c) => {
+/** Classify every returned key (including nested delimiter prefixes), grouped
+ * by policy prefix to keep a large listing's audit batch bounded. */
+async function auditFiles(c: FilesContext, pluginId: string, action: string, keys: string[]): Promise<Response | null> {
+  try {
+    const classes = await resolveDataClasses(c.env);
+    if (!classes.ok) return auditUnavailable(c);
+    const userId = actingUserId(c);
+    const actor = { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: pluginId };
+    const groups = new Map<string, string[]>();
+    for (const key of keys) {
+      const prefix = classes.prefixes.find((entry) => key.startsWith(entry.key));
+      if (!prefix) continue;
+      const ids = groups.get(prefix.key) ?? [];
+      ids.push(key);
+      groups.set(prefix.key, ids);
+    }
+    const reads: PendingRead[] = [...groups].map(([key, ids]) => ({
+      action, kind: 'media_prefix', key, targetType: 'media',
+      ids: ids.slice(0, 100), count: ids.length, actor,
+    }));
+    // A contributor can itself be classified independently of its file paths.
+    if (classes.exact.has(`plugin:${pluginId}`)) reads.push({
+      action, kind: 'plugin', key: pluginId, targetType: 'media',
+      ids: keys.slice(0, 100), count: keys.length, actor,
+    });
+    await auditReads(c, reads);
+    return null;
+  } catch (error) {
+    console.error('private file audit unavailable', error);
+    return auditUnavailable(c);
+  }
+}
+
+async function headFile(c: FilesContext): Promise<Response> {
   const access = await authenticateFiles(c);
   if (access instanceof Response) return access;
+  const key = validateKey(c.req.query('key') || '', access.prefixes);
+  if (!key) return c.json({ error: 'invalid_key' }, 400, NO_STORE);
+  const object = await access.bucket.head(key);
+  if (!object) return c.notFound();
+  const refused = await auditFiles(c, access.auth.pluginId, 'media.head', [key]);
+  if (refused) return refused;
+  return new Response(null, { headers: objectHeaders(object) });
+}
+
+filesApiRoutes.get('/files', async (c) => {
+  // Hono dispatches HEAD through GET; keep metadata handling body-free.
+  if (c.req.method === 'HEAD') return headFile(c);
+  const access = await authenticateFiles(c);
+  if (access instanceof Response) return access;
+
 
   const keyParam = c.req.query('key');
   if (keyParam !== undefined) {
@@ -127,12 +178,18 @@ filesApiRoutes.get('/files', async (c) => {
     if (!key) return c.json({ error: 'invalid_key' }, 400, NO_STORE);
     const object = await access.bucket.get(key);
     if (!object) return c.notFound();
+    const refused = await auditFiles(c, access.auth.pluginId, 'media.read', [key]);
+    if (refused) { await object.body.cancel(); return refused; }
     return new Response(object.body, { headers: objectHeaders(object) });
   }
 
   const options = listOptions(c, access.prefixes);
   if (options instanceof Response) return options;
   const listed = await access.bucket.list(options);
+  const refused = await auditFiles(c, access.auth.pluginId, 'media.list', [
+    ...listed.objects.map((object) => object.key), ...listed.delimitedPrefixes,
+  ]);
+  if (refused) return refused;
   return c.json({
     objects: listed.objects.map((object) => ({
       key: object.key,
@@ -148,16 +205,7 @@ filesApiRoutes.get('/files', async (c) => {
   }, 200, NO_STORE);
 });
 
-filesApiRoutes.on('HEAD', '/files', async (c) => {
-  const access = await authenticateFiles(c);
-  if (access instanceof Response) return access;
-
-  const key = validateKey(c.req.query('key') || '', access.prefixes);
-  if (!key) return c.json({ error: 'invalid_key' }, 400, NO_STORE);
-  const object = await access.bucket.head(key);
-  if (!object) return c.notFound();
-  return new Response(null, { headers: objectHeaders(object) });
-});
+filesApiRoutes.on('HEAD', '/files', headFile);
 
 filesApiRoutes.put('/files', async (c) => {
   const access = await authenticateFiles(c);

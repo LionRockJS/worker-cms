@@ -193,6 +193,31 @@ describe('read logging', () => {
 });
 
 describe('ePHI fails closed', () => {
+  it.each([
+    ['page_type', 'chart', 'unknown'],
+    ['unknown', 'chart', 'phi'],
+    ['page_type', ' ', 'phi'],
+  ])('withholds reads for malformed policy %s/%s/%s', async (kind, key, value) => {
+    const [id] = await seedPages(1, 'chart');
+    await classify(kind, key, value);
+    const response = await adminFetch(`/admin/pages/${id}/read`);
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe('Audit log unavailable');
+  });
+
+  it('withholds page data when classification cannot be resolved', async () => {
+    const [id] = await seedPages(1, 'chart');
+    await env.DB.prepare('ALTER TABLE data_classes RENAME TO data_classes_away').run();
+    try {
+      const response = await adminFetch(`/admin/pages/${id}/read`);
+      expect(response.status).toBe(503);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.text()).toBe('Audit log unavailable');
+    } finally {
+      await env.DB.prepare('ALTER TABLE data_classes_away RENAME TO data_classes').run();
+    }
+  });
+
   it('refuses to serve a record it could not account for', async () => {
     const [id] = await seedPages(1, 'chart');
     await classify('page_type', 'chart', 'phi');

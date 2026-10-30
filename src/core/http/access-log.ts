@@ -30,6 +30,7 @@ import {
 } from '../db/data-classes';
 import { contextActor, writeAuditRows, type AuditActor, type AuditRow } from '../db/audit';
 import { wantsJsonResponse } from '../auth/guards';
+import type { AppContext } from './context';
 
 /** At most this many ids go into target_ids; target_count stays authoritative. */
 const TARGET_ID_CAP = 100;
@@ -130,6 +131,42 @@ function rowFor(read: PendingRead, dataClass: 'pii' | 'phi'): AuditRow {
   };
 }
 
+/** Persist classified reads before returning a sensitive stream. Callers may
+ * use this directly rather than waiting for response middleware. */
+export async function auditReads(c: AppContext, pending: PendingRead[]): Promise<void> {
+  const classes = await resolveDataClasses(c.env);
+  if (!classes.ok) throw new Error('Classification unavailable');
+  // Keep attribution per event: a request can contain more than one actor.
+  const groups = new Map<string, { actor: AuditActor; rows: AuditRow[]; strict: boolean }>();
+  for (const read of pending) {
+    const dataClass = classFor(classes, read.kind, read.key);
+    if (!dataClass) continue;
+    const actor = read.actor ?? contextActor(c);
+    const key = JSON.stringify(actor);
+    let group = groups.get(key);
+    if (!group) {
+      group = { actor, rows: [], strict: false };
+      groups.set(key, group);
+    }
+    group.rows.push(rowFor(read, dataClass));
+    group.strict ||= failsClosed(dataClass);
+  }
+  for (const group of groups.values()) {
+    if (group.strict) {
+      await writeAuditRows(c, group.rows, group.actor, true);
+    } else {
+      const promise = writeAuditRows(c, group.rows, group.actor);
+      try { c.executionCtx.waitUntil(promise); } catch { await promise; }
+    }
+  }
+}
+
+export function auditUnavailable(c: AppContext): Response {
+  return wantsJsonResponse(c.req.raw)
+    ? Response.json({ success: false, error: 'Audit log unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    : new Response('Audit log unavailable', { status: 503, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
+}
+
 /**
  * Drains the request's announced reads and writes the classified ones.
  *
@@ -139,44 +176,14 @@ function rowFor(read: PendingRead, dataClass: 'pii' | 'phi'): AuditRow {
  */
 export const accessLog = createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
   await next();
-
   const context = requestContext.getStore();
   const pending = context?.pendingReads;
   if (!context || !pending?.length) return;
   delete context.pendingReads;
-
-  const classes = await resolveDataClasses(c.env);
-  const rows: AuditRow[] = [];
-  let strict = false;
-  let actor: AuditActor | undefined;
-  for (const read of pending) {
-    const dataClass = classFor(classes, read.kind, read.key);
-    if (!dataClass) continue;
-    if (failsClosed(dataClass)) strict = true;
-    actor ??= read.actor;
-    rows.push(rowFor(read, dataClass));
-  }
-  if (!rows.length) return;
-
-  if (!strict) {
-    // Ordinary PII: written after the response, like every other audit write.
-    const promise = writeAuditRows(c, rows, actor ?? contextActor(c));
-    try {
-      c.executionCtx.waitUntil(promise);
-    } catch {
-      void promise;
-    }
-    return;
-  }
-
-  // ePHI: the record has to exist before the data leaves. If the write fails
-  // the response is replaced, so the rows the handler fetched are never served.
   try {
-    await writeAuditRows(c, rows, actor ?? contextActor(c), true);
+    await auditReads(c, pending);
   } catch (error) {
-    console.error('access log failed; refusing to serve the record', error);
-    c.res = wantsJsonResponse(c.req.raw)
-      ? Response.json({ success: false, error: 'Audit log unavailable' }, { status: 503 })
-      : new Response('Audit log unavailable', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+    console.error('access log unavailable; refusing to serve the record', error);
+    c.res = auditUnavailable(c);
   }
 });

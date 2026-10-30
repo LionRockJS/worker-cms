@@ -15,9 +15,8 @@
 //     even when the page's own type is ordinary, and tag links travel in the
 //     snapshot.
 //
-// This gate fails CLOSED, unlike read logging. Where a classification outage
-// must not take every read surface down (see data-classes.ts), publication is
-// an infrequent, explicit, non-reversible disclosure: refusing it until
+// This gate fails CLOSED, as do classified reads. Publication is
+// an explicit, non-reversible disclosure: refusing it until
 // classification can be read again costs an operator a retry, while guessing
 // costs a breach. Nothing gates *un*publication — withdrawing a page that was
 // published before it was classified has to stay possible.
