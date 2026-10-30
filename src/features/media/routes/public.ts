@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { applyMediaResponseHeaders, mediaObjectResponse } from '../security';
 import { recordRead } from '../../../core/http/access-log';
+import { mediaDisposition } from '../regulated';
 import type { Env, Variables } from '../../../types';
 
 /**
@@ -8,10 +9,10 @@ import type { Env, Variables } from '../../../types';
  * a cached hit is still accounted for.
  *
  * These routes are public and unauthenticated, so a recorded row carries the
- * source IP and the key but no actor. That is a limit of the surface, not of
- * the log: classifying a media prefix makes its deliveries traceable, it does
- * not make serving ePHI from a public, cacheable URL acceptable. Regulated
- * objects belong behind an authenticated route.
+ * source IP and the key but no actor. That is a limit of the surface: a
+ * regulated object is not served here at all (see withhold below), so what this
+ * records is the delivery of unregulated content. Regulated objects are served
+ * only by the authenticated route in routes/files.ts.
  */
 function announceMediaRead(key: string): void {
   recordRead({
@@ -34,12 +35,41 @@ async function isPublicMedia(env: Env, key: string): Promise<boolean> {
   const object = await env.MEDIA_BUCKET?.head(key);
   return !!object && object.customMetadata?.cmsPrivate !== '1';
 }
+
+/**
+ * Refuses a regulated object before the route does anything else — before the
+ * existence check, so a withheld key is indistinguishable from a missing one
+ * (confirming that an object exists under a classified prefix is itself a
+ * disclosure), and before the edge-cache read, so classifying a prefix stops
+ * deliveries this Worker has already cached.
+ *
+ * `unknown` answers 503, not 404: it means the classification could not be
+ * read, and saying "not found" to that would be the silent fail-open the whole
+ * control exists to avoid. Downstream caches are a separate matter — a
+ * `max-age=31536000` response already handed out is beyond this Worker's reach
+ * and has to be purged.
+ */
+async function withhold(c: { env: Env }, key: string): Promise<Response | null> {
+  switch (await mediaDisposition(c.env, key)) {
+    case 'withheld':
+      return new Response('Not Found', { status: 404 });
+    case 'unknown':
+      return new Response('Media classification unavailable', {
+        status: 503,
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    default:
+      return null;
+  }
+}
 /** Images binding input ceiling; larger objects are served untransformed. */
 const MAX_TRANSFORM_BYTES = 20 * 1024 * 1024;
 
 mediaPublicRoutes.get('/media-preview/*', async (c) => {
   if (!c.env.MEDIA_BUCKET) return c.notFound();
   const key = c.req.path.replace(/^\/media-preview\//, '');
+  const refusal = await withhold(c, key);
+  if (refusal) return refusal;
   if (!await isPublicMedia(c.env, key)) return c.notFound();
   announceMediaRead(key);
 
@@ -60,6 +90,8 @@ mediaPublicRoutes.get('/media-preview/*', async (c) => {
 mediaPublicRoutes.get('/media/*', async (c) => {
   if (!c.env.MEDIA_BUCKET) return c.notFound();
   const key = c.req.path.replace(/^\/media\//, '');
+  const refusal = await withhold(c, key);
+  if (refusal) return refusal;
   if (!await isPublicMedia(c.env, key)) return c.notFound();
   announceMediaRead(key);
   return await mediaObjectResponse(c.env.MEDIA_BUCKET, key) ?? c.notFound();

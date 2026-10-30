@@ -8,6 +8,9 @@ import type { Env, Variables } from '../../../types';
 import { requirePermission } from '../../../core/auth/guards';
 import { renderPage } from '../../../core/render/chrome';
 import { logAudit } from '../../../core/db/audit';
+import { recordRead } from '../../../core/http/access-log';
+import { mediaObjectResponse } from '../security';
+import { mediaClassifier } from '../regulated';
 import { contentListPage, type ContentListMediaItem } from '../template';
 
 export const mediaFilesRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -17,8 +20,17 @@ mediaFilesRoutes.use('/settings/content/*', requirePermission('menu:manage'));
 
 const MEDIA_LIST_PAGE_SIZE = 50;
 
+function encodeKey(key: string): string {
+  return key.split('/').map(encodeURIComponent).join('/');
+}
+
 function mediaHref(key: string): string {
-  return `/media/${key.split('/').map(encodeURIComponent).join('/')}`;
+  return `/media/${encodeKey(key)}`;
+}
+
+/** Where an authorized operator fetches an object the public route withholds. */
+function regulatedMediaHref(key: string): string {
+  return `/admin/media/${encodeKey(key)}`;
 }
 
 function formatBytes(bytes: number): string {
@@ -85,9 +97,14 @@ mediaFilesRoutes.get('/settings/content', async (c) => {
   const listed = await c.env.MEDIA_BUCKET.list({ limit: MEDIA_LIST_PAGE_SIZE, cursor });
   const keys = listed.objects.map((object) => object.key);
   const linkedPages = await linkedPagesForMedia(c.env.DB, keys);
+  // A withheld object 404s on /media/..., so the browser must point at the
+  // authenticated route instead or every regulated row looks broken.
+  const classify = await mediaClassifier(c.env);
   const media: ContentListMediaItem[] = listed.objects.map((object) => ({
     key: object.key,
-    mediaHref: mediaHref(object.key),
+    mediaHref: classify(object.key) === 'public'
+      ? mediaHref(object.key)
+      : regulatedMediaHref(object.key),
     size: formatBytes(object.size),
     uploadedAt: object.uploaded.toISOString(),
     linkedPages: linkedPages.get(object.key) ?? [],
@@ -97,6 +114,35 @@ mediaFilesRoutes.get('/settings/content', async (c) => {
     : '';
 
   return renderPage(c, contentListPage, { bucketConfigured: true, media, nextHref });
+});
+
+/**
+ * Authenticated delivery of an object the public routes withhold. Its own
+ * capability rather than `media:upload`, because uploading media and reading
+ * regulated media are different job duties — no built-in role holds it, so a
+ * deployment grants it deliberately through the Roles admin.
+ *
+ * Never cached: `no-store` and no validator, so a regulated object does not
+ * come to rest in a shared or browser cache the way the public route's
+ * year-long `max-age` allows. The read is announced, so the global access log
+ * records it against the classified prefix with an actor attached — which is
+ * the whole point of serving it here instead.
+ */
+mediaFilesRoutes.get('/media/:key{.+}', requirePermission('media:regulated'), async (c) => {
+  if (!c.env.MEDIA_BUCKET) return c.notFound();
+  const key = c.req.param('key');
+  if (!await c.env.DB.prepare('SELECT 1 FROM media_files WHERE key = ?').bind(key).first()) {
+    return c.notFound();
+  }
+
+  recordRead({ action: 'media.read', kind: 'media_prefix', key, targetType: 'media', ids: [key], count: 1 });
+
+  const served = await mediaObjectResponse(c.env.MEDIA_BUCKET, key);
+  if (!served) return c.notFound();
+  const headers = new Headers(served.headers);
+  headers.set('Cache-Control', 'no-store');
+  headers.delete('ETag');
+  return new Response(served.body, { headers });
 });
 
 mediaFilesRoutes.post('/settings/content/delete', async (c) => {

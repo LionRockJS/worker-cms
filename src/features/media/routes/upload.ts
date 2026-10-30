@@ -10,6 +10,7 @@ import { rateLimitByIP } from '../../../core/http/rate-limit';
 import { logAudit } from '../../../core/db/audit';
 import { slugify, str } from '../../../core/http/forms';
 import { validateUpload } from '../security';
+import { mediaClassifier } from '../regulated';
 
 export const mediaUploadRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -22,6 +23,12 @@ mediaUploadRoutes.post('/upload', async (c) => {
   if (!c.env.MEDIA_BUCKET) {
     return c.json({ success: false, error: 'MEDIA_BUCKET binding is not configured' }, 501);
   }
+
+  // Private-by-default for regulated destinations: the object marker is written
+  // here, so it protects the object afterwards whatever the classification
+  // table says. An upload that cannot be classified is refused rather than
+  // guessed — mis-marking is durable, while a refusal costs a retry.
+  const classify = await mediaClassifier(c.env);
 
   const form = await c.req.formData();
   const uploadedFiles = [...form.values()].filter((value) => typeof value !== 'string');
@@ -48,8 +55,13 @@ mediaUploadRoutes.post('/upload', async (c) => {
 
     const safeName = file.name.replace(/[^a-z0-9-_.]/gi, '');
     const key = `${uploadDirectory}/${datePath}/${crypto.randomUUID()}-${safeName}`;
+    const disposition = classify(key);
+    if (disposition === 'unknown') {
+      return c.json({ success: false, error: 'classification_unavailable' }, 503);
+    }
     await c.env.MEDIA_BUCKET.put(key, file.stream(), {
       httpMetadata: { contentType: validation.contentType },
+      ...(disposition === 'withheld' ? { customMetadata: { cmsPrivate: '1' } } : {}),
     });
     const url = `/media/${key}`;
     await c.env.DB.prepare(

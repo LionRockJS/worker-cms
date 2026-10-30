@@ -133,6 +133,45 @@ was classified has to stay possible.
 conflating the two would make the classification screen unusable for ordinary
 contact data.
 
+### D9. Regulated media is withheld, not merely logged
+
+Added 2026-10-30, from the same review. Classifying a media prefix made its
+deliveries *audited* and nothing more: an ordinarily uploaded object under a
+`phi` prefix stayed fetchable by anyone holding the URL
+(`src/features/media/routes/public.ts:32`), under `max-age=31536000`. Recording
+a disclosure is not preventing one.
+
+Two layers, because neither alone covers the cases:
+
+- `src/features/media/regulated.ts` classifies a key by prefix, which covers
+  objects already in the bucket when their prefix is classified;
+- the `cmsPrivate` object marker is now written at **upload** time for a
+  regulated destination, so it protects the object independently of the table.
+  An upload that cannot be classified is refused rather than guessed, because
+  mis-marking is durable where a refusal costs a retry.
+
+The public routes refuse **before** the existence check, so a withheld key
+cannot be told apart from a missing one — confirming that something exists under
+a classified prefix is itself a disclosure — and before the edge-cache read, so
+classifying a prefix stops deliveries this Worker has already cached.
+
+Like D8 this fails closed, and more loudly: an unreadable classification answers
+**503**, not 404, on every public media request. 404 would read as "no such
+file" when the truth is "we cannot tell", which is the silent fail-open the
+control exists to prevent. The cost is that public media stops on a database
+that never ran the `data_classes` migration — deliberately, because an
+installation that cannot say which objects are regulated should not be handing
+objects to anonymous callers, and the fix is the migration it already owes.
+
+Authorized access keeps working: `GET /admin/media/*` serves any registered
+object under the new `media:regulated` capability, with `no-store` and no
+validator, and announces the read so the access log records it against the
+classified prefix *with an actor* — which is the point of serving it there
+instead. No built-in role holds `media:regulated`, so a deployment grants it
+deliberately; uploading media and reading regulated media are different duties.
+
+`pii` is not withheld, for the same reason it is not gated on publication.
+
 ## 3. Event envelope
 
 ```
@@ -451,6 +490,20 @@ These are real gaps this design does not close. Each needs its own decision.
   which is what an ISO or SOC 2 auditor asks to see.
 - **After-hours access.** Deliberately not a signal: it needs an hours-of-business
   policy per deployment, and guessing one produces either noise or false comfort.
+- **Caches already holding a withheld object.** D9 stops this Worker from
+  serving a regulated object, but a `max-age=31536000` response handed out
+  before the prefix was classified may sit in the Cloudflare edge cache, a
+  downstream proxy or a browser. Those have to be purged, and copies already
+  downloaded cannot be recalled. Assessing prior exposure is an operational
+  step, not a code change.
+- **Embedding regulated media in page content.** The editor's upload response
+  returns the canonical `/media/<key>` path, which a withheld object no longer
+  serves. Regulated media is reachable through `/admin/media/*` and the Files
+  browser; it is not supported inside published page content, which is
+  consistent with D8 refusing to publish the page in the first place.
+- **Separate public and private buckets.** One bucket serves both, and the
+  separation is by prefix classification and object marker rather than by
+  binding. A dedicated private bucket would make the boundary structural.
 - **Object Lock.** The sweep writes to a plain bucket. Hash chaining makes
   tampering *detectable*; only Object Lock in compliance mode makes it
   impossible, and that is configured on the bucket, not in this code.
