@@ -1,0 +1,119 @@
+<div class="my-4 px-4 sm:px-6 lg:px-8">
+  <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <p class="text-sm text-gray-500">{{ "audit.review_help" | t }}</p>
+    <div class="flex items-center gap-4">
+      <a href="{{ classesHref }}" class="text-sm text-indigo-600 hover:underline">{{ "audit.classification" | t }}</a>
+      <a href="{{ auditHref }}" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_audit.audit_log" | t }}</a>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
+    <h2 class="text-lg font-bold text-gray-900">{{ "audit.archive" | t }}</h2>
+    {% if bucketBound %}
+      <div class="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div>
+          <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.sealed_segments" | t }}</div>
+          <div class="text-[2rem] font-bold text-gray-900">{{ seals }}</div>
+          <div class="text-xs text-gray-500 font-mono">{{ coverage }}</div>
+        </div>
+        <div>
+          <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.backlog" | t }}</div>
+          <div class="text-[2rem] font-bold text-gray-900">{{ backlog }}</div>
+          {% if hasBacklog %}
+            <div class="text-xs text-gray-500">{{ "audit.oldest" | t }} {{ oldestUnarchived | l10n_date }}</div>
+          {% endif %}
+        </div>
+        <div>
+          <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.verified" | t }}</div>
+          {% if hasFailures %}
+            <div class="text-[2rem] font-bold text-red-700">{{ failureCount }}</div>
+            <div class="text-xs text-red-700">{{ "audit.verify_failed" | t }}</div>
+          {% else %}
+            <div class="text-[2rem] font-bold text-gray-900">{{ verifiedCount }}</div>
+            <div class="text-xs text-gray-500">{{ "audit.verify_ok" | t }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if hasVerification %}
+        <div class="mt-4 overflow-x-auto w-full">
+          <table class="w-full min-w-[560px] text-left">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.segment" | t }}</th>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.seq_range" | t }}</th>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.integrity" | t }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              {% for seal in verification %}
+                <tr class="hover:bg-gray-50 transition-colors">
+                  <td class="px-6 py-4 text-xs text-gray-500 font-mono">{{ seal.r2Key }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-500 font-mono">{{ seal.range }}</td>
+                  <td class="px-6 py-4">
+                    {% if seal.ok %}
+                      <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">{{ "audit.verify_ok" | t }}</span>
+                    {% else %}
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        {% if seal.missing %}
+                          <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">{{ "audit.missing_object" | t }}</span>
+                        {% elsif seal.contentOk == false %}
+                          <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">{{ "audit.content_mismatch" | t }}</span>
+                        {% endif %}
+                        {% if seal.chainOk == false %}
+                          <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">{{ "audit.chain_broken" | t }}</span>
+                        {% endif %}
+                      </div>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="mt-3 text-sm text-gray-500">{{ "audit.no_bucket" | t }}</p>
+      {% if hasBacklog %}
+        <p class="mt-2 text-sm text-red-700">{{ "audit.no_bucket_backlog" | t }} {{ backlog }}</p>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  {% for signal in signals %}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 mt-4">
+      <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">
+        <div>
+          <h2 class="text-lg font-bold text-gray-900">{{ signal.titleKey | t }}</h2>
+          <p class="mt-1 text-sm text-gray-500">{{ signal.helpKey | t }}</p>
+        </div>
+      </div>
+      {% if signal.hasRows %}
+        <div class="overflow-x-auto w-full">
+          <table class="w-full min-w-[560px] text-left">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.actor" | t }}</th>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.context" | t }}</th>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "audit.measure" | t }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              {% for row in signal.rows %}
+                <tr class="hover:bg-gray-50 transition-colors">
+                  <td class="px-6 py-4 text-sm font-medium text-gray-900">{{ row.subject }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-500 font-mono">{{ row.context }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-900">{{ row.value }}
+                    <span class="text-xs text-gray-500">({{ row.events }})</span>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="px-6 pb-4 text-sm text-gray-400">{{ "audit.signal_clear" | t }}</p>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>

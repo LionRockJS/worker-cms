@@ -318,11 +318,45 @@ is reported missing; a rewritten seal breaks the chain for itself and everything
 after it; rows past their class window are pruned while hotter classes stay; and
 with no bucket nothing is archived *and* nothing is pruned.
 
-**Phase 4 — shipping and alerting**
-Tail Worker or direct OTLP, plus alerts on bulk export, after-hours access and
-mass reads.
-*Verify:* an induced bulk export raises an alert; the sink receives the same
-`event_id` as D1.
+**Phase 4a — detection and review** — done 2026-10-30.
+`src/features/audit/signals.ts` and the screen at `/admin/audit/review`: three
+signals plus archive health in one place. This is the half of Phase 4 that needs
+no deployment decisions, and it closes the gap that mattered most — a trail
+nobody examines satisfies no regime (ISO 27001 A 8.16, SOC 2 CC7.2, NIST AU-6,
+HIPAA §164.308(a)(1)(ii)(D) all require review, not just recording).
+
+The signals, with their default thresholds:
+
+| signal | fires on | default |
+|---|---|---|
+| `bulk_reads` | one actor, one classified container, records read in 24h | 500 |
+| `refused_access` | denied auth and permission checks per actor+address in 24h | 5 |
+| `contributor_alone` | classified reads by a plugin with no acting user, 7d | any |
+
+Thresholds are defaults chosen to be quiet on an ordinary install, not policy;
+they are exported constants, not configuration, until someone needs them to be.
+
+Archive health shows sealed segments, their seq coverage, the unarchived backlog
+and its oldest event (which is what reveals a stalled sweep), and the
+verification result. `verifyAuditArchive()` now checks the **newest** window of
+seals rather than walking forward from the first, seeding the chain from the
+seal immediately before the window — on a long archive a forward walk would
+never reach the segment an operator is actually asking about.
+
+*Verified* in `test/audit-review.test.ts`: each signal fires on its shape and
+stays silent otherwise — below threshold, outside the window, unclassified
+containers however large, and a contributor read that does name its user;
+`bulk_reads` sums across requests rather than needing one large read; a refused
+sign-in with no resolved account is still reported rather than dropped for lack
+of a name; backlog counts only what the seals do not cover; a windowed
+verification still validates the chain into the window and really is the newest
+seals; and the screen is gated on `audit:read` and records its own opening.
+
+**Phase 4b — shipping** — not built. Replicating the R2 archive to S3 or Azure
+Blob, and any real-time SIEM feed, needs decisions this design cannot make for a
+deployment: which sink, whose credentials, and which region each tenant's events
+may leave for. §5 has the shape; the delivery channel for an alert is the same
+open question.
 
 ## 9. Migration
 
@@ -376,9 +410,14 @@ These are real gaps this design does not close. Each needs its own decision.
   dashboard, Wrangler or the API bypasses the Worker entirely. That is
   Cloudflare account-level audit logging plus access control, not this.
 - **Shipping to an external sink.** The archive lands in R2; replicating it to
-  S3 or Azure Blob, and any real-time SIEM feed, is not built.
-- **Surfacing verification.** `verifyAuditArchive()` exists and is tested but
-  has no screen or route, so today an operator cannot run it from the admin.
+  S3 or Azure Blob, and any real-time SIEM feed, is not built (Phase 4b).
+- **Alert delivery.** Signals are detected and shown, but nothing pushes them —
+  no email, webhook or SIEM. An operator has to open the screen.
+- **Scheduled review.** Nothing records *that* a review happened beyond the
+  `audit.review` event, so there is no evidence trail of periodic examination,
+  which is what an ISO or SOC 2 auditor asks to see.
+- **After-hours access.** Deliberately not a signal: it needs an hours-of-business
+  policy per deployment, and guessing one produces either noise or false comfort.
 - **Object Lock.** The sweep writes to a plain bucket. Hash chaining makes
   tampering *detectable*; only Object Lock in compliance mode makes it
   impossible, and that is configured on the bucket, not in this code.

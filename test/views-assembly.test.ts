@@ -16,7 +16,11 @@ import { describe, expect, it } from 'vitest';
 
 /** Views that must appear only when their feature is enabled. */
 const FEATURE_VIEWS: Record<string, string[]> = {
-  'audit': ['sections/audit.liquid', 'templates/audit.json', 'sections/audit-classes.liquid', 'templates/audit-classes.json'],
+  'audit': [
+    'sections/audit.liquid', 'templates/audit.json',
+    'sections/audit-classes.liquid', 'templates/audit-classes.json',
+    'sections/audit-review.liquid', 'templates/audit-review.json',
+  ],
   'trash': ['sections/trash.liquid', 'templates/trash.json'],
   'users-roles': ['sections/users.liquid', 'sections/roles.liquid', 'sections/user-form.liquid', 'sections/role-form.liquid'],
   'i18n': ['sections/languages.liquid', 'sections/translations.liquid'],

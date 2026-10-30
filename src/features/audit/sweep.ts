@@ -233,13 +233,18 @@ export interface SealVerification {
  * swapped object fails its own `segment_hash`, and a swapped *seal* fails the
  * chain of every seal after it.
  */
-export async function verifyAuditArchive(env: Env, limit = 100): Promise<SealVerification[]> {
+export async function verifyAuditArchive(env: Env, limit = 25): Promise<SealVerification[]> {
   const bucket = env.AUDIT_BUCKET;
   if (!bucket) return [];
 
+  // The newest `limit` seals, returned in chain order. Deliberately the newest
+  // rather than walking forward from the first seal: a tamper in last week's
+  // segment is what an operator is looking for, and on a long archive a
+  // forward walk would never reach it.
   const seals = await env.DB.prepare(
     `SELECT first_seq, last_seq, segment_hash, prev_hash, rolling_hash, r2_key
-       FROM audit_seals ORDER BY last_seq LIMIT ?`,
+       FROM (SELECT * FROM audit_seals ORDER BY last_seq DESC LIMIT ?)
+      ORDER BY last_seq`,
   ).bind(limit).all<{
     first_seq: number;
     last_seq: number;
@@ -249,8 +254,17 @@ export async function verifyAuditArchive(env: Env, limit = 100): Promise<SealVer
     r2_key: string;
   }>();
 
+  if (!seals.results.length) return [];
+
+  // A window's chain can only be checked against what came before it, so seed
+  // from the seal immediately preceding the window. Null when the window
+  // starts at the first seal ever written, which is the genesis case.
+  const preceding = await env.DB.prepare(
+    'SELECT rolling_hash FROM audit_seals WHERE last_seq < ? ORDER BY last_seq DESC LIMIT 1',
+  ).bind(seals.results[0].last_seq).first<{ rolling_hash: string }>();
+
   const results: SealVerification[] = [];
-  let expectedPrev: string | null = null;
+  let expectedPrev: string | null = preceding?.rolling_hash ?? null;
   for (const seal of seals.results) {
     const object = await bucket.get(seal.r2_key);
     const chainOk = (seal.prev_hash ?? null) === expectedPrev

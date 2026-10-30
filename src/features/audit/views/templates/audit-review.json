@@ -1,0 +1,18 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "title": "{{ 'audit.review' | t }}",
+        "description": "{{ summaryLabel }}"
+      }
+    },
+    "content": {
+      "type": "audit-review"
+    }
+  },
+  "order": [
+    "header",
+    "content"
+  ]
+}

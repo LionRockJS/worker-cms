@@ -1,5 +1,6 @@
 import { adminLayout, type BaseTemplateProps } from '../../core/render/layout';
 import { renderView } from '../../core/render/liquid';
+import type { ArchiveHealth, ReviewSignal } from './signals';
 
 interface AuditPagination {
   total: number;
@@ -141,4 +142,57 @@ export async function auditClassesPage(views: Fetcher, opts: BaseTemplateProps &
   });
 
   return adminLayout(views, opts, { title: 'Data Classification', body });
+}
+
+export async function auditReviewPage(views: Fetcher, opts: BaseTemplateProps & {
+  signals: ReviewSignal[];
+  health: ArchiveHealth;
+}): Promise<string> {
+  const { signals, health } = opts;
+  const flagged = signals.reduce((sum, signal) => sum + signal.rows.length, 0);
+  const failures = (health.verification ?? []).filter((seal) => !seal.contentOk || !seal.chainOk);
+
+  const body = await renderView(views, '/templates/audit-review.json', {
+    auditHref: '/admin/audit',
+    classesHref: '/admin/audit/classes',
+    flagged,
+    hasFlagged: flagged > 0,
+    summaryLabel: flagged === 0
+      ? 'Nothing flagged'
+      : `${flagged} finding${flagged === 1 ? '' : 's'} to review`,
+
+    // Archive
+    bucketBound: health.bucketBound,
+    seals: health.seals,
+    hasSeals: health.seals > 0,
+    coverage: health.fromSeq === null ? '—' : `${health.fromSeq}–${health.toSeq}`,
+    backlog: health.backlog,
+    oldestUnarchived: health.oldestUnarchived,
+    hasBacklog: health.backlog > 0,
+    verification: (health.verification ?? []).map((seal) => ({
+      r2Key: seal.r2Key,
+      range: `${seal.firstSeq}–${seal.lastSeq}`,
+      ok: seal.contentOk && seal.chainOk,
+      contentOk: seal.contentOk,
+      chainOk: seal.chainOk,
+      missing: !!seal.missing,
+    })),
+    hasVerification: (health.verification ?? []).length > 0,
+    verifiedCount: (health.verification ?? []).length,
+    failureCount: failures.length,
+    hasFailures: failures.length > 0,
+
+    // Signals
+    signals: signals.map((signal) => ({
+      id: signal.id,
+      titleKey: `audit.signal.${signal.id}`,
+      helpKey: `audit.signal.${signal.id}_help`,
+      threshold: signal.threshold,
+      windowHours: signal.windowHours,
+      rows: signal.rows,
+      hasRows: signal.rows.length > 0,
+    })),
+  });
+
+  return adminLayout(views, opts, { title: 'Audit Review', body });
 }

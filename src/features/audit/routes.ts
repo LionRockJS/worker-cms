@@ -5,7 +5,8 @@
 // use to edit their own trail.
 
 import { Hono } from 'hono';
-import { auditClassesPage, auditPage } from './template';
+import { auditClassesPage, auditPage, auditReviewPage } from './template';
+import { archiveHealth, reviewSignals } from './signals';
 import type { Env, Variables } from '../../types';
 import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
@@ -170,4 +171,24 @@ auditRoutes.post('/audit/classes/:id/delete', requirePermission('menu:manage'), 
   // Declassifying stops reads being recorded, so the act itself is recorded.
   logAudit(c, 'data_class.clear', 'settings', `${row.container_kind}:${row.container_key}`);
   return c.redirect('/admin/audit/classes?flash=audit.flash.removed');
+});
+
+// ── Review ────────────────────────────────────────────────────────────────────
+// Detection and archive health in one screen. Recording a trail nobody examines
+// satisfies no regime — ISO 27001 A 8.16, SOC 2 CC7.2, NIST AU-6 and HIPAA
+// §164.308(a)(1)(ii)(D) all require the log be reviewed — so this is the screen
+// that makes reviewing it a minute's work rather than a query-writing exercise.
+
+auditRoutes.get('/audit/review', requirePermission('audit:read'), async (c) => {
+  const [signals, health] = await Promise.all([
+    reviewSignals(c.env),
+    archiveHealth(c.env),
+  ]);
+
+  // Opening the review is itself a read of the trail.
+  logAudit(c, 'audit.review', 'audit', undefined, {
+    flagged: signals.reduce((sum, signal) => sum + signal.rows.length, 0),
+  });
+
+  return renderPage(c, auditReviewPage, { signals, health });
 });
