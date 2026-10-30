@@ -656,9 +656,13 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
       .bind(page.uuid)
       .first();
 
+  // An auto-republish that was refused must not report a publish that did not
+  // happen — a regulated page saved here is updated in draft and nowhere else.
+  let republishRefused = false;
   if (action === 'publish' || autoRepublish) {
     const outcome = await publishPageToTargets(c.env, pageId);
     if (!outcome) return c.notFound();
+    republishRefused = !!outcome.refused;
     if (!outcome.refused) announcePageEvent(c, 'publish', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug });
     if (action === 'publish') {
       return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&flash=${publishFlash(outcome)}${returnToParam}${nativeParam}`);
@@ -671,6 +675,10 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
 
   if (!autoRepublish) announcePageEvent(c, 'update', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug });
 
-  const savedFlash = autoRepublish ? 'Page+updated+and+published+successfully' : 'Page+updated+successfully';
+  const savedFlash = autoRepublish && !republishRefused
+    ? 'Page+updated+and+published+successfully'
+    : republishRefused
+      ? 'Page+updated,+but+not+published'
+      : 'Page+updated+successfully';
   return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&flash=${savedFlash}${returnToParam}${nativeParam}`);
 });

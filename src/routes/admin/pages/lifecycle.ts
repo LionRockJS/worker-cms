@@ -17,6 +17,12 @@ export const pageLifecycleRoutes = new Hono<{ Bindings: Env; Variables: Variable
 
 // with the targets that failed (failures are already logged by the registry).
 export function publishFlash(outcome: PublishOutcome): string {
+  if (outcome.refusedReason === 'regulated') {
+    return encodeURIComponent('This page holds regulated data and cannot be published');
+  }
+  if (outcome.refusedReason === 'classification_unavailable') {
+    return encodeURIComponent('Not published: the data classification could not be read, so regulated data cannot be ruled out');
+  }
   if (outcome.refused) return encodeURIComponent('Submission pages cannot be published — they mirror source data from the published database');
   const failed = describeFailures(outcome);
   if (!failed) return 'Page+published+successfully';

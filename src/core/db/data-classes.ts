@@ -43,9 +43,16 @@ export interface DataClassMap {
   exact: Map<string, DataClass>;
   prefixes: Array<{ key: string; class: DataClass }>;
   size: number;
+  /**
+   * False when the lookup itself could not be answered, so an empty map means
+   * "unknown" rather than "nothing is regulated". Read logging tolerates that
+   * and records nothing; publication must not, and refuses instead — see
+   * `src/core/publish/regulated.ts`.
+   */
+  ok: boolean;
 }
 
-const EMPTY: DataClassMap = { exact: new Map(), prefixes: [], size: 0 };
+const EMPTY: DataClassMap = { exact: new Map(), prefixes: [], size: 0, ok: false };
 
 function isDataClass(value: string): value is DataClass {
   return value === 'pii' || value === 'phi';
@@ -57,16 +64,19 @@ export async function resolveDataClasses(env: Env): Promise<DataClassMap> {
   if (context?.dataClasses) return context.dataClasses;
   if (!env.DB) return EMPTY;
 
+  let ok = true;
   const rows = await env.DB.prepare('SELECT container_kind, container_key, class FROM data_classes')
     .all<{ container_kind: string; container_key: string; class: string }>()
     // A database that has not run the data_classes migration must not take
-    // every read surface down with it; it simply classifies nothing.
+    // every read surface down with it; it simply classifies nothing. The `ok`
+    // flag is how a consumer that cannot afford that guess tells the two apart.
     .catch((error) => {
       console.error('data_classes lookup failed', error);
+      ok = false;
       return { results: [] as Array<{ container_kind: string; container_key: string; class: string }> };
     });
 
-  const map: DataClassMap = { exact: new Map(), prefixes: [], size: 0 };
+  const map: DataClassMap = { exact: new Map(), prefixes: [], size: 0, ok };
   for (const row of rows.results) {
     if (!isDataClass(row.class)) continue;
     map.size += 1;

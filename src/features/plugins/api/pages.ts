@@ -627,12 +627,17 @@ pagesApiRoutes.post('/pages/publish', async (c) => {
   // failures apply to the slice.
   const outcome = await publishPagesToTargets(c.env, publishable.map((item) => item.page));
   const refusedIds = new Set(outcome.refused.map((page) => page.id));
+  const regulatedIds = new Set(outcome.refusedRegulated.map((page) => page.id));
 
   const published: number[] = [];
   const hookPages: HookPage[] = [];
   for (const item of publishable) {
     if (refusedIds.has(item.page.id)) {
-      errors.push({ index: item.index, id: item.page.id, error: 'submission_publish_refused' });
+      errors.push({
+        index: item.index,
+        id: item.page.id,
+        error: regulatedIds.has(item.page.id) ? 'regulated_publish_refused' : 'submission_publish_refused',
+      });
       continue;
     }
     if (!outcome.targets.length) {

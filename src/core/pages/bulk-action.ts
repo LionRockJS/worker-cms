@@ -48,7 +48,7 @@ export const BULK_ACTION_PAGE_LIMIT = 100;
 /** What one slice of a bulk action achieved. */
 export interface BulkPageActionOutcome {
   updated: number;
-  /** Pages the publish targets declined (submission mirrors). */
+  /** Pages the publish targets declined: submission mirrors and regulated pages. */
   refused: number;
   /** Targets that errored, by name. */
   failedTargets: Set<string>;
@@ -215,7 +215,9 @@ export function bulkActionFlash(
   const pageLabel = count === 1 ? 'page' : 'pages';
   const base = count === 0 ? 'No pages updated' : `${count} ${pageLabel} ${past}`;
   const notes: string[] = [];
-  if (refused) notes.push(`${refused} submission ${refused === 1 ? 'page was' : 'pages were'} skipped`);
+  if (refused) {
+    notes.push(`${refused} ${refused === 1 ? 'page was' : 'pages were'} skipped (submission mirrors or regulated data)`);
+  }
   if (failedTargets.length) notes.push(`target failures: ${failedTargets.join(', ')}`);
   return notes.length ? `${base}; ${notes.join('; ')}` : base;
 }

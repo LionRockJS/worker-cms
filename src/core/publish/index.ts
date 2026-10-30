@@ -27,6 +27,7 @@ import { coreExtensions } from '../extensions';
 import { r2Adapter } from './r2';
 import { isSubmissionMirror, submissionMirrorIds } from '../db/submission-ingest';
 import { projectLect, publishLectRules } from './projection';
+import { regulatedPages, type PublishRefusal } from './regulated';
 
 export interface PublishOutcome {
   /** Targets that were attempted, in order. */
@@ -34,14 +35,19 @@ export interface PublishOutcome {
   /** Target ids whose publish/unpublish threw. */
   failures: string[];
   /**
-   * Set when the page is a submission mirror: publishing one would upsert the
-   * original live row it shares a uuid with, and unpublishing/trashing one
-   * would DELETE that live row — so both are refused before reaching any adapter.
+   * Set when the page never reached an adapter. Either it is a submission
+   * mirror — publishing one would upsert the original live row it shares a uuid
+   * with, and unpublishing/trashing one would DELETE that live row — or it holds
+   * regulated data, which is never published.
    */
   refused?: boolean;
+  /** Which refusal it was, for the message the admin sees. */
+  refusedReason?: PublishRefusal;
 }
 
-const REFUSED_OUTCOME: PublishOutcome = { targets: [], failures: [], refused: true };
+const refusal = (reason: PublishRefusal): PublishOutcome => (
+  { targets: [], failures: [], refused: true, refusedReason: reason }
+);
 
 const DEFAULT_TARGETS = 'd1';
 
@@ -71,14 +77,6 @@ export async function getPublishAdapters(env: Env): Promise<PublishAdapter[]> {
   if (contributed) adapters.push(...contributed);
 
   return adapters;
-}
-
-async function buildSnapshot(env: Env, pageId: number): Promise<PublishSnapshot | null> {
-  const page = await env.DB.prepare('SELECT * FROM pages WHERE id = ?')
-    .bind(pageId)
-    .first<Page>();
-  if (!page) return null;
-  return (await buildSnapshots(env, [page]))[0];
 }
 
 /**
@@ -230,11 +228,19 @@ async function runOnAll(
   return { targets: adapters.map((adapter) => adapter.id), failures };
 }
 
-/** Publishes a draft page to every configured target. Null when the draft is missing. */
+/** Publishes a draft page to every configured target. Null when the draft is missing.
+ *  Both refusals are decided before a snapshot exists, so a refused page is
+ *  never built, let alone handed to a target. */
 export async function publishPageToTargets(env: Env, pageId: number): Promise<PublishOutcome | null> {
-  const snapshot = await buildSnapshot(env, pageId);
-  if (!snapshot) return null;
-  if (await isSubmissionMirror(env.DB, pageId)) return REFUSED_OUTCOME;
+  const page = await env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
+  if (!page) return null;
+  if (await isSubmissionMirror(env.DB, pageId)) return refusal('submission');
+
+  const regulated = await regulatedPages(env, [page]);
+  if (regulated.unavailable) return refusal('classification_unavailable');
+  if (regulated.ids.has(page.id)) return refusal('regulated');
+
+  const snapshot = (await buildSnapshots(env, [page]))[0];
   const adapters = await getPublishAdapters(env);
   return runOnAll(adapters, (adapter) => adapter.publish(snapshot));
 }
@@ -248,8 +254,12 @@ export interface BulkPublishOutcome {
   failures: string[];
   /** Pages handed to the targets, in input order. */
   published: Page[];
-  /** Submission mirrors, skipped before any adapter saw them. */
+  /** Pages skipped before any adapter saw them: submission mirrors first, then
+   *  regulated pages. */
   refused: Page[];
+  /** The regulated subset of `refused`. A policy refusal, not a structural one,
+   *  so a caller that reports per-page outcomes can say which it was. */
+  refusedRegulated: Page[];
 }
 
 /**
@@ -262,23 +272,32 @@ export interface BulkPublishOutcome {
  * costs one submission-mirror check and one tag read per chunk, where the
  * per-page path costs about six round trips each.
  *
- * Submission mirrors are refused exactly as in the single-page path — writing
- * one would upsert the live row it shares a uuid with — and reported in
- * `refused` instead of being sent to any adapter.
+ * Submission mirrors and regulated pages are refused exactly as in the
+ * single-page path, and reported in `refused` instead of being sent to any
+ * adapter. A classification outage refuses the whole slice.
  */
 export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<BulkPublishOutcome> {
   const adapters = await getPublishAdapters(env);
   const targets = adapters.map((adapter) => adapter.id);
-  if (!pages.length) return { targets, failures: [], published: [], refused: [] };
+  const empty = { targets, failures: [], published: [], refused: [], refusedRegulated: [] };
+  if (!pages.length) return empty;
 
   const mirrors = await submissionMirrorIds(env.DB, pages.map((page) => page.id));
-  const refused = pages.filter((page) => mirrors.has(page.id));
-  const publishable = pages.filter((page) => !mirrors.has(page.id));
+  const candidates = pages.filter((page) => !mirrors.has(page.id));
+
+  const regulated = await regulatedPages(env, candidates);
+  const refusedRegulated = regulated.unavailable
+    ? candidates
+    : candidates.filter((page) => regulated.ids.has(page.id));
+  const regulatedIds = new Set(refusedRegulated.map((page) => page.id));
+
+  const refused = [...pages.filter((page) => mirrors.has(page.id)), ...refusedRegulated];
+  const publishable = candidates.filter((page) => !regulatedIds.has(page.id));
   // Without a configured target there is nothing to fan out to, but the pages
   // still count as handled — the single-page path reports the same empty
   // `targets` and leaves the caller to decide what that means.
   if (!publishable.length || !adapters.length) {
-    return { targets, failures: [], published: publishable, refused };
+    return { targets, failures: [], published: publishable, refused, refusedRegulated };
   }
 
   const snapshots = await buildSnapshots(env, publishable);
@@ -298,7 +317,7 @@ export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<Bu
     }
   });
 
-  return { targets, failures, published: publishable, refused };
+  return { targets, failures, published: publishable, refused, refusedRegulated };
 }
 
 /**
@@ -306,7 +325,7 @@ export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<Bu
  * hand must pass its submission marker so source mirrors are refused.
  */
 export async function unpublishPageFromTargets(env: Env, uuid: string, isSubmission = false): Promise<PublishOutcome> {
-  if (isSubmission) return REFUSED_OUTCOME;
+  if (isSubmission) return refusal('submission');
   const adapters = await getPublishAdapters(env);
   return runOnAll(adapters, (adapter) => adapter.unpublish(uuid));
 }

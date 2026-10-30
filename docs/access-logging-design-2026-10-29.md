@@ -102,6 +102,37 @@ A JSON array cannot be indexed usefully in SQLite, and the 72-hour question is
 Subject references are opaque: page `uuid`, user id, contact id. Never a name,
 email or slug — a slug can itself be the identifier (`/patients/jane-doe`).
 
+### D8. Classification gates publication, and fails closed
+
+Added 2026-10-30, after the compliance review found that publication returns the
+whole `lect` when no projection rule exists
+(`src/core/publish/projection.ts:53`): minimization is declared by plugins, so a
+disabled plugin silently restored full disclosure, and a `phi` classification
+did not gate the path at all.
+
+A page classified `phi` is now **never published**. The gate is host-owned
+(`src/core/publish/regulated.ts`), runs before any snapshot is built, and
+refuses on either container the page belongs to:
+
+- its page type;
+- a taxonomy any of its tags belongs to — the *association* is the regulated
+  fact, and a page tagged from a classified taxonomy discloses it even when the
+  page's own type is ordinary. This is the first consumer of the `taxonomy`
+  container kind, keyed by `tags.taxonomy_slug`.
+
+Unlike read logging, this path **fails closed**: a classification outage refuses
+publication rather than permitting it. The asymmetry is deliberate. Read logging
+that fails closed takes every surface down with the classification table; a
+publication that fails open is an irreversible disclosure. Refusing costs an
+operator a retry.
+
+Nothing gates *un*publication — withdrawing a page that reached live before it
+was classified has to stay possible.
+
+`pii` is not gated. It is logged on read, not withheld from publication;
+conflating the two would make the classification screen unusable for ordinary
+contact data.
+
 ## 3. Event envelope
 
 ```
@@ -404,6 +435,8 @@ These are real gaps this design does not close. Each needs its own decision.
 
 - **The public site Worker.** Published pages share one table and can carry PII;
   a visitor read there is not logged by this design and is a separate Worker.
+  Since D8, a `phi`-classified page cannot reach that table at all, so what is
+  unlogged there is PII and unclassified content.
 - **Plugin-internal databases.** The events plugin's own guest tables are read
   without passing through `/__cms`. Only its CMS-side reads are covered.
 - **Direct infrastructure access.** D1 or R2 reached through the Cloudflare
