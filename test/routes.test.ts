@@ -2001,11 +2001,6 @@ describe('admin routes', () => {
     const { queue, sent } = queueStub<CmsAdminJobMessage>();
     (env as unknown as { ADMIN_JOBS_QUEUE?: Queue<CmsAdminJobMessage> }).ADMIN_JOBS_QUEUE = queue;
     await seedDraftPages('default', 25, 4000, 'All Scope');
-    const matchLect = blueprintToLect('default', cmsConfig.blueprint, cmsConfig.defaultLanguage);
-    matchLect.name = localizedFixture('All Scope');
-    await env.DB.prepare('UPDATE pages SET lect = ? WHERE id BETWEEN ? AND ?')
-      .bind(stringifyLect(matchLect), 4001, 4025)
-      .run();
     const query = 'operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=All%20Scope&path1=';
     const body = new URLSearchParams({
       bulk_action: 'delete',
@@ -2045,6 +2040,57 @@ describe('admin routes', () => {
     expect(data.currentHref).toBe('/admin/advanced-search/default?operator=AND&pagesize=20&search1=About&path1=&sort=updated_at&order=DESC&page=1');
     expect(section).toContain('data-bulk-form aria-hidden="true"');
     expect(section).toContain('mb-3 hidden rounded-xl');
+  });
+
+  it('GET /admin/advanced-search matches page names and structured content without a path', async () => {
+    for (const [id, name, lect] of [
+      [103, 'Hello Big WORLD', null],
+      [104, 'Content match', JSON.stringify({ body: { en: 'Say hello world' } })],
+      [105, 'Unrelated', JSON.stringify({ body: { en: 'Something else' } })],
+    ] as Array<[number, string, string | null]>) {
+      await env.DB.prepare('INSERT INTO pages (id, name, slug, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+        .bind(id, name, `search-example-${id}`, 'default', lect)
+        .run();
+    }
+
+    const response = await fetchWorker('/admin/advanced-search?operator=AND&pagesize=20&sort=updated_at&order=DESC&path1=&search1=hello+world', {
+      headers: { Cookie: await authCookie() },
+    });
+    expect(response.status).toBe(200);
+    const data = bodyData(await response.text());
+    expect(data.count).toBe(2);
+    expect((data.pages as Array<{ name: string }>).map((page) => page.name).sort())
+      .toEqual(['Content match', 'Hello Big WORLD']);
+  });
+
+  it('combines name matches with Chinese variants, tags, exclusions and explicit paths', async () => {
+    for (const [id, name, lect] of [
+      [103, '苏玮 include', null],
+      [104, '蘇瑋 exclude', '{}'],
+      [105, 'Content match', JSON.stringify({ body: { en: '蘇瑋' } })],
+    ] as Array<[number, string, string | null]>) {
+      await env.DB.prepare('INSERT INTO pages (id, name, slug, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+        .bind(id, name, `search-chinese-${id}`, 'default', lect)
+        .run();
+    }
+    await env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id) VALUES (?, ?, ?)')
+      .bind(402, 103, 301)
+      .run();
+
+    const cookie = await authCookie();
+    const search = async (query: Record<string, string>) => {
+      const response = await fetchWorker(`/admin/advanced-search/default?${new URLSearchParams(query)}`, {
+        headers: { Cookie: cookie },
+      });
+      expect(response.status).toBe(200);
+      const data = bodyData(await response.text());
+      return (data.pages as Array<{ name: string }>).map((page) => page.name).sort();
+    };
+
+    expect(await search({ search1: '蘇瑋', tags1: '301' })).toEqual(['苏玮 include']);
+    expect(await search({ operator: 'NOT', search1: '苏玮', search2: 'exclude' }))
+      .toEqual(['Content match', '苏玮 include']);
+    expect(await search({ search1: '苏玮', path1: 'body.en' })).toEqual(['Content match']);
   });
 
   it('POST /admin/pages/pull/:uuid recreates a missing draft from published content', async () => {

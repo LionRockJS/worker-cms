@@ -222,8 +222,7 @@ export function advancedSearchCondition(
 
   if (criterion.term) {
     // A Chinese term also matches its Simplified/Traditional variants, so we OR
-    // a LIKE per variant. Non-Chinese terms yield a single variant — identical
-    // to the previous single-LIKE behaviour.
+    // a LIKE per variant. Non-Chinese terms yield a single variant.
     const searchTerms = chineseSearchVariants(criterion.term)
       .map((variant) => `%${variant.replaceAll(' ', '%')}%`);
     const orGroup = (clause: string) =>
@@ -245,8 +244,8 @@ export function advancedSearchCondition(
         for (const term of searchTerms) params.push(path, term);
       }
     } else {
-      conditions.push(orGroup(`${pageAlias}.lect LIKE ?`));
-      for (const term of searchTerms) params.push(term);
+      conditions.push(orGroup(`(${pageAlias}.name LIKE ? OR ${pageAlias}.lect LIKE ?)`));
+      for (const term of searchTerms) params.push(term, term);
     }
   }
 

@@ -183,17 +183,17 @@ describe('Chinese Simplified/Traditional search variants', () => {
       { index: 1, term: '苏玮', path: '', tags: [] },
       'p',
     );
-    expect(conditions).toEqual(['(p.lect LIKE ? OR p.lect LIKE ?)']);
-    expect(params).toEqual(['%苏玮%', '%蘇瑋%']);
+    expect(conditions).toEqual(['((p.name LIKE ? OR p.lect LIKE ?) OR (p.name LIKE ? OR p.lect LIKE ?))']);
+    expect(params).toEqual(['%苏玮%', '%苏玮%', '%蘇瑋%', '%蘇瑋%']);
   });
 
-  it('keeps a single LIKE (no OR) for a non-Chinese term', () => {
+  it('matches the name or content for a non-Chinese term', () => {
     const { conditions, params } = advancedSearchCondition(
       { index: 1, term: 'hello world', path: '', tags: [] },
       'p',
     );
-    expect(conditions).toEqual(['p.lect LIKE ?']);
-    expect(params).toEqual(['%hello%world%']);
+    expect(conditions).toEqual(['(p.name LIKE ? OR p.lect LIKE ?)']);
+    expect(params).toEqual(['%hello%world%', '%hello%world%']);
   });
 
   it('ORs variants within a json path condition', () => {
