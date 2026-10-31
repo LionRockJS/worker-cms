@@ -8,6 +8,7 @@
 import type { AppContext } from '../core/http/context';
 import type { Env } from '../types';
 import { featureServiceEntries } from '../generated/services';
+import { regulatedWritesBlocked } from '../core/http/regulated-writes';
 
 export type AdminScreenTarget =
   | { screen: 'profile' }
@@ -40,6 +41,10 @@ export interface FeatureServiceEntry {
   reservePageCreates?(env: Env, input: PageCreateReservationInput): Promise<FeatureReservation>;
   adminScreenProps?(c: AppContext, target: AdminScreenTarget): Promise<Record<string, unknown>>;
   scheduled?(env: Env): Promise<string | null>;
+  /** Audit retention/archival only; business work is denied by default. */
+  scheduledDuringWriteContainment?: true;
+  /** Health-only work that must run even when regulated admission fails. */
+  monitor?(env: Env): Promise<void>;
   call?(operation: string, env: Env, input: unknown): Promise<unknown>;
 }
 
@@ -105,10 +110,17 @@ export async function featureAdminScreenProps(
 export async function runFeatureScheduledWork(env: Env): Promise<string[]> {
   const lines = await Promise.all(
     featureServiceEntries
-      .filter((entry) => entry.scheduled)
+      .filter((entry) => entry.scheduled && (!regulatedWritesBlocked(env) || entry.scheduledDuringWriteContainment === true))
       .map((entry) => entry.scheduled!(env)),
   );
   return lines.filter((line): line is string => Boolean(line));
+}
+
+export async function runFeatureMonitoringWork(env: Env): Promise<void> {
+  for (const entry of featureServiceEntries) {
+    try { await entry.monitor?.(env); }
+    catch { console.error(JSON.stringify({ event: 'feature.monitor-failed', feature: entry.id })); }
+  }
 }
 
 /**

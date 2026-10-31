@@ -27,6 +27,7 @@ import { getPlugins } from './registry';
 import { listPageTypeApprovals } from './page-types';
 import { getSetting, saveSetting } from '../../core/db/settings';
 import { safeParseLect } from '../../core/db/lect';
+import { countPageMetadata } from '../../core/db/count-metadata';
 
 /** Cap on manifest-declared limits honored per plugin. */
 export const MAX_DECLARED_LIMITS = 20;
@@ -208,17 +209,16 @@ export async function countLimitUsage(
   def: NormalizedLimitDef,
   scopeValue: string | number | null,
 ): Promise<number> {
-  let sql = 'SELECT COUNT(*) AS total FROM pages WHERE page_type = ?';
+  let sql = 'p.page_type = ?';
   const params: unknown[] = [def.pageType];
   if (def.scope === 'per_parent') {
-    sql += ' AND page_id = ?';
+    sql += ' AND p.page_id = ?';
     params.push(scopeValue);
   } else if (def.scope === 'per_pointer') {
-    sql += ' AND json_extract(lect, ?) = ?';
+    sql += ' AND json_extract(p.lect, ?) = ?';
     params.push(`$._pointers.${def.pointerKey}`, String(scopeValue ?? ''));
   }
-  const row = await db.prepare(sql).bind(...params).first<{ total: number }>();
-  return row?.total ?? 0;
+  return countPageMetadata(db, sql, params, { types: def.pageType ? [def.pageType] : undefined, action: 'page.limit-usage' });
 }
 
 /** Groups candidates by the scope value a limit counts over. Candidates a

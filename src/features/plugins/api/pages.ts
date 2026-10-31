@@ -16,11 +16,15 @@ import type {
   DuplicateInput,
   PageInput,
   PageListBatchInput,
+  PluginAuth,
 } from './types';
+import type { LivePageSnapshot } from '../../../core/publish/adapter';
+import { copySensitivityStatement } from '../../../core/db/sensitivity';
 import type { AppContext } from '../../../core/http/context';
 import { authenticatePlugin, forbiddenPageType } from './auth';
-import { recordPageReads, recordRead } from '../../../core/http/access-log';
-import type { AuditActor } from '../../../core/db/audit';
+import { auditReads, ReadAuditUnavailableError, recordPageReads, recordRead, recordTagReads } from '../../../core/http/access-log';
+import { countPageMetadata } from '../../../core/db/count-metadata';
+import { pluginReadActor as apiActor } from './read-audit';
 import {
   asFiniteNumber,
   asPositiveSafeInteger,
@@ -122,20 +126,13 @@ interface PageResourceRow extends Page {
 
 export const pagesApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-/**
- * The audit actor for a contributor read: the user the plugin is acting for,
- * with the plugin itself in acting_via. A read with no acting user is recorded
- * as the plugin acting alone, which on a classified container is worth
- * reviewing in its own right.
- */
-function apiActor(c: AppContext, pluginId: string): AuditActor {
-  const userId = actingUserId(c);
-  return {
-    userId: userId === null ? null : String(userId),
-    roles: null,
-    sessionSid: null,
-    via: pluginId,
-  };
+/** Live metadata can belong to a different type than its draft counterpart. */
+function liveSourceRefusal(c: AppContext, auth: PluginAuth, liveMap: Map<string, LivePageSnapshot> | null): Response | null {
+  for (const page of liveMap?.values() ?? []) {
+    if (page.page_type === undefined) return c.json({ error: 'live_source_unavailable' }, 503, { 'Cache-Control': 'no-store' });
+    if (!pageTypeScopeAllows(auth.readableTypes, page.page_type ?? 'default')) return c.json({ error: 'forbidden_live_source' }, 403, { 'Cache-Control': 'no-store' });
+  }
+  return null;
 }
 
 /** Announces a read of one known page type. Used where the response may be a
@@ -144,17 +141,17 @@ function announceTypeRead(
   c: AppContext,
   pluginId: string,
   pageType: string,
-  rows: ReadonlyArray<{ id?: number }>,
+  rows: ReadonlyArray<{ id?: number; uuid?: string }>,
 ): void {
-  if (!rows.length) return;
   recordRead({
     action: 'page.read',
     kind: 'page_type',
     key: pageType,
     targetType: 'page',
-    ids: rows.map((row) => row.id).filter((id): id is number => typeof id === 'number').map(String).slice(0, 100),
+    ids: rows.map((row) => row.id).filter((id): id is number => typeof id === 'number').map(String),
     count: rows.length,
     actor: apiActor(c, pluginId),
+    uuidById: Object.fromEntries(rows.filter(row => row.id !== undefined && row.uuid).map(row => [String(row.id), row.uuid!])),
   });
 }
 
@@ -311,24 +308,25 @@ pagesApiRoutes.get('/pages', async (c) => {
   // paginating with offset only need the total once, on the first page.
   const skipCount = c.req.query('count') === '0';
 
-  const select = fields ? fields.join(', ') : '*';
+  const select = fields ? [...new Set(['id', 'uuid', ...fields])].join(', ') : '*';
   const [rows, totalRow] = await Promise.all([
     c.env.DB.prepare(`SELECT ${select} FROM pages ${where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`)
       .bind(...params, limit, offset)
       .all<Page>(),
     skipCount
       ? Promise.resolve(null)
-      : c.env.DB.prepare(`SELECT COUNT(*) AS total FROM pages ${where}`)
-          .bind(...params)
-          .first<{ total: number }>(),
+      : countPageMetadata(c.env.DB, where.replace(/^WHERE\s+/, ''), params, { types: [pageType] }),
   ]);
 
   // Checking live state needs a full draft row (its UUID is the stable
   // draft/live join key), so keep fields= projections lean and predictable.
-  const liveMap = includeLiveStatus && !fields ? await liveMapForDraftPages(c.env, rows.results) : null;
+  const liveMap = includeLiveStatus && !fields ? await liveMapForDraftPages(c.env, rows.results, apiActor(c, auth.pluginId)) : null;
+  const liveRefusal = liveSourceRefusal(c, auth, liveMap);
+  if (liveRefusal) return liveRefusal;
   const tagsMap = c.req.query('include_tags') === '1' && !fields
     ? await pageTagsByPageId(c.env.DB, rows.results.map((row) => row.id))
     : null;
+  if (tagsMap) recordTagReads('tag.plugin-list', [...tagsMap.values()].flat(), apiActor(c, auth.pluginId));
   announceTypeRead(c, auth.pluginId, pageType, rows.results);
   return c.json({
     pages: fields
@@ -338,7 +336,7 @@ pagesApiRoutes.get('/pages', async (c) => {
           ...(liveMap ? { isPublished: liveMap.has(row.uuid) } : {}),
           ...(tagsMap ? { tags: tagsMap.get(row.id) ?? [] } : {}),
         })),
-    total: skipCount ? -1 : (totalRow?.total ?? 0),
+    total: skipCount ? -1 : (totalRow ?? 0),
     limit,
     offset,
   });
@@ -444,6 +442,11 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
     ).bind(query.pageType, query.limit, query.groupBy.tagTaxonomy);
   }));
 
+  queries.forEach((query, index) => {
+    if (!query.groupBy) return;
+    recordTagReads('tag.plugin-group', results[index].results.flatMap(row => typeof row.resource_tag_id === 'number'
+      ? [{ id: row.resource_tag_id, taxonomy_slug: row.resource_tag_taxonomy_slug ?? query.groupBy!.tagTaxonomy }] : []), apiActor(c, auth.pluginId));
+  });
   queries.forEach((query, index) => announceTypeRead(c, auth.pluginId, query.pageType, results[index].results));
   return c.json({
     pages_by_type: Object.fromEntries(queries.map((query, index) => [
@@ -552,6 +555,7 @@ pagesApiRoutes.post('/pages/search', async (c) => {
     ? await pageTagsByPageId(c.env.DB, result.results.map((row) => row.id))
     : null;
 
+  if (tagsMap) recordTagReads('tag.plugin-search', [...tagsMap.values()].flat(), apiActor(c, auth.pluginId));
   return c.json({
     pages: result.results.map((row) => ({
       ...serializePage(row),
@@ -625,7 +629,10 @@ pagesApiRoutes.post('/pages/publish', async (c) => {
   // multiplies straight into the subrequest budget. Per-id outcomes are still
   // reported — the batched call hands back which pages it refused, and target
   // failures apply to the slice.
-  const outcome = await publishPagesToTargets(c.env, publishable.map((item) => item.page));
+  const outcome = await publishPagesToTargets(c.env, publishable.map((item) => item.page), apiActor(c, auth.pluginId));
+  if (outcome.refusedReason === 'writes_unavailable') {
+    return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
   const refusedIds = new Set(outcome.refused.map((page) => page.id));
   const regulatedIds = new Set(outcome.refusedRegulated.map((page) => page.id));
 
@@ -689,7 +696,9 @@ pagesApiRoutes.get('/pages/:id', async (c) => {
     .bind(id)
     .all<{ tag_id: number }>();
   const includeLiveStatus = c.req.query('include_live_status') === '1';
-  const liveMap = includeLiveStatus ? await liveMapForDraftPages(c.env, [page]) : null;
+  const liveMap = includeLiveStatus ? await liveMapForDraftPages(c.env, [page], apiActor(c, auth.pluginId)) : null;
+  const liveRefusal = liveSourceRefusal(c, auth, liveMap);
+  if (liveRefusal) return liveRefusal;
 
   return c.json({
     page: {
@@ -710,6 +719,7 @@ pagesApiRoutes.post('/pages', async (c) => {
 
   const result = await createPages(c, auth, [body]);
   if (!result.ok) return c.json(result.body, result.status);
+  recordPageReads('page.create-result', result.created, { actor: apiActor(c, auth.pluginId) });
   if (result.created.length) return c.json({ page: result.created[0] }, 201);
   const failure = result.errors[0];
   return c.json(
@@ -731,6 +741,7 @@ pagesApiRoutes.post('/pages/batch', async (c) => {
 
   const result = await createPages(c, auth, items.map((item) => (item ?? {}) as PageInput));
   if (!result.ok) return c.json(result.body, result.status);
+  recordPageReads('page.create-result', result.created, { actor: apiActor(c, auth.pluginId) });
   return c.json({
     created: result.created,
     // Per-item errors keep the wire shape bulk callers already parse.
@@ -789,10 +800,9 @@ pagesApiRoutes.post('/pages/duplicate', async (c) => {
   // covers the set. Per-pointer limits are only checkable when the override
   // lect repoints the pointer (the normal "duplicate into a new list" flow);
   // clones that inherit per-row source pointers are not gated here.
-  const remainingRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM pages WHERE ${selector.sql} AND page_type = ? AND id > ?`,
-  ).bind(...selector.params, pageType, cursor).first<{ total: number }>();
-  const remaining = Math.min(remainingRow?.total ?? 0, DUPLICATE_MAX_PER_CALL);
+  const remainingCount = await countPageMetadata(c.env.DB, `${selector.sql} AND page_type = ? AND id > ?`,
+    [...selector.params, pageType, cursor], { types: [pageType], action: 'page.duplicate-count' });
+  const remaining = Math.min(remainingCount, DUPLICATE_MAX_PER_CALL);
   if (remaining > 0) {
     const candidate = createCandidate(pageType, targetParentId, overrideLect);
     const violation = await checkCreateLimits(c.env, Array.from({ length: remaining }, () => candidate));
@@ -822,6 +832,7 @@ pagesApiRoutes.post('/pages/duplicate', async (c) => {
   // Charged up front for `remaining` clones; whatever is not written is
   // refunded below as that fraction of the charge, in every currency it took.
   const chargedClones = cloneCharge.charged > 0 ? remaining : 0;
+  const operationId = crypto.randomUUID();
   let copied = 0;
   let done = false;
   try {
@@ -838,6 +849,15 @@ pagesApiRoutes.post('/pages/duplicate', async (c) => {
     if (!rows.length) { done = true; break; }
     const hasMore = rows.length > take;
     const chunk = hasMore ? rows.slice(0, take) : rows;
+
+    // Persist the actual selected sources (including the look-ahead row)
+    // before processing/copying a chunk. Never replay committed chunks here.
+    try {
+      await auditReads(c, [{ action: 'page.duplicate-read', kind: 'page_type', key: pageType, targetType: 'page',
+        ids: rows.map(row => String(row.id)), count: rows.length, actor: apiActor(c, auth.pluginId),
+        detail: { operation: 'duplicate', operation_id: operationId, phase: 'intent' },
+      }], true);
+    } catch { throw new ReadAuditUnavailableError(); }
 
     // Clones keep the SOURCE slug family, not a name-derived one: some types
     // (events-plugin guests) deliberately carry pseudonymous slugs so the
@@ -865,6 +885,7 @@ pagesApiRoutes.post('/pages/duplicate', async (c) => {
         end: row.end, timezone: row.timezone, pageType, versionId: cmsId(usedIds),
         lect, parentId: targetParentId,
       }));
+      statements.push(copySensitivityStatement(c.env.DB, row.uuid, uuid));
 
       hookPages.push({ id, uuid, page_type: pageType, name: row.name, slug });
     }
@@ -991,6 +1012,7 @@ pagesApiRoutes.patch('/pages/batch', async (c) => {
     return c.json({ error: 'update_failed' }, 500);
   }
   emitPluginHooks(c, 'update', hookPages, auth.pluginId);
+  recordPageReads('page.update-result', updated, { actor: apiActor(c, auth.pluginId) });
   errors.sort((a, b) => a.index - b.index);
   return c.json({ updated, errors, count: updated.length });
 });
@@ -1072,6 +1094,7 @@ async function updatePage(c: AppContext): Promise<Response> {
 
   const updated = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(id).first<Page>();
   emitPluginHook(c, 'update', { id, uuid: page.uuid, page_type: pageType, name, slug }, auth.pluginId);
+  recordPageReads('page.update-result', [updated!], { actor: apiActor(c, auth.pluginId) });
   return c.json({ page: serializePage(updated!) });
 }
 
@@ -1104,7 +1127,7 @@ pagesApiRoutes.delete('/pages/batch', async (c) => {
 
   // Bulk unpublish: one round-trip per target per chunk, instead of a
   // 100-wide per-page fanout that made big batch deletes hang mid-way.
-  await unpublishPagesFromTargets(c.env, pages).catch(() => {});
+  await unpublishPagesFromTargets(c.env, pages, apiActor(c, auth.pluginId)).catch(() => {});
   emitPluginHooks(c, 'delete', pages, auth.pluginId);
 
   return c.json({ ok: true, trashed: pages.length });
@@ -1191,7 +1214,7 @@ pagesApiRoutes.delete('/pages/:id', async (c) => {
   const page = await trashDraftPage(c.env.DB, id);
   if (!page) return c.json({ error: 'not_found' }, 404);
 
-  await unpublishPageFromTargets(c.env, page.uuid, !!page.submission_origin);
+  await unpublishPageFromTargets(c.env, page.uuid, !!page.submission_origin, apiActor(c, auth.pluginId));
   emitPluginHook(
     c,
     'delete',

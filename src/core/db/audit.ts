@@ -22,6 +22,7 @@
 
 import type { Env, JWTPayload } from '../../types';
 import type { AppContext } from '../http/context';
+import { recordAuditOutage } from './audit-outages';
 
 /** Entity types whose changes are configuration rather than content. They get
  *  the longer `admin_config` retention: low volume, high forensic value. */
@@ -48,6 +49,9 @@ export interface AuditEntry {
 
 /** A fully resolved row, after class and retention have been decided. */
 export interface AuditRow {
+  /** Stable identity/time for idempotent administrative reconciliation receipts. */
+  eventId?: string;
+  occurredAt?: string;
   action: string;
   eventClass: EventClass;
   retentionClass: string;
@@ -92,9 +96,9 @@ const INSERT = `INSERT INTO audit_events
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest) {
-  return env.DB.prepare(INSERT).bind(
-    crypto.randomUUID(),
-    new Date().toISOString(),
+  return env.DB.prepare(INSERT + (row.eventId ? ' ON CONFLICT(event_id) DO NOTHING' : '')).bind(
+    row.eventId ?? crypto.randomUUID(),
+    row.occurredAt ?? new Date().toISOString(),
     row.eventClass,
     row.dataClass,
     row.retentionClass,
@@ -115,6 +119,11 @@ function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditReq
     row.queryFingerprint,
     row.detail ? JSON.stringify(row.detail) : null,
   );
+}
+
+/** Shared statement builder for health probes and reconciliation receipts. */
+export function auditStatement(env: Env, row: AuditRow, actor: AuditActor) {
+  return statement(env, row, actor, NO_REQUEST);
 }
 
 /** A mutation entry resolved to a row: the entity type picks the retention. */
@@ -157,8 +166,11 @@ function requestFrom(c: AppContext): AuditRequest {
 
 /** Runs `promise` after the response, or detached where there is no
  *  ExecutionContext (unit tests). Never rejects. */
-function afterResponse(c: AppContext, promise: Promise<unknown>): void {
-  const guarded = promise.catch((error) => console.error('audit log failed', error));
+function afterResponse(c: AppContext, promise: Promise<unknown>, rows: AuditRow[], actor: AuditActor): void {
+  const guarded = promise.catch(async (error) => {
+    await recordAuditOutage(c.env, 'audit-write', rows, actor);
+    console.error('audit log failed', error);
+  });
   try {
     c.executionCtx.waitUntil(guarded);
   } catch {
@@ -175,7 +187,8 @@ export function logAudit(
   detail?: Record<string, unknown>,
 ): void {
   const row = mutationRow({ action, entityType, entityId, detail });
-  afterResponse(c, statement(c.env, row, actorFromUser(c.get('user')), requestFrom(c)).run());
+  const actor = actorFromUser(c.get('user'));
+  afterResponse(c, statement(c.env, row, actor, requestFrom(c)).run(), [row], actor);
 }
 
 /**
@@ -187,9 +200,10 @@ export function logAudit(
 export function logAuditBatch(env: Env, user: JWTPayload | undefined, entries: AuditEntry[]): Promise<void> {
   if (!entries.length) return Promise.resolve();
   const actor = actorFromUser(user);
-  return env.DB.batch(entries.map((entry) => statement(env, mutationRow(entry), actor, NO_REQUEST)))
+  const rows = entries.map(mutationRow);
+  return env.DB.batch(rows.map((row) => statement(env, row, actor, NO_REQUEST)))
     .then(() => undefined)
-    .catch((error) => console.error('audit log failed', error));
+    .catch(async (error) => { await recordAuditOutage(env, 'audit-write', rows, actor); console.error('audit log failed', error); });
 }
 
 /**
@@ -201,9 +215,10 @@ export function logAuditBatchVia(c: AppContext, via: string, entries: AuditEntry
   if (!entries.length) return Promise.resolve();
   const actor = actorFromUser(undefined, via);
   const request = requestFrom(c);
-  return c.env.DB.batch(entries.map((entry) => statement(c.env, mutationRow(entry), actor, request)))
+  const rows = entries.map(mutationRow);
+  return c.env.DB.batch(rows.map((row) => statement(c.env, row, actor, request)))
     .then(() => undefined)
-    .catch((error) => console.error('audit log failed', error));
+    .catch(async (error) => { await recordAuditOutage(c.env, 'audit-write', rows, actor); console.error('audit log failed', error); });
 }
 
 /** What an authentication event knows about its actor. A failed sign-in that
@@ -249,7 +264,7 @@ export function logAuthEvent(
     queryFingerprint: null,
     detail: opts.detail ?? null,
   };
-  afterResponse(c, statement(c.env, row, actor, requestFrom(c)).run());
+  afterResponse(c, statement(c.env, row, actor, requestFrom(c)).run(), [row], actor);
 }
 
 /** The signed-in user as an audit actor, or an actor-less one off an
@@ -278,7 +293,19 @@ export async function writeAuditRows(
   try {
     await c.env.DB.batch(statements);
   } catch (error) {
+    await recordAuditOutage(c.env, 'audit-write', rows, actor);
     if (strict) throw error;
     console.error('audit log failed', error);
+  }
+}
+
+/** Awaitable off-request writer for jobs, ingestion and pre-disclosure events. */
+export async function writeBackgroundAuditRows(env: Env, rows: AuditRow[], actor: AuditActor, strict = true): Promise<void> {
+  if (!rows.length) return;
+  try { await env.DB.batch(rows.map(row => statement(env, row, actor, NO_REQUEST))); }
+  catch (error) {
+    await recordAuditOutage(env, 'audit-write', rows, actor);
+    if (strict) throw error;
+    console.error('background audit log failed', error);
   }
 }

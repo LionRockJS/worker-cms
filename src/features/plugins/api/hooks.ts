@@ -3,6 +3,7 @@
 
 import type { AppContext } from '../../../core/http/context';
 import { logAuditBatchVia } from '../../../core/db/audit';
+import { actingUserId } from './create';
 import { deliverHooks, type HookEvent, type HookPage } from '../hooks';
 
 // ── Lifecycle hook + audit (plugin actor, no signed-in user) ──────────────────
@@ -29,7 +30,8 @@ export function emitPluginHooks(c: AppContext, event: HookEvent, pages: HookPage
 
   // deliverHooks tolerates a null user (passes user: null in the payload) and
   // chunks the pages so a bulk delete costs a fetch per hundred, not per page.
-  const hookPromise = deliverHooks(c.env, undefined, event, pages);
+  const userId = actingUserId(c);
+  const hookPromise = deliverHooks(c.env, undefined, event, pages, { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: pluginId });
 
   const combined = Promise.allSettled([auditPromise, hookPromise]);
   try {

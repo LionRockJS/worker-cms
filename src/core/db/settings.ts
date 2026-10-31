@@ -1,4 +1,5 @@
 import type { Env } from '../../types';
+import { recordMetadataReads } from '../http/access-log';
 
 export const SIDEBAR_MENU_SETTING_KEY = 'admin.sidebar_menu.hidden_items';
 export const APP_BRANDING_SETTING_KEY = 'admin.app_branding';
@@ -237,6 +238,7 @@ export function defaultSidebarMenuSettings(): SidebarMenuSettings {
 
 export async function getSetting(env: Env, key: string): Promise<string | null> {
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
+  recordMetadataReads('settings.read', 'settings', row ? [key] : []);
   return row?.value ?? null;
 }
 

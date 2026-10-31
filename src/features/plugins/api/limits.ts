@@ -5,6 +5,8 @@ import type { Env, Variables } from '../../../types';
 import { authenticatePlugin } from './auth';
 import { asFiniteNumber } from './serialize';
 import { countLimitUsage, effectiveLimitsForPlugin } from '../limits';
+import { recordRead } from '../../../core/http/access-log';
+import { pluginReadActor } from './read-audit';
 
 export const limitsApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -23,6 +25,7 @@ limitsApiRoutes.get('/limits', async (c) => {
   const limits = await effectiveLimitsForPlugin(c.env, auth.plugin);
   const pointerValue = (c.req.query('pointer_value') ?? '').trim();
   const parentId = asFiniteNumber(c.req.query('page_id'));
+  const actor = pluginReadActor(c, auth.pluginId);
 
   const out = [];
   for (const limit of limits) {
@@ -47,5 +50,6 @@ limitsApiRoutes.get('/limits', async (c) => {
     });
   }
 
+  if (out.length) recordRead({ action: 'plugin.limits-read', kind: 'plugin', key: auth.pluginId, targetType: 'plugin_limit', ids: out.map(limit => limit.key), count: out.length, actor });
   return c.json({ limits: out });
 });

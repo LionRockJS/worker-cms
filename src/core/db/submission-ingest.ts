@@ -1,3 +1,9 @@
+import { auditBackgroundReads } from '../http/access-log';
+import { incomingSensitivityStatements } from './sensitivity';
+import type { AuditActor } from './audit';
+import { readD1PageSource } from '../publish/d1';
+import { liveSourceReads } from '../publish/read-audit';
+import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 // ============================================================
 // Generic submission ingest — published DB → draft pages.
 //
@@ -112,20 +118,16 @@ function parseCursor(raw: string | null): Cursor {
  * concurrently or repeatedly: creation is idempotent by uuid, and the bounded
  * cursor wraps after a complete pass so older rows are reconsidered.
  */
-export async function ingestSubmissions(env: Env): Promise<IngestResult> {
+export async function ingestSubmissions(env: Env, actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: 'system:submission-ingest' }): Promise<IngestResult> {
+  assertRegulatedWritesAllowed(env);
   if (!env.PUBLISHED_DB) return { scanned: 0, created: 0, more: false };
 
   const cursor = parseCursor(await getSetting(env, CURSOR_SETTING_KEY));
 
-  const rows = await env.PUBLISHED_DB.prepare(
-    `SELECT uuid, created_at, name, slug, weight, start, end, timezone, page_type, lect, page_id
-     FROM pages
-     WHERE created_at > ? OR (created_at = ? AND uuid > ?)
-     ORDER BY created_at ASC, uuid ASC
-     LIMIT ?`,
-  )
-    .bind(cursor.created_at, cursor.created_at, cursor.uuid, SCAN_LIMIT)
-    .all<LiveSubmissionRow>();
+  const source = await readD1PageSource<LiveSubmissionRow>(env.PUBLISHED_DB, 'submission',
+    'p.created_at > ? OR (p.created_at = ? AND p.uuid > ?)', [cursor.created_at, cursor.created_at, cursor.uuid, SCAN_LIMIT],
+    'ORDER BY p.created_at ASC, p.uuid ASC LIMIT ?');
+  const rows = { results: source.rows };
 
   if (!rows.results.length) {
     // A completed pass resets the cursor so later runs can detect a formerly
@@ -136,6 +138,11 @@ export async function ingestSubmissions(env: Env): Promise<IngestResult> {
     }
     return { scanned: 0, created: 0, more: false };
   }
+
+  const evidence = await auditBackgroundReads(env,
+    await liveSourceReads(env, { id: 'd1' }, source.provenance, actor, 'submission.ingest-read'), actor);
+  const protections = incomingSensitivityStatements(env.DB, evidence);
+  if (protections.length) await env.DB.batch(protections);
 
   // One query for both pre-checks: which rows already exist in draft, and
   // which referenced parent pages exist locally.
@@ -195,7 +202,7 @@ export async function ingestSubmissions(env: Env): Promise<IngestResult> {
       page_type: row.page_type,
       name: row.name,
       slug: row.slug,
-    }]);
+    }], actor);
   }
 
   if (last.created_at !== cursor.created_at || last.uuid !== cursor.uuid) {

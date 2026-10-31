@@ -17,10 +17,11 @@ import {
 import type { Env, JWTPayload, Page } from '../../types';
 import { trashDraftPages, type TrashedPageRef } from '../db/admin-queries';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
-import { logAuditBatch } from '../db/audit';
+import { logAuditBatch, type AuditActor } from '../db/audit';
 import { submissionMirrorIds } from '../db/submission-ingest';
 import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
 import { safeParseLect, stringifyLect, type Lect } from '../db/lect';
+import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
 /** The bulk actions a page listing offers. */
 export type BulkPageAction = 'publish' | 'unpublish' | 'delete' | 'add_tag' | 'remove_tag' | 'replace_text';
@@ -68,11 +69,11 @@ export interface BulkTargetQuery {
  * the criteria are evaluated against the draft table now, so a page edited
  * while the action runs cannot slip in or out of the set half way through.
  */
-export async function resolveBulkTargetIds(env: Env, query: BulkTargetQuery): Promise<number[]> {
+export async function resolveBulkTargetIds(env: Env, query: BulkTargetQuery, actor?: AuditActor): Promise<number[]> {
   const ids = await advancedSearchMatchingPageIds(env.DB, query.pageTypes, query.criteria, query.operator);
   if (!query.status) return ids;
 
-  const livePages = await listLiveByTypes(env, query.pageTypes);
+  const livePages = await listLiveByTypes(env, query.pageTypes, actor);
   const liveMap = new Map(livePages.map((page) => [page.uuid, page]));
   const pages = await draftPagesByIds(env.DB, ids);
   return pages.filter((page) => {
@@ -93,6 +94,7 @@ export async function applyBulkPageAction(
   ids: number[],
   options: BulkPageActionOptions = {},
 ): Promise<BulkPageActionOutcome> {
+  if (action !== 'unpublish') assertRegulatedWritesAllowed(env);
   const failedTargets = new Set<string>();
   let updated = 0;
   let refused = 0;
@@ -155,7 +157,7 @@ export async function applyBulkPageAction(
       // One bulk unpublish per chunk instead of a per-page delete: D1 collapses
       // the whole slice into a single batch, so a 90-page chunk costs ~1 round
       // trip to the published DB rather than ~3 per page.
-      const outcome = await unpublishPagesFromTargets(env, trashed);
+      const outcome = await unpublishPagesFromTargets(env, trashed, { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null });
       refused += outcome.refusedCount;
       outcome.failures.forEach((target) => failedTargets.add(target));
       deleted.push(...trashed);
@@ -174,7 +176,9 @@ export async function applyBulkPageAction(
   const succeeded: Page[] = [];
 
   if (action === 'publish') {
-    const outcome = await publishPagesToTargets(env, pages);
+    const outcome = await publishPagesToTargets(env, pages, {
+      userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null,
+    });
     outcome.failures.forEach((target) => failedTargets.add(target));
     succeeded.push(...outcome.published);
     updated += outcome.published.length;
@@ -184,6 +188,7 @@ export async function applyBulkPageAction(
     const outcome = await unpublishPagesFromTargets(
       env,
       pages.map((page) => ({ uuid: page.uuid, submission_origin: mirrors.has(page.id) ? 1 : 0 })),
+      { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null },
     );
     outcome.failures.forEach((target) => failedTargets.add(target));
     succeeded.push(...pages.filter((page) => !mirrors.has(page.id)));

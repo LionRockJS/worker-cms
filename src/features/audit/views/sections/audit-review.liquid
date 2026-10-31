@@ -80,6 +80,44 @@
     {% endif %}
   </div>
 
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
+    <h2 class="text-lg font-bold text-gray-900">{{ "audit.outage.title" | t }}</h2>
+    {% if outageEnabled %}
+      {% if outageAvailable %}
+        <p class="mt-2 text-sm text-gray-500">{{ "audit.outage.help" | t }}</p>
+        <p class="mt-2 text-sm {% if outageHealthy %}text-gray-500{% else %}text-red-700{% endif %}">
+          {% if outageHealthy %}{{ "audit.outage.healthy" | t }}{% else %}{{ "audit.outage.unhealthy" | t }}{% endif %}
+          {% if outageCheckedAt %}{{ outageCheckedAt | l10n_date }}{% endif %}
+        </p>
+        {% for incident in outageItems %}
+          <div class="mt-4 border-t border-gray-200 pt-4">
+            <a class="text-sm text-indigo-600 hover:underline font-mono" href="{{ incident.detailHref }}">{{ incident.id }}</a>
+            <p class="text-sm text-gray-500">{{ incident.observedAt | l10n_date }} · {{ incident.reason }} · {{ incident.eventCount }}</p>
+            {% unless incident.captureComplete %}<p class="text-sm text-red-700">{{ "audit.outage.incomplete" | t }}</p>{% endunless %}
+            {% if incident.alertDelivered %}<p class="text-sm text-gray-500">{{ "audit.outage.delivered" | t }}</p>{% else %}<p class="text-sm text-red-700">{{ "audit.outage.pending" | t }}</p>{% endif %}
+            {% if incident.review %}
+              <p class="text-sm text-gray-500">{{ "audit.outage.reviewed" | t }}: {{ incident.review.disposition }} · {{ incident.review.reviewedAt | l10n_date }} · {{ incident.review.evidenceRef }}</p>
+            {% elsif incident.canReconcile %}
+              <form action="{{ incident.reconcileAction }}" method="post" class="mt-3 flex flex-wrap items-center gap-3" data-single-submit>
+                <label class="text-sm text-gray-700">{{ "audit.outage.disposition" | t }}
+                  <select name="disposition" required class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="evidence-located">{{ "audit.outage.located" | t }}</option>
+                    <option value="containment-verified">{{ "audit.outage.contained" | t }}</option>
+                    <option value="unrecoverable-gap">{{ "audit.outage.gap" | t }}</option>
+                  </select>
+                </label>
+                <label class="text-sm text-gray-700">{{ "audit.outage.reference" | t }}<input name="evidence_ref" required maxlength="80" class="border border-gray-300 rounded-lg px-3 py-2 text-sm"></label>
+                <label class="text-sm text-gray-700">{{ "audit.outage.digest" | t }}<input name="evidence_sha256" required minlength="64" maxlength="64" pattern="[a-f0-9]{64}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono"></label>
+                <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">{{ "audit.outage.save" | t }}</button>
+              </form>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if outageNextHref %}<a class="mt-4 inline-flex text-sm text-indigo-600 hover:underline" href="{{ outageNextHref }}">{{ "common.next" | t }}</a>{% endif %}
+      {% else %}<p class="mt-2 text-sm text-red-700">{{ "audit.outage.unavailable" | t }}</p>{% endif %}
+    {% else %}<p class="mt-2 text-sm text-gray-500">{{ "audit.outage.disabled" | t }}</p>{% endif %}
+  </div>
+
   {% for signal in signals %}
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 mt-4">
       <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">

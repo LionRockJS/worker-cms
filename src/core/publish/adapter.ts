@@ -51,6 +51,10 @@ export interface PublishSnapshot {
 /** Minimal live-page projection the admin UI uses for publish-status badges. */
 export interface LivePageSnapshot {
   uuid: string;
+  /** Actual source type, never inferred from the corresponding draft. */
+  page_type?: string | null;
+  /** Complete source taxonomy provenance; undefined means it cannot be verified. */
+  taxonomy_slugs?: string[];
   lect: string | null;
   weight: number;
   /** Schedule metadata is optional for third-party read adapters. */
@@ -62,6 +66,8 @@ export interface LivePageSnapshot {
 export interface PublishAdapter {
   /** Stable identifier used in logs and partial-failure flash messages. */
   id: string;
+  /** Plugin identity, when a removable contributor owns this destination. */
+  contributorId?: string;
 
   /** Create or replace the published copy of a page. Throw on failure. */
   publish(snapshot: PublishSnapshot): Promise<void>;

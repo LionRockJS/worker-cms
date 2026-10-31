@@ -1,3 +1,4 @@
+import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // The dashboard and page listings: all pages, per-type lists, and the
 // create-by-type entry points.
 
@@ -18,6 +19,8 @@ import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages, listDas
 import { liveMapForDraftPages } from '../../../core/publish';
 import { draftLectProjector } from '../../../core/publish/projection';
 import { recordPageReads } from '../../../core/http/access-log';
+import { readD1PageSource } from '../../../core/publish/d1';
+import { auditLiveReads } from '../../../core/publish/read-audit';
 import { dashboardPagination, renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { userCan } from '../../../core/auth/permissions';
@@ -40,9 +43,9 @@ async function importExportLinks(
 type DashboardStatusFilter = ReturnType<typeof dashboardStatusFilter>;
 type DashboardLiveUuidRow = { uuid: string };
 type DashboardPageRow = Page & { isDraftMissing?: boolean; tagNames?: string[] };
-type DashboardPageTagNameRow = { page_id: number; name: string };
+type DashboardPageTagNameRow = { page_id: number; id: number; name: string; taxonomy_slug: string | null };
 type DashboardPublishedPageTagRow = { page_id: number; tag_id: number; weight: number; id: number };
-type DashboardTagNameRow = { id: number; name: string };
+type DashboardTagNameRow = { id: number; name: string; taxonomy_slug: string | null };
 
 function statusFilterLinks(routeBase: string, active: DashboardStatusFilter) {
   return [
@@ -95,7 +98,7 @@ async function addDashboardPageTags<T extends DashboardPageRow>(c: AppContext, p
   const [draftTagRows, publishedTagRows] = await Promise.all([
     draftPageIds.length
       ? c.env.DB.prepare(
-          `SELECT pt.page_id, t.name
+          `SELECT pt.page_id, t.id, t.name, t.taxonomy_slug
            FROM page_tags pt
            JOIN tags t ON t.id = pt.tag_id
            WHERE pt.page_id IN (${draftPageIds.map(() => '?').join(',')})
@@ -116,15 +119,18 @@ async function addDashboardPageTags<T extends DashboardPageRow>(c: AppContext, p
       : Promise.resolve({ results: [] as DashboardPublishedPageTagRow[] }),
   ]);
 
+  recordTagReads('tag.dashboard-label', draftTagRows.results);
+
   for (const row of draftTagRows.results) addTag(pageKey('draft', row.page_id), row.name);
 
   const publishedTagIds = Array.from(new Set(publishedTagRows.results.map((row) => row.tag_id)));
   if (publishedTagIds.length) {
     const tagNames = await c.env.DB.prepare(
-      `SELECT id, name FROM tags WHERE id IN (${publishedTagIds.map(() => '?').join(',')})`,
+      `SELECT id, name, taxonomy_slug FROM tags WHERE id IN (${publishedTagIds.map(() => '?').join(',')})`,
     )
       .bind(...publishedTagIds)
       .all<DashboardTagNameRow>();
+    recordTagReads('tag.dashboard-label', tagNames.results);
     const tagNamesById = new Map(tagNames.results.map((tag) => [tag.id, tag.name]));
     for (const row of publishedTagRows.results) {
       const name = tagNamesById.get(row.tag_id);
@@ -155,9 +161,9 @@ function dashboardPaginationResult<T>(items: T[], requestedPage: number, limit: 
 }
 
 async function liveDashboardUuids(c: AppContext): Promise<Set<string>> {
-  const liveRows = await c.env.PUBLISHED_DB.prepare('SELECT uuid FROM pages')
-    .all<DashboardLiveUuidRow>();
-  return new Set(liveRows.results.map((page) => page.uuid));
+  const source = await readD1PageSource<DashboardLiveUuidRow & { page_type: string | null }>(c.env.PUBLISHED_DB, 'identity', '1', []);
+  await auditLiveReads(c.env, { id: 'd1' }, source.provenance, undefined, 'page.live-status');
+  return new Set(source.rows.map((page) => page.uuid));
 }
 
 async function liveDashboardPagesForRequest(
@@ -171,15 +177,11 @@ async function liveDashboardPagesForRequest(
   },
 ) {
   const { pageType, requestedPage, pageSize, statusFilter, now } = options;
-  const whereSql = pageType ? 'WHERE page_type = ?' : '';
+  const whereSql = pageType ? 'p.page_type = ?' : '1';
   const baseParams = pageType ? [pageType] : [];
-  const liveRows = await c.env.PUBLISHED_DB.prepare(
-    `SELECT * FROM pages ${whereSql}
-     ORDER BY weight ASC, name ASC, id ASC`,
-  )
-    .bind(...baseParams)
-    .all<Page>();
-  const matchingRows = liveRows.results.filter((page) => (
+  const source = await readD1PageSource<Page>(c.env.PUBLISHED_DB, 'full', whereSql, baseParams, 'ORDER BY p.weight ASC, p.name ASC, p.id ASC');
+  await auditLiveReads(c.env, { id: 'd1' }, source.provenance, undefined, 'page.live-status');
+  const matchingRows = source.rows.filter((page) => (
     publicationStatusForPage(page, true, now) === statusFilter
   ));
   const paginated = dashboardPaginationResult(matchingRows, requestedPage, pageSize);
@@ -261,7 +263,7 @@ async function dashboardPagesForRequest(
   const results = await addDashboardPageTags(c, result.results);
   // Both list routes come through here, so one announcement covers them. A
   // mixed list is recorded as one row per page type, not one per row.
-  recordPageReads('page.list', results);
+  recordPageReads('page.list', results.filter(page => !('isDraftMissing' in page && page.isDraftMissing)));
   return { ...result, results };
 }
 
@@ -305,6 +307,8 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     resolveCmsConfig(c.env),
     editorTaxonomy(c.env.DB),
   ]);
+  recordTagReads('tag.filter-options', taxonomy.tags);
+  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
   const t = await uiTranslator(c);
 
   return renderPage(c, dashboardPage, {
@@ -367,6 +371,8 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     importExportLinks(c.env, pageType),
     userCan(c, 'content:write'),
   ]);
+  recordTagReads('tag.filter-options', taxonomy.tags);
+  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
   const t = await uiTranslator(c);
 
   return renderPage(c, dashboardPage, {

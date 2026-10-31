@@ -1,3 +1,4 @@
+import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // The advanced-search page controller.
 //
 // Lived in utils/admin-render.ts, which is why every admin route — trash,
@@ -56,6 +57,8 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
   const hasSearch = criteria.length > 0;
 
   const taxonomy = await editorTaxonomy(c.env.DB);
+  recordTagReads('tag.filter-options', taxonomy.tags);
+  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
 
   const result = hasSearch
     ? await performAdvancedSearch(c.env.DB, pageTypes, criteria, operator, {
@@ -94,9 +97,10 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
         kind: 'page_type',
         key: pageType,
         targetType: 'page',
-        ids: ids.slice(0, 100),
+        ids,
         count: ids.length,
         queryFingerprint: fingerprint,
+        uuidById: Object.fromEntries(result.results.filter(row => (row.page_type ?? 'default') === pageType).map(row => [String(row.id), row.uuid])),
       });
     }
   }

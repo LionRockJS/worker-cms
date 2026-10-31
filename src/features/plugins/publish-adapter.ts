@@ -15,10 +15,17 @@
 // ============================================================
 
 import type { ResolvedPlugin } from './types';
+import type { Env } from '../../types';
 import type { PublishAdapter, PublishSnapshot, PublishedTag } from '../../core/publish/adapter';
-import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
+import { pluginById, PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
 
-async function post(plugin: ResolvedPlugin, secret: string, tenantId: string, path: string, body: unknown, optional = false): Promise<void> {
+async function post(plugin: ResolvedPlugin, secret: string, tenantId: string, path: string, body: unknown, optional = false, env?: Env): Promise<void> {
+  if (env) {
+    const current = await pluginById(env, plugin.manifest.id);
+    if (!current?.secret || !current.manifest.publishTarget) throw new Error('Publish plugin is no longer available');
+    plugin = current;
+    secret = current.secret;
+  }
   const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/publish/${path}`, {
     method: 'POST',
     headers: {
@@ -28,6 +35,7 @@ async function post(plugin: ResolvedPlugin, secret: string, tenantId: string, pa
     },
     body: JSON.stringify(body),
   });
+  await response.body?.cancel();
   // Optional endpoints (tags, remove-tag) may simply not exist in a plugin.
   if (optional && response.status === 404) return;
   if (!response.ok) {
@@ -35,24 +43,25 @@ async function post(plugin: ResolvedPlugin, secret: string, tenantId: string, pa
   }
 }
 
-export function pluginAdapter(plugin: ResolvedPlugin, secret: string, tenantId = ''): PublishAdapter {
+export function pluginAdapter(plugin: ResolvedPlugin, secret: string, tenantId = '', env?: Env): PublishAdapter {
   return {
     id: `plugin:${plugin.manifest.id}`,
+    contributorId: plugin.manifest.id,
 
     async publish(snapshot: PublishSnapshot): Promise<void> {
-      await post(plugin, secret, tenantId, 'page', snapshot);
+      await post(plugin, secret, tenantId, 'page', snapshot, false, env);
     },
 
     async unpublish(uuid: string): Promise<void> {
-      await post(plugin, secret, tenantId, 'remove', { uuid });
+      await post(plugin, secret, tenantId, 'remove', { uuid }, false, env);
     },
 
     async publishTags(tags: PublishedTag[]): Promise<void> {
-      await post(plugin, secret, tenantId, 'tags', { tags }, true);
+      await post(plugin, secret, tenantId, 'tags', { tags }, true, env);
     },
 
     async removeTag(tagId: number): Promise<void> {
-      await post(plugin, secret, tenantId, 'remove-tag', { tagId }, true);
+      await post(plugin, secret, tenantId, 'remove-tag', { tagId }, true, env);
     },
   };
 }

@@ -17,7 +17,7 @@ ingestApiRoutes.post('/ingest/submissions', async (c) => {
     return c.json({ error: 'submission_hook_required' }, 403);
   }
 
-  const result = await ingestSubmissions(c.env);
+  const result = await ingestSubmissions(c.env, { userId: null, roles: null, sessionSid: null, via: auth.pluginId });
   return c.json({ ok: true, ...result });
 });
 

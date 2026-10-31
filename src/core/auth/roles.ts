@@ -82,9 +82,9 @@ export function splitRoles(value: string): string[] {
 }
 
 /** Resolves the effective role → permission map from the database. */
-export async function resolveRolePermissions(env: Env): Promise<Map<string, Set<Permission>>> {
+export async function resolveRolePermissions(env: Env, fresh = false): Promise<Map<string, Set<Permission>>> {
   const context = requestContext.getStore();
-  if (context?.rolePermissions) return context.rolePermissions;
+  if (!fresh && context?.rolePermissions) return context.rolePermissions;
 
   const map = new Map<string, Set<Permission>>();
   // Seed built-in defaults.

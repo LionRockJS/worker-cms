@@ -10,6 +10,7 @@ import { signJWT } from './auth-fixtures';
 import type { Env } from '../src/types';
 
 const CMS_ORIGIN = 'https://cms.example.com';
+const ACTOR = { userId: '1', roles: 'admin', sessionSid: null, via: null };
 
 const MANIFEST = {
   id: 'events',
@@ -118,7 +119,7 @@ describe('plugin tenant enrollment', () => {
     const { testEnv, url } = await register(plugin);
     const resolved = await resolvedPlugin(testEnv, url);
 
-    const result = await enrollPluginTenant(testEnv, resolved, 'admin@example.com');
+    const result = await enrollPluginTenant(testEnv, resolved, ACTOR);
 
     expect(result).toEqual({ ok: true, code: 'connected' });
     expect(plugin.tenants.get(CMS_ORIGIN)).toEqual({ cmsUrl: CMS_ORIGIN, secret: resolved.apiSecret });
@@ -137,7 +138,7 @@ describe('plugin tenant enrollment', () => {
     });
     const { testEnv, url } = await register(plugin);
 
-    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), 'admin@example.com');
+    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), ACTOR);
 
     expect(result.ok).toBe(true);
     expect(plugin.enrollCalls[0]?.tenant_vars).toEqual([
@@ -150,7 +151,7 @@ describe('plugin tenant enrollment', () => {
   it('leaves no redeemable ticket behind after the handshake', async () => {
     const plugin = makePlugin({ cms: cmsApp({ DB: env.DB, CANONICAL_ORIGIN: CMS_ORIGIN } as unknown as Env) });
     const { testEnv, url } = await register(plugin);
-    await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), 'admin@example.com');
+    await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), ACTOR);
 
     expect(await getSetting(testEnv, 'plugin.enrollment.events')).toBeNull();
   });
@@ -219,7 +220,7 @@ describe('plugin tenant enrollment', () => {
       },
     });
     const { testEnv, url } = await register(plugin);
-    await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), 'admin@example.com');
+    await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), ACTOR);
 
     const replay = await cms(new Request(`${CMS_ORIGIN}/__cms/tenant/claim`, {
       method: 'POST',
@@ -239,7 +240,7 @@ describe('plugin tenant enrollment', () => {
     });
     const { testEnv, url } = await register(plugin);
 
-    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), 'admin@example.com');
+    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), ACTOR);
 
     expect(result.ok).toBe(false);
     expect(plugin.tenants.size).toBe(0);
@@ -250,7 +251,7 @@ describe('plugin tenant enrollment', () => {
     const plugin = makePlugin({ cms });
     const { testEnv, url } = await register(plugin);
     const resolved = await resolvedPlugin(testEnv, url);
-    await enrollPluginTenant(testEnv, resolved, 'admin@example.com');
+    await enrollPluginTenant(testEnv, resolved, ACTOR);
 
     const response = await cms(new Request(`${CMS_ORIGIN}/__cms/tenant/claim`, {
       method: 'POST',
@@ -300,7 +301,7 @@ describe('plugin tenant enrollment', () => {
     });
     const { testEnv, url } = await register(plugin);
 
-    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), 'admin@example.com');
+    const result = await enrollPluginTenant(testEnv, await resolvedPlugin(testEnv, url), ACTOR);
 
     expect(result).toEqual({ ok: false, code: 'not-supported' });
     expect(plugin.enrollCalls).toEqual([]);
@@ -311,7 +312,7 @@ describe('plugin tenant enrollment', () => {
     const { testEnv, url } = await register(plugin);
     const resolved = await resolvedPlugin(testEnv, url);
 
-    const result = await enrollPluginTenant({ DB: env.DB } as unknown as Env, resolved, 'admin@example.com');
+    const result = await enrollPluginTenant({ DB: env.DB } as unknown as Env, resolved, ACTOR);
 
     expect(result).toEqual({ ok: false, code: 'no-canonical-origin' });
     expect(plugin.enrollCalls).toEqual([]);
@@ -336,7 +337,7 @@ describe('plugin tenant enrollment', () => {
     const plugin = makePlugin({ cms: cmsApp({ DB: env.DB, CANONICAL_ORIGIN: CMS_ORIGIN } as unknown as Env) });
     const { testEnv, url } = await register(plugin);
     const resolved = await resolvedPlugin(testEnv, url);
-    await enrollPluginTenant(testEnv, resolved, 'admin@example.com');
+    await enrollPluginTenant(testEnv, resolved, ACTOR);
     plugin.tenants.set('https://other.example.com', { cmsUrl: 'https://other.example.com', secret: 'other' });
 
     const result = await revokePluginTenant(testEnv, resolved);

@@ -1,3 +1,5 @@
+import { resolveDataClasses } from '../db/data-classes';
+import { regulatedPages } from '../publish/regulated';
 import { validateAccessSession } from '../auth/sessions';
 import { effectivePermissions, resolveRolePermissions } from '../auth/roles';
 // Durable Object: one instance per page, handles hybrid WebSocket live sync.
@@ -24,7 +26,7 @@ import { effectivePermissions, resolveRolePermissions } from '../auth/roles';
 //
 // HLC format: "<Date.now()>.<counter>.<userId>" – lexicographic ordering is sufficient.
 
-import type { Env } from '../../types';
+import type { Env, Page } from '../../types';
 import * as Y from 'yjs';
 
 const MAX_TEXT_BASELINE = 1_000_000;
@@ -36,6 +38,7 @@ function strField(msg: Record<string, unknown>, key: string): string {
 }
 
 interface WsAttachment {
+  pageId?: string;
   userId: string;
   userName: string;
   sid: string;
@@ -149,7 +152,7 @@ export class PageSyncDO implements DurableObject {
     const userId = request.headers.get('X-User-Id') ?? '';
     const userName = request.headers.get('X-User-Name') ?? '';
 
-    const attachment: WsAttachment = { userId, userName, sid: request.headers.get('X-Session-Id') ?? '', exp: Number(request.headers.get('X-Session-Expires')) };
+    const attachment: WsAttachment = { userId, userName, pageId: request.headers.get('X-Page-Id') ?? undefined, sid: request.headers.get('X-Session-Id') ?? '', exp: Number(request.headers.get('X-Session-Expires')) };
     if (!await this.validSession(attachment)) return new Response('Unauthorized', { status: 401 });
     if (this.state.getWebSockets().length >= 32) return new Response('Too many connections', { status: 429 });
     const { 0: client, 1: server } = new WebSocketPair();
@@ -380,6 +383,22 @@ export class PageSyncDO implements DurableObject {
 
   private async validSession(attachment: WsAttachment | null): Promise<boolean> {
     if (!attachment || !Number.isFinite(attachment.exp)) return false;
+    // Long-lived sockets bypass HTTP readiness after upgrade. Recheck here
+    // before inbound messages, outbound delivery and the existing idle alarm.
+    if (this.env.REGULATED_MODE && this.env.REGULATED_MODE !== 'false') return false;
+    const classes = await resolveDataClasses(this.env);
+    if (!classes.ok) return false;
+    if (attachment.pageId) {
+      const page = await this.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(attachment.pageId).first<Page>();
+      if (!page) return false;
+      const regulated = await regulatedPages(this.env, [page]);
+      if (regulated.unavailable || regulated.ids.size) return false;
+    } else if ([...classes.exact.values(), ...classes.prefixes.map(p => p.class)].includes('phi')) {
+      // Older attachments have no page identity. Do not guess which policy
+      // applies once PHI is present; reconnect through the checked HTTP route.
+      return false;
+    }
+
     const user = await validateAccessSession(this.env.DB, {
       sub: attachment.userId, sid: attachment.sid, exp: attachment.exp,
       type: 'access', iat: 0, name: '', email: '', role: '',

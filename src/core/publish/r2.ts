@@ -13,6 +13,7 @@
 
 import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from './adapter';
 import { safeParseLect } from '../db/lect';
+import { ReadAuditUnavailableError } from '../http/access-log';
 
 interface IndexEntry {
   uuid: string;
@@ -53,9 +54,11 @@ export function r2Adapter(bucket: R2Bucket, prefix = ''): PublishAdapter {
     const object = await bucket.get(pageKey(uuid));
     if (!object) return null;
     try {
-      return (await object.json()) as Record<string, unknown>;
+      const document: unknown = await object.json();
+      if (!document || typeof document !== 'object' || Array.isArray(document)) throw new ReadAuditUnavailableError();
+      return document as Record<string, unknown>;
     } catch {
-      return null;
+      throw new ReadAuditUnavailableError();
     }
   }
 
@@ -64,8 +67,14 @@ export function r2Adapter(bucket: R2Bucket, prefix = ''): PublishAdapter {
       uuids.map(async (uuid): Promise<[string, LivePageSnapshot] | null> => {
         const document = await readPage(uuid);
         if (!document) return null;
+        const tags = document.tags;
+        const taxonomySlugs = Array.isArray(tags) && tags.every(tag => tag && typeof tag === 'object'
+          && (tag.taxonomy_slug === null || typeof tag.taxonomy_slug === 'string' && tag.taxonomy_slug.length > 0))
+          ? [...new Set(tags.map(tag => tag.taxonomy_slug ?? 'default'))] as string[] : undefined;
         return [uuid, {
           uuid,
+          ...(document.page_type === null || typeof document.page_type === 'string' ? { page_type: document.page_type } : {}),
+          taxonomy_slugs: taxonomySlugs,
           lect: document.lect === undefined || document.lect === null ? null : JSON.stringify(document.lect),
           weight: typeof document.weight === 'number' ? document.weight : 0,
           start: typeof document.start === 'string' ? document.start : null,
@@ -78,7 +87,8 @@ export function r2Adapter(bucket: R2Bucket, prefix = ''): PublishAdapter {
   }
 
   /** The self-contained JSON object a reader fetches for one page. */
-  function pageDocument({ page, tags, publishedAt }: PublishSnapshot): Record<string, unknown> {
+  function pageDocument({ page, tags, tagCatalogue, publishedAt }: PublishSnapshot): Record<string, unknown> {
+    const catalogue = new Map(tagCatalogue.map(tag => [tag.id, tag]));
     return {
       uuid: page.uuid,
       name: page.name,
@@ -89,7 +99,8 @@ export function r2Adapter(bucket: R2Bucket, prefix = ''): PublishAdapter {
       timezone: page.timezone,
       page_type: page.page_type,
       lect: safeParseLect(page.lect),
-      tags: tags.map((tag) => ({ uuid: tag.uuid, tag_id: tag.tag_id, weight: tag.weight, slug: tag.slug, name: tag.name })),
+      tags: tags.map((tag) => ({ uuid: tag.uuid, tag_id: tag.tag_id, weight: tag.weight, slug: tag.slug, name: tag.name,
+        taxonomy_slug: catalogue.get(tag.tag_id)?.taxonomy_slug })),
       published_at: publishedAt,
     };
   }

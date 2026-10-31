@@ -18,6 +18,7 @@ import {
   type EffectiveCredit,
 } from '../service';
 import { creditSummaryPage, type CreditSummaryRow, type LimitSummaryRow } from '../template';
+import { recordContributorReads } from '../../../core/http/access-log';
 
 export const creditSettingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -102,6 +103,7 @@ creditSettingsRoutes.get('/settings/credits', async (c) => {
   })).sort(bySummaryOrder);
 
   const pluginCount = new Set([...rows, ...limitRows].map((row) => row.pluginId)).size;
+  recordContributorReads('plugin.credit-metadata-read', rows.map(row => row.pluginId));
   const paidCount = rows.filter((row) => !row.effectiveFree).length;
 
   return renderPage(c, creditSummaryPage, {

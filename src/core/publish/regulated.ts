@@ -22,12 +22,14 @@
 // published before it was classified has to stay possible.
 // ============================================================
 
+import { inventoried } from '../http/regulated-profile';
 import type { Env, Page } from '../../types';
 import { classFor, resolveDataClasses, type DataClassMap } from '../db/data-classes';
+import { pageSensitivityFloors } from '../db/sensitivity';
 
-/** Why publication was refused. `regulated` and `classification_unavailable`
- *  are this gate's; `submission` is the pre-existing structural refusal. */
-export type PublishRefusal = 'submission' | 'regulated' | 'classification_unavailable';
+/** Classification, structural and deployment-containment refusals share the
+ * publication result contract; none is a successful target receipt. */
+export type PublishRefusal = 'submission' | 'regulated' | 'classification_unavailable' | 'writes_unavailable';
 
 /** The class that may never be published. */
 const REGULATED_CLASS = 'phi';
@@ -62,9 +64,14 @@ export async function regulatedPages(env: Env, pages: Page[]): Promise<Regulated
 
   const map = await resolveDataClasses(env);
   if (!map.ok) return { ids, unavailable: true };
+  try {
+    const floors = await pageSensitivityFloors(env, pages.map(page => page.uuid), 'uuid');
+    for (const page of pages) if (floors.get(page.uuid) === REGULATED_CLASS) ids.add(page.id);
+  } catch { return { ids, unavailable: true }; }
 
   for (const page of pages) {
-    if (classFor(map, 'page_type', page.page_type ?? '') === REGULATED_CLASS) ids.add(page.id);
+    if (!inventoried(env, 'page_type', page.page_type ?? 'default')) return { ids, unavailable: true };
+    if (classFor(map, 'page_type', page.page_type ?? 'default') === REGULATED_CLASS) ids.add(page.id);
   }
 
   const taxonomies = regulatedTaxonomies(map);

@@ -51,6 +51,15 @@ migrations_dir = "migrations/published"
 # binding = "AUDIT_BUCKET"
 # bucket_name = "worker-cms-audit"
 
+# Optional private outage diagnostics, separate from D1 and the sealed archive.
+# See docs/audit-outage-monitoring.md before enabling; do not expose this bucket.
+# [[r2_buckets]]
+# binding = "AUDIT_OUTAGE_BUCKET"
+# bucket_name = "worker-cms-audit-outages"
+# [[services]]
+# binding = "AUDIT_MONITOR"
+# service = "cms-audit-monitor"
+
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "worker-cms-media"
@@ -159,3 +168,15 @@ DEFAULT_TIMEZONE = "+0800"
 # wrangler secret put GITHUB_CLIENT_SECRET
 # wrangler secret put GOOGLE_CLIENT_SECRET
 # wrangler secret put PLUGIN_SECRET   # optional outbound-only fallback for legacy plugin rows
+
+# Regulated deployment opt-in. See docs/regulated-profile.md before enabling.
+# Holds content/configuration writes, queue execution, ingestion and billing until W4b.
+# Prepare queue consumers and pinned plugin identities; no write-enable bypass flag.
+# Add these inside [vars], with a complete approved inventory:
+# REGULATED_MODE = "true"
+# REGULATED_INVENTORY = '[{"kind":"page_type","key":"patient_note","class":"phi"}]'
+# Requires audit feature, AUDIT_BUCKET, HTTPS CANONICAL_ORIGIN and existing migrations.
+# Outage monitoring opt-in (inside [vars]); receiver identity must be opaque.
+# AUDIT_OUTAGE_MONITORING = "true"
+# AUDIT_MONITOR_SOURCE = "cms-prod-01"
+# AUDIT_ARCHIVE_MAX_LAG_SECONDS = "3600"

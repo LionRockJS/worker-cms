@@ -8,6 +8,7 @@
 import { USER_ROLES } from '../../types';
 import type { Env, Permission } from '../../types';
 import { ROLE_LABELS, resolveRolePermissions } from './roles';
+import { recordMetadataReads } from '../http/access-log';
 
 export interface RoleSummary {
   name: string;
@@ -25,6 +26,7 @@ const PERMISSION_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?::[a-z][a-z0-9]*(?:-
 export async function allRoleOptions(env: Env): Promise<Array<{ name: string; label: string }>> {
   const custom = await env.DB.prepare('SELECT name, label FROM roles WHERE builtin = 0 ORDER BY label ASC')
     .all<{ name: string; label: string }>();
+  recordMetadataReads('role.labels-read', 'roles', custom.results.map(row => row.name));
   return [
     ...USER_ROLES.map((name) => ({ name, label: ROLE_LABELS[name] })),
     ...custom.results,
@@ -51,6 +53,8 @@ export async function listRolesForAdmin(env: Env): Promise<RoleSummary[]> {
     permissionCount: map.get(row.name)?.size ?? 0,
     locked: false,
   }));
+  recordMetadataReads('role.labels-read', 'roles', custom.results.map(row => row.name));
+  recordMetadataReads('role.grants-read', 'role_permissions', [...USER_ROLES, ...custom.results.map(row => row.name)], 'role_permission_set');
   return [...builtin, ...customRoles];
 }
 
@@ -58,12 +62,16 @@ export async function listRolesForAdmin(env: Env): Promise<RoleSummary[]> {
 export async function getRoleForEdit(env: Env, name: string): Promise<{ name: string; label: string; builtin: boolean; locked: boolean; permissions: Set<Permission> } | null> {
   const map = await resolveRolePermissions(env);
   if (BUILTIN.has(name)) {
+    recordMetadataReads('role.state-read', 'roles', [name], 'role_state');
+    recordMetadataReads('role.grants-read', 'role_permissions', [name], 'role_permission_set');
     return { name, label: ROLE_LABELS[name as keyof typeof ROLE_LABELS], builtin: true, locked: name === 'admin', permissions: map.get(name) ?? new Set() };
   }
   const row = await env.DB.prepare('SELECT name, label FROM roles WHERE name = ? AND builtin = 0')
     .bind(name)
     .first<{ name: string; label: string }>();
   if (!row) return null;
+  recordMetadataReads('role.labels-read', 'roles', [row.name]);
+  recordMetadataReads('role.grants-read', 'role_permissions', [row.name], 'role_permission_set');
   return { name: row.name, label: row.label, builtin: false, locked: false, permissions: map.get(row.name) ?? new Set() };
 }
 

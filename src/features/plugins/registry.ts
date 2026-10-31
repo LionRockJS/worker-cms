@@ -21,6 +21,7 @@ import {
 } from './types';
 import { listEnabledPlugins, getPlugin } from './store';
 import { claimIdentity, listIdentityApprovals } from './identity';
+import { regulatedWritesBlocked } from '../../core/http/regulated-writes';
 
 /** Reserved prefix every plugin Worker serves its CMS-facing endpoints under. */
 export const PLUGIN_PREFIX = '/__plugin';
@@ -291,7 +292,7 @@ async function enforceIdentities(
       continue;
     }
 
-    if (!env.DB || await claimIdentity(env.DB, record.id, manifest.id)) {
+    if (!regulatedWritesBlocked(env) && (!env.DB || await claimIdentity(env.DB, record.id, manifest.id))) {
       pinnedByRow.set(record.id, manifest.id);
       ownerByManifest.set(manifest.id, record.id);
       allowed.add(record.id);

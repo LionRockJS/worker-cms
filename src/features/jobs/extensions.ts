@@ -20,6 +20,7 @@ import {
   isCmsAdminJobMessage,
 } from './queue';
 import { runCmsAdminJob } from './runner';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 
 registerCoreExtensions({
   async handleQueueMessage(env: Env, body: unknown): Promise<boolean> {
@@ -29,6 +30,7 @@ registerCoreExtensions({
   },
 
   async enqueueAdminAction(c: AppContext, input: QueuedAdminAction): Promise<boolean> {
+    assertRegulatedWritesAllowed(c.env);
     if (!c.env.ADMIN_JOBS_QUEUE) return false;
     const job = await createPluginAdminActionJob(c.env.DB, {
       pluginId: input.contributorId,
@@ -43,6 +45,7 @@ registerCoreExtensions({
   },
 
   async enqueueBulkAction(c: AppContext, input: QueuedBulkAction): Promise<boolean> {
+    assertRegulatedWritesAllowed(c.env);
     const job = await createAdvancedSearchBulkActionJob(c.env.DB, {
       action: input.action,
       scope: input.scope,

@@ -1,6 +1,12 @@
 import type { Env } from '../../types';
 import type { Page, PageTag } from '../../types';
 import { savePageVersion } from './admin-queries';
+import { auditBackgroundReads } from '../http/access-log';
+import type { AuditActor } from './audit';
+import { incomingSensitivityStatements } from './sensitivity';
+import { readD1PageSource } from '../publish/d1';
+import { liveSourceReads } from '../publish/read-audit';
+import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
 export async function setDraftPageTags(
   db: D1DatabaseClient,
@@ -37,22 +43,31 @@ export interface PullPublishedPageResult {
 }
 
 export async function pullPublishedPageToDraft(
-  draftDb: D1DatabaseClient,
-  publishedDb: D1DatabaseClient,
+  env: Env,
   uuid: string,
+  actor: AuditActor,
 ): Promise<PullPublishedPageResult | null> {
+  assertRegulatedWritesAllowed(env);
+  const { DB: draftDb, PUBLISHED_DB: publishedDb } = env;
   const existing = await draftDb.prepare('SELECT * FROM pages WHERE uuid = ?')
     .bind(uuid)
     .first<Page>();
-  if (existing) return { page: existing, created: false };
+  if (existing) {
+    await auditBackgroundReads(env, [{ action: 'page.pull-existing', kind: 'page_type', key: existing.page_type ?? 'default', targetType: 'page', ids: [String(existing.id)], count: 1,
+      uuidById: { [String(existing.id)]: existing.uuid } }], actor);
+    return { page: existing, created: false };
+  }
 
-  const livePage = await publishedDb.prepare('SELECT * FROM pages WHERE uuid = ?')
-    .bind(uuid)
-    .first<Page>();
+  const source = await readD1PageSource<Page>(publishedDb, 'full', 'p.uuid = ?', [uuid]);
+  const livePage = source.rows[0];
   if (!livePage) return null;
 
+  // Source evidence must precede the copy, including classifications inherited
+  // from the published tag catalogue rather than the draft's associations.
+  const evidence = await auditBackgroundReads(env, await liveSourceReads(env, { id: 'd1' }, source.provenance, actor, 'page.pull-read'), actor);
+
   const parentId = await existingDraftParentId(draftDb, livePage.page_id);
-  await draftDb.prepare(
+  const insert = draftDb.prepare(
     `INSERT INTO pages (uuid, created_at, updated_at, name, slug, weight, start, end, timezone, page_type, lect, page_id, creator, editors)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
@@ -71,8 +86,8 @@ export async function pullPublishedPageToDraft(
       parentId,
       livePage.creator,
       livePage.editors,
-    )
-    .run();
+    );
+  await draftDb.batch([...incomingSensitivityStatements(draftDb, evidence), insert]);
 
   const draftPage = await draftDb.prepare('SELECT * FROM pages WHERE uuid = ?')
     .bind(uuid)

@@ -1,3 +1,5 @@
+import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
+import { actingUserId } from './create';
 // Content metadata and tag provisioning: what a plugin needs to build an
 // import UI (page types, blueprint fields, taxonomies) plus tag upsert.
 
@@ -27,6 +29,8 @@ contentApiRoutes.get('/content-meta', async (c) => {
   }
 
   const taxonomy = await editorTaxonomy(c.env.DB);
+  const userId = actingUserId(c);
+  recordTaxonomyReads('taxonomy.plugin-meta', taxonomy.taxonomies, { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: auth.pluginId });
   const pathSpecs: Record<string, Array<{ path: string; kind: string }>> = {};
   for (const pageType of types) {
     pathSpecs[pageType] = advancedSearchPathSpecs([pageType], config).map(({ path, kind }) => ({ path, kind }));
@@ -85,7 +89,9 @@ contentApiRoutes.post('/tags/ensure', async (c) => {
   // Mirror to the publish targets that keep a tag catalogue, so a tag minted
   // here resolves for readers as soon as a page carrying it goes live. Bounded
   // by MAX_ENSURE_TAGS and idempotent, so re-ensuring an existing tag is cheap.
-  await publishTagsToTargets(c.env, [...seen.values()]);
+  const userId = actingUserId(c);
+  await publishTagsToTargets(c.env, [...seen.values()], { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: auth.pluginId });
+  recordTagReads('tag.ensure-result', ensured.map(tag => ({ id: tag.id, taxonomy_slug: tag.taxonomy })), { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: auth.pluginId });
 
   return c.json({ tags: ensured, errors });
 });

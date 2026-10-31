@@ -258,3 +258,14 @@ describe('the review screen', () => {
       });
   });
 });
+
+it('includes classified export events in the existing bulk-read signal', async () => {
+  await seedRead({ eventClass: 'export', targetCount: BULK_READ_RECORDS });
+  expect(signalById(await reviewSignals(env as unknown as Env), 'bulk_reads').rows).toHaveLength(1);
+});
+
+it('includes contributor-originated exports in the existing accountable-user signal', async () => {
+  await seedRead({ eventClass: 'export', actorUserId: null, actingVia: 'exporting-plugin' });
+  expect(signalById(await reviewSignals(env as unknown as Env), 'contributor_alone').rows)
+    .toMatchObject([{ subject: 'exporting-plugin' }]);
+});

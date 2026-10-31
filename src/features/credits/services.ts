@@ -11,6 +11,8 @@ import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../
 import type { Env } from '../../types';
 import { loadShowCredits } from '../../core/db/settings';
 import { creditLedgerRowForView } from './ledger-view';
+import { recordTableReads } from '../../core/http/access-log';
+import { recordWalletReads } from './read-audit';
 import {
   adminAction,
   PROFILE_DONATE_PATH,
@@ -247,6 +249,7 @@ async function saveCreditPricing(
  */
 async function profileCreditProps(c: AppContext): Promise<Record<string, unknown>> {
   const userId = Number(c.get('user').sub);
+  recordWalletReads(userId);
   const [balances, sharedBalances] = await Promise.all([
     getCreditBalances(c.env, userId),
     getSharedCreditBalances(c.env),
@@ -262,6 +265,7 @@ async function profileCreditProps(c: AppContext): Promise<Record<string, unknown
       limit: PROFILE_LEDGER_PAGE_SIZE,
       offset: (page - 1) * PROFILE_LEDGER_PAGE_SIZE,
     });
+    recordTableReads('credit.ledger-read', 'credit_ledger', ledger.map(row => row.id));
     return {
       ...walletIdentity(currency),
       balance: balances?.[currency] ?? 0,
@@ -295,9 +299,11 @@ async function profileCreditProps(c: AppContext): Promise<Record<string, unknown
 
 /** The shared-pool cards on the users list — one per currency. */
 async function sharedPoolProps(env: Env): Promise<Record<string, unknown>> {
+  recordWalletReads(null);
   const balances = await getSharedCreditBalances(env);
   const wallets = await Promise.all(CREDIT_CURRENCIES.map(async (currency) => {
     const ledger = await listSharedCreditLedger(env, { currency, limit: USERS_LEDGER_PAGE_SIZE });
+    recordTableReads('credit.ledger-read', 'shared_credit_ledger', ledger.map(row => row.id));
     return {
       ...walletIdentity(currency),
       balance: balances[currency],
@@ -314,6 +320,7 @@ async function sharedPoolProps(env: Env): Promise<Record<string, unknown>> {
 
 /** One user's balances, adjust/grant forms and recent ledger, per currency. */
 async function userCreditProps(c: AppContext, userId: number): Promise<Record<string, unknown>> {
+  recordWalletReads(userId);
   const [balances, sharedBalances, rolePermissions] = await Promise.all([
     getCreditBalances(c.env, userId),
     getSharedCreditBalances(c.env),
@@ -327,6 +334,7 @@ async function userCreditProps(c: AppContext, userId: number): Promise<Record<st
 
   const wallets = await Promise.all(CREDIT_CURRENCIES.map(async (currency) => {
     const ledger = await listCreditLedger(c.env, userId, { currency, limit: USERS_LEDGER_PAGE_SIZE });
+    recordTableReads('credit.ledger-read', 'credit_ledger', ledger.map(row => row.id));
     return {
       ...walletIdentity(currency),
       balance: balances?.[currency] ?? 0,

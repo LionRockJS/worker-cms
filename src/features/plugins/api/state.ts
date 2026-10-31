@@ -7,6 +7,9 @@
 
 import { Hono } from 'hono';
 import type { Env, Variables } from '../../../types';
+import { recordRead, recordTableReads } from '../../../core/http/access-log';
+import { actingUserId } from './create';
+import type { AppContext } from '../../../core/http/context';
 import { authenticatePlugin } from './auth';
 import {
   MAX_STATE_KEYS_PER_PLUGIN,
@@ -22,6 +25,13 @@ import {
 
 export const stateApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+function recordStateRead(c: AppContext, pluginId: string, action: string, keys: string[]): void {
+  const userId = actingUserId(c);
+  const actor = { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: pluginId };
+  recordRead({ action, kind: 'plugin', key: pluginId, targetType: 'plugin_state', ids: keys, count: keys.length, actor });
+  recordTableReads(action, 'plugin_state', keys, actor);
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 // Every entry this plugin owns, optionally narrowed with ?prefix=. Values are
@@ -34,6 +44,7 @@ stateApiRoutes.get('/state', async (c) => {
   if (prefix && !isValidStateKey(prefix)) return c.json({ error: 'invalid_prefix' }, 400);
 
   const entries = await listPluginState(c.env.DB, auth.plugin.manifest.id, prefix);
+  recordStateRead(c, auth.pluginId, 'state.list', entries.map(entry => entry.key));
   return c.json({ state: entries });
 });
 
@@ -48,6 +59,7 @@ stateApiRoutes.get('/state/:key', async (c) => {
 
   const entry = await getPluginState(c.env.DB, auth.plugin.manifest.id, key);
   if (!entry) return c.json({ error: 'not_found' }, 404);
+  recordStateRead(c, auth.pluginId, 'state.read', [entry.key]);
   return c.json({ key: entry.key, value: entry.value, updated_at: entry.updated_at });
 });
 

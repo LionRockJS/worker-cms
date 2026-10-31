@@ -9,6 +9,8 @@ import type { PluginAuth } from './types';
 import { pluginById } from '../registry';
 import { timingSafeEqualStr } from '../proxy';
 import { listPageTypeApprovals } from '../page-types';
+import { requestContext } from '../../../core/http/request-context';
+import { pluginReadActor } from './read-audit';
 
 // ── Auth + scoping ────────────────────────────────────────────────────────────
 
@@ -34,6 +36,8 @@ export async function authenticatePlugin(c: AppContext): Promise<PluginAuth | Re
   if (!timingSafeEqualStr(c.req.header('x-plugin-secret') ?? '', plugin.apiSecret)) {
     return c.json({ error: 'forbidden' }, 403);
   }
+  const context = requestContext.getStore();
+  if (context) context.readActor = pluginReadActor(c, pluginId);
 
   const contentTypes = plugin.manifest.contentTypes;
   const allowedTypes = new Set(Object.keys(contentTypes?.blueprint ?? {}));

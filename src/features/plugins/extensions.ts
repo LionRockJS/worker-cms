@@ -1,3 +1,4 @@
+import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 // The plugin platform's implementations of core's extension points.
 //
 // Importing this module registers them. Core calls whatever is registered and
@@ -33,6 +34,7 @@ import { viewsFor } from './views';
 import { listPlugins } from './store';
 import { authenticatePlugin } from './api/auth';
 import { actingUserId } from './api/create';
+import { recordContributorReads } from '../../core/http/access-log';
 
 registerCoreExtensions({
   async publishAdapters(env: Env): Promise<PublishAdapter[]> {
@@ -42,15 +44,15 @@ registerCoreExtensions({
         console.error(`Plugin ${plugin.manifest.id} declares publishTarget but has no secret configured`);
         continue;
       }
-      adapters.push(pluginAdapter(plugin, plugin.secret, pluginTenantId(env)));
+      adapters.push(pluginAdapter(plugin, plugin.secret, pluginTenantId(env), env));
     }
     return adapters;
   },
 
   async contentTypes(env: Env): Promise<ContributedContentTypes[]> {
     return (await getPlugins(env))
-      .map((plugin) => plugin.manifest.contentTypes)
-      .filter((types): types is NonNullable<typeof types> => Boolean(types));
+      .filter(plugin => !!plugin.manifest.contentTypes)
+      .map(plugin => ({ ...plugin.manifest.contentTypes!, auditContributorId: plugin.manifest.id }));
   },
 
   async sidebarNav(env: Env): Promise<ContributedNavItem[]> {
@@ -58,10 +60,9 @@ registerCoreExtensions({
   },
 
   async localeCatalog(env: Env, localeCode: string): Promise<Record<string, string>> {
-    const views = (await getPlugins(env))
-      .filter((plugin) => plugin.manifest.i18n === true)
-      .map((plugin) => plugin.fetcher);
-    return pluginBundledCatalog(views, localeCode);
+    const plugins = (await getPlugins(env)).filter((plugin) => plugin.manifest.i18n === true);
+    recordContributorReads('plugin.locale-metadata-read', plugins.map(plugin => plugin.manifest.id));
+    return pluginBundledCatalog(plugins.map(plugin => plugin.fetcher), localeCode);
   },
 
   /**
@@ -82,8 +83,8 @@ registerCoreExtensions({
     return rules;
   },
 
-  async notifyPageEvent(env, user: JWTPayload | undefined, event, pages): Promise<void> {
-    await deliverHooks(env, user, event, pages);
+  async notifyPageEvent(env, user: JWTPayload | undefined, event, pages, actor): Promise<void> {
+    await deliverHooks(env, user, event, pages, actor);
   },
 
   /** Replays a queued admin request against the plugin that owns it. */
@@ -92,8 +93,14 @@ registerCoreExtensions({
     if (!plugin) throw new Error(`Plugin ${job.pluginId} is not available`);
     if (!plugin.secret) throw new Error(`Plugin ${job.pluginId} has no secret configured`);
 
+    const roleMap = await resolveRolePermissions(env, true);
+    const permissions = await pluginUserPermissions(env, plugin.manifest, job.user.role);
+    if (!splitRoles(job.user.role).includes('admin')) {
+      const granted = effectivePermissions(roleMap, job.user.role);
+      if (!granted.has('plugin:access') || !permissions.length) throw new Error('Job plugin permission revoked');
+    }
     const headers = new Headers();
-    headers.set('x-cms-user', pluginUserHeader(job.user, await pluginUserPermissions(env, plugin.manifest, job.user.role)));
+    headers.set('x-cms-user', pluginUserHeader(job.user, permissions));
     setPluginAuthHeaders(headers, plugin.secret, pluginTenantId(env));
     headers.set('x-cms-background-job', '1');
     if (job.contentType) headers.set('content-type', job.contentType);
@@ -105,10 +112,10 @@ registerCoreExtensions({
       redirect: 'manual',
     });
 
-    if (response.status < 200 || response.status >= 400) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`Plugin action returned ${response.status}${text ? `: ${text.slice(0, 160)}` : ''}`);
-    }
+    // Response bodies may contain regulated content; status is sufficient for
+    // the job failure record, which must not copy that content into logs.
+    await response.body?.cancel();
+    if (response.status < 200 || response.status >= 400) throw new Error(`Plugin action returned ${response.status}`);
     return { status: response.status, location: response.headers.get('location') };
   },
 
@@ -118,7 +125,9 @@ registerCoreExtensions({
   },
 
   async contentTypeContributors(env: Env): Promise<ContentTypeContributorInfo[]> {
-    return (await getPlugins(env)).map((plugin) => ({
+    const plugins = await getPlugins(env);
+    recordContributorReads('plugin.schema-metadata-read', plugins.map(plugin => plugin.manifest.id));
+    return plugins.map((plugin) => ({
       name: plugin.manifest.name,
       contentTypes: plugin.manifest.contentTypes,
     }));
@@ -141,6 +150,8 @@ registerCoreExtensions({
   },
 
   async contributedPermissions(env: Env): Promise<ContributedPermission[]> {
+    const plugins = await getPlugins(env);
+    recordContributorReads('plugin.permission-metadata-read', plugins.filter(plugin => plugin.manifest.permissions?.length).map(plugin => plugin.manifest.id));
     return allPluginPermissions(env);
   },
 
@@ -177,7 +188,9 @@ registerCoreExtensions({
         manageHref: hrefs(plugin.binding, 'limits'),
       }));
     }));
-    return summaries.flat();
+    const result = summaries.flat();
+    recordContributorReads('plugin.limit-metadata-read', result.map(row => row.contributorId));
+    return result;
   },
 
   async authenticateApiCaller(c: AppContext): Promise<ApiCallerIdentity | Response> {

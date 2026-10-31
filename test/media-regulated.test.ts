@@ -156,12 +156,12 @@ describe('the public media routes', () => {
     });
   });
 
-  it('serves everything again once the classification is removed', async () => {
+  it('retains public-media denial when a classification row is removed', async () => {
     await classify('records/', 'phi');
     expect((await fetchPath(`/media/${CHART_KEY}`)).status).toBe(404);
 
     await env.DB.prepare('DELETE FROM data_classes').run();
-    expect((await fetchPath(`/media/${CHART_KEY}`)).status).toBe(200);
+    expect((await fetchPath(`/media/${CHART_KEY}`)).status).toBe(404);
   });
 });
 

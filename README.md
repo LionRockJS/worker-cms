@@ -1309,3 +1309,7 @@ The only real declared dependency anywhere is in schema: the
 that enables it without the plugin platform fails the build. (The credits
 fragment's `-- requires: core` is a no-op — `core` is implicit and ignored by
 the assembler.)
+
+## Regulated deployments
+
+For the opt-in readiness, explicit container inventory and write containment pending durable mutation evidence, see [Regulated deployment profile](docs/regulated-profile.md). Regulated mode currently permits protected reads and designated containment/maintenance operations; content/configuration writes, queued jobs, ingestion and recurring billing stay held. Prepare queue consumers and required pinned plugin identities before activation. See [P0 progress](docs/compliance-p0-progress-2026-10-30.md) for implemented safeguards, verification and remaining coverage.

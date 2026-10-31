@@ -37,6 +37,10 @@ function hoursAgo(hours: number): string {
 }
 
 export interface SignalRow {
+  /** Actual joined user source, for metadata policy; never a synthetic fallback label. */
+  user_id?: number | null;
+  /** Internal source sensitivity for classified audit-of-audit reads. */
+  data_class?: 'pii' | 'phi' | null;
   /** Who or what the row is about. */
   subject: string;
   /** Where it happened — a container, a path, an address. */
@@ -77,12 +81,13 @@ export interface ArchiveHealth {
 async function bulkReads(env: Env): Promise<ReviewSignal> {
   const rows = await env.DB.prepare(
     `SELECT COALESCE(u.name, 'user #' || ae.actor_user_id, 'no actor') AS subject,
-            ae.container_key AS context,
+            ae.container_key AS context, MAX(u.id) AS user_id,
             SUM(ae.target_count) AS value,
-            COUNT(*) AS events
+            COUNT(*) AS events,
+            CASE WHEN MAX(ae.data_class = 'phi') = 1 THEN 'phi' WHEN MAX(ae.data_class = 'pii') = 1 THEN 'pii' END AS data_class
        FROM audit_events ae
        LEFT JOIN users u ON u.id = CAST(ae.actor_user_id AS INTEGER)
-      WHERE ae.event_class = 'read' AND ae.data_class IN ('pii', 'phi')
+      WHERE ae.event_class IN ('read', 'export') AND ae.data_class IN ('pii', 'phi')
         AND ae.occurred_at >= ?
       GROUP BY ae.actor_user_id, ae.container_key
      HAVING SUM(ae.target_count) >= ?
@@ -105,9 +110,10 @@ async function bulkReads(env: Env): Promise<ReviewSignal> {
 async function refusedAccess(env: Env): Promise<ReviewSignal> {
   const rows = await env.DB.prepare(
     `SELECT COALESCE(u.name, 'user #' || ae.actor_user_id, 'no actor') AS subject,
-            COALESCE(ae.source_ip, 'no address') AS context,
+            COALESCE(ae.source_ip, 'no address') AS context, MAX(u.id) AS user_id,
             COUNT(*) AS value,
-            COUNT(DISTINCT ae.action) AS events
+            COUNT(DISTINCT ae.action) AS events,
+            CASE WHEN MAX(ae.data_class = 'phi') = 1 THEN 'phi' WHEN MAX(ae.data_class = 'pii') = 1 THEN 'pii' END AS data_class
        FROM audit_events ae
        LEFT JOIN users u ON u.id = CAST(ae.actor_user_id AS INTEGER)
       WHERE ae.outcome = 'denied' AND ae.occurred_at >= ?
@@ -135,9 +141,10 @@ async function contributorAlone(env: Env): Promise<ReviewSignal> {
     `SELECT ae.acting_via AS subject,
             ae.container_key AS context,
             SUM(ae.target_count) AS value,
-            COUNT(*) AS events
+            COUNT(*) AS events,
+            CASE WHEN MAX(ae.data_class = 'phi') = 1 THEN 'phi' WHEN MAX(ae.data_class = 'pii') = 1 THEN 'pii' END AS data_class
        FROM audit_events ae
-      WHERE ae.event_class = 'read' AND ae.data_class IN ('pii', 'phi')
+      WHERE ae.event_class IN ('read', 'export') AND ae.data_class IN ('pii', 'phi')
         AND ae.acting_via IS NOT NULL AND ae.actor_user_id IS NULL
         AND ae.occurred_at >= ?
       GROUP BY ae.acting_via, ae.container_key
@@ -153,7 +160,7 @@ async function contributorAlone(env: Env): Promise<ReviewSignal> {
 }
 
 /** Whether the archive is keeping up, and whether it still verifies. */
-export async function archiveHealth(env: Env): Promise<ArchiveHealth> {
+export async function archiveHealth(env: Env, verificationLimit = 25): Promise<ArchiveHealth> {
   const [seals, backlog] = await Promise.all([
     env.DB.prepare(
       'SELECT COUNT(*) AS seals, MIN(first_seq) AS fromSeq, MAX(last_seq) AS toSeq FROM audit_seals',
@@ -174,7 +181,7 @@ export async function archiveHealth(env: Env): Promise<ArchiveHealth> {
     oldestUnarchived: backlog?.oldest ?? null,
     // Verification reads every segment back from R2, so it is only run when
     // there is a bucket to read from, and only over the newest window.
-    verification: bucketBound ? await verifyAuditArchive(env) : null,
+    verification: bucketBound ? await verifyAuditArchive(env, verificationLimit) : null,
     bucketBound,
   };
 }

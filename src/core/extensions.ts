@@ -1,3 +1,4 @@
+import type { AuditActor } from './db/audit';
 // Extension points core offers to droppable platform features.
 //
 // Core used to reach into src/plugins directly — the chrome asked it for
@@ -36,6 +37,8 @@ export interface ContributedNavItem {
 
 /** A content-type fragment contributed at runtime. */
 export interface ContributedContentTypes {
+  /** Host-attested contributor identity for cached metadata attribution. */
+  auditContributorId?: string;
   blueprint?: Record<string, unknown[]>;
   blocks?: Record<string, unknown[]>;
   blockLists?: Record<string, string[]>;
@@ -228,7 +231,7 @@ export interface CoreExtensions {
   /** Per-page-type rules for what survives publication. */
   lectRules?(env: Env): Promise<Record<string, PublishLectRule>>;
   /** Announce a page lifecycle event. Must never throw or block the response. */
-  notifyPageEvent?(env: Env, user: JWTPayload | undefined, event: PageEvent, pages: PageEventPage[]): Promise<void>;
+  notifyPageEvent?(env: Env, user: JWTPayload | undefined, event: PageEvent, pages: PageEventPage[], actor?: AuditActor): Promise<void>;
   /**
    * Perform a queued `plugin_admin_action` job: forward the recorded request
    * to the plugin that owns it. Resolves with the response status and any

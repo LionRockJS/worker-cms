@@ -11,12 +11,16 @@ import type { PublishOutcome } from '../../../core/publish';
 import { requirePermission } from '../../../core/auth/guards';
 import { pullPublishedPageToDraft } from '../../../core/db/page-store';
 import { isSubmissionMirror } from '../../../core/db/submission-ingest';
+import { contextActor } from '../../../core/db/audit';
 
 
 export const pageLifecycleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // with the targets that failed (failures are already logged by the registry).
 export function publishFlash(outcome: PublishOutcome): string {
+  if (outcome.refusedReason === 'writes_unavailable') {
+    return encodeURIComponent('Publication is unavailable while regulated writes are contained');
+  }
   if (outcome.refusedReason === 'regulated') {
     return encodeURIComponent('This page holds regulated data and cannot be published');
   }
@@ -34,7 +38,7 @@ export function publishFlash(outcome: PublishOutcome): string {
 pageLifecycleRoutes.post('/pages/:id/publish', requirePermission('content:publish'), async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
   const backHref = safeAdminReturnPath(c.req.query('return_to'));
-  const outcome = await publishPageToTargets(c.env, pageId);
+  const outcome = await publishPageToTargets(c.env, pageId, contextActor(c));
   if (!outcome) return c.notFound();
 
   const page = await c.env.DB.prepare('SELECT uuid, name, slug, page_type FROM pages WHERE id = ?')
@@ -56,7 +60,7 @@ pageLifecycleRoutes.post('/pages/:id/publish', requirePermission('content:publis
 // ── Pull published page (PUBLISHED → DRAFT) ───────────────────────────────────
 
 pageLifecycleRoutes.post('/pages/pull/:uuid', requirePermission('content:write'), async (c) => {
-  const result = await pullPublishedPageToDraft(c.env.DB, c.env.PUBLISHED_DB, c.req.param('uuid'));
+  const result = await pullPublishedPageToDraft(c.env, c.req.param('uuid'), contextActor(c));
   if (!result) return c.notFound();
 
   if (result.created) {
@@ -84,7 +88,7 @@ pageLifecycleRoutes.post('/pages/:id/unpublish', requirePermission('content:publ
     .first<{ uuid: string; name: string; slug: string; page_type: string | null }>();
   if (!page) return c.notFound();
 
-  await unpublishPageFromTargets(c.env, page.uuid, await isSubmissionMirror(c.env.DB, pageId));
+  const outcome = await unpublishPageFromTargets(c.env, page.uuid, await isSubmissionMirror(c.env.DB, pageId), contextActor(c));
 
   announcePageEvent(c, 'unpublish', {
     id: pageId,
@@ -94,7 +98,10 @@ pageLifecycleRoutes.post('/pages/:id/unpublish', requirePermission('content:publ
     page_type: page.page_type,
   });
 
-  return c.redirect(appendQuery(backHref, 'flash=Page+unpublished'));
+  const problems = [outcome.failures.length ? 'some targets could not be withdrawn' : '',
+    outcome.auditFailures?.length ? 'audit evidence incomplete' : ''].filter(Boolean);
+  const flash = problems.length ? encodeURIComponent(`Withdrawal requested; ${problems.join('; ')}`) : 'Page+unpublished';
+  return c.redirect(appendQuery(backHref, `flash=${flash}`));
 });
 
 // ── Delete page → move to TRASH (soft-delete) ────────────────────────────────
@@ -109,7 +116,7 @@ pageLifecycleRoutes.post('/pages/:id/delete', requirePermission('content:delete'
   if (!page) return c.notFound();
 
   // Unpublish from every publish target now that the draft copy is gone.
-  await unpublishPageFromTargets(c.env, page.uuid, !!page.submission_origin);
+  await unpublishPageFromTargets(c.env, page.uuid, !!page.submission_origin, contextActor(c));
 
   announcePageEvent(c, 'delete', {
     id: page.id,

@@ -15,6 +15,9 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../../../types';
 import type { AppContext } from '../../../core/http/context';
 import { coreExtensions, type ApiCallerIdentity } from '../../../core/extensions';
+import { recordRead, recordTableReads } from '../../../core/http/access-log';
+import { recordWalletReads } from '../read-audit';
+import type { CreditCurrency } from '../currencies';
 import {
   effectiveCreditsForId,
   getCreditBalance,
@@ -51,6 +54,19 @@ function actingUserId(c: AppContext): number | null {
   return coreExtensions().actingUserId?.(c) ?? null;
 }
 
+function readActor(c: AppContext, callerId: string) {
+  const userId = actingUserId(c);
+  return { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: callerId };
+}
+
+function announceBalances(c: AppContext, callerId: string, currencies?: readonly CreditCurrency[]): void {
+  recordWalletReads(actingUserId(c), currencies, readActor(c, callerId));
+}
+
+function announceContributor(c: AppContext, callerId: string): void {
+  recordRead({ action: 'credit.plugin-read', kind: 'plugin', key: callerId, targetType: 'credit_contributor', ids: [callerId], count: 1, actor: readActor(c, callerId) });
+}
+
 // ── Credits ───────────────────────────────────────────────────────────────────
 // The calling plugin's declared costs with effective prices, plus the acting
 // user's balance when x-acting-user-id is sent. Read-only, for plugin UIs
@@ -63,6 +79,8 @@ creditApiRoutes.get('/credits', async (c) => {
   const credits = await effectiveCreditsForId(c.env, auth.callerId);
   const balances = payer !== null ? await getCreditBalances(c.env, payer) : null;
   const sharedBalances = await getSharedCreditBalances(c.env);
+  announceBalances(c, auth.callerId);
+  announceContributor(c, auth.callerId);
   return c.json({
     // `balance` / `shared_balance` stay the ordinary credit wallet, which is
     // what callers written before diamonds existed read; `balances` /
@@ -110,6 +128,8 @@ creditApiRoutes.get('/credits/quote', async (c) => {
   const balance = payer !== null ? await getCreditBalance(c.env, payer, currency) : null;
   const sharedBalance = await getSharedCreditBalance(c.env, currency);
   const total = credit.value * quantity;
+  announceBalances(c, auth.callerId, [currency]);
+  announceContributor(c, auth.callerId);
   return c.json({
     key,
     currency,
@@ -151,6 +171,8 @@ creditApiRoutes.post('/credits/charge', async (c) => {
 
   const currency = credit.def.currency;
   const total = credit.value * quantity;
+  announceBalances(c, auth.callerId, [currency]);
+  announceContributor(c, auth.callerId);
   if (total === 0) {
     return c.json({ ok: true, charged: 0, currency, balance: await getCreditBalance(c.env, payer, currency) });
   }
@@ -233,6 +255,8 @@ creditApiRoutes.post('/credits/usage', async (c) => {
 
   const report = await reportSubscriptionUsage(c.env, { userId, credit, quantity });
   if (!report.ok) return c.json({ error: 'unknown_user' }, 400);
+  if (report.subscription) recordTableReads('credit.subscription-read', 'credit_subscriptions', [report.subscription.id], readActor(c, auth.callerId));
+  announceContributor(c, auth.callerId);
   return c.json({
     ok: true,
     currency: credit.def.currency,
@@ -254,6 +278,8 @@ creditApiRoutes.get('/credits/subscriptions', async (c) => {
     if (userId <= 0) return c.json({ error: 'invalid_user_id' }, 400);
   }
   const rows = await listSubscriptionsForPlugin(c.env, auth.callerId, userId);
+  recordTableReads('credit.subscription-read', 'credit_subscriptions', rows.map(row => row.id), readActor(c, auth.callerId));
+  announceContributor(c, auth.callerId);
   return c.json({ subscriptions: rows.map(subscriptionJson) });
 });
 

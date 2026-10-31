@@ -6,12 +6,15 @@
 // lives here is the durability: the claim, the cursor, the running totals.
 
 import { coreExtensions } from '../../core/extensions';
-import type { Env } from '../../types';
+import { auditBackgroundReads } from '../../core/http/access-log';
+import { effectivePermissions, resolveRolePermissions } from '../../core/auth/roles';
+import type { Env, Permission } from '../../types';
 import {
   applyBulkPageAction,
   bulkActionFlash,
   resolveBulkTargetIds,
   BULK_ACTION_PAGE_LIMIT,
+  draftPagesByIds,
 } from '../../core/pages/bulk-action';
 import {
   claimAdminJob,
@@ -22,12 +25,21 @@ import {
   type AdvancedSearchBulkActionPayload,
 } from './queue';
 import { appendQuery } from '../../core/http/forms';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 
 export async function runCmsAdminJob(env: Env, jobId: string): Promise<void> {
+  // Keep durable work queued; do not claim it and convert containment into a
+  // terminal failure or replay an opaque plugin request.
+  assertRegulatedWritesAllowed(env);
   const job = await claimAdminJob(env.DB, jobId);
   if (!job) return;
 
   try {
+    if (!job.user) throw new Error('Job user missing');
+    const current = await env.DB.prepare('SELECT email, name, role FROM users WHERE id = ?')
+      .bind(job.user.sub).first<{ email: string; name: string; role: string }>();
+    if (!current) throw new Error('Job user no longer exists');
+    job.user = { ...job.user, ...current };
     if (job.type === 'plugin_admin_action') {
       await runPluginAdminActionJob(env, job);
     } else if (job.type === 'advanced_search_bulk_action') {
@@ -46,6 +58,15 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
 
   const run = coreExtensions().runPluginAction;
   if (!run) throw new Error('Plugin admin actions require the plugin platform');
+
+  await auditBackgroundReads(env, [{ action: 'job.plugin-disclosure', kind: 'table', key: 'admin_jobs',
+    targetType: 'admin_job', ids: [job.id], count: 1, eventClass: 'export',
+    detail: { job_id: job.id, destination: job.pluginId, phase: 'intent' },
+  }, { action: 'job.plugin-disclosure', kind: 'plugin', key: job.pluginId, targetType: 'plugin', ids: [job.pluginId], count: 1,
+    eventClass: 'export', detail: { job_id: job.id, destination: job.pluginId, phase: 'intent' },
+  }, { action: 'user.job-disclosure', kind: 'table', key: 'users', targetType: 'users', ids: [job.user.sub], count: 1,
+    eventClass: 'export', detail: { job_id: job.id, destination: job.pluginId, phase: 'intent' },
+  }], { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null });
 
   const result = await run(env, {
     pluginId: job.pluginId,
@@ -67,6 +88,10 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
 async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Promise<void> {
   if (!job.user) throw new Error('Admin job is missing user data');
   let input = parseAdvancedSearchBulkActionJob(job.body);
+  const required: Permission = input.action === 'publish' || input.action === 'unpublish' ? 'content:publish'
+    : input.action === 'delete' ? 'content:delete' : 'content:write';
+  if (!effectivePermissions(await resolveRolePermissions(env, true), job.user.role).has(required)) throw new Error('Job permission revoked');
+
   if (input.scope === 'all' && !input.resolvedAll) {
     input = {
       ...input,
@@ -75,7 +100,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
         criteria: input.criteria,
         operator: input.operator,
         status: input.status,
-      }),
+      }, { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null }),
       cursor: 0,
       resolvedAll: true,
     };
@@ -83,6 +108,16 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
 
   const cursor = Math.max(0, input.cursor ?? 0);
   const pageIds = input.ids.slice(cursor, cursor + BULK_ACTION_PAGE_LIMIT);
+  const byType = new Map<string, string[]>();
+  for (const page of await draftPagesByIds(env.DB, pageIds)) {
+    const key = page.page_type ?? 'default';
+    const ids = byType.get(key) ?? [];
+    ids.push(String(page.id)); byType.set(key, ids);
+  }
+  await auditBackgroundReads(env, [...byType].map(([key, ids]) => ({
+    action: 'page.job-read', kind: 'page_type', key, targetType: 'page', ids, count: ids.length,
+    detail: { job_id: job.id, operation: input.action },
+  })), { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null });
   const outcome = await applyBulkPageAction(env, job.user, input.action, pageIds, {
     targetTagIds: input.targetTagIds,
     searchText: input.searchText,

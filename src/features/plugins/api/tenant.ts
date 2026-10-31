@@ -17,6 +17,7 @@ import type { Env, Variables } from '../../../types';
 import { pluginById } from '../registry';
 import { pluginTenantId } from '../proxy';
 import { claimEnrollmentTicket, manifestAllowsAutoTenant } from '../enroll';
+import { auditPluginManagement } from '../disclosure-audit';
 
 export const cmsTenantRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -48,6 +49,13 @@ cmsTenantRoutes.post('/tenant/claim', async (c) => {
   // admin repointed the plugin in between, the old target must not be able to
   // redeem it.
   if (claimed.url !== plugin.binding) return c.json({ error: 'invalid_ticket' }, 403, NO_STORE);
+  try {
+    await auditPluginManagement(c.env, pluginId, 'credential-claim', claimed.actor
+      ? { ...claimed.actor, via: pluginId }
+      : { userId: null, roles: null, sessionSid: null, via: pluginId });
+  } catch {
+    return c.json({ error: 'audit_unavailable' }, 503, NO_STORE);
+  }
 
   console.log(`Plugin ${pluginId} enrolled tenant ${tenantId}`);
   return c.json(

@@ -6,6 +6,32 @@
 
 import type { LivePageSnapshot, PublishAdapter, PublishSnapshot, PublishedTag } from './adapter';
 
+/** Internal projections only: capture taxonomy provenance with the source row,
+ * keeping audit-only metadata separate from the caller's returned columns. */
+export async function readD1PageSource<T extends { uuid: string; page_type?: string | null }>(
+  db: D1DatabaseClient, projection: 'identity' | 'live' | 'submission' | 'full', where: string, params: unknown[], order = '',
+): Promise<{ rows: T[]; provenance: Pick<LivePageSnapshot, 'uuid' | 'page_type' | 'taxonomy_slugs'>[] }> {
+  const columns = {
+    identity: 'p.uuid, p.page_type',
+    live: 'p.uuid, p.page_type, p.lect, p.weight, p.start, p.end, p.timezone',
+    submission: 'p.uuid, p.created_at, p.name, p.slug, p.weight, p.start, p.end, p.timezone, p.page_type, p.lect, p.page_id',
+    full: 'p.*',
+  }[projection];
+  const result = await db.prepare(`SELECT ${columns},
+    (SELECT json_group_array(CASE WHEN t.id IS NULL THEN NULL ELSE COALESCE(t.taxonomy_slug, 'default') END)
+     FROM page_tags pt LEFT JOIN tags t ON t.id = pt.tag_id WHERE pt.page_id = p.id) AS taxonomy_json
+    FROM pages p WHERE ${where} ${order}`).bind(...params).all<T & { taxonomy_json: string }>();
+  const provenance: Pick<LivePageSnapshot, 'uuid' | 'page_type' | 'taxonomy_slugs'>[] = [];
+  const rows = result.results.map(({ taxonomy_json, ...row }) => {
+    const keys: unknown = JSON.parse(taxonomy_json);
+    provenance.push({ uuid: row.uuid, page_type: row.page_type,
+      taxonomy_slugs: Array.isArray(keys) && keys.every(key => typeof key === 'string' && key.length > 0) ? [...new Set(keys as string[])] : undefined });
+    // The reserved query-only column has been removed; SQL owns the projection.
+    return row as unknown as T;
+  });
+  return { rows, provenance };
+}
+
 /** Statements per batched round-trip, under D1's 100-statement cap. A tag
  *  costs two of them (the conflict sweep and the upsert). */
 const BATCH_CHUNK = 90;
@@ -14,6 +40,11 @@ const BATCH_CHUNK = 90;
 const ID_LOOKUP_CHUNK = 90;
 
 export function d1Adapter(publishedDb: D1DatabaseClient): PublishAdapter {
+  async function liveRows(where: string, params: string[]): Promise<LivePageSnapshot[]> {
+    const source = await readD1PageSource<LivePageSnapshot>(publishedDb, 'live', where, params);
+    return source.rows.map((row, index) => ({ ...row, taxonomy_slugs: source.provenance[index].taxonomy_slugs }));
+  }
+
   /** The pair of statements that makes one catalogue row match `DB.tags`,
    *  ids included — a published link is only resolvable if the id agrees. */
   const catalogueStatements = (tag: PublishedTag): D1PreparedStatement[] => [
@@ -232,23 +263,14 @@ export function d1Adapter(publishedDb: D1DatabaseClient): PublishAdapter {
     async liveMap(uuids: string[]): Promise<Map<string, LivePageSnapshot>> {
       if (!uuids.length) return new Map();
       const placeholders = uuids.map(() => '?').join(',');
-      const livePages = await publishedDb.prepare(
-        `SELECT uuid, lect, weight, start, end, timezone FROM pages WHERE uuid IN (${placeholders})`,
-      )
-        .bind(...uuids)
-        .all<LivePageSnapshot>();
-      return new Map(livePages.results.map((page) => [page.uuid, page]));
+      const pages = await liveRows(`p.uuid IN (${placeholders})`, uuids);
+      return new Map(pages.map((page) => [page.uuid, page]));
     },
 
     async listLiveByTypes(pageTypes: string[]): Promise<LivePageSnapshot[]> {
       if (!pageTypes.length) return [];
       const placeholders = pageTypes.map(() => '?').join(',');
-      const livePages = await publishedDb.prepare(
-        `SELECT uuid, lect, weight, start, end, timezone FROM pages WHERE page_type IN (${placeholders})`,
-      )
-        .bind(...pageTypes)
-        .all<LivePageSnapshot>();
-      return livePages.results;
+      return liveRows(`p.page_type IN (${placeholders})`, pageTypes);
     },
   };
 }

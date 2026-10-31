@@ -1,3 +1,4 @@
+import { recordTableReads } from '../../../core/http/access-log';
 // User administration — list users and assign their roles. Admin-gated
 // (users:manage). Users are created by OAuth login, not here.
 
@@ -83,6 +84,7 @@ usersRoutes.get('/users', async (c) => {
       .first<{ n: number }>(),
     featureAdminScreenProps(c, { screen: 'users' }),
   ]);
+  recordTableReads('user.list', 'users', users.results.map(user => user.id));
   const providersByUser = new Map<number, string[]>();
   for (const identity of identities.results) {
     const providers = providersByUser.get(identity.user_id) ?? [];
@@ -190,6 +192,7 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
 });
 
 async function userForm(c: AppContext, user: User, error?: string, flash?: string): Promise<Response> {
+  recordTableReads('user.read', 'users', [user.id]);
   const [options, creditPanel] = await Promise.all([
     allRoleOptions(c.env),
     featureAdminScreenProps(c, { screen: 'user', userId: user.id }),

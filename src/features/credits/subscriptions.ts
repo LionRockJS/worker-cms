@@ -38,6 +38,7 @@
 // ============================================================
 
 import type { Env } from '../../types';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import type { CreditBillingMode } from './contracts';
 import { type EffectiveCredit, creditContributors, currencyLabel, effectiveCreditsFor, spendCredits } from './service';
 
@@ -177,6 +178,7 @@ export interface SweepResult {
  * billing/idempotency/mode-switch rules this implements.
  */
 export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = {}): Promise<SweepResult> {
+  assertRegulatedWritesAllowed(env);
   const now = opts.now ?? new Date();
   const result: SweepResult = { processed: 0, charged: 0, pastDue: 0, canceled: 0, deferred: 0 };
 

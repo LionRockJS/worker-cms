@@ -6,6 +6,7 @@ import type { BlueprintEntry, CmsConfig } from '../../cms-config';
 import type { Page, Tag, Taxonomy } from '../../types';
 import { num, strParam } from '../http/forms';
 import { chineseSearchVariants } from './chinese';
+import { countPageMetadata } from './count-metadata';
 
 export type AdvancedSearchOperator = 'AND' | 'OR' | 'NOT';
 
@@ -276,10 +277,7 @@ export async function performAdvancedSearch(
   },
 ): Promise<AdvancedSearchResult> {
   const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator);
-  const countRow = await db.prepare(`SELECT COUNT(*) as total FROM pages p WHERE ${whereSql}`)
-    .bind(...baseParams)
-    .first<{ total: number }>();
-  const total = countRow?.total ?? 0;
+  const total = await countPageMetadata(db, whereSql, baseParams, { types: pageTypes });
   const totalPages = Math.max(1, Math.ceil(total / options.limit));
   const currentPage = Math.min(options.page, totalPages);
   const currentOffset = (currentPage - 1) * options.limit;

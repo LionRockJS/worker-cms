@@ -28,17 +28,26 @@ import { r2Adapter } from './r2';
 import { isSubmissionMirror, submissionMirrorIds } from '../db/submission-ingest';
 import { projectLect, publishLectRules } from './projection';
 import { regulatedPages, type PublishRefusal } from './regulated';
+import { auditPublishTransfer, auditWithdrawal, withdrawalReads, type WithdrawalRead } from './audit';
+import type { AuditActor } from '../db/audit';
+import { classFor, resolveDataClasses } from '../db/data-classes';
+import { inventoried } from '../http/regulated-profile';
+import { auditLiveReads } from './read-audit';
+import { regulatedWritesBlocked } from '../http/regulated-writes';
 
 export interface PublishOutcome {
   /** Targets that were attempted, in order. */
   targets: string[];
   /** Target ids whose publish/unpublish threw. */
   failures: string[];
+  /** Containment proceeded with incomplete audit evidence for these targets. */
+  auditFailures?: string[];
   /**
    * Set when the page never reached an adapter. Either it is a submission
    * mirror — publishing one would upsert the original live row it shares a uuid
    * with, and unpublishing/trashing one would DELETE that live row — or it holds
-   * regulated data, which is never published.
+   * regulated data, which is never published, or deployment write containment
+   * prevents any publication.
    */
   refused?: boolean;
   /** Which refusal it was, for the message the admin sees. */
@@ -228,10 +237,10 @@ async function runOnAll(
   return { targets: adapters.map((adapter) => adapter.id), failures };
 }
 
-/** Publishes a draft page to every configured target. Null when the draft is missing.
- *  Both refusals are decided before a snapshot exists, so a refused page is
- *  never built, let alone handed to a target. */
-export async function publishPageToTargets(env: Env, pageId: number): Promise<PublishOutcome | null> {
+/** Publishes a draft page to every configured target. Null when a missing draft
+ * is looked up outside containment. Admission refusals precede the snapshot. */
+export async function publishPageToTargets(env: Env, pageId: number, actor?: AuditActor): Promise<PublishOutcome | null> {
+  if (regulatedWritesBlocked(env)) return refusal('writes_unavailable');
   const page = await env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
   if (!page) return null;
   if (await isSubmissionMirror(env.DB, pageId)) return refusal('submission');
@@ -242,7 +251,10 @@ export async function publishPageToTargets(env: Env, pageId: number): Promise<Pu
 
   const snapshot = (await buildSnapshots(env, [page]))[0];
   const adapters = await getPublishAdapters(env);
-  return runOnAll(adapters, (adapter) => adapter.publish(snapshot));
+  return runOnAll(adapters, async (adapter) => {
+    await auditPublishTransfer(env, adapter, 'page', [snapshot.page], snapshot.tagCatalogue, actor);
+    await adapter.publish(snapshot);
+  });
 }
 
 /** Result of a bulk publish. `published` and `refused` are the input rows split
@@ -254,12 +266,14 @@ export interface BulkPublishOutcome {
   failures: string[];
   /** Pages handed to the targets, in input order. */
   published: Page[];
-  /** Pages skipped before any adapter saw them: submission mirrors first, then
-   *  regulated pages. */
+  /** Pages skipped before an adapter: all input under deployment containment;
+   * otherwise submission mirrors first, then regulated pages. */
   refused: Page[];
   /** The regulated subset of `refused`. A policy refusal, not a structural one,
    *  so a caller that reports per-page outcomes can say which it was. */
   refusedRegulated: Page[];
+  /** Whole-deployment containment; separate from record-level PHI refusals. */
+  refusedReason?: 'writes_unavailable';
 }
 
 /**
@@ -276,7 +290,9 @@ export interface BulkPublishOutcome {
  * single-page path, and reported in `refused` instead of being sent to any
  * adapter. A classification outage refuses the whole slice.
  */
-export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<BulkPublishOutcome> {
+export async function publishPagesToTargets(env: Env, pages: Page[], actor?: AuditActor): Promise<BulkPublishOutcome> {
+  if (regulatedWritesBlocked(env)) return { targets: [], failures: [], published: [], refused: pages,
+    refusedRegulated: [], refusedReason: 'writes_unavailable' };
   const adapters = await getPublishAdapters(env);
   const targets = adapters.map((adapter) => adapter.id);
   const empty = { targets, failures: [], published: [], refused: [], refusedRegulated: [] };
@@ -302,14 +318,17 @@ export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<Bu
 
   const snapshots = await buildSnapshots(env, publishable);
   const failures: string[] = [];
-  const results = await Promise.allSettled(adapters.map((adapter) => (
-    adapter.publishMany
-      ? adapter.publishMany(snapshots)
-      : snapshots.reduce<Promise<void>>(
-        (prior, snapshot) => prior.then(() => adapter.publish(snapshot)),
-        Promise.resolve(),
-      )
-  )));
+  const results = await Promise.allSettled(adapters.map(async (adapter) => {
+    if (adapter.publishMany) {
+      await auditPublishTransfer(env, adapter, 'page', snapshots.map(s => s.page), snapshots.flatMap(s => s.tagCatalogue), actor);
+      await adapter.publishMany(snapshots);
+    } else {
+      for (const snapshot of snapshots) {
+        await auditPublishTransfer(env, adapter, 'page', [snapshot.page], snapshot.tagCatalogue, actor);
+        await adapter.publish(snapshot);
+      }
+    }
+  }));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
       failures.push(adapters[index].id);
@@ -324,10 +343,16 @@ export async function publishPagesToTargets(env: Env, pages: Page[]): Promise<Bu
  * Removes a page from every configured target. Callers that have the page at
  * hand must pass its submission marker so source mirrors are refused.
  */
-export async function unpublishPageFromTargets(env: Env, uuid: string, isSubmission = false): Promise<PublishOutcome> {
+export async function unpublishPageFromTargets(env: Env, uuid: string, isSubmission = false, actor?: AuditActor): Promise<PublishOutcome> {
   if (isSubmission) return refusal('submission');
   const adapters = await getPublishAdapters(env);
-  return runOnAll(adapters, (adapter) => adapter.unpublish(uuid));
+  const auditFailures = new Set<string>();
+  let metadata: Promise<WithdrawalRead[]> | undefined;
+  const outcome = await runOnAll(adapters, async (adapter) => {
+    if (!await auditWithdrawal(env, adapter, 'unpublish', [uuid], () => metadata ??= withdrawalReads(env, 'unpublish', [uuid]), actor)) auditFailures.add(adapter.id);
+    await adapter.unpublish(uuid);
+  });
+  return { ...outcome, ...(auditFailures.size ? { auditFailures: outcome.targets.filter(id => auditFailures.has(id)) } : {}) };
 }
 
 /** Result of a bulk unpublish: `refusedCount` is how many pages were submission
@@ -335,6 +360,7 @@ export async function unpublishPageFromTargets(env: Env, uuid: string, isSubmiss
 export interface BulkUnpublishOutcome {
   targets: string[];
   failures: string[];
+  auditFailures?: string[];
   refusedCount: number;
 }
 
@@ -349,6 +375,7 @@ export interface BulkUnpublishOutcome {
 export async function unpublishPagesFromTargets(
   env: Env,
   pages: Array<{ uuid: string; submission_origin?: number | boolean }>,
+  actor?: AuditActor,
 ): Promise<BulkUnpublishOutcome> {
   const targetable = pages.filter((page) => !page.submission_origin);
   const refusedCount = pages.length - targetable.length;
@@ -358,24 +385,39 @@ export async function unpublishPagesFromTargets(
   if (!uuids.length || !adapters.length) return { targets, failures: [], refusedCount };
 
   const failures: string[] = [];
-  const results = await Promise.allSettled(adapters.map((adapter) => (
-    adapter.unpublishMany
-      ? adapter.unpublishMany(uuids)
-      : uuids.reduce<Promise<void>>((prior, uuid) => prior.then(() => adapter.unpublish(uuid)), Promise.resolve())
-  )));
+  const auditFailures = new Set<string>();
+  let metadata: Promise<WithdrawalRead[]> | undefined;
+  const results = await Promise.allSettled(adapters.map(async (adapter) => {
+    const reads = () => metadata ??= withdrawalReads(env, 'unpublish', uuids);
+    if (adapter.unpublishMany) {
+      if (!await auditWithdrawal(env, adapter, 'unpublish', uuids, reads, actor)) auditFailures.add(adapter.id);
+      await adapter.unpublishMany(uuids);
+    } else {
+      for (const uuid of uuids) {
+        if (!await auditWithdrawal(env, adapter, 'unpublish', [uuid], async () => (await reads()).filter(read => read.withdrawalUuid === uuid), actor)) auditFailures.add(adapter.id);
+        await adapter.unpublish(uuid);
+      }
+    }
+  }));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
       failures.push(adapters[index].id);
       console.error(`Publish target ${adapters[index].id} bulk unpublish failed:`, result.reason);
     }
   });
-  return { targets, failures, refusedCount };
+  return { targets, failures, refusedCount, ...(auditFailures.size ? { auditFailures: targets.filter(id => auditFailures.has(id)) } : {}) };
 }
 
 /** Drops a deleted tag from targets that support it (best effort elsewhere). */
-export async function removeTagFromTargets(env: Env, tagId: number): Promise<PublishOutcome> {
+export async function removeTagFromTargets(env: Env, tagId: number, actor?: AuditActor): Promise<PublishOutcome> {
   const adapters = (await getPublishAdapters(env)).filter((adapter) => adapter.removeTag);
-  return runOnAll(adapters, (adapter) => adapter.removeTag!(tagId));
+  const auditFailures = new Set<string>();
+  let metadata: Promise<WithdrawalRead[]> | undefined;
+  const outcome = await runOnAll(adapters, async (adapter) => {
+    if (!await auditWithdrawal(env, adapter, 'remove-tag', [String(tagId)], () => metadata ??= withdrawalReads(env, 'remove-tag', [String(tagId)]), actor)) auditFailures.add(adapter.id);
+    await adapter.removeTag!(tagId);
+  });
+  return { ...outcome, ...(auditFailures.size ? { auditFailures: outcome.targets.filter(id => auditFailures.has(id)) } : {}) };
 }
 
 /** Tag ids per read, bounded by D1's cap on bound parameters. */
@@ -404,16 +446,19 @@ function toPublishedTag(row: Record<string, unknown>): PublishedTag {
 }
 
 /** Every tag, or just the named ones, read in parameter-cap-sized chunks. */
-async function readTags(env: Env, tagIds?: number[]): Promise<PublishedTag[]> {
+async function readTags(env: Env, tagIds?: number[], taxonomyRequired = false): Promise<PublishedTag[]> {
+  // Old schemas may omit taxonomy_slug only when no taxonomy policy depends
+  // on it. Never turn an unknowable regulated taxonomy into the default one.
+  const fields = taxonomyRequired ? '*, taxonomy_slug' : '*';
   if (!tagIds) {
-    const rows = await env.DB.prepare('SELECT * FROM tags ORDER BY id').all<Record<string, unknown>>();
+    const rows = await env.DB.prepare(`SELECT ${fields} FROM tags ORDER BY id`).all<Record<string, unknown>>();
     return rows.results.map(toPublishedTag);
   }
   const unique = Array.from(new Set(tagIds));
   const tags: PublishedTag[] = [];
   for (let index = 0; index < unique.length; index += TAG_ID_CHUNK) {
     const chunk = unique.slice(index, index + TAG_ID_CHUNK);
-    const rows = await env.DB.prepare(`SELECT * FROM tags WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    const rows = await env.DB.prepare(`SELECT ${fields} FROM tags WHERE id IN (${chunk.map(() => '?').join(',')})`)
       .bind(...chunk)
       .all<Record<string, unknown>>();
     tags.push(...rows.results.map(toPublishedTag));
@@ -430,39 +475,60 @@ async function readTags(env: Env, tagIds?: number[]): Promise<PublishedTag[]> {
 export async function publishTagsToTargets(
   env: Env,
   tagIds?: number[],
-): Promise<PublishOutcome & { count: number }> {
+  actor?: AuditActor,
+): Promise<PublishOutcome & { count: number; refusedCount?: number }> {
+  if (regulatedWritesBlocked(env)) return { ...refusal('writes_unavailable'), count: 0 };
   const adapters = (await getPublishAdapters(env)).filter((adapter) => adapter.publishTags);
   const targets = adapters.map((adapter) => adapter.id);
   if (!adapters.length || (tagIds && !tagIds.length)) return { targets, failures: [], count: 0 };
-  const tags = await readTags(env, tagIds);
+  const classes = await resolveDataClasses(env, true);
+  if (!classes.ok) return { ...refusal('classification_unavailable'), count: 0 };
+  let found: PublishedTag[];
+  try {
+    found = await readTags(env, tagIds, [...classes.exact.keys()].some(key => key.startsWith('taxonomy:')));
+  } catch (error) {
+    console.error('Publish: tag classification source unavailable', error);
+    return { ...refusal('classification_unavailable'), count: 0 };
+  }
+  if (found.some(tag => !inventoried(env, 'taxonomy', tag.taxonomy_slug ?? 'default'))) {
+    return { ...refusal('classification_unavailable'), count: 0 };
+  }
+  const tags = found.filter(tag => classFor(classes, 'taxonomy', tag.taxonomy_slug ?? 'default') !== 'phi');
+  const refusedCount = found.length - tags.length;
+  if (refusedCount && !tags.length) return { ...refusal('regulated'), count: 0, refusedCount };
   if (!tags.length) return { targets, failures: [], count: 0 };
   // Chunked so resyncing a large tag table stays inside the subrequest budget:
   // an adapter that batches (D1) turns each chunk into one round-trip.
   const outcome = await runOnAll(adapters, async (adapter) => {
     for (let index = 0; index < tags.length; index += TAG_SYNC_CHUNK) {
-      await adapter.publishTags!(tags.slice(index, index + TAG_SYNC_CHUNK));
+      const chunk = tags.slice(index, index + TAG_SYNC_CHUNK);
+      await auditPublishTransfer(env, adapter, 'tags', [], chunk, actor);
+      await adapter.publishTags!(chunk);
     }
   });
-  return { ...outcome, count: tags.length };
+  return { ...outcome, count: tags.length, ...(refusedCount ? { refusedCount } : {}) };
 }
 
 /** Pushes one tag, after an admin create or edit. */
-export async function publishTagToTargets(env: Env, tagId: number): Promise<PublishOutcome> {
-  return publishTagsToTargets(env, [tagId]);
+export async function publishTagToTargets(env: Env, tagId: number, actor?: AuditActor): Promise<PublishOutcome> {
+  return publishTagsToTargets(env, [tagId], actor);
 }
 
 /** First configured adapter that can answer live-state reads, if any. */
 async function liveReader(env: Env): Promise<PublishAdapter | null> {
   const adapters = await getPublishAdapters(env);
-  return adapters.find((adapter) => adapter.liveMap && adapter.getLiveLect && adapter.listLiveByTypes) ?? null;
+  return adapters.find((adapter) => adapter.liveMap && adapter.listLiveByTypes) ?? null;
 }
 
-export async function getLiveLect(env: Env, uuid: string): Promise<string | null> {
+export async function getLiveLect(env: Env, uuid: string, actor?: AuditActor): Promise<string | null> {
   const reader = await liveReader(env);
-  return reader ? reader.getLiveLect!(uuid) : null;
+  if (!reader) return null;
+  const pages = [...(await reader.liveMap!([uuid])).values()];
+  await auditLiveReads(env, reader, pages, actor);
+  return pages.find(page => page.uuid === uuid)?.lect ?? null;
 }
 
-export async function liveMapForDraftPages(env: Env, draftPages: Page[]): Promise<Map<string, LivePageSnapshot>> {
+export async function liveMapForDraftPages(env: Env, draftPages: Page[], actor?: AuditActor): Promise<Map<string, LivePageSnapshot>> {
   const reader = await liveReader(env);
   if (!reader) return new Map();
   const uuids = Array.from(new Set(draftPages.map((page) => page.uuid)));
@@ -473,12 +539,16 @@ export async function liveMapForDraftPages(env: Env, draftPages: Page[]): Promis
     const liveMap = await reader.liveMap!(chunk);
     liveMap.forEach((page, uuid) => combined.set(uuid, page));
   }
+  await auditLiveReads(env, reader, [...combined.values()], actor);
   return combined;
 }
 
-export async function listLiveByTypes(env: Env, pageTypes: string[]): Promise<LivePageSnapshot[]> {
+export async function listLiveByTypes(env: Env, pageTypes: string[], actor?: AuditActor): Promise<LivePageSnapshot[]> {
   const reader = await liveReader(env);
-  return reader ? reader.listLiveByTypes!(pageTypes) : [];
+  if (!reader) return [];
+  const pages = await reader.listLiveByTypes!(pageTypes);
+  await auditLiveReads(env, reader, pages, actor);
+  return pages;
 }
 
 /** Human-readable flash fragment for a partially failed publish. */

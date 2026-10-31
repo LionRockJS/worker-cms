@@ -1,6 +1,7 @@
 import { adminLayout, type BaseTemplateProps } from '../../core/render/layout';
 import { renderView } from '../../core/render/liquid';
 import type { ArchiveHealth, ReviewSignal } from './signals';
+import type { outagePage } from './outages';
 
 interface AuditPagination {
   total: number;
@@ -147,6 +148,8 @@ export async function auditClassesPage(views: Fetcher, opts: BaseTemplateProps &
 export async function auditReviewPage(views: Fetcher, opts: BaseTemplateProps & {
   signals: ReviewSignal[];
   health: ArchiveHealth;
+  outages?: Awaited<ReturnType<typeof outagePage>>;
+  canReconcile?: boolean;
 }): Promise<string> {
   const { signals, health } = opts;
   const flagged = signals.reduce((sum, signal) => sum + signal.rows.length, 0);
@@ -157,6 +160,20 @@ export async function auditReviewPage(views: Fetcher, opts: BaseTemplateProps & 
     classesHref: '/admin/audit/classes',
     flagged,
     hasFlagged: flagged > 0,
+    outageEnabled: !!opts.outages?.enabled,
+    outageAvailable: !!opts.outages?.available,
+    outageCheckedAt: opts.outages?.health?.checkedAt ?? null,
+    outageHealthy: !!opts.outages?.health && opts.outages.health.primaryWritable
+      && opts.outages.health.classificationAvailable && opts.outages.health.journalWritable
+      && opts.outages.health.archiveHealthy && opts.outages.health.admissionReady && opts.outages.health.alertDeliveryHealthy
+      && opts.outages.health.monitorConfigured && opts.outages.health.monitorReachable
+      && Date.now() - Date.parse(opts.outages.health.checkedAt) >= -60_000
+      && Date.now() - Date.parse(opts.outages.health.checkedAt) <= 15 * 60_000,
+    outageNextHref: opts.outages?.nextCursor ? `/admin/audit/review?outage_cursor=${encodeURIComponent(opts.outages.nextCursor)}` : null,
+    outageItems: (opts.outages?.items ?? []).map(item => ({ ...item,
+      detailHref: `/admin/audit/outages/${item.id}`, reconcileAction: `/admin/audit/outages/${item.id}/reconcile`,
+      canReconcile: !!opts.canReconcile && !item.review,
+    })),
     summaryLabel: flagged === 0
       ? 'Nothing flagged'
       : `${flagged} finding${flagged === 1 ? '' : 's'} to review`,

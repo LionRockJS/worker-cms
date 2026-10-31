@@ -8,7 +8,7 @@ import type { Env, Variables } from '../../../types';
 import { requirePermission } from '../../../core/auth/guards';
 import { renderPage } from '../../../core/render/chrome';
 import { logAudit } from '../../../core/db/audit';
-import { recordRead } from '../../../core/http/access-log';
+import { recordRead, recordPageReads } from '../../../core/http/access-log';
 import { mediaObjectResponse } from '../security';
 import { mediaClassifier } from '../regulated';
 import { contentListPage, type ContentListMediaItem } from '../template';
@@ -67,17 +67,19 @@ async function linkedPagesForMedia(
   const links = new Map<string, ContentListMediaItem['linkedPages']>(keys.map((key) => [key, []]));
   if (!keys.length) return links;
 
-  type PageRow = { id: number; name: string; slug: string; lect: string | null };
+  type PageRow = { id: number; name: string; slug: string; lect: string | null; page_type: string | null };
   // Scan each media-bearing page once, then match only the current R2 batch
   // in memory. A dynamically generated OR-of-LIKE expression can exceed
   // SQLite's complexity limit when the bucket page contains many objects.
   const pages = await db.prepare(
-    "SELECT id, name, slug, lect FROM pages WHERE instr(lect, '/media/') > 0 ORDER BY name ASC, id ASC",
+    "SELECT id, name, slug, lect, page_type FROM pages WHERE instr(lect, '/media/') > 0 ORDER BY name ASC, id ASC",
   ).all<PageRow>();
 
+  const returned = new Map<number, PageRow>();
   for (const page of pages.results) {
     for (const key of keys) {
       if (!pageReferencesMedia(page.lect, key)) continue;
+      returned.set(page.id, page);
       links.get(key)?.push({
         name: page.name,
         slug: page.slug,
@@ -85,6 +87,7 @@ async function linkedPagesForMedia(
       });
     }
   }
+  recordPageReads('page.media-reference', [...returned.values()]);
   return links;
 }
 
@@ -96,6 +99,7 @@ mediaFilesRoutes.get('/settings/content', async (c) => {
   const cursor = c.req.query('cursor') || undefined;
   const listed = await c.env.MEDIA_BUCKET.list({ limit: MEDIA_LIST_PAGE_SIZE, cursor });
   const keys = listed.objects.map((object) => object.key);
+  for (const key of keys) recordRead({ action: 'media.list', kind: 'media_prefix', key, targetType: 'media', ids: [key], count: 1 });
   const linkedPages = await linkedPagesForMedia(c.env.DB, keys);
   // A withheld object 404s on /media/..., so the browser must point at the
   // authenticated route instead or every regulated row looks broken.

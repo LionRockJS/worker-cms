@@ -192,6 +192,10 @@ export interface BlockType {
 // Cloudflare Worker environment bindings
 // ============================================================
 export interface Env {
+  /** Opt-in strict deployment readiness. Only true/false are accepted. */
+  REGULATED_MODE?: string;
+  /** JSON array of {kind,key,class: public|pii|phi}; must match live classification. */
+  REGULATED_INVENTORY?: string;
   DB: D1DatabaseClient;
   PUBLISHED_DB: D1DatabaseClient;
   VIEWS: Fetcher;
@@ -203,6 +207,16 @@ export interface Env {
   /** Where the audit sweep writes sealed archive segments. Without it the
    *  sweep does nothing at all — it never prunes what it could not archive. */
   AUDIT_BUCKET?: R2Bucket;
+  /** Opt-in private outage journal and monitoring, independent of the primary table. */
+  AUDIT_OUTAGE_MONITORING?: string;
+  /** Private diagnostic journal, separate from the archive bucket and primary D1. */
+  AUDIT_OUTAGE_BUCKET?: R2Bucket;
+  /** Deployment-owned receiver for PHI-free alerts/heartbeats, not a user-configured URL. */
+  AUDIT_MONITOR?: Fetcher;
+  /** Opaque deployment-owned monitor identity; never a patient/user identifier. */
+  AUDIT_MONITOR_SOURCE?: string;
+  /** Archive lag alert threshold (seconds); defaults to 3600, not a standards mandate. */
+  AUDIT_ARCHIVE_MAX_LAG_SECONDS?: string;
   /** Cloudflare Images binding used for media thumbnails; falls back to the original when unbound. */
   IMAGES?: ImagesBinding;
   /** Comma-separated built-in publish targets ("d1", "r2"). Defaults to "d1".

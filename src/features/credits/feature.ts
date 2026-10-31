@@ -2,6 +2,7 @@ import type { CmsFeature } from '../../core/feature';
 import { getCreditBalances, getSharedCreditBalances } from './service';
 import { userIdFromContext } from '../../core/http/forms';
 import { loadShowCredits } from '../../core/db/settings';
+import { recordWalletReads } from './read-audit';
 import {
   CREDIT_CURRENCIES,
   creditCurrencyDefinition,
@@ -30,6 +31,7 @@ export const creditsFeature: CmsFeature = {
       getCreditBalances(c.env, userIdFromContext(c)),
       getSharedCreditBalances(c.env),
     ]);
+    recordWalletReads(userIdFromContext(c));
     return {
       showCredits: true,
       sidebarWallets: CREDIT_CURRENCIES.flatMap((currency) => {

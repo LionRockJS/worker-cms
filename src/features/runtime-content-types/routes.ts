@@ -15,6 +15,7 @@ import type { Env, Variables, Permission } from '../../types';
 import { coreExtensions, type ContentTypeContributorInfo } from '../../core/extensions';
 import { num, str } from '../../core/http/forms';
 import { logAudit } from '../../core/db/audit';
+import { recordTableReads, recordTaxonomyReads } from '../../core/http/access-log';
 import { requirePermission } from '../../core/auth/guards';
 import { renderPage } from '../../core/render/chrome';
 import { userCan } from '../../core/auth/permissions';
@@ -98,6 +99,7 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
       spec.listRows(c.env.DB),
       coreExtensions().contentTypeContributors?.(c.env) ?? [],
     ]);
+    recordTableReads('schema.list', spec.table, dbRows.map(row => row.id));
     const resolved = await resolveCmsConfig(c.env);
     const dbSlugs = new Set(dbRows.map((row) => row.slug));
     const configRows = configOnlyTypes(
@@ -164,6 +166,7 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
   routes.get(`${base}/:id/edit`, async (c) => {
     const row = await fetchRow(c.env.DB, parseInt(c.req.param('id'), 10));
     if (!row) return c.notFound();
+    recordTableReads('schema.read', spec.table, [row.id]);
     const mode = (await userCan(c, spec.permission)) ? 'edit' : 'view';
     return renderForm(c, spec.modelFromRow(mode, row));
   });
@@ -325,6 +328,7 @@ export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | 
     const selectedBlocks = new Set(model.selectedBlocks ?? []);
     const selectedTaxonomies = new Set(model.selectedTaxonomies ?? []);
     const available = availableTaxonomies(config, taxonomies.results);
+    recordTaxonomyReads('taxonomy.schema-options', available.map(row => ({ slug: row.slug })));
 
     // In view mode the config/plugin-owned entries stay disabled; with extend
     // permission the remaining checkboxes become editable additions.

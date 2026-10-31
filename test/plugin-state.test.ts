@@ -55,6 +55,8 @@ function stateApi(
 }
 
 beforeEach(async () => {
+  await env.DB.prepare('DELETE FROM data_classes').run();
+  await env.DB.prepare('DELETE FROM audit_events').run();
   clearConfigCache();
   clearManifestCache();
   __clearInjectedFetchers();
@@ -174,5 +176,30 @@ describe('plugin state API', () => {
       .bind(PLUGIN_ID)
       .first<{ total: number }>();
     expect(rows?.total).toBe(0);
+  });
+});
+
+
+describe('classified plugin state reads', () => {
+  it.each(['plugin', 'table'])('records state reads under %s policy without content bodies', async kind => {
+    await env.DB.prepare('INSERT INTO data_classes (container_kind, container_key, class) VALUES (?, ?, ?)')
+      .bind(kind, kind === 'plugin' ? PLUGIN_ID : 'plugin_state', 'phi').run();
+    await stateApi('PUT', '/__cms/state/private.record', { value: 'private patient content' });
+    expect((await stateApi('GET', '/__cms/state/private.record')).status).toBe(200);
+    expect((await stateApi('GET', '/__cms/state')).status).toBe(200);
+    const rows = (await env.DB.prepare("SELECT action, acting_via, actor_user_id, data_class, detail FROM audit_events WHERE event_class = 'read' ORDER BY seq").all()).results;
+    expect(rows).toEqual(['state.read', 'state.list'].map(action => ({ action, acting_via: PLUGIN_ID, actor_user_id: null, data_class: 'phi', detail: null })));
+    expect(JSON.stringify(rows)).not.toContain('private patient content');
+  });
+
+  it.each(['/__cms/state/private.record', '/__cms/state'])('withholds state at %s during audit failure', async path => {
+    await env.DB.prepare("INSERT INTO data_classes (container_kind, container_key, class) VALUES ('plugin', ?, 'phi')").bind(PLUGIN_ID).run();
+    await stateApi('PUT', '/__cms/state/private.record', { value: 'private patient content' });
+    await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+    try {
+      const response = await stateApi('GET', path);
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain('private patient content');
+    } finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
   });
 });

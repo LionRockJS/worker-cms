@@ -14,6 +14,7 @@ import { authenticatePlugin } from './auth';
 import { listFilePrefixApprovals } from '../file-prefixes';
 import { resolveDataClasses } from '../../../core/db/data-classes';
 import { auditReads, auditUnavailable, type PendingRead } from '../../../core/http/access-log';
+import { inventoried } from '../../../core/http/regulated-profile';
 import { actingUserId } from './create';
 
 export const filesApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -127,6 +128,7 @@ async function auditFiles(c: FilesContext, pluginId: string, action: string, key
     const actor = { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: pluginId };
     const groups = new Map<string, string[]>();
     for (const key of keys) {
+      if (!inventoried(c.env, 'media_prefix', key)) return auditUnavailable(c);
       const prefix = classes.prefixes.find((entry) => key.startsWith(entry.key));
       if (!prefix) continue;
       const ids = groups.get(prefix.key) ?? [];
@@ -135,12 +137,12 @@ async function auditFiles(c: FilesContext, pluginId: string, action: string, key
     }
     const reads: PendingRead[] = [...groups].map(([key, ids]) => ({
       action, kind: 'media_prefix', key, targetType: 'media',
-      ids: ids.slice(0, 100), count: ids.length, actor,
+      ids, count: ids.length, actor,
     }));
     // A contributor can itself be classified independently of its file paths.
     if (classes.exact.has(`plugin:${pluginId}`)) reads.push({
       action, kind: 'plugin', key: pluginId, targetType: 'media',
-      ids: keys.slice(0, 100), count: keys.length, actor,
+      ids: keys, count: keys.length, actor,
     });
     await auditReads(c, reads);
     return null;

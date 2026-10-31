@@ -8,9 +8,12 @@
 import type { FeatureServiceEntry } from '../services';
 import type { Env } from '../../types';
 import { sweepAuditEvents } from './sweep';
+import { monitorAuditOutages } from './outages';
 
 export const auditServices: FeatureServiceEntry = {
   id: 'audit',
+  monitor: monitorAuditOutages,
+  scheduledDuringWriteContainment: true,
 
   /**
    * One bounded archive-and-prune pass per cron tick. Silent when there is

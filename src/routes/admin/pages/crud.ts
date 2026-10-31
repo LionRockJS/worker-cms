@@ -1,3 +1,4 @@
+import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // Page create / read / edit / update, plus the weight controls.
 //
 // NOTE on ordering: the static POST /pages/batch-weight and POST /pages/reorder
@@ -24,7 +25,7 @@ import { uiTranslator } from '../../../core/i18n';
 import { requirePermission } from '../../../core/auth/guards';
 import { userCan } from '../../../core/auth/permissions';
 import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
-import { logAudit } from '../../../core/db/audit';
+import { contextActor, logAudit } from '../../../core/db/audit';
 import { recordPageReads } from '../../../core/http/access-log';
 import { publishFlash } from './lifecycle';
 import {
@@ -73,6 +74,8 @@ pageCrudRoutes.get('/pages/new', requirePermission('content:write'), async (c) =
   if (pluginView) return pluginView;
 
   const taxonomy = await editorTaxonomy(c.env.DB);
+  recordTagReads('tag.editor-options', taxonomy.tags);
+  recordTaxonomyReads('taxonomy.editor-options', taxonomy.taxonomies);
   return renderPage(c, editorPage, {
     parentPages: [],
     tags: taxonomy.tags,
@@ -153,6 +156,8 @@ pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
       parentPageOption(c.env.DB, nullableStr(form.get('page_id'))),
       editorTaxonomy(c.env.DB),
     ]);
+    recordTagReads('tag.editor-options', taxonomy.tags);
+    recordTaxonomyReads('taxonomy.editor-options', taxonomy.taxonomies);
     return renderPage(c, editorPage, {
       parentPages,
       tags: taxonomy.tags,
@@ -556,6 +561,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   }
 
   if (errors.length) {
+    recordPageReads('page.validation-read', [page]);
     const data = await editorPageData(c, page, nullableStr(form.get('page_id')) ?? page.page_id);
     const pageType = nullableStr(form.get('page_type')) ?? page.page_type ?? 'default';
     const lect = lectFromForm(config, pageType, lectForPage(config, pageType, page.lect), form, language);
@@ -660,7 +666,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   // happen — a regulated page saved here is updated in draft and nowhere else.
   let republishRefused = false;
   if (action === 'publish' || autoRepublish) {
-    const outcome = await publishPageToTargets(c.env, pageId);
+    const outcome = await publishPageToTargets(c.env, pageId, contextActor(c));
     if (!outcome) return c.notFound();
     republishRefused = !!outcome.refused;
     if (!outcome.refused) announcePageEvent(c, 'publish', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug });

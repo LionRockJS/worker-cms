@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import type { Env } from '../types';
 import { getSetting, saveSetting } from './db/settings';
 import { coreExtensions } from './extensions';
+import { recordMetadataReads } from './http/access-log';
 
 export const DEFAULT_CONTENT_LANGUAGE = 'mis';
 export const CONTENT_DEFAULT_LANGUAGE_SETTING_KEY = 'content.default_language';
@@ -42,6 +43,7 @@ export async function listLocales(env: Env): Promise<LocaleRecord[]> {
   const result = await env.DB.prepare(
     'SELECT * FROM locales ORDER BY weight ASC, label COLLATE NOCASE ASC, code ASC',
   ).all<LocaleRecord>();
+  recordMetadataReads('locale.read', 'locales', result.results.map(row => row.code));
   return result.results;
 }
 
@@ -128,6 +130,7 @@ export async function listLocaleMessages(env: Env, localeCode: unknown): Promise
   const result = await env.DB.prepare(
     'SELECT locale_code, message_key, value, updated_at FROM locale_messages WHERE locale_code = ? ORDER BY message_key ASC',
   ).bind(code).all<LocaleMessage>();
+  recordMetadataReads('translation.read', 'locale_messages', result.results.map(row => `${row.locale_code}:${row.message_key}`));
   return result.results;
 }
 

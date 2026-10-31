@@ -18,10 +18,27 @@ import {
 import { dbBlockTypeToContentTypes, listDbBlockTypes } from './block-type-store';
 import type { Env } from '../../types';
 import type { ContributedContentTypes as PluginContentTypes } from '../extensions';
-import { localeRegistry } from '../i18n';
+import { CONTENT_DEFAULT_LANGUAGE_SETTING_KEY, localeRegistry } from '../i18n';
+import { recordContributorReads, recordMetadataReads } from '../http/access-log';
+import { PAGE_TYPE_EXTENSIONS_SETTING_KEY } from './page-type-store';
 
 const CONFIG_TTL_MS = 60_000;
-let cached: { config: CmsConfig; expires: number } | null = null;
+interface ConfigSnapshot {
+  config: CmsConfig;
+  expires: number;
+  sources: { table: string; ids: (string | number)[] }[];
+  contributors: string[];
+}
+let cached: ConfigSnapshot | null = null;
+
+function announceSnapshot(snapshot: ConfigSnapshot): void {
+  for (const source of snapshot.sources) {
+    if (!source.ids.length) continue;
+    const action = source.table === 'settings' ? 'settings.read' : source.table === 'locales' ? 'locale.read' : 'schema.config-read';
+    recordMetadataReads(action, source.table, source.ids);
+  }
+  recordContributorReads('plugin.config-metadata-read', snapshot.contributors);
+}
 
 function mergeContentTypes(base: CmsConfig, fragment: PluginContentTypes | undefined): void {
   if (!fragment) return;
@@ -47,7 +64,7 @@ function safeAssign<T>(target: Record<string, T>, source: Record<string, T> | un
  * isolate with a short TTL.
  */
 export async function resolveCmsConfig(env: Env): Promise<CmsConfig> {
-  if (cached && cached.expires > Date.now()) return cached.config;
+  if (cached && cached.expires > Date.now()) { announceSnapshot(cached); return cached.config; }
 
   const contributed = await coreExtensions().contentTypes?.(env) ?? [];
   const [dbPageTypes, dbBlockTypes, registry, extensions] = env.DB
@@ -85,7 +102,16 @@ export async function resolveCmsConfig(env: Env): Promise<CmsConfig> {
   // Last: extensions ADD to (never replace) whatever the layers above produced.
   applyPageTypeExtensions(merged, extensions);
 
-  cached = { config: merged, expires: Date.now() + CONFIG_TTL_MS };
+  cached = { config: merged, expires: Date.now() + CONFIG_TTL_MS,
+    sources: [
+      { table: 'page_types', ids: dbPageTypes.map(row => row.id) },
+      { table: 'block_types', ids: dbBlockTypes.map(row => row.id) },
+      { table: 'locales', ids: 'locales' in registry ? registry.locales.map(row => row.code) : [] },
+      { table: 'settings', ids: [CONTENT_DEFAULT_LANGUAGE_SETTING_KEY, PAGE_TYPE_EXTENSIONS_SETTING_KEY] },
+    ],
+    contributors: contributed.flatMap(fragment => fragment.auditContributorId ? [fragment.auditContributorId] : []),
+  };
+  announceSnapshot(cached);
   return merged;
 }
 

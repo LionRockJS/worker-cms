@@ -1,3 +1,5 @@
+import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
+import { recordRead } from '../../../core/http/access-log';
 // Shared editor rendering: the props the structured editor needs, plugin
 // edit/new/read view delegation, and page-version helpers.
 
@@ -144,6 +146,15 @@ export async function editorPageData(
       .all<{ tag_id: number }>(),
     draftLectProjector(c.env),
   ]);
+
+  recordTagReads('tag.editor-options', taxonomy.tags);
+  recordTaxonomyReads('taxonomy.editor-options', taxonomy.taxonomies);
+  if (versions.results.length) recordRead({
+    action: 'page.history', kind: 'page_type', key: page.page_type ?? 'default', targetType: 'page_version',
+    ids: [...new Set([...versions.results.map(row => String(row.id)), ...(version ? [String(version.id)] : [])])],
+    count: new Set([...versions.results.map(row => row.id), ...(version ? [version.id] : [])]).size,
+    uuidById: Object.fromEntries([...versions.results, ...(version ? [version] : [])].map(row => [String(row.id), page.uuid])),
+  });
 
   return {
     parentPages,

@@ -1,3 +1,6 @@
+import { recordPageReads } from '../../core/http/access-log';
+import { countPageMetadata } from '../../core/db/count-metadata';
+import { countTrashMetadataByType } from './queries';
 // Trash listing, restore-to-draft, and permanent delete.
 
 import { Hono } from 'hono';
@@ -23,19 +26,16 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
   const typeWhere = filterType ? 'WHERE page_type = ?' : '';
   const typeParams = filterType ? [filterType] : [];
 
-  const [countRow, typeRows, recentRow] = await Promise.all([
+  const countOptions = { source: 'trash_pages' as const, types: filterType ? [filterType] : undefined };
+  const [total, typeRows, recentCount] = await Promise.all([
     // Listing total/recent are scoped to the filter; the type breakdown is not,
     // so the dropdown always lists every type with its full count.
-    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM trash_pages ${typeWhere}`).bind(...typeParams).first<{ total: number }>(),
-    c.env.DB.prepare(
-      'SELECT page_type, COUNT(*) AS cnt FROM trash_pages GROUP BY page_type ORDER BY cnt DESC',
-    ).all<{ page_type: string | null; cnt: number }>(),
-    c.env.DB.prepare(
-      `SELECT COUNT(*) AS cnt FROM trash_pages WHERE created_at >= datetime('now', '-1 hour') ${filterType ? 'AND page_type = ?' : ''}`,
-    ).bind(...typeParams).first<{ cnt: number }>(),
+    countPageMetadata(c.env.DB, filterType ? 'p.page_type = ?' : '1', typeParams, countOptions),
+    countTrashMetadataByType(c.env.DB),
+    countPageMetadata(c.env.DB, `p.created_at >= datetime('now', '-1 hour') ${filterType ? 'AND p.page_type = ?' : ''}`,
+      typeParams, { ...countOptions, action: 'page.trash-recent-count' }),
   ]);
 
-  const total = countRow?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(requestedPage, totalPages);
   const offset = (currentPage - 1) * pageSize;
@@ -43,6 +43,8 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
   const trashedPages = await c.env.DB.prepare(
     `SELECT * FROM trash_pages ${typeWhere} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
   ).bind(...typeParams, pageSize, offset).all<Page>();
+
+  recordPageReads('page.trash-list', trashedPages.results);
 
   const paginationResult = {
     results: trashedPages.results,
@@ -57,7 +59,7 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
     }
   }
 
-  const typeCounts = typeRows.results.map((r) => ({ pageType: r.page_type ?? 'unknown', count: r.cnt }));
+  const typeCounts = typeRows.map((r) => ({ pageType: r.page_type ?? 'unknown', count: r.cnt }));
   const grandTotal = typeCounts.reduce((sum, t) => sum + t.count, 0);
 
   return renderPage(c, trashPage, {
@@ -68,7 +70,7 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
     grandTotal,
     filterType,
     typeCounts,
-    recentCount: recentRow?.cnt ?? 0,
+    recentCount,
     canPurgeTrash: await userCan(c, 'trash:purge'),
   });
 });

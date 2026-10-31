@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { authRoutes } from './routes/auth';
 import { adminRoutes } from './routes/admin';
 import { publicRouters } from './features/routers';
-import { runFeatureScheduledWork } from './features/services';
+import { runFeatureMonitoringWork, runFeatureScheduledWork } from './features/services';
 import { errorPage } from './core/render/errors';
 import {
   canonicalHostResponse,
@@ -20,7 +20,10 @@ import {
   withSensitiveCacheHeaders,
   withSecurityHeaders,
 } from './core/http/headers';
-import { accessLog } from './core/http/access-log';
+import { accessLog, auditUnavailable, ReadAuditUnavailableError } from './core/http/access-log';
+import { assertRegulatedReady } from './core/http/regulated-profile';
+import { assertRegulatedWritesAllowed, regulatedRequestWriteBlocked, regulatedWritesBlocked, RegulatedWritesUnavailableError } from './core/http/regulated-writes';
+import { featureInstalled } from './features';
 import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
@@ -77,6 +80,22 @@ app.use('*', async (c, next) => {
   const cspNonce = generateCspNonce();
   await requestContext.run({ cspNonce }, () => next());
   c.res = withSensitiveCacheHeaders(withSecurityHeaders(c.res, cspNonce), c.req.raw);
+  return undefined;
+});
+
+app.use('*', async (c, next) => {
+  // Assets contain no tenant records and remain available during repair.
+  if (!c.req.path.startsWith('/assets/') && !c.req.path.startsWith('/views/')) {
+    try { await assertRegulatedReady(c.env, featureInstalled('audit')); }
+    catch (error) {
+      console.error('Regulated profile not ready', error);
+      return c.json({ error: 'regulated_profile_unavailable' }, 503, { 'Cache-Control': 'no-store' });
+    }
+  }
+  if (regulatedRequestWriteBlocked(c.env, c.req.raw)) {
+    return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  await next();
   return undefined;
 });
 
@@ -161,6 +180,11 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof RegulatedWritesUnavailableError) return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  if (String(err).includes('sensitivity_reduction_requires_review')) {
+    return c.json({ error: 'Changing this record to a lower classification requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
+  }
+  if (err instanceof ReadAuditUnavailableError) return auditUnavailable(c);
   if (err instanceof BodyTooLargeError) return c.json({ error: 'body_too_large' }, 413);
   console.error(err);
   return c.html(
@@ -186,9 +210,13 @@ export default {
   // today the jobs feature. With no handler registered a message is simply
   // acknowledged, which is what a build without a durable runner should do.
   async queue(batch: MessageBatch<unknown>, env: WorkerEnv): Promise<void> {
+    const sessionEnv = withD1Sessions(env);
+    await assertRegulatedReady(sessionEnv, featureInstalled('audit'));
+    // Reject before claiming jobs or acknowledging a batch, including when the
+    // jobs feature is absent. Operators must pause/drain consumers for rollout.
+    assertRegulatedWritesAllowed(sessionEnv);
     const handle = coreExtensions().handleQueueMessage;
     if (!handle) return;
-    const sessionEnv = withD1Sessions(env);
     for (const message of batch.messages) {
       await handle(sessionEnv, message.body);
     }
@@ -200,8 +228,12 @@ export default {
   // POST /__cms/ingest/submissions.
   async scheduled(_controller: ScheduledController, env: WorkerEnv, _ctx: ExecutionContext): Promise<void> {
     const sessionEnv = withD1Sessions(env);
-    const result = await ingestSubmissions(sessionEnv);
-    if (result.scanned) console.log('submission ingest:', JSON.stringify(result));
+    await runFeatureMonitoringWork(sessionEnv);
+    await assertRegulatedReady(sessionEnv, featureInstalled('audit'));
+    if (!regulatedWritesBlocked(sessionEnv)) {
+      const result = await ingestSubmissions(sessionEnv);
+      if (result.scanned) console.log('submission ingest:', JSON.stringify(result));
+    }
     // Cron work owned by installed features (today, the credit subscription
     // sweep) is composed through the generated feature-service registry.
     for (const featureWork of await runFeatureScheduledWork(sessionEnv)) {

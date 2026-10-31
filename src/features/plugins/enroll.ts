@@ -27,6 +27,8 @@ import type { PluginManifest, ResolvedPlugin } from './types';
 import { getSetting, saveSetting } from '../../core/db/settings';
 import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
 import { pluginTenantId, timingSafeEqualStr } from './proxy';
+import type { AuditActor } from '../../core/db/audit';
+import { auditPluginManagement } from './disclosure-audit';
 
 /** How long a minted enrollment ticket stays redeemable. */
 export const ENROLL_TTL_MS = 5 * 60_000;
@@ -47,8 +49,8 @@ interface PendingEnrollment {
   url: string;
   /** Epoch ms after which the ticket is dead. */
   exp: number;
-  /** Admin who pressed Connect (audit trail). */
-  by: string;
+  /** Initiator retained across the plugin's single-use callback. */
+  actor?: AuditActor;
 }
 
 /** True when a manifest advertises host-initiated tenant enrollment. */
@@ -81,14 +83,11 @@ function generateTicket(): string {
 }
 
 /**
- * Condenses a plugin's error response into one audit-log line. The body is
- * plugin-controlled text landing in stored records, so it is stripped of
- * control characters and hard-capped rather than logged verbatim.
+ * Error bodies may echo credentials or config values. Retain status only.
  */
 async function failureDetail(response: Response): Promise<string> {
-  const body = await response.text().catch(() => '');
-  const clean = body.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
-  return `${response.status}${clean ? ` ${clean}` : ''}`;
+  await response.body?.cancel();
+  return String(response.status);
 }
 
 /** Outcome codes surfaced to the admin as a flash message. */
@@ -98,13 +97,15 @@ export type EnrollCode =
   | 'not-supported'
   | 'no-secret'
   | 'unreachable'
+  | 'audit-unavailable'
   | 'rejected';
 
 export interface EnrollResult {
   ok: boolean;
   code: EnrollCode;
-  /** Plugin-reported detail, for the audit log only (never a secret). */
+  /** Status only; never a plugin-controlled response body. */
   detail?: string;
+  auditUnavailable?: boolean;
 }
 
 /**
@@ -114,7 +115,7 @@ export interface EnrollResult {
 export async function enrollPluginTenant(
   env: Env,
   plugin: ResolvedPlugin,
-  actorEmail: string,
+  actor: AuditActor,
 ): Promise<EnrollResult> {
   // The tenant id IS this CMS's canonical origin; without it the plugin has no
   // origin to call back to and nothing can be verified.
@@ -122,13 +123,15 @@ export async function enrollPluginTenant(
   if (!tenantId) return { ok: false, code: 'no-canonical-origin' };
   if (!manifestAllowsAutoTenant(plugin.manifest)) return { ok: false, code: 'not-supported' };
   if (!plugin.apiSecret) return { ok: false, code: 'no-secret' };
+  try { await auditPluginManagement(env, plugin.manifest.id, 'enroll', actor); }
+  catch { return { ok: false, code: 'audit-unavailable' }; }
 
   const ticket = generateTicket();
   const pending: PendingEnrollment = {
     hash: await sha256Hex(ticket),
     url: plugin.binding,
     exp: Date.now() + ENROLL_TTL_MS,
-    by: actorEmail,
+    actor,
   };
   await saveSetting(env, enrollmentKey(plugin.manifest.id), JSON.stringify(pending));
 
@@ -144,10 +147,10 @@ export async function enrollPluginTenant(
         ...(tenantVars.length ? { tenant_vars: tenantVars } : {}),
       }),
     });
-    if (response.ok) return { ok: true, code: 'connected' };
+    if (response.ok) { await response.body?.cancel(); return { ok: true, code: 'connected' }; }
     return { ok: false, code: 'rejected', detail: await failureDetail(response) };
   } catch (error) {
-    console.error(`Plugin ${plugin.binding} enrollment failed:`, error);
+    console.error('Plugin enrollment transport failed', { plugin: plugin.manifest.id });
     return { ok: false, code: 'unreachable' };
   } finally {
     // Whether the plugin redeemed it or not, the window closes with the
@@ -160,19 +163,23 @@ export async function enrollPluginTenant(
  * Asks the plugin to drop this CMS's tenant record. Authenticated with the
  * pairwise secret, so it can only ever remove our own row.
  */
-export async function revokePluginTenant(env: Env, plugin: ResolvedPlugin): Promise<EnrollResult> {
+export async function revokePluginTenant(env: Env, plugin: ResolvedPlugin,
+  actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: 'system:plugin-revoke' },
+): Promise<EnrollResult> {
   if (!plugin.apiSecret) return { ok: false, code: 'no-secret' };
   const headers = new Headers({ 'x-plugin-secret': plugin.apiSecret });
   const tenantId = pluginTenantId(env);
   if (tenantId) headers.set('x-cms-tenant', tenantId);
+  const audited = await auditPluginManagement(env, plugin.manifest.id, 'revoke', actor, true);
+  const warning = audited ? {} : { auditUnavailable: true };
 
   try {
     const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${REVOKE_PATH}`, { method: 'POST', headers });
-    if (response.ok) return { ok: true, code: 'connected' };
-    return { ok: false, code: 'rejected', detail: await failureDetail(response) };
+    if (response.ok) { await response.body?.cancel(); return { ok: true, code: 'connected', ...warning }; }
+    return { ok: false, code: 'rejected', detail: await failureDetail(response), ...warning };
   } catch (error) {
-    console.error(`Plugin ${plugin.binding} revoke failed:`, error);
-    return { ok: false, code: 'unreachable' };
+    console.error('Plugin revocation transport failed', { plugin: plugin.manifest.id });
+    return { ok: false, code: 'unreachable', ...warning };
   }
 }
 
@@ -182,6 +189,7 @@ async function clearPendingEnrollment(env: Env, pluginId: string): Promise<void>
 
 export interface ClaimedEnrollment {
   url: string;
+  actor?: AuditActor;
 }
 
 /**
@@ -222,5 +230,5 @@ export async function claimEnrollmentTicket(
     .first<{ key: string }>();
   if (!claimed) return null;
 
-  return { url: pending.url };
+  return { url: pending.url, ...(pending.actor ? { actor: pending.actor } : {}) };
 }

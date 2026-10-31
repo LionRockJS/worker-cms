@@ -4,6 +4,16 @@ Publishing fans a draft-page snapshot out to the targets configured in
 `PUBLISH_TARGETS` (default `d1`). See `index.ts` for the registry and
 `adapter.ts` for the adapter contract.
 
+Registry publication entry points enforce regulated write containment before
+source reads/snapshot assembly/adapter discovery, and the shared transfer audit
+checks it again before preparation and after awaited evidence persistence for
+each target/chunk. Bulk deployment refusal uses
+`refusedReason: 'writes_unavailable'`, independently of record-level PHI/submission refusals.
+Adapter methods are storage primitives; production publication must use the
+registry wrappers. Withdrawal remains a distinct containment path. These
+checks do not supply persistent schema/destination approvals or durable
+mutation/delivery receipts; see the regulated-profile runbook.
+
 ## Naming
 
 Both databases call the table `pages` — same name, same shape — so a published
@@ -76,3 +86,45 @@ Invariants the ingest and publish paths preserve:
   page-version history (`ingest-submission` or `pull-published`) records their
   origin, so `publishPageToTargets` and `unpublishPageFromTargets` can refuse
   them without changing the page schema; page type is irrelevant.
+
+## Administrative live reads
+
+Production callers use `getLiveLect`, `liveMapForDraftPages` and `listLiveByTypes`
+from the publish registry. These wrappers announce classified source reads in
+HTTP and await them outside HTTP, retaining an explicit actor for contributor
+and queued work. Adapter read methods are storage primitives; calling them
+directly bypasses those wrappers.
+
+Contributor live-status endpoints also check their current read scope against
+the actual live type. Approval for a draft type does not grant access to a live
+copy of a different type; revoked/missing source approval withholds the result.
+
+`LivePageSnapshot.page_type` is the actual source type (`null` means the default
+type). `taxonomy_slugs` is the complete source taxonomy set; an empty array
+means no associations and `undefined` means unverifiable provenance. D1 derives
+it from its own published tag catalogue in the same query. R2 retains
+`taxonomy_slug` on each tag in newly published objects, using the snapshot's
+catalogue rather than the current draft catalogue.
+
+Direct D1 dashboard, manual-pull and ingestion reads reuse `readD1PageSource`
+to capture type/taxonomy provenance with the source rows. This is a storage
+primitive: dashboard callers pass its provenance to `auditLiveReads`; copy
+producers persist `liveSourceReads` through the existing background audit
+pipeline before materialization and floor propagation. Query-only provenance
+is returned separately from the requested row projection. Source deletion or
+retagging before auditing cannot erase the captured taxonomy set.
+
+Missing type provenance is refused when page-type policies apply; missing
+taxonomy provenance is refused when taxonomy policies apply. The regulated
+profile requires both. Orphan associations and malformed R2 page documents are
+withheld. Older R2 objects without tag provenance may therefore need containment
+or removal. Rebuild provenance only from verified, approved non-PHI sources;
+the existing PHI publication denial still applies. Do not infer historical
+provenance from current draft tags or an unrelated D1 database.
+
+Live reads also apply retained UUID sensitivity, and publication consults that
+floor before sending a snapshot. Classification reductions and lower-class
+retyping are contained until governed declassification exists. See the
+[sensitivity floor upgrade and evidence boundaries](../../../docs/sensitivity-floors.md),
+including historical associations already erased before installation and
+copies outside this host's read path.

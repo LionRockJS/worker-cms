@@ -288,7 +288,7 @@ describe('r2 adapter', () => {
     const document = (await object!.json()) as Record<string, unknown>;
     expect(document.slug).toBe('hello');
     expect(document.lect).toEqual({ name: { en: 'Hello' } });
-    expect(document.tags).toEqual([{ uuid: 'tag-link-uuid', tag_id: 42, weight: 1, slug: 'news', name: 'News' }]);
+    expect(document.tags).toEqual([{ uuid: 'tag-link-uuid', tag_id: 42, weight: 1, slug: 'news', name: 'News', taxonomy_slug: 'category' }]);
 
     const index = await env.MEDIA_BUCKET!.get('publish-test/index.json');
     const parsedIndex = (await index!.json()) as { pages: Array<{ uuid: string; page_type: string | null }> };

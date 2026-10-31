@@ -2,23 +2,23 @@
 // Container classification.
 //
 // Which containers hold regulated data, and therefore which reads are recorded.
-// Classification is per *container* — a page type, an R2 key prefix, a
-// contributor, a table — never per row: a row-level test fails the moment a
-// container that was clean starts holding regulated data, and it gives no
-// defensible answer to "which systems contain ePHI?".
+// Classification is per container. Persistent container floors retain the
+// highest assigned class; derived UUID floors preserve it when records move
+// or lose associations. They are retention safeguards, not row-by-row labels.
 //
 // Core owns this even though `runtime-content-types` is where database page
 // types live, because that feature is optional and the compiled base types in
 // content-config.ts exist without it. Classification has to work in either
 // profile.
 //
-// Resolved once per request and cached alongside the role map. An empty table
-// means every lookup misses, which is exactly what an install with no
-// regulated data should pay for read logging: one query, no rows written.
+// Resolved once per request and cached alongside the role map. Empty policy
+// and floor tables keep an unclassified install inert: one query, no audit rows.
 // ============================================================
 
 import type { Env } from '../../types';
 import { requestContext } from '../http/request-context';
+import { recordAuditOutage } from './audit-outages';
+import { sensitivitySchemaFailureSql } from './sensitivity';
 
 export type ContainerKind = 'page_type' | 'taxonomy' | 'media_prefix' | 'plugin' | 'table';
 export type DataClass = 'pii' | 'phi';
@@ -37,8 +37,7 @@ export interface DataClassRow {
   created_at: string;
 }
 
-/** Exact matches keyed `kind:key`, plus the prefix entries kept in order so the
- *  longest (most specific) prefix wins. */
+/** Exact matches keyed `kind:key`, plus retained media prefixes. */
 export interface DataClassMap {
   exact: Map<string, DataClass>;
   prefixes: Array<{ key: string; class: DataClass }>;
@@ -58,13 +57,15 @@ function isDataClass(value: string): value is DataClass {
 }
 
 /** Resolves the classification map, cached for the rest of this request. */
-export async function resolveDataClasses(env: Env): Promise<DataClassMap> {
+export async function resolveDataClasses(env: Env, fresh = false, reportFailure = true): Promise<DataClassMap> {
   const context = requestContext.getStore();
-  if (context?.dataClasses) return context.dataClasses;
+  if (!fresh && context?.dataClasses) return context.dataClasses;
   if (!env.DB) return EMPTY;
 
   let ok = true;
-  const rows = await env.DB.prepare('SELECT container_kind, container_key, class FROM data_classes')
+  const rows = await env.DB.prepare(`SELECT container_kind, container_key, class FROM data_classes
+    UNION ALL SELECT container_kind, container_key, CASE level WHEN 2 THEN 'phi' WHEN 1 THEN 'pii' ELSE 'invalid' END AS class FROM data_class_floors
+    UNION ALL SELECT 'table', 'sensitivity_schema', 'invalid' WHERE ${sensitivitySchemaFailureSql}`)
     .all<{ container_kind: string; container_key: string; class: string }>()
     // Preserve the failure state so reads and publication can fail closed.
     .catch((error) => {
@@ -74,20 +75,29 @@ export async function resolveDataClasses(env: Env): Promise<DataClassMap> {
     });
 
   const map: DataClassMap = { exact: new Map(), prefixes: [], size: 0, ok };
+  const effective = new Map<string, { kind: ContainerKind; key: string; class: DataClass }>();
   for (const row of rows.results) {
     if (!isDataClass(row.class) || !CONTAINER_KINDS.includes(row.container_kind as ContainerKind) || !row.container_key.trim()) {
       map.ok = false;
       continue;
     }
-    map.size += 1;
-    if (row.container_kind === 'media_prefix') {
-      map.prefixes.push({ key: row.container_key, class: row.class });
+    const id = `${row.container_kind}:${row.container_key}`;
+    const previous = effective.get(id);
+    if (!previous || row.class === 'phi') effective.set(id, { kind: row.container_kind as ContainerKind, key: row.container_key, class: row.class });
+  }
+  for (const row of effective.values()) {
+    map.size++;
+    if (row.kind === 'media_prefix') {
+      map.prefixes.push({ key: row.key, class: row.class });
     } else {
-      map.exact.set(`${row.container_kind}:${row.container_key}`, row.class);
+      map.exact.set(`${row.kind}:${row.key}`, row.class);
     }
   }
-  // Longest prefix first, so 'upload/records/private/' beats 'upload/'.
+  // Stable specificity order for grouped evidence; protection uses the highest
+  // matching class so a narrower prefix cannot lower an older PHI boundary.
   map.prefixes.sort((a, b) => b.key.length - a.key.length);
+
+  if (!map.ok && reportFailure) await recordAuditOutage(env, 'classification');
 
   if (context) context.dataClasses = map;
   return map;
@@ -102,7 +112,8 @@ export function clearDataClassCache(): void {
 /** The class of one container, or null when it is not classified. */
 export function classFor(map: DataClassMap, kind: ContainerKind, key: string): DataClass | null {
   if (kind === 'media_prefix') {
-    return map.prefixes.find((entry) => key.startsWith(entry.key))?.class ?? null;
+    const matches = map.prefixes.filter(entry => key.startsWith(entry.key));
+    return matches.some(entry => entry.class === 'phi') ? 'phi' : matches.length ? 'pii' : null;
   }
   return map.exact.get(`${kind}:${key}`) ?? null;
 }

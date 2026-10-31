@@ -33,6 +33,7 @@ import type { BaseTemplateProps, SidebarNavItem } from './layout';
 import { withActiveSidebarItems } from './sidebar';
 import { localeRegistry, resolveUiLocale } from '../i18n';
 import { featureInstalled, features } from '../../features';
+import { recordContributorReads, recordTableReads } from '../http/access-log';
 
 /**
  * Builds the template props shared by every authenticated admin page:
@@ -41,6 +42,7 @@ import { featureInstalled, features } from '../../features';
  */
 export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> {
   const user = c.get('user');
+  recordTableReads('user.chrome-read', 'users', [user.sub]);
   const userRoles = user.role.split(',').map((role) => role.trim()).filter(Boolean);
   const fallbackSiteTitle = c.env.SITE_TITLE ?? '0xCMS';
   const requestUrl = new URL(c.req.url);
@@ -68,6 +70,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   const visible = navItems
     .filter((item) => !item.roles?.length || item.roles.some((role) => userRoles.includes(role)))
     .filter((item) => isAdmin || (item.permissions?.some((permission) => permissions.has(permission as Permission)) ?? false));
+  recordContributorReads('plugin.navigation-read', visible.map(item => item.pluginId));
   // Plugins that do not ship locale catalogs (manifest `i18n: true`) get no
   // translation key at all: the sidebar renders their manifest label directly
   // instead of asking the client for a key that can never resolve.

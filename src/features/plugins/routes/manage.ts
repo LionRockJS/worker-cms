@@ -11,7 +11,11 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../../../types';
 import { requirePermission } from '../../../core/auth/guards';
 import { renderPage } from '../../../core/render/chrome';
-import { logAudit } from '../../../core/db/audit';
+import { contextActor, logAudit } from '../../../core/db/audit';
+import { auditUnavailable } from '../../../core/http/access-log';
+import { auditPluginManagement } from '../disclosure-audit';
+import { recordContributorReads, recordMetadataReads, recordTableReads } from '../../../core/http/access-log';
+import { listIdentityApprovals } from '../identity';
 import { str, num } from '../../../core/http/forms';
 import { getPlugins, clearManifestCache, pluginIdentityStates } from '../registry';
 import { clearConfigCache } from '../../../core/db/content-config';
@@ -221,6 +225,9 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
     getPlugins(c.env),
     pluginIdentityStates(c.env),
   ]);
+  recordTableReads('plugin.registry-list', 'plugins', rows.map(row => row.id));
+  recordMetadataReads('plugin.identity-read', 'plugin_identity_approvals', identities.filter(state => state.pinnedId).map(state => state.rowId));
+  recordContributorReads('plugin.metadata-read', [...resolved.map(plugin => plugin.manifest.id), ...identities.flatMap(state => state.pinnedId ? [state.pinnedId] : [])]);
   // resolved plugins are keyed by their base URL (ResolvedPlugin.binding).
   const byUrl = new Map(resolved.map((p) => [p.binding, p]));
   // A plugin held back over its identity is reachable but deliberately not
@@ -304,11 +311,15 @@ pluginsManageRoutes.post('/plugins-manage', async (c) => {
 
 pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
+  const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row: plugin, resolved } = found;
   const tenantId = pluginTenantId(c.env);
   const tenantVarNames = manifestTenantVars(resolved?.manifest);
+  if (resolved && tenantId && tenantVarNames.length && (resolved.apiSecret || resolved.secret)) {
+    try { await auditPluginManagement(c.env, resolved.manifest.id, 'tenant-config-read', contextActor(c)); }
+    catch { return auditUnavailable(c); }
+  }
   const tenantConfig = await readPluginTenantConfig(resolved, tenantId, tenantVarNames);
   const identity = (await pluginIdentityStates(c.env)).find((state) => state.rowId === id);
   return renderPage(c, pluginFormPage, {
@@ -360,6 +371,8 @@ pluginsManageRoutes.post('/plugins-manage/:id/tenant-config', async (c) => {
     vars[name] = value === '' ? null : value;
   }
 
+  try { await auditPluginManagement(c.env, resolved.manifest.id, 'tenant-config-write', contextActor(c)); }
+  catch { return auditUnavailable(c); }
   try {
     const response = await resolved.fetcher.fetch(`${PLUGIN_ORIGIN}${TENANT_CONFIG_PATH}`, {
       method: 'PUT',
@@ -371,6 +384,7 @@ pluginsManageRoutes.post('/plugins-manage/:id/tenant-config', async (c) => {
       body: JSON.stringify({ vars }),
     });
     const ok = response.ok;
+    await response.body?.cancel();
     logAudit(c, 'plugin.tenant.config', 'plugin', plugin.url, {
       ok,
       keys: Object.keys(vars),
@@ -378,7 +392,7 @@ pluginsManageRoutes.post('/plugins-manage/:id/tenant-config', async (c) => {
     });
     return c.redirect(`/admin/plugins-manage/${id}/edit?flash=${ok ? 'tenant-config-saved' : 'tenant-config-failed'}`);
   } catch (error) {
-    console.error(`Plugin ${plugin.url} tenant config update failed:`, error);
+    console.error('Plugin tenant config update failed', { plugin: resolved.manifest.id });
     logAudit(c, 'plugin.tenant.config', 'plugin', plugin.url, { ok: false, keys: Object.keys(vars) });
     return c.redirect(`/admin/plugins-manage/${id}/edit?flash=tenant-config-failed`);
   }
@@ -396,7 +410,8 @@ pluginsManageRoutes.post('/plugins-manage/:id/connect', async (c) => {
   const { row, resolved } = found;
   if (!resolved) return c.redirect(`/admin/plugins-manage/${id}/edit?flash=connect-unreachable`);
 
-  const result = await enrollPluginTenant(c.env, resolved, c.get('user').email);
+  const result = await enrollPluginTenant(c.env, resolved, contextActor(c));
+  if (result.code === 'audit-unavailable') return auditUnavailable(c);
   if (result.ok) {
     // Enrollment changes the plugin's effective connection state outside D1.
     // Treat it like enable/disable: discard the resolved registry/config
@@ -420,10 +435,11 @@ pluginsManageRoutes.post('/plugins-manage/:id/disconnect', async (c) => {
   const { row, resolved } = found;
   if (!resolved) return c.redirect(`/admin/plugins-manage/${id}/edit?flash=disconnect-unreachable`);
 
-  const result = await revokePluginTenant(c.env, resolved);
+  const result = await revokePluginTenant(c.env, resolved, contextActor(c));
   logAudit(c, 'plugin.tenant.disconnect', 'plugin', row.url, {
     ok: result.ok,
     code: result.code,
+    ...(result.auditUnavailable ? { audit_unavailable: true } : {}),
     ...(result.detail ? { detail: result.detail } : {}),
   });
   return c.redirect(`/admin/plugins-manage/${id}/edit?flash=${enrollFlash('disconnect', result)}`);
@@ -442,7 +458,8 @@ pluginsManageRoutes.post('/plugins-manage/:id/rotate-secret', async (c) => {
   // admin is left with a plugin that 403s until they remember to reconnect.
   const resolved = (await getPlugins(c.env)).find((candidate) => candidate.binding === plugin.url);
   if (resolved && manifestAllowsAutoTenant(resolved.manifest)) {
-    const result = await enrollPluginTenant(c.env, resolved, c.get('user').email);
+    const result = await enrollPluginTenant(c.env, resolved, contextActor(c));
+    if (result.code === 'audit-unavailable') return auditUnavailable(c);
     logAudit(c, 'plugin.tenant.connect', 'plugin', plugin.url, {
       ok: result.ok,
       code: result.code,
@@ -563,16 +580,23 @@ pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
 // assets); nothing runs in CMS chrome until an admin explicitly approves a
 // path here, pinning its content hash. See utils/plugin-assets.ts.
 
-async function resolvedPluginFor(env: Env, id: number) {
+async function resolvedPluginFor(env: Env, id: number, announce = false) {
   const row = await getPlugin(env.DB, id);
   if (!row) return null;
   const resolved = (await getPlugins(env)).find((plugin) => plugin.binding === row.url);
+  if (announce) {
+    recordMetadataReads('plugin.registry-read', 'plugins', [row.id]);
+    const identity = (await listIdentityApprovals(env.DB)).find(identity => identity.plugin_row_id === id);
+    recordMetadataReads('plugin.identity-read', 'plugin_identity_approvals', identity ? [id] : []);
+    const sourceId = resolved?.manifest.id ?? identity?.manifest_id;
+    if (sourceId) recordContributorReads('plugin.metadata-read', [sourceId]);
+  }
   return { row, resolved };
 }
 
 pluginsManageRoutes.get('/plugins-manage/:id/assets', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
+  const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
   if (!resolved) {
@@ -587,6 +611,14 @@ pluginsManageRoutes.get('/plugins-manage/:id/assets', async (c) => {
 
   const declared = resolved.manifest.assets ?? [];
   const approvals = new Map((await listApprovals(c.env.DB, resolved.manifest.id)).map((a) => [a.path, a]));
+  recordMetadataReads('plugin.asset-approvals-read', 'plugin_asset_approvals', [...approvals.keys()].map(path => `${resolved.manifest.id}:${path}`));
+
+  // Approval inspection fetches manifest-declared resources from the plugin.
+  // Gate the exchange before starting any of the parallel requests.
+  if (declared.length) {
+    try { await auditPluginManagement(c.env, resolved.manifest.id, 'asset-inspect', contextActor(c)); }
+    catch { return auditUnavailable(c); }
+  }
 
   const assets = await Promise.all(declared.map(async (asset) => {
     const approval = approvals.get(asset.path);
@@ -634,6 +666,9 @@ pluginsManageRoutes.post('/plugins-manage/:id/assets/approve', async (c) => {
   const declared = (resolved.manifest.assets ?? []).some((asset) => asset.path === path);
   if (!declared) return c.text('Unknown asset path', 400);
 
+  try { await auditPluginManagement(c.env, resolved.manifest.id, 'asset-approve-fetch', contextActor(c)); }
+  catch { return auditUnavailable(c); }
+
   const upstream = await resolved.fetcher.fetch(`${PLUGIN_ORIGIN}${path}`);
   if (!upstream.ok) return c.redirect(`/admin/plugins-manage/${id}/assets?flash=fetch-failed`);
   const integrity = await computeIntegrity(await limitedBytes(upstream));
@@ -665,7 +700,7 @@ pluginsManageRoutes.post('/plugins-manage/:id/assets/revoke', async (c) => {
 
 pluginsManageRoutes.get('/plugins-manage/:id/files', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
+  const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
   if (!resolved) {
@@ -680,9 +715,14 @@ pluginsManageRoutes.get('/plugins-manage/:id/files', async (c) => {
 
   const declared = resolved.manifest.filePrefixes ?? [];
   const approvals = new Map((await listFilePrefixApprovals(c.env.DB, resolved.manifest.id)).map((approval) => [approval.prefix, approval]));
+  recordMetadataReads('plugin.file-approvals-read', 'plugin_file_prefix_approvals', [...approvals.keys()].map(prefix => `${resolved.manifest.id}:${prefix}`));
   const prefixes = await Promise.all(declared.map(async (prefix) => {
     const approval = approvals.get(prefix);
     const conflict = approval ? null : await findFilePrefixConflict(c.env.DB, resolved.manifest.id, prefix);
+    if (conflict) {
+      recordMetadataReads('plugin.file-approvals-read', 'plugin_file_prefix_approvals', [`${conflict.plugin_id}:${conflict.prefix}`]);
+      recordContributorReads('plugin.conflict-metadata-read', [conflict.plugin_id]);
+    }
     return {
       prefix,
       approved: !!approval,
@@ -766,7 +806,7 @@ function limitLabel(value: number | null): string {
 
 pluginsManageRoutes.get('/plugins-manage/:id/limits', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
+  const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
   if (!resolved) {
@@ -878,7 +918,7 @@ interface CreditPricingPayload {
 
 pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
+  const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
   if (!resolved) {
@@ -972,7 +1012,7 @@ function pageTypeAccess(value: string): PluginPageTypeAccess | null {
 
 pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
+  const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
   if (!resolved) {
@@ -1006,6 +1046,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
     }));
   const pageTypeNames = [...new Set([...readTypes, ...writeTypes])].sort();
   const approvals = await listPageTypeApprovals(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id);
+  recordMetadataReads('plugin.type-approvals-read', 'plugin_page_type_approvals', approvals.map(approval => `${approval.plugin_id}:${approval.page_type}:${approval.access}`));
   const approvalByKey = new Map(approvals.map((approval) => [`${approval.page_type}:${approval.access}`, approval]));
 
   const pageTypes = pageTypeNames.map((pageType) => {

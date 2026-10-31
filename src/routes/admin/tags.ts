@@ -1,3 +1,4 @@
+import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // Tag and taxonomy management.
 
 import { Hono } from 'hono';
@@ -22,7 +23,7 @@ import {
 } from '../../core/http/forms';
 import type { FormValue } from '../../core/http/forms';
 import { ensureDefaultLectName } from '../../core/db/page-logic';
-import { logAudit } from '../../core/db/audit';
+import { contextActor, logAudit } from '../../core/db/audit';
 import { requirePermission } from '../../core/auth/guards';
 import { publishTagToTargets, publishTagsToTargets, removeTagFromTargets } from '../../core/publish';
 import { renderPage } from '../../core/render/chrome';
@@ -52,6 +53,7 @@ tagsRoutes.get('/taxonomies', async (c) => {
     name: config.taxonomies[taxonomy.slug] ?? taxonomy.name,
   }));
 
+  recordTaxonomyReads('taxonomy.list', [...dbTaxonomies.results, ...configTaxonomies]);
   return renderPage(c, taxonomiesPage, {
     dbTaxonomies: dbTaxonomies.results,
     configTaxonomies,
@@ -111,7 +113,7 @@ tagsRoutes.post('/taxonomies/:id', requirePermission('taxonomy:write'), async (c
     await c.env.DB.prepare('UPDATE tags SET taxonomy_slug = ? WHERE taxonomy_slug = ?')
       .bind(slug, existing.slug)
       .run();
-    await publishTagsToTargets(c.env, moved);
+    await publishTagsToTargets(c.env, moved, contextActor(c));
   }
   logAudit(c, 'taxonomy.update', 'taxonomy', id, { name, slug });
   return c.redirect('/admin/taxonomies');
@@ -126,7 +128,7 @@ tagsRoutes.post('/taxonomies/:id/delete', requirePermission('taxonomy:write'), a
   const orphaned = await tagIdsInTaxonomy(c.env.DB, taxonomy.slug);
   await c.env.DB.prepare('UPDATE tags SET taxonomy_slug = NULL WHERE taxonomy_slug = ?').bind(taxonomy.slug).run();
   await c.env.DB.prepare('DELETE FROM taxonomies WHERE id = ?').bind(id).run();
-  await publishTagsToTargets(c.env, orphaned);
+  await publishTagsToTargets(c.env, orphaned, contextActor(c));
   logAudit(c, 'taxonomy.delete', 'taxonomy', id);
   return c.redirect('/admin/taxonomies');
 });
@@ -140,6 +142,7 @@ tagsRoutes.get('/tags', async (c) => {
     listTags(c.env.DB, filterTaxonomy),
     userCan(c, 'tag:write'),
   ]);
+  recordTagReads('tag.list', tags);
   return renderPage(c, tagsPage, {
     taxonomies,
     tags,
@@ -177,7 +180,7 @@ tagsRoutes.post('/tags/batch-weight', requirePermission('tag:write'), async (c) 
 
   // Weight is the order published readers group by, so reordering has to reach
   // the targets the same way a rename does.
-  await publishTagsToTargets(c.env, updates.map((update) => Number(update.id)));
+  await publishTagsToTargets(c.env, updates.map((update) => Number(update.id)), contextActor(c));
 
   return c.json({ success: true });
 });
@@ -186,9 +189,13 @@ tagsRoutes.post('/tags/batch-weight', requirePermission('tag:write'), async (c) 
 // the catalogue existed has tag links whose ids resolve to nothing there; edits
 // push one tag at a time, this pushes the lot.
 tagsRoutes.post('/tags/sync-published', requirePermission('tag:write'), async (c) => {
-  const outcome = await publishTagsToTargets(c.env);
+  const outcome = await publishTagsToTargets(c.env, undefined, contextActor(c));
   logAudit(c, 'tag.sync-published', 'tag', undefined, { count: outcome.count, failures: outcome.failures });
-  const status = outcome.failures.length ? `error=${encodeURIComponent(outcome.failures.join(','))}` : `synced=${outcome.count}`;
+  const error = outcome.refusedReason === 'writes_unavailable' ? 'Publication is unavailable while regulated writes are contained'
+    : outcome.refusedReason === 'classification_unavailable' ? 'Tag classification unavailable'
+    : outcome.refusedCount ? `${outcome.refusedCount} regulated tags withheld`
+    : outcome.failures.join(',');
+  const status = error ? `error=${encodeURIComponent(error)}` : `synced=${outcome.count}`;
   return c.redirect(`/admin/tags?${status}`);
 });
 
@@ -208,7 +215,7 @@ tagsRoutes.post('/tags', requirePermission('tag:write'), async (c) => {
   )
     .bind(name, slug, weight, taxonomySlug, parentTagId, stringifyLect(lect))
     .run();
-  await publishTagToTargets(c.env, result.meta.last_row_id);
+  await publishTagToTargets(c.env, result.meta.last_row_id, contextActor(c));
   logAudit(c, 'tag.create', 'tag', result.meta.last_row_id, { name, slug, weight, taxonomySlug });
   return c.redirect('/admin/tags');
 });
@@ -239,7 +246,7 @@ tagsRoutes.post('/tags/:id', requirePermission('tag:write'), async (c) => {
   )
     .bind(name, slug, weight, taxonomySlug, parentTagId, stringifyLect(lect), id)
     .run();
-  await publishTagToTargets(c.env, id);
+  await publishTagToTargets(c.env, id, contextActor(c));
   logAudit(c, 'tag.update', 'tag', id, { name, slug, weight, taxonomySlug });
   return c.redirect('/admin/tags');
 });
@@ -248,7 +255,7 @@ tagsRoutes.post('/tags/:id/delete', requirePermission('tag:write'), async (c) =>
   const id = parseInt(c.req.param('id'), 10);
   await Promise.all([
     c.env.DB.prepare('DELETE FROM page_tags WHERE tag_id = ?').bind(id).run(),
-    removeTagFromTargets(c.env, id),
+    removeTagFromTargets(c.env, id, contextActor(c)),
     c.env.DB.prepare('DELETE FROM trash_page_tags WHERE tag_id = ?').bind(id).run(),
     c.env.DB.prepare('UPDATE tags SET parent_tag = NULL WHERE parent_tag = ?').bind(id).run(),
   ]);
@@ -258,6 +265,7 @@ tagsRoutes.post('/tags/:id/delete', requirePermission('tag:write'), async (c) =>
 });
 
 async function taxonomyForm(c: AppContext, taxonomy?: TaxonomyFormData, readOnly = false) {
+  if (taxonomy) recordTaxonomyReads('taxonomy.read', [taxonomy]);
   return renderPage(c, taxonomyFormPage, {
     taxonomy,
     readOnly,
@@ -329,6 +337,7 @@ async function tagTaxonomyOptions(c: AppContext): Promise<TagTaxonomyOption[]> {
       : 'config',
   }));
 
+  recordTaxonomyReads('taxonomy.options', [...dbTaxonomies.results, ...configTaxonomies.map(row => ({ slug: row.id }))]);
   return [
     ...dbTaxonomies.results.map((taxonomy) => ({
       id: taxonomy.slug,
@@ -344,6 +353,7 @@ async function tagForm(c: AppContext, tag?: Tag) {
     resolveCmsConfig(c.env),
   ]);
   const language = languageFromRequest(c, undefined, config);
+  if (tag) recordTagReads('tag.read', [tag]);
   const lect = safeParseLect(tag?.lect);
   const rawTranslatedName = getLectLocalizedValue(lect, 'name', language);
   const translatedName = language === config.defaultLanguage ? rawTranslatedName || tag?.name || '' : rawTranslatedName;
@@ -351,10 +361,11 @@ async function tagForm(c: AppContext, tag?: Tag) {
   const translatedPlaceholder = language === config.defaultLanguage ? '' : defaultTranslatedName;
   const selectedParent = { id: '', label: '' };
   if (tag?.parent_tag) {
-    const parent = await c.env.DB.prepare('SELECT id, name, lect FROM tags WHERE id = ?')
+    const parent = await c.env.DB.prepare('SELECT id, name, lect, taxonomy_slug FROM tags WHERE id = ?')
       .bind(tag.parent_tag)
       .first<Tag>();
     if (parent) {
+      recordTagReads('tag.parent-option', [parent]);
       selectedParent.id = String(parent.id);
       selectedParent.label = getLectLocalizedValue(safeParseLect(parent.lect), 'name', config.defaultLanguage) || parent.name;
     }

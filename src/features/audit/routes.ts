@@ -10,11 +10,16 @@ import { archiveHealth, reviewSignals } from './signals';
 import type { Env, Variables } from '../../types';
 import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
-import { logAudit } from '../../core/db/audit';
+import { contextActor, logAudit, writeAuditRows } from '../../core/db/audit';
+import { auditUnavailable, recordRead, recordTableReads } from '../../core/http/access-log';
+import { outageEnabled } from '../../core/db/audit-outages';
+import { outagePage, readOutage, reconcileOutage, type OutageReview } from './outages';
 import {
   CONTAINER_KINDS,
   DATA_CLASSES,
   clearDataClassCache,
+  classFor,
+  resolveDataClasses,
   type ContainerKind,
   type DataClass,
   type DataClassRow,
@@ -39,6 +44,8 @@ function oneOf(value: string | undefined, allowed: string[]): string {
 }
 
 interface AuditEventRow {
+  event_id: string;
+  data_class: DataClass | 'none';
   occurred_at: string;
   action: string;
   outcome: string;
@@ -81,7 +88,7 @@ auditRoutes.get('/audit', requirePermission('audit:read'), async (c) => {
   // bridges actor_user_id's TEXT affinity to users.id without giving up the
   // primary-key index on the users side.
   const rows = await c.env.DB.prepare(
-    `SELECT ae.occurred_at, ae.action, ae.outcome, ae.event_class, ae.actor_user_id, ae.actor_roles,
+    `SELECT ae.event_id, ae.data_class, ae.occurred_at, ae.action, ae.outcome, ae.event_class, ae.actor_user_id, ae.actor_roles,
             ae.acting_via, ae.source_ip, ae.target_type, ae.target_id, ae.target_count, ae.detail,
             u.name AS actor_name
        FROM audit_events ae
@@ -90,6 +97,12 @@ auditRoutes.get('/audit', requirePermission('audit:read'), async (c) => {
       ORDER BY ae.seq DESC
       LIMIT ? OFFSET ?`,
   ).bind(...params, pageSize, (currentPage - 1) * pageSize).all<AuditEventRow>();
+  recordTableReads('user.audit-actor-read', 'users', rows.results.filter(row => row.actor_name !== null && row.actor_user_id !== null).map(row => row.actor_user_id!));
+
+  for (const dataClass of ['none', 'pii', 'phi'] as const) {
+    const ids = rows.results.filter(row => row.data_class === dataClass).map(row => row.event_id);
+    if (ids.length) recordRead({ action: 'audit.events-read', kind: 'table', key: 'audit_events', targetType: 'audit_event', ids, count: ids.length, minimumClass: dataClass === 'none' ? undefined : dataClass });
+  }
 
   // dashboardPagination reads only the pagination block, and its third argument
   // carries the active filters into every page link (blank values are dropped).
@@ -125,8 +138,22 @@ auditRoutes.get('/audit', requirePermission('audit:read'), async (c) => {
 
 auditRoutes.get('/audit/classes', requirePermission('audit:read'), async (c) => {
   const rows = await c.env.DB.prepare(
-    'SELECT id, container_kind, container_key, class, note, created_at FROM data_classes ORDER BY container_kind, container_key',
+    `SELECT d.id, d.container_kind, d.container_key,
+      CASE WHEN f.level = 2 THEN 'phi' ELSE d.class END AS class, d.note, d.created_at
+     FROM data_classes d LEFT JOIN data_class_floors f ON f.container_kind = d.container_kind AND f.container_key = d.container_key
+     UNION ALL SELECT 0, f.container_kind, f.container_key, CASE f.level WHEN 2 THEN 'phi' ELSE 'pii' END,
+       'Retained classification; removal requires review.', '' FROM data_class_floors f
+       WHERE NOT EXISTS (SELECT 1 FROM data_classes d WHERE d.container_kind = f.container_kind AND d.container_key = f.container_key)
+     ORDER BY container_kind, container_key`,
   ).all<DataClassRow>();
+  const effective = await resolveDataClasses(c.env);
+  if (!effective.ok) return auditUnavailable(c);
+  for (const row of rows.results) row.class = classFor(effective, row.container_kind as ContainerKind, row.container_key) ?? row.class;
+  recordTableReads('audit.classes-read', 'data_classes', rows.results.filter(row => row.id > 0).map(row => row.id));
+  const retained = rows.results.filter(row => row.id === 0);
+  if (retained.length) recordRead({ action: 'audit.class-floors-read', kind: 'table', key: 'data_classes', targetType: 'data_class_floor',
+    ids: retained.map(row => `${row.container_kind}:${row.container_key}`), count: retained.length,
+    minimumClass: classFor(effective, 'table', 'data_class_floors') ?? undefined, detail: { source_table: 'data_class_floors' } });
 
   return renderPage(c, auditClassesPage, {
     classes: rows.results,
@@ -145,6 +172,11 @@ auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) =
   if (!CONTAINER_KINDS.includes(kind as ContainerKind) || !DATA_CLASSES.includes(dataClass as DataClass) || !key) {
     return c.redirect('/admin/audit/classes?flash=audit.flash.invalid');
   }
+  const effective = await resolveDataClasses(c.env, true);
+  if (!effective.ok) return auditUnavailable(c);
+  if (classFor(effective, kind as ContainerKind, key) === 'phi' && dataClass !== 'phi') {
+    return c.json({ error: 'Classification reduction requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
+  }
 
   // Re-classifying a container updates it rather than failing: an operator
   // correcting pii to phi should not have to delete the row first.
@@ -160,17 +192,12 @@ auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) =
 
 auditRoutes.post('/audit/classes/:id/delete', requirePermission('menu:manage'), async (c) => {
   const id = Number(c.req.param('id'));
+  if (id <= 0) return c.json({ error: 'Classification removal requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
   const row = await c.env.DB.prepare('SELECT container_kind, container_key FROM data_classes WHERE id = ?')
     .bind(id)
     .first<{ container_kind: string; container_key: string }>();
   if (!row) return c.redirect('/admin/audit/classes?flash=audit.flash.invalid');
-
-  await c.env.DB.prepare('DELETE FROM data_classes WHERE id = ?').bind(id).run();
-  clearDataClassCache();
-
-  // Declassifying stops reads being recorded, so the act itself is recorded.
-  logAudit(c, 'data_class.clear', 'settings', `${row.container_kind}:${row.container_key}`);
-  return c.redirect('/admin/audit/classes?flash=audit.flash.removed');
+  return c.json({ error: 'Classification removal requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
 });
 
 // ── Review ────────────────────────────────────────────────────────────────────
@@ -180,15 +207,52 @@ auditRoutes.post('/audit/classes/:id/delete', requirePermission('menu:manage'), 
 // that makes reviewing it a minute's work rather than a query-writing exercise.
 
 auditRoutes.get('/audit/review', requirePermission('audit:read'), async (c) => {
-  const [signals, health] = await Promise.all([
+  const [signals, health, outages] = await Promise.all([
     reviewSignals(c.env),
     archiveHealth(c.env),
+    outagePage(c.env, (c.req.query('outage_cursor') ?? '').slice(0, 2048) || undefined),
   ]);
+  for (const signal of signals) {
+    recordTableReads('user.audit-actor-read', 'users', signal.rows.flatMap(row => row.user_id == null ? [] : [row.user_id]));
+    if (!signal.rows.length) continue;
+    const minimumClass = signal.rows.some(row => row.data_class === 'phi') ? 'phi' : signal.rows.some(row => row.data_class === 'pii') ? 'pii' : undefined;
+    recordRead({ action: 'audit.signal-read', kind: 'table', key: 'audit_events', targetType: 'audit_signal', ids: [signal.id], count: signal.rows.length, minimumClass });
+  }
 
   // Opening the review is itself a read of the trail.
   logAudit(c, 'audit.review', 'audit', undefined, {
     flagged: signals.reduce((sum, signal) => sum + signal.rows.length, 0),
   });
 
-  return renderPage(c, auditReviewPage, { signals, health });
+  return renderPage(c, auditReviewPage, { signals, health, outages,
+    canReconcile: await userCan(c, 'menu:manage') });
+});
+
+auditRoutes.get('/audit/outages/:id', requirePermission('audit:read'), async (c) => {
+  if (!outageEnabled(c.env)) return c.notFound();
+  try {
+    const incident = await readOutage(c.env, c.req.param('id'));
+    if (!incident) return c.notFound();
+    const dataClass = incident.records.some(row => row.dataClass === 'phi') ? 'phi'
+      : incident.records.some(row => row.dataClass === 'pii') ? 'pii' : 'none';
+    await writeAuditRows(c, [{ action: 'audit.outage.read', eventClass: 'admin', dataClass,
+      retentionClass: dataClass === 'none' ? 'admin_config' : `${dataClass}_access`, outcome: 'success', targetType: 'audit_outage', targetId: incident.id,
+      targetIds: null, targetCount: 1, containerKey: null, queryFingerprint: null, detail: null,
+    }], contextActor(c), true);
+    return c.json(incident, 200, { 'Cache-Control': 'no-store' });
+  } catch { return auditUnavailable(c); }
+});
+
+auditRoutes.post('/audit/outages/:id/reconcile', requirePermission('audit:read'), requirePermission('menu:manage'), async (c) => {
+  const form = await c.req.formData();
+  try {
+    await reconcileOutage(c.env, c.req.param('id'), contextActor(c), {
+      disposition: String(form.get('disposition') ?? '') as OutageReview['disposition'],
+      evidenceRef: String(form.get('evidence_ref') ?? '').trim(),
+      evidenceSha256: String(form.get('evidence_sha256') ?? '').trim(),
+    });
+    return c.redirect('/admin/audit/review');
+  } catch {
+    return c.json({ error: 'Review not saved; verify evidence and retry after repair' }, 409, { 'Cache-Control': 'no-store' });
+  }
 });

@@ -158,12 +158,13 @@ describe('read logging', () => {
     expect((await adminFetch('/admin/pages/list/note?pagesize=100')).status).toBe(200);
 
     const rows = await env.DB.prepare(
-      "SELECT target_count, target_id, target_ids, action FROM audit_events WHERE event_class = 'read'",
+      "SELECT target_count, target_id, target_ids, action FROM audit_events WHERE action = 'page.list'",
     ).all<ReadRow>();
     expect(rows.results).toHaveLength(1);
     expect(rows.results[0]).toMatchObject({ action: 'page.list', target_count: 100, target_id: null });
     // Capped at 100 ids, with target_count staying authoritative.
     expect(JSON.parse(rows.results[0].target_ids ?? '[]')).toHaveLength(100);
+    await expect.poll(async () => env.DB.prepare("SELECT target_count FROM audit_events WHERE action = 'page.count'").first()).toEqual({ target_count: 120 });
   });
 
   it('records a search by fingerprint and never stores the terms', async () => {
@@ -180,15 +181,162 @@ describe('read logging', () => {
     );
     expect(response.status).toBe(200);
 
-    await readRows().toHaveLength(1);
+    await readRows().toHaveLength(2);
     const rows = (await env.DB.prepare(
       "SELECT action, query_fingerprint, detail, container_key, target_ids FROM audit_events WHERE event_class = 'read'",
     ).all<ReadRow>()).results;
-    expect(rows[0].action).toBe('page.search');
-    expect(rows[0].query_fingerprint).toMatch(/^[0-9a-f]{24}$/);
+    expect(rows.map(row => row.action).sort()).toEqual(['page.count', 'page.search']);
+    expect(rows.every(row => /^[0-9a-f]{24}$/.test(row.query_fingerprint ?? ''))).toBe(true);
     // The whole point of the fingerprint: a search string in a CMS holding
     // regulated data is frequently the identifier being searched for.
     expect(JSON.stringify(rows)).not.toContain(term);
+  });
+});
+
+describe('sensitive metadata lookups', () => {
+  it('audits sensitive taxonomy associations on otherwise public page metadata', async () => {
+    const [id] = await seedPages(1, 'article');
+    await env.DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (99, 'Sensitive', 'sensitive-tag', 'clinical')").run();
+    await env.DB.prepare('INSERT INTO page_tags (page_id, tag_id) VALUES (?, 99)').bind(id).run();
+    await classify('taxonomy', 'clinical', 'phi');
+    expect((await adminFetch('/admin/api/parent-pages')).status).toBe(200);
+    await readRows().toEqual(expect.arrayContaining([expect.objectContaining({ action: 'page.lookup', container_key: 'clinical', data_class: 'phi', target_count: 1 })]));
+  });
+
+  it('refuses PHI live sync before upgrading the connection', async () => {
+    const [id] = await seedPages(1, 'chart');
+    await classify('page_type', 'chart', 'phi');
+    const response = await adminFetch(`/admin/api/sync/${id}`, { headers: { Upgrade: 'websocket', Origin: 'http://localhost' } });
+    expect(response.status).toBe(503);
+  });
+
+  it('records version preview/history separately from the current page read', async () => {
+    const [id] = await seedPages(1, 'chart');
+    await classify('page_type', 'chart', 'phi');
+    await env.DB.prepare("INSERT INTO page_versions (id, page_id, lect, action) VALUES (987, ?, ?, 'update')").bind(id, JSON.stringify({ note: 'old secret' })).run();
+    expect((await adminFetch(`/admin/pages/${id}/read?version=987`)).status).toBe(200);
+    await readRows().toMatchObject([
+      { action: 'page.read', data_class: 'phi' },
+      { action: 'page.history', target_type: 'page_version', target_id: '987', data_class: 'phi' },
+    ]);
+  });
+
+  it.each(['/admin/api/parent-pages', '/admin/api/pages/chart'])('audits page metadata at %s', async path => {
+    await seedPages(1, 'chart');
+    await classify('page_type', 'chart', 'phi');
+    expect((await adminFetch(path)).status).toBe(200);
+    await readRows().toMatchObject([{ action: 'page.lookup', container_key: 'chart', data_class: 'phi', target_count: 1 }]);
+  });
+
+  it('withholds lookup data if the PHI audit cannot be written', async () => {
+    await seedPages(1, 'chart');
+    await classify('page_type', 'chart', 'phi');
+    await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+    try {
+      const response = await adminFetch('/admin/api/parent-pages');
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain('Page 500');
+    } finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
+  });
+
+  it('audits user lookups under table classification', async () => {
+    await classify('table', 'users', 'phi');
+    expect((await adminFetch('/admin/api/users')).status).toBe(200);
+    await readRows().toMatchObject([{ action: 'user.lookup', container_key: 'users', data_class: 'phi', target_count: 2 }]);
+  });
+
+  it('audits tag lookups against their actual taxonomy', async () => {
+    await env.DB.prepare("INSERT INTO taxonomies (id, name, slug) VALUES (91, 'Diagnosis', 'diagnosis')").run();
+    await env.DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (92, 'Private diagnosis', 'private-diagnosis', 'diagnosis')").run();
+    await classify('taxonomy', 'diagnosis', 'phi');
+    expect((await adminFetch('/admin/api/tags/diagnosis')).status).toBe(200);
+    await readRows().toMatchObject([{ action: 'tag.lookup', container_key: 'diagnosis', data_class: 'phi', target_count: 1 }]);
+  });
+});
+
+describe('nested and administrative sensitive reads', () => {
+  it('audits stored content returned by an invalid edit submission', async () => {
+    const [id] = await seedPages(1, 'chart', 9200);
+    await classify('page_type', 'chart', 'phi');
+    await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+    try {
+      const response = await adminFetch(`/admin/pages/${id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ name: '', slug: '' }).toString(),
+      });
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain('Page 9200');
+    } finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
+  });
+
+  it('retains every PHI identifier across bounded audit rows', async () => {
+    const ids = await seedPages(120, 'chart', 9100);
+    await classify('page_type', 'chart', 'phi');
+    // Exercise the core helper with the same request scope used by routes;
+    // dashboard pagination is intentionally capped at 100, so use its batch API.
+    const { Hono } = await import('hono');
+    const { requestContext } = await import('../src/core/http/request-context');
+    const { accessLog, recordPageReads } = await import('../src/core/http/access-log');
+    const app = new Hono();
+    app.use('*', async (_, next) => { await requestContext.run({ cspNonce: '' }, () => next()); });
+    app.use('*', accessLog);
+    app.get('/', c => { recordPageReads('page.bulk-read', ids.map(id => ({ id, page_type: 'chart' }))); return c.json({ count: ids.length }); });
+    expect((await app.request('http://localhost/', {}, env)).status).toBe(200);
+    const rows = (await env.DB.prepare("SELECT target_ids, target_count FROM audit_events WHERE action = 'page.bulk-read' ORDER BY seq").all<ReadRow>()).results;
+    expect(rows.map(row => row.target_count)).toEqual([100, 20]);
+    expect(rows.flatMap(row => JSON.parse(row.target_ids ?? '[]'))).toEqual(ids.map(String));
+  });
+
+  it('audits a classified parent option on an unclassified child page', async () => {
+    const [parent] = await seedPages(1, 'chart', 8100);
+    const [child] = await seedPages(1, 'article', 8101);
+    await env.DB.prepare('UPDATE pages SET page_id = ? WHERE id = ?').bind(parent, child).run();
+    await classify('page_type', 'chart', 'phi');
+    expect((await adminFetch(`/admin/pages/${child}/read?native=1`)).status).toBe(200);
+    const rows = (await env.DB.prepare("SELECT action, target_id FROM audit_events WHERE event_class = 'read'").all()).results;
+    expect(rows).toContainEqual({ action: 'page.parent-option', target_id: String(parent) });
+  });
+
+  it.each(['/admin/tags', '/admin/tags/8301/edit', '/admin/taxonomies/8300/edit', '/admin/pages/new?page_type=default'])('withholds classified nested taxonomy/tag data at %s on sink failure', async path => {
+    await env.DB.prepare("INSERT INTO taxonomies (id, name, slug) VALUES (8300, 'Clinical labels', 'nested-clinical')").run();
+    await env.DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (8301, 'Sensitive label', 'nested-label', 'nested-clinical')").run();
+    await classify('taxonomy', 'nested-clinical', 'phi');
+    await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+    try {
+      const response = await adminFetch(path);
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain('Sensitive label');
+    } finally {
+      await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run();
+      await env.DB.prepare('DELETE FROM tags WHERE id = 8301').run();
+      await env.DB.prepare('DELETE FROM taxonomies WHERE id = 8300').run();
+    }
+  });
+
+  it('inherits taxonomy classification from trash associations', async () => {
+    await env.DB.prepare("INSERT INTO trash_pages (id, name, slug, page_type, lect) VALUES (8400, 'Trashed record', 'trash-record', 'article', '{}')").run();
+    await env.DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (8401, 'Clinical', 'trash-clinical', 'trash-clinical')").run();
+    await env.DB.prepare('INSERT INTO trash_page_tags (page_id, tag_id) VALUES (8400, 8401)').run();
+    await classify('taxonomy', 'trash-clinical', 'phi');
+    try {
+      expect((await adminFetch('/admin/trash')).status).toBe(200);
+      const rows = (await env.DB.prepare("SELECT action, container_key, target_id FROM audit_events WHERE event_class = 'read'").all()).results;
+      expect(rows).toContainEqual({ action: 'page.trash-list', container_key: 'trash-clinical', target_id: '8400' });
+    } finally {
+      await env.DB.prepare('DELETE FROM trash_page_tags WHERE page_id = 8400').run();
+      await env.DB.prepare('DELETE FROM trash_pages WHERE id = 8400').run();
+      await env.DB.prepare('DELETE FROM tags WHERE id = 8401').run();
+    }
+  });
+
+  it.each(['/admin/users', '/admin/users/2/edit'])('withholds classified user administration data at %s when auditing fails', async path => {
+    await classify('table', 'users', 'phi');
+    await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+    try {
+      const response = await adminFetch(path);
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain('editor@example.com');
+    } finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
   });
 });
 
@@ -260,7 +408,7 @@ describe('the classification screen', () => {
     expect((await adminFetch('/admin/audit/classes', {}, 'editor')).status).toBe(403);
   });
 
-  it('classifies and declassifies a container, recording both', async () => {
+  it('classifies a container and refuses removal until governed declassification exists', async () => {
     const add = await adminFetch('/admin/audit/classes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -276,15 +424,14 @@ describe('the classification screen', () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: '',
     });
-    expect(remove.status).toBe(302);
-    expect(await env.DB.prepare('SELECT id FROM data_classes').first()).toBeNull();
+    expect(remove.status).toBe(409);
+    expect(await env.DB.prepare('SELECT id FROM data_classes').first()).not.toBeNull();
 
-    // Turning recording on and off is itself recorded, or the policy could be
-    // changed around a read without a trace.
+    // No successful removal is invented for a refused transition.
     await expect.poll(async () => (await env.DB.prepare(
       "SELECT action FROM audit_events WHERE action LIKE 'data_class.%' ORDER BY seq",
     ).all<{ action: string }>()).results, { timeout: 2000 })
-      .toEqual([{ action: 'data_class.set' }, { action: 'data_class.clear' }]);
+      .toEqual([{ action: 'data_class.set' }]);
   });
 
   it('rejects an unknown container kind rather than storing it', async () => {

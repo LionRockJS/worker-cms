@@ -8,6 +8,7 @@ import { featureAdminScreenProps } from '../../features/services';
 import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i18n';
 import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';
 import { logAudit } from '../../core/db/audit';
+import { recordTableReads } from '../../core/http/access-log';
 
 
 export const profileRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -77,6 +78,8 @@ profileRoutes.get('/profile', async (c) => {
     resolveUiLocale(c),
   ]);
   if (!user) return c.notFound();
+  // The user's own row is announced by the common authenticated chrome.
+  recordTableReads('identity.profile-read', 'user_oauth_identities', identityRows.results.map(row => row.id));
 
   const byOAuthId = new Map<string, OAuthIdentityRow>();
   for (const identity of identityRows.results) {

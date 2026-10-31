@@ -10,8 +10,10 @@
 import type { AppContext } from '../../core/http/context';
 import type { Env, JWTPayload } from '../../types';
 import type { PluginHookEvent } from './types';
-import { pluginsForHook, PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
+import { pluginsForHook, pluginById, PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
 import { pluginTenantId } from './proxy';
+import { auditHookDelivery } from './hook-audit';
+import type { AuditActor } from '../../core/db/audit';
 import { logAudit } from '../../core/db/audit';
 
 /** A minimal page snapshot delivered to plugins. Plugins receive whatever the
@@ -40,7 +42,7 @@ export function dispatchHook(c: AppContext, event: HookEvent, page: HookPage): v
     page_type: page.page_type,
   });
 
-  const promise = deliverHook(c.env, c.get('user'), event, page);
+  const promise = deliverHook(c.env, c.get('user'), event, page).catch(error => console.error('hook delivery withheld or failed', error));
   try {
     c.executionCtx.waitUntil(promise);
   } catch {
@@ -77,11 +79,13 @@ export async function deliverHooks(
   user: JWTPayload | undefined,
   event: HookEvent,
   pages: HookPage[],
+  initiatingActor?: AuditActor,
 ): Promise<void> {
   if (!pages.length) return;
   const plugins = await pluginsForHook(env, event);
   if (plugins.length === 0) return;
 
+  const actor: AuditActor = initiatingActor ?? { userId: user?.sub ?? null, roles: user?.role ?? null, sessionSid: user?.sid ?? null, via: user ? null : 'system:background' };
   const userPayload = user
     ? { id: user.sub, email: user.email, name: user.name, role: user.role }
     : null;
@@ -91,32 +95,19 @@ export async function deliverHooks(
     const chunk = pages.slice(start, start + HOOK_BATCH_SIZE);
     const body = JSON.stringify({ event, page: chunk[0], pages: chunk, user: userPayload });
 
-    await Promise.all(
-      plugins.map(async (plugin) => {
-        if (!plugin.secret) {
-          console.error(`Plugin ${plugin.binding} has no secret configured; skipping hook ${event}`);
-          return;
-        }
-        try {
-          const response = await plugin.fetcher.fetch(
-            `${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/hooks/${event}`,
-            {
-              method: 'POST',
-              headers: {
-                'content-type': 'application/json',
-                'x-plugin-secret': plugin.secret,
-                ...(tenantId ? { 'x-cms-tenant': tenantId } : {}),
-              },
-              body,
-            },
-          );
-          if (!response.ok) {
-            console.error(`Plugin ${plugin.binding} hook ${event} returned ${response.status}`);
-          }
-        } catch (error) {
-          console.error(`Plugin ${plugin.binding} hook ${event} failed:`, error);
-        }
-      }),
-    );
+    for (const candidate of plugins) {
+      // Re-read host-owned enablement/secret immediately before each chunk.
+      const plugin = await pluginById(env, candidate.manifest.id);
+      if (!plugin || !plugin.secret || !(plugin.manifest.hooks ?? []).includes(event)) continue;
+      await auditHookDelivery(env, plugin, user, event, chunk, actor);
+      try {
+        const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/hooks/${event}`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-plugin-secret': plugin.secret,
+            ...(tenantId ? { 'x-cms-tenant': tenantId } : {}) }, body,
+        });
+        if (!response.ok) console.error(`Plugin hook ${event} returned ${response.status}`);
+        await response.body?.cancel();
+      } catch (error) { console.error(`Plugin hook ${event} failed:`, error); }
+    }
   }
 }

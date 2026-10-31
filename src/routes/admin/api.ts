@@ -2,8 +2,10 @@ import { rejectCrossSiteRequest } from '../../core/http/headers';
 // Admin JSON API endpoints.
 
 import { Hono } from 'hono';
+import { recordRead, recordPageReads, recordTagReads, queryFingerprint } from '../../core/http/access-log';
+import { regulatedPages } from '../../core/publish/regulated';
 import { getLectLocalizedValue, safeParseLect } from '../../core/db/lect';
-import type { Env, Variables, Tag, Taxonomy } from '../../types';
+import type { Env, Variables, Tag, Taxonomy, Page } from '../../types';
 import { num } from '../../core/http/forms';
 import { requirePermission } from '../../core/auth/guards';
 import type { AppContext } from '../../core/http/context';
@@ -30,15 +32,16 @@ apiRoutes.get('/api/parent-pages', requirePermission('content:read'), async (c) 
 
   const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const pages = await c.env.DB.prepare(
-    `SELECT id, name, slug
+    `SELECT id, uuid, name, slug, page_type
      FROM pages
      ${whereSql}
      ORDER BY updated_at DESC, name ASC
      LIMIT 20`,
   )
     .bind(...params)
-    .all<{ id: number; name: string; slug: string }>();
+    .all<{ id: number; uuid: string; name: string; slug: string; page_type: string }>();
 
+  recordPageReads('page.lookup', pages.results, { queryFingerprint: await queryFingerprint(query) });
   return c.json(pages.results.map((page) => ({
     id: page.id,
     name: page.name,
@@ -71,7 +74,7 @@ apiRoutes.get('/api/parent-tags', requirePermission('content:read'), async (c) =
 
   const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const tags = await c.env.DB.prepare(
-    `SELECT id, name, slug, lect
+    `SELECT id, name, slug, lect, taxonomy_slug
      FROM tags
      ${whereSql}
      ORDER BY weight ASC, name ASC
@@ -80,6 +83,7 @@ apiRoutes.get('/api/parent-tags', requirePermission('content:read'), async (c) =
     .bind(...params)
     .all<Tag>();
 
+  recordTagReads('tag.lookup', tags.results);
   return c.json(tags.results.map((tag) => ({
     id: tag.id,
     name: getLectLocalizedValue(safeParseLect(tag.lect), 'name', config.defaultLanguage) || tag.name,
@@ -112,6 +116,7 @@ apiRoutes.get('/api/users', requirePermission('content:write'), async (c) => {
     .bind(...params)
     .all<{ id: number; name: string | null; email: string | null }>();
 
+  recordRead({ action: 'user.lookup', kind: 'table', key: 'users', targetType: 'user', ids: users.results.map(row => String(row.id)), count: users.results.length });
   return c.json(users.results.map((user) => ({
     id: user.id,
     name: user.name?.trim() || user.email || `#${user.id}`,
@@ -140,15 +145,16 @@ apiRoutes.get('/api/pages/:type', requirePermission('content:read'), async (c) =
   }
 
   const pages = await c.env.DB.prepare(
-    `SELECT id, name, slug
+    `SELECT id, uuid, name, slug, page_type
      FROM pages
      WHERE ${conditions.join(' AND ')}
      ORDER BY updated_at DESC, name ASC
      LIMIT 20`,
   )
     .bind(...params)
-    .all<{ id: number; name: string; slug: string }>();
+    .all<{ id: number; uuid: string; name: string; slug: string; page_type: string }>();
 
+  recordPageReads('page.lookup', pages.results, { queryFingerprint: await queryFingerprint(query) });
   return c.json(pages.results.map((page) => ({
     id: page.id,
     // `page` retained for backward compatibility with earlier callers.
@@ -172,6 +178,7 @@ apiRoutes.get('/api/tags/:type', requirePermission('content:read'), async (c) =>
   const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE taxonomy_slug = ? ORDER BY weight ASC, name ASC')
     .bind(taxonomySlug)
     .all<Tag>();
+  recordTagReads('tag.lookup', tags.results);
   return c.json(tags.results.map((tag) => ({
     value: tag.id,
     label: getLectLocalizedValue(safeParseLect(tag.lect), 'name', config.defaultLanguage) || tag.name,
@@ -236,7 +243,15 @@ apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c)
 
   const pageId = parseInt(c.req.param('pageId'), 10);
   if (!Number.isFinite(pageId) || pageId <= 0) return c.text('Invalid page ID', 400);
-  if (!(await draftPageExists(c, pageId))) return c.text('Page not found', 404);
+  const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
+  if (!page) return c.text('Page not found', 404);
+  const regulated = await regulatedPages(c.env, [page]);
+  if (regulated.unavailable) return c.text('Classification unavailable', 503);
+  // Session validation is already implemented in the DO, but durable per-delivery
+  // PHI auditing is not. Keep regulated streams closed until that exists.
+  if (c.env.REGULATED_MODE === 'true' || regulated.ids.size > 0) {
+    return c.text('Regulated live sync unavailable', 503);
+  }
 
   const user = c.get('user');
   return c.env.PAGE_SYNC.get(c.env.PAGE_SYNC.idFromName(`page-${pageId}`)).fetch(
@@ -247,6 +262,7 @@ apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c)
         'X-User-Name': user.name,
         'X-Session-Id': user.sid!,
         'X-Session-Expires': String(user.exp),
+        'X-Page-Id': String(pageId),
       },
     }),
   );
@@ -293,7 +309,9 @@ apiRoutes.post('/api/presence/:pageId', requirePermission('content:write'), asyn
 apiRoutes.get('/api/presence/:pageId', requirePermission('content:read'), async (c) => {
   const pageId = parseInt(c.req.param('pageId'), 10);
   if (!Number.isFinite(pageId) || pageId <= 0) return c.json({ error: 'invalid_page_id' }, 400);
-  if (!(await draftPageExists(c, pageId))) return c.json({ error: 'page_not_found' }, 404);
+  const page = await c.env.DB.prepare('SELECT id, page_type FROM pages WHERE id = ?').bind(pageId).first<{ id: number; page_type: string }>();
+  if (!page) return c.json({ error: 'page_not_found' }, 404);
+  recordPageReads('page.presence', [page]);
 
   return c.env.PAGE_SYNC.get(c.env.PAGE_SYNC.idFromName(`page-${pageId}`)).fetch(
     'https://page-sync/?action=presence',

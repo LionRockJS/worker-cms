@@ -2,7 +2,7 @@
 
 Prepared 30 October 2026. Planning baseline: `e50a467`; findings originated in the [readiness assessment](compliance-readiness-2026-10-30.md). See the [ISO matrix](iso-27001-control-matrix-2026-10-30.md) and [HIPAA matrix](hipaa-control-matrix-2026-10-30.md) for control/evidence distinctions.
 
-Implementation tracking: see the [first P0 progress increment](compliance-p0-progress-2026-10-30.md) for existing safeguards, completed changes, validation and remaining tasks. The source observations below describe the planning baseline; use that progress note for the newer implementation status.
+Implementation tracking: see the [P0 implementation progress](compliance-p0-progress-2026-10-30.md), including fifteen increments through 31 October, the [coverage inventory](sensitive-read-outbound-coverage-2026-10-31.md), [sensitivity upgrade runbook](sensitivity-floors.md) and [manual acceptance record](p0-manual-acceptance-2026-10-31.md). **Five P0 packages remain open (W0, W1, W2, W3, W4a). COV-11 covers the listed metadata/count/source snapshots; COV-13 contains writes at HTTP/background and direct publication/transfer boundaries. W3 persistent schema/destination approvals and W4b durable mutation/policy evidence remain engineering work. Queue/pin preparation, historical recovery, governed declassification and external/deployment acceptance remain dependencies.** The source observations below describe the planning baseline; use those records for the newer implementation status.
 
 ## Objective and scope
 

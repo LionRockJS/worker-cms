@@ -22,6 +22,7 @@
 // already owes, and the failure says so instead of leaking quietly.
 // ============================================================
 
+import { inventoried } from '../../core/http/regulated-profile';
 import type { Env } from '../../types';
 import { classFor, resolveDataClasses } from '../../core/db/data-classes';
 
@@ -47,7 +48,8 @@ const REGULATED_CLASS = 'phi';
 export async function mediaClassifier(env: Env): Promise<(key: string) => MediaDisposition> {
   const map = await resolveDataClasses(env);
   if (!map.ok) return () => 'unknown';
-  return (key) => (classFor(map, 'media_prefix', key) === REGULATED_CLASS ? 'withheld' : 'public');
+  return (key) => !inventoried(env, 'media_prefix', key) ? 'unknown'
+    : (classFor(map, 'media_prefix', key) === REGULATED_CLASS ? 'withheld' : 'public');
 }
 
 /** The verdict for a single key. */

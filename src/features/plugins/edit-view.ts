@@ -1,3 +1,5 @@
+import { flushReadAudit } from '../../core/http/access-log';
+import { auditPluginDisclosure } from './disclosure-audit';
 // ============================================================
 // Plugin-rendered page edit/create view.
 //
@@ -118,6 +120,11 @@ async function dispatchPluginView(
     'x-cms-user': pluginUserHeader(user, await pluginUserPermissions(c.env, plugin.manifest, user.role)),
   });
   setPluginAuthHeaders(headers, plugin.secret, pluginTenantId(c.env));
+
+  const refused = await flushReadAudit(c, { destination: plugin.manifest.id, operation: endpoint.slice(1) });
+  if (refused) return refused;
+  const destinationRefused = await auditPluginDisclosure(c, plugin.manifest.id, endpoint.slice(1), 'plugin.render-disclosure');
+  if (destinationRefused) return destinationRefused;
 
   let upstream: Response;
   try {

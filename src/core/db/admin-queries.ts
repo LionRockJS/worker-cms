@@ -2,7 +2,9 @@
 // SQL stays raw here — this module just removes the duplication of issuing it.
 
 import type { Page, PageVersion, PageTag, Tag, Taxonomy } from '../../types';
+import { recordPageReads, recordTableReads } from '../http/access-log';
 import { num, slugify } from '../http/forms';
+import { countPageMetadata } from './count-metadata';
 
 export interface DashboardListResult {
   results: Page[];
@@ -29,6 +31,7 @@ export async function fetchUserName(db: D1DatabaseClient, userId: number | null 
     .bind(userId)
     .first<{ name: string | null; email: string | null }>();
   if (!row) return null;
+  recordTableReads('user.display', 'users', [userId]);
   return row.name?.trim() || row.email || null;
 }
 
@@ -54,6 +57,7 @@ export async function fetchEditorUsers(
   )
     .bind(...ids)
     .all<{ id: number; name: string | null; email: string | null }>();
+  recordTableReads('user.display', 'users', rows.results.map(row => row.id));
   const names = new Map(rows.results.map((row) => [row.id, row.name?.trim() || row.email || '']));
   return ids.map((id) => ({ id, name: names.get(id) || `#${id}` }));
 }
@@ -85,9 +89,10 @@ export async function ensureUniqueDraftSlug(
 export async function parentPageOption(db: D1DatabaseClient, pageId: string | number | null | undefined): Promise<Page[]> {
   const id = num(pageId, 0);
   if (!id) return [];
-  const page = await db.prepare('SELECT id, name, slug FROM pages WHERE id = ?')
+  const page = await db.prepare('SELECT id, name, slug, page_type FROM pages WHERE id = ?')
     .bind(id)
     .first<Page>();
+  if (page) recordPageReads('page.parent-option', [page]);
   return page ? [page] : [];
 }
 
@@ -409,10 +414,7 @@ export async function listDashboardDraftPages(
 ): Promise<DashboardListResult> {
   const whereSql = options.pageType ? 'WHERE page_type = ?' : '';
   const baseParams = options.pageType ? [options.pageType] : [];
-  const countRow = await db.prepare(`SELECT COUNT(*) AS total FROM pages ${whereSql}`)
-    .bind(...baseParams)
-    .first<{ total: number }>();
-  const total = countRow?.total ?? 0;
+  const total = await countPageMetadata(db, whereSql.replace(/^WHERE\s+/, ''), baseParams, { types: options.pageType ? [options.pageType] : undefined });
   const totalPages = Math.max(1, Math.ceil(total / options.limit));
   const currentPage = Math.min(options.page, totalPages);
   const currentOffset = (currentPage - 1) * options.limit;

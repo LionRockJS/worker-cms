@@ -48,7 +48,26 @@
     "target": "Target",
     "verified": "Verified",
     "verify_failed": "segments failed",
-    "verify_ok": "verified"
+    "verify_ok": "verified",
+    "outage": {
+      "title": "Audit outages and reconciliation",
+      "help": "Review diagnostics and verify external evidence. Saving a review never replays an operation or restores missing history.",
+      "healthy": "Latest checks passed:",
+      "unhealthy": "Checks require attention or no recent check is available:",
+      "incomplete": "Diagnostic capture is incomplete; verify the missing evidence independently.",
+      "delivered": "Alert receiver acknowledged delivery.",
+      "pending": "Alert delivery is pending or not configured.",
+      "reviewed": "Reviewed (not proof of historical recovery)",
+      "disposition": "Review outcome",
+      "located": "Evidence located",
+      "contained": "Containment independently verified",
+      "gap": "Unrecoverable evidence gap",
+      "reference": "Evidence reference (case ID)",
+      "digest": "Evidence SHA-256",
+      "save": "Record review",
+      "unavailable": "The outage journal is unavailable. Do not interpret this as no outages.",
+      "disabled": "Outage monitoring is not enabled for this deployment."
+    }
   },
   "view_strings": {
     "sections_audit.audit_log": "Audit Log"

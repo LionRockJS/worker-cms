@@ -1,3 +1,4 @@
+import { auditPluginDisclosure } from '../disclosure-audit';
 import { limitedBytes } from '../../../core/http/body-limit';
 // ============================================================
 // Plugin admin proxy — forwards /admin/plugins/<id>/* to the
@@ -184,6 +185,8 @@ async function servePluginView(c: AppContext): Promise<Response> {
 
   const permissions = await pluginUserPermissions(c.env, plugin.manifest, c.get('user').role);
   const headers = buildPluginProxyHeaders(c.req.raw.headers, c.get('user'), plugin.secret, pluginTenantId(c.env), permissions);
+  const refused = await auditPluginDisclosure(c, pluginId, 'view', 'plugin.view-disclosure');
+  if (refused) return refused;
   const upstreamResponse = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/admin/views${viewPath}${url.search}`, {
     method: c.req.method,
     headers,
@@ -297,6 +300,14 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
       throw error;
     }
     if (queued) return c.redirect(queueRedirect(pluginId, rest));
+  }
+
+  // Every method forwards user metadata and may disclose query/body data.
+  // Queued requests return above and use their own execution-time audit.
+  const refused = await auditPluginDisclosure(c, pluginId, c.req.method, hasBody ? 'plugin.request-disclosure' : 'plugin.read');
+  if (refused) {
+    if (claimedOnceToken) await releaseFormOnceToken(c.env, claimedOnceToken);
+    return refused;
   }
 
   let upstreamResponse: Response;
