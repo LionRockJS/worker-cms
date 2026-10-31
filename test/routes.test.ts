@@ -2063,6 +2063,20 @@ describe('admin routes', () => {
       .toEqual(['Content match', 'Hello Big WORLD']);
   });
 
+  it('matches the page name for a type-specific search when its content name differs', async () => {
+    await env.DB.prepare('INSERT INTO pages (id, name, slug, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+      .bind(103, 'Hello world', 'hello-world', 'default', JSON.stringify({ name: { mis: 'Lorem Lipsum' } }))
+      .run();
+
+    const response = await fetchWorker('/admin/advanced-search/default?page_type=default&operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=Hello+world&path1=', {
+      headers: { Cookie: await authCookie() },
+    });
+    expect(response.status).toBe(200);
+    const data = bodyData(await response.text());
+    expect(data.count).toBe(1);
+    expect((data.pages as Array<{ name: string }>).map((page) => page.name)).toEqual(['Hello world']);
+  });
+
   it('combines name matches with Chinese variants, tags, exclusions and explicit paths', async () => {
     for (const [id, name, lect] of [
       [103, '苏玮 include', null],
