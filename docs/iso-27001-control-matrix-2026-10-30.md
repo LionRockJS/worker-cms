@@ -2,6 +2,8 @@
 
 Updated 30 October 2026. Based on the source review at revision `ac27e68` and the [readiness assessment](compliance-readiness-2026-10-30.md). This separates implemented controls, confirmed gaps and evidence to verify; it is not a new production assessment or implementation change.
 
+**Partly superseded.** The F1, F3 and P0 commits landed after `ac27e68` and closed or narrowed several gaps recorded below, including the F1–F5 findings cited in A.5.12, A.5.14, A.5.28, A.5.33, A.5.34, A.8.3, A.8.12 and A.8.15. See the [coverage review at `edee9a7`](iso-27001-coverage-review-2026-11-01.md) for the re-tested status of those rows before acting on a gap stated here.
+
 ## How to read the statuses
 
 | Status | Meaning |
