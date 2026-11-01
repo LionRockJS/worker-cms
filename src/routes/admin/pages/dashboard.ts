@@ -373,6 +373,12 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
   ]);
   recordTagReads('tag.filter-options', taxonomy.tags);
   recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
+  // Serving these names in clear is its own disclosure, recorded separately
+  // from the list read so the log distinguishes a masked view from a revealed
+  // one. Without the capability the names never reach the response at all.
+  const privacyFields = pageTypeHasPrivacyFields(config.blueprint[pageType]);
+  const canRevealPii = privacyFields && await userCan(c, 'pii:reveal');
+  if (canRevealPii) recordPageReads('page.pii-reveal', draftPages.results);
   const t = await uiTranslator(c);
 
   return renderPage(c, dashboardPage, {
@@ -390,7 +396,8 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     bulkTagGroups: dashboardBulkTagGroups(taxonomy.tags, taxonomy.taxonomies, config.taxonomies),
     pagination: dashboardPagination(routeBase, draftPages, statusParams),
     reorder: canWrite,
-    privacyTable: pageTypeHasPrivacyFields(config.blueprint[pageType]),
+    privacyFields,
+    canRevealPii,
     t,
   });
 });

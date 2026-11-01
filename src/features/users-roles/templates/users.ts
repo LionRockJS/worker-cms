@@ -14,6 +14,9 @@ export async function usersPage(views: Fetcher, opts: BaseTemplateProps & {
   }>;
   flash?: string;
   error?: string;
+  /** Whether this viewer holds `pii:reveal`. Without it the names and email
+   *  addresses arrive already masked and carry no reveal affordance. */
+  canRevealPii?: boolean;
   /** Props for panels contributed by another feature (today, the shared
    *  credit pool). Passed through untouched; the section renders a panel only
    *  when its owner supplied the props. */
@@ -26,6 +29,7 @@ export async function usersPage(views: Fetcher, opts: BaseTemplateProps & {
     hasFlash: !!opts.flash,
     hasError: !!opts.error,
     hasUsers: users.length > 0,
+    canRevealPii: !!opts.canRevealPii,
     users,
     ...opts.panels,
   });

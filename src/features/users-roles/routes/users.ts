@@ -7,7 +7,9 @@ import { usersPage, userFormPage } from '../templates/users';
 import type { Env, Variables, User } from '../../../types';
 import { logAudit } from '../../../core/db/audit';
 import { requirePermission } from '../../../core/auth/guards';
+import { userCan } from '../../../core/auth/permissions';
 import { renderPage } from '../../../core/render/chrome';
+import { maskPrivateValue } from '../../../core/render/privacy';
 import { allRoleOptions } from '../../../core/auth/role-store';
 import { ROLE_LABELS, builtinRoleTranslationKey, effectivePermissions, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
 import { featureAdminScreenProps } from '../../services';
@@ -85,6 +87,11 @@ usersRoutes.get('/users', async (c) => {
     featureAdminScreenProps(c, { screen: 'users' }),
   ]);
   recordTableReads('user.list', 'users', users.results.map(user => user.id));
+  // Names and email addresses are personal data whether or not this screen is
+  // the one being audited. Reveal is a deliberate grant; serving the values in
+  // clear is recorded as its own disclosure.
+  const canRevealPii = await userCan(c, 'pii:reveal');
+  if (canRevealPii) recordTableReads('user.pii-reveal', 'users', users.results.map(user => user.id));
   const providersByUser = new Map<number, string[]>();
   for (const identity of identities.results) {
     const providers = providersByUser.get(identity.user_id) ?? [];
@@ -93,14 +100,15 @@ usersRoutes.get('/users', async (c) => {
   }
 
   return renderPage(c, usersPage, {
+    canRevealPii,
     users: users.results.map((user) => {
       const providers = [...(providersByUser.get(user.id) ?? [])];
       const fallbackProvider = providerFromOAuthId(user.oauth_id);
       if (fallbackProvider && !providers.includes(fallbackProvider)) providers.push(fallbackProvider);
       return {
         id: user.id,
-        name: user.name,
-        email: user.email,
+        name: canRevealPii ? user.name : maskPrivateValue(user.name, 'name'),
+        email: canRevealPii ? user.email : maskPrivateValue(user.email, 'email'),
         identityProviders: providers.map((provider) => ({ provider, label: providerLabel(provider) })),
         roles: rolesForView(user.role, options),
         editHref: `/admin/users/${user.id}/edit`,

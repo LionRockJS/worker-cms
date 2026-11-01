@@ -774,6 +774,13 @@ volumes.
   explicitly.
   Existing sockets recheck authorization before messages and deliveries, and
   sweep idle connections every 60 seconds.
+- Personal data (names, email, phone) is masked **server-side** on the users
+  and contact-page lists. Only `pii:reveal` gets the cleartext in the response;
+  without it the values never leave the Worker, and the browser-side reveal
+  toggle is a convenience for an already-authorized viewer rather than the
+  control. Serving cleartext is recorded as its own audit action
+  (`user.pii-reveal`, `page.pii-reveal`). No role but `admin` holds
+  `pii:reveal` by default.
 - Public media delivery requires a `media_files` registration. Plugin file API
   writes are private, including files whose keys overlap an existing media row.
 - All plugin blueprint types require explicit write approval under Plugins →

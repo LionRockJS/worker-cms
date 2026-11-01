@@ -8,7 +8,7 @@
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200">
     <div class="overflow-x-auto">
-      <table class="w-full min-w-[680px] text-left" data-privacy-table>
+      <table class="w-full min-w-[680px] text-left"{% if canRevealPii %} data-privacy-table{% endif %}>
       <thead class="bg-gray-50 border-b border-gray-200">
         <tr>
           <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_users.name" | t }}</th>
@@ -22,8 +22,8 @@
         {% if hasUsers %}
           {% for user in users %}
             <tr class="hover:bg-gray-50">
-              <td class="px-6 py-3 text-sm font-medium text-gray-900"><span data-private-field="name">{{ user.name }}</span></td>
-              <td class="px-6 py-3 text-sm text-gray-500"><span data-private-field="email">{{ user.email }}</span></td>
+              <td class="px-6 py-3 text-sm font-medium text-gray-900"><span{% if canRevealPii %} data-private-field="name"{% endif %}>{{ user.name }}</span></td>
+              <td class="px-6 py-3 text-sm text-gray-500"><span{% if canRevealPii %} data-private-field="email"{% endif %}>{{ user.email }}</span></td>
               <td class="px-6 py-3">
                 <div class="flex flex-wrap gap-1.5">
                   {% for provider in user.identityProviders %}

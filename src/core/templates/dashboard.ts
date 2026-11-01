@@ -1,5 +1,6 @@
 import { adminLayout, type BaseTemplateProps } from '../render/layout';
 import { renderView } from '../render/liquid';
+import { maskPrivateValue } from '../render/privacy';
 import type { Page } from '../../types';
 import type { UiTranslator } from '../i18n';
 
@@ -46,7 +47,11 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
   pageTypeFilter?: string;
   statusFilter?: '' | 'draft' | 'scheduled' | 'live' | 'ended';
   statusFilters?: DashboardStatusFilterLink[];
-  privacyTable?: boolean;
+  /** This page type holds personal data (its blueprint declares a PII field). */
+  privacyFields?: boolean;
+  /** Whether this viewer holds `pii:reveal`. Without it the names are masked
+   *  here, before they are serialized, rather than in the browser. */
+  canRevealPii?: boolean;
   searchValue?: string;
   searchAction?: string;
   advancedSearchHref?: string;
@@ -100,6 +105,9 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
   if (statusFilter) bulkParams.set('status', statusFilter);
   const bulkAction = requestedBulkAction ?? `${bulkRoute}?${bulkParams.toString()}`;
   const pageActionReturnQuery = `?return_to=${encodeURIComponent(returnPath)}`;
+  // One decision drives both: a withheld name is never accompanied by a
+  // reveal toggle, and a toggle is never shown without a value to reveal.
+  const withheldNames = !!opts.privacyFields && !opts.canRevealPii;
   const pageTypeOptions = pageTypeChoices.map((slug) => ({
     slug,
     href: `/admin/pages/list/${encodeURIComponent(slug)}`,
@@ -143,7 +151,7 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
     allTypesSelected: !pageTypeFilter,
     pageTypeOptions,
     allTypesHref: '/admin/pages/list',
-    privacyTable: !!opts.privacyTable,
+    privacyTable: withheldNames ? false : !!opts.privacyFields,
     emptyColspan: 4,
     searchValue,
     searchAction,
@@ -187,7 +195,7 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
       const tagNames = page.tagNames ?? [];
       return {
         id: page.id,
-        name: page.name,
+        name: withheldNames ? maskPrivateValue(page.name, 'name') : page.name,
         slug: page.slug,
         tags: tagNames.slice(0, 5).map((name) => ({ name })),
         hasTags: tagNames.length > 0,
