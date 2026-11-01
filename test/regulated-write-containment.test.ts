@@ -3,6 +3,7 @@ import { createExecutionContext } from 'cloudflare:test';
 import { beforeEach, afterEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { regulatedRequestWriteBlocked, assertRegulatedWritesAllowed } from '../src/core/http/regulated-writes';
+import { createCustomRole, deleteCustomRole, saveRolePermissions } from '../src/core/auth/role-store';
 import { coreExtensions, registerCoreExtensions } from '../src/core/extensions';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, getPlugins } from '../src/features/plugins/registry';
@@ -74,6 +75,7 @@ it.each([
   ['POST', '/__cms/ingest/submissions'], ['POST', '/__cms/credits/usage'], ['POST', '/__cms/tenant/claim'],
   ['POST', '/admin/pages/8251'], ['POST', '/admin/pages/8251/publish'], ['POST', '/admin/pages/8251/delete'],
   ['POST', '/admin/audit/classes'], ['POST', '/admin/plugins-manage/8252/connect'], ['POST', '/admin/users/8250'],
+  ['POST', '/admin/roles'], ['POST', '/admin/roles/moderator'], ['POST', '/admin/roles/w4b-direct/delete'],
   ['POST', '/admin/plugins/containment/action'], ['POST', '/__cms/future-write?read_only=true'],
 ])('withholds %s %s before content/configuration work', async (method, path) => {
   const response = await http(method, path, { page_type: 'chart', name: 'Must not be written' }, { 'x-http-method-override': 'GET' });
@@ -83,6 +85,37 @@ it.each([
   expect((await env.DB.prepare('SELECT name FROM pages WHERE id = 8251').first())?.name).toBe('Private chart');
   expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM pages').first())?.n).toBe(1);
   expect(deliveries).toBe(0);
+});
+
+it('blocks direct role creation, permission changes and deletion in regulated mode', async () => {
+  await env.DB.prepare("INSERT INTO roles (name, label, builtin) VALUES ('w4b-direct', 'Original role', 0)").run();
+  await env.DB.prepare("INSERT INTO role_permissions (role, permission) VALUES ('w4b-direct', 'content:read')").run();
+  try {
+    const unusedStatement = env.DB.prepare('SELECT 1');
+    const unusedAudit = { write: unusedStatement, guard: unusedStatement };
+    const unusedRemovals = { write: unusedStatement, dataClass: 'none' as const,
+      actor: { userId: null, roles: null, sessionSid: null, via: null },
+      request: { requestId: null, sourceIp: null, userAgent: null } };
+    const unusedSnapshot = { managed: false, builtin: null, grants: [] };
+    const unusedDeletion = { removals: unusedRemovals, deletion: unusedAudit, operationId: 'unused', occurredAt: 'unused', before: unusedSnapshot };
+    await expect(createCustomRole(configured(), 'w4b-new', 'New role', unusedAudit)).rejects.toThrow('Regulated writes require durable mutation evidence');
+    await expect(saveRolePermissions(configured(), 'w4b-direct', 'Changed role', ['content:write'], unusedSnapshot, unusedAudit)).rejects.toThrow('Regulated writes require durable mutation evidence');
+    await expect(deleteCustomRole(configured(), 'w4b-direct', unusedDeletion)).rejects.toThrow('Regulated writes require durable mutation evidence');
+    expect(await env.DB.prepare("SELECT label FROM roles WHERE name = 'w4b-direct'").first()).toEqual({ label: 'Original role' });
+    expect((await env.DB.prepare("SELECT permission FROM role_permissions WHERE role = 'w4b-direct'").all()).results).toEqual([{ permission: 'content:read' }]);
+    expect(await env.DB.prepare("SELECT name FROM roles WHERE name = 'w4b-new'").first()).toBeNull();
+  } finally {
+    await env.DB.prepare("DELETE FROM role_permissions WHERE role = 'w4b-direct'").run();
+    await env.DB.prepare("DELETE FROM roles WHERE name = 'w4b-direct'").run();
+  }
+});
+
+it('does not mutate classification or record a success when the regulated policy endpoint is blocked', async () => {
+  const response = await http('POST', '/admin/audit/classes', { container_kind: 'page_type', container_key: 'chart', class: 'phi' });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: 'regulated_writes_unavailable' });
+  expect(await env.DB.prepare("SELECT class FROM data_classes WHERE container_kind = 'page_type' AND container_key = 'chart'").first()).toEqual({ class: 'phi' });
+  expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'data_class.set'").first<{ n: number }>())?.n).toBe(0);
 });
 
 it.each([

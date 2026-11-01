@@ -14,8 +14,9 @@
 //     I/O, so events inside one request share a timestamp; `seq` is what
 //     orders those.
 //
-// Writes stay fire-and-forget via waitUntil so a logging failure can never
-// break the action it records. Detail payloads should stay small (slugs,
+// Legacy logAudit writes are fire-and-forget via waitUntil; paths that require
+// durable evidence must batch their mutation and audit statement together.
+// Detail payloads should stay small (slugs,
 // filenames, failure reasons) — never content bodies, and never an email or
 // any other identifier that erasure has to be able to reach.
 // ============================================================
@@ -23,6 +24,8 @@
 import type { Env, JWTPayload } from '../../types';
 import type { AppContext } from '../http/context';
 import { recordAuditOutage } from './audit-outages';
+import { USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../auth/role-mutation-sql';
+import { abortIf } from './transaction-guard';
 
 /** Entity types whose changes are configuration rather than content. They get
  *  the longer `admin_config` retention: low volume, high forensic value. */
@@ -80,7 +83,7 @@ export interface AuditActor {
 
 /** Request details every event carries. All null off a request — a queued job
  *  replays an action with no inbound headers of its own. */
-interface AuditRequest {
+export interface AuditRequest {
   requestId: string | null;
   sourceIp: string | null;
   userAgent: string | null;
@@ -89,14 +92,15 @@ interface AuditRequest {
 const NO_REQUEST: AuditRequest = { requestId: null, sourceIp: null, userAgent: null };
 const NO_ACTOR: AuditActor = { userId: null, roles: null, sessionSid: null, via: null };
 
-const INSERT = `INSERT INTO audit_events
-    (event_id, occurred_at, event_class, data_class, retention_class, action, outcome,
-     actor_user_id, actor_roles, acting_via, session_sid, request_id, source_ip, user_agent,
-     target_type, target_id, target_ids, target_count, container_key, query_fingerprint, detail)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const AUDIT_COLUMNS = [
+  'event_id', 'occurred_at', 'event_class', 'data_class', 'retention_class', 'action', 'outcome',
+  'actor_user_id', 'actor_roles', 'acting_via', 'session_sid', 'request_id', 'source_ip', 'user_agent',
+  'target_type', 'target_id', 'target_ids', 'target_count', 'container_key', 'query_fingerprint', 'detail',
+] as const;
+const INSERT_COLUMNS = `INSERT INTO audit_events (${AUDIT_COLUMNS.join(', ')})`;
 
-function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest) {
-  return env.DB.prepare(INSERT + (row.eventId ? ' ON CONFLICT(event_id) DO NOTHING' : '')).bind(
+function auditValues(row: AuditRow, actor: AuditActor, request: AuditRequest) {
+  return [
     row.eventId ?? crypto.randomUUID(),
     row.occurredAt ?? new Date().toISOString(),
     row.eventClass,
@@ -118,7 +122,16 @@ function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditReq
     row.containerKey,
     row.queryFingerprint,
     row.detail ? JSON.stringify(row.detail) : null,
-  );
+  ];
+}
+
+function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest, requirePreviousChange = false) {
+  const placeholders = Array.from({ length: 21 }, () => '?');
+  // A missing/stale target or an ignored mutation must roll back the entire
+  // batch, not commit success evidence. Invalid JSON throws only on failure.
+  if (requirePreviousChange) placeholders[5] = "CASE WHEN changes() = 1 THEN ? ELSE json('{') END";
+  const sql = `${INSERT_COLUMNS} VALUES (${placeholders.join(', ')})` + (row.eventId ? ' ON CONFLICT(event_id) DO NOTHING' : '');
+  return env.DB.prepare(sql).bind(...auditValues(row, actor, request));
 }
 
 /** Shared statement builder for health probes and reconciliation receipts. */
@@ -176,6 +189,87 @@ function afterResponse(c: AppContext, promise: Promise<unknown>, rows: AuditRow[
   } catch {
     void guarded;
   }
+}
+
+/**
+ * Prepare attributable mutation evidence for the SAME D1 batch as a protected
+ * policy/business mutation. The caller must not run it separately or use this
+ * for effects outside that database. This does not make retries idempotent.
+ */
+export interface MutationAuditEvidence {
+  /** Both statements must follow the mutation, in this order, in the same batch. */
+  write: D1PreparedStatement;
+  guard: D1PreparedStatement;
+}
+
+function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest,
+  requirePreviousChange = false): MutationAuditEvidence {
+  const prepared = { ...row, eventId: row.eventId ?? crypto.randomUUID(), occurredAt: row.occurredAt ?? new Date().toISOString() };
+  const expected = auditValues(prepared, actor, request);
+  const matches = AUDIT_COLUMNS.map(column => `${column} IS ?`).join(' AND ');
+  // A zero-row insert, or a trigger that removes/rewrites the new row, must
+  // roll back the business mutation without depending on a table constraint.
+  const guard = abortIf(env, `changes() <> 1 OR NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})`, expected);
+  return { write: statement(env, prepared, actor, request, requirePreviousChange), guard };
+}
+
+/** Prepare off-request mutation evidence; caller must batch it with the write. */
+export function auditEvidence(env: Env, row: AuditRow, actor: AuditActor): MutationAuditEvidence {
+  return preparedAuditEvidence(env, row, actor, NO_REQUEST);
+}
+
+/** Prepare request-attributed evidence and its guard for the same D1 batch. */
+export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
+  options: { requirePreviousChange?: boolean } = {}): MutationAuditEvidence {
+  const row = mutationRow(entry);
+  row.dataClass = dataClass;
+  return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange);
+}
+
+/**
+ * Record each user losing a deleted role, from the same D1 transaction as the
+ * later user updates. The role-store compares event count and final user roles
+ * before committing, so a skipped audit or skipped update cannot look successful.
+ */
+export interface RoleRemovalAuditEvidence {
+  write: D1PreparedStatement;
+  actor: AuditActor;
+  request: AuditRequest;
+  dataClass: AuditRow['dataClass'];
+}
+
+export function roleRemovalAuditEvidence(c: AppContext, role: string, operationId: string, occurredAt: string,
+  dataClass: AuditRow['dataClass']): RoleRemovalAuditEvidence {
+  const row = mutationRow({ action: 'user.roles', entityType: 'user' });
+  row.occurredAt = occurredAt;
+  row.dataClass = dataClass;
+  const actor = actorFromUser(c.get('user'));
+  const request = requestFrom(c);
+  const values = auditValues(row, actor, request);
+  const expressions: string[] = [];
+  const bindings: Array<string | number | null> = [];
+  // UUIDv4 per affected user; identifiers and actor/request data use the same
+  // envelope as ordinary mutation events. No free-text name/email is copied.
+  const uuid = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', (abs(random()) % 4) + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))";
+  for (let index = 0; index < values.length; index++) {
+    if (index === 0) expressions.push(uuid);
+    else if (index === 15) expressions.push('CAST(u.id AS TEXT)');
+    else if (index === 17) expressions.push('1');
+    else if (index === 20) {
+      expressions.push(`json_object('operation_id', ?, 'role_before', u.role, 'role_after', ${USER_WITHOUT_ROLE_SQL}, 'removed_role', ?)`);
+      bindings.push(operationId, role, role);
+    } else {
+      expressions.push('?');
+      bindings.push(values[index]);
+    }
+  }
+  bindings.push(role, role);
+  return {
+    write: c.env.DB.prepare(`${INSERT_COLUMNS} SELECT ${expressions.join(', ')} FROM users AS u
+      WHERE ${USER_HAS_ROLE_SQL} AND EXISTS (SELECT 1 FROM roles WHERE name = ? AND builtin = 0)`)
+      .bind(...bindings),
+    actor, request, dataClass,
+  };
 }
 
 /** Records one mutation by the signed-in user. */

@@ -1,11 +1,14 @@
-import { recordTableReads } from '../../../core/http/access-log';
+import { auditUnavailable, flushReadAudit, recordTableReads } from '../../../core/http/access-log';
 // User administration — list users and assign their roles. Admin-gated
 // (users:manage). Users are created by OAuth login, not here.
 
 import { Hono } from 'hono';
 import { usersPage, userFormPage } from '../templates/users';
 import type { Env, Variables, User } from '../../../types';
-import { logAudit } from '../../../core/db/audit';
+import { mutationAuditEvidence } from '../../../core/db/audit';
+import { abortIf } from '../../../core/db/transaction-guard';
+import { accessMutationClass, accessMutationUnavailable, unsafeAccessEvidence } from '../mutation-audit';
+import { safeRoleAuditValue } from '../../../core/auth/role-mutation-sql';
 import { requirePermission } from '../../../core/auth/guards';
 import { userCan } from '../../../core/auth/permissions';
 import { renderPage } from '../../../core/render/chrome';
@@ -159,8 +162,26 @@ usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
     }
   }
 
-  await c.env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(nextRole, id).run();
-  logAudit(c, 'user.roles', 'user', id, { role: nextRole });
+  if (!safeRoleAuditValue(user.role) || !safeRoleAuditValue(nextRole)) return unsafeAccessEvidence(c);
+  const dataClass = await accessMutationClass(c.env, ['users', 'roles', 'role_permissions']);
+  if (dataClass === null) return auditUnavailable(c);
+  const refusedRead = await flushReadAudit(c);
+  if (refusedRead) return refusedRead;
+  try {
+    const evidence = mutationAuditEvidence(c, { action: 'user.roles', entityType: 'user', entityId: id,
+      detail: { role_before: user.role, role: nextRole } }, dataClass, { requirePreviousChange: true });
+    await c.env.DB.batch([
+      // Recheck the observed target and last-admin guard inside the transaction.
+      c.env.DB.prepare(`UPDATE users SET role = ? WHERE id = ? AND role = ?
+        AND (? = 0 OR EXISTS (SELECT 1 FROM users WHERE id != ? AND (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%'))`)
+        .bind(nextRole, id, user.role, losesAdmin ? 1 : 0, id),
+      evidence.write,
+      evidence.guard,
+      abortIf(c.env, 'NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND role = ?)', [id, nextRole]),
+    ]);
+  } catch {
+    return accessMutationUnavailable(c);
+  }
   return c.redirect('/admin/users');
 });
 
@@ -172,9 +193,9 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
     return c.redirect('/admin/users?error=You+cannot+remove+your+own+user');
   }
 
-  const user = await c.env.DB.prepare('SELECT id, email, role FROM users WHERE id = ?')
+  const user = await c.env.DB.prepare('SELECT id, role FROM users WHERE id = ?')
     .bind(id)
-    .first<Pick<User, 'id' | 'email' | 'role'>>();
+    .first<Pick<User, 'id' | 'role'>>();
   if (!user) return c.notFound();
 
   if (!(await canManageRoleValue(c, user.role))) {
@@ -190,12 +211,31 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
     }
   }
 
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id),
-    c.env.DB.prepare('DELETE FROM user_oauth_identities WHERE user_id = ?').bind(id),
-    c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
-  ]);
-  logAudit(c, 'user.delete', 'user', id, { email: user.email });
+  if (!safeRoleAuditValue(user.role)) return unsafeAccessEvidence(c);
+  const dataClass = await accessMutationClass(c.env, ['users', 'roles', 'sessions', 'user_oauth_identities']);
+  if (dataClass === null) return auditUnavailable(c);
+  const refusedRead = await flushReadAudit(c);
+  if (refusedRead) return refusedRead;
+  try {
+    const evidence = mutationAuditEvidence(c, { action: 'user.delete', entityType: 'user', entityId: id,
+      detail: { role_before: user.role } }, dataClass, { requirePreviousChange: true });
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM user_oauth_identities WHERE user_id = ?').bind(id),
+      // If authorization's observed role or last-admin state changed, a zero
+      // row delete makes the required audit abort and restores both child sets.
+      c.env.DB.prepare(`DELETE FROM users WHERE id = ? AND role = ?
+        AND (? = 0 OR EXISTS (SELECT 1 FROM users WHERE id != ? AND (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%'))`)
+        .bind(id, user.role, hasAdminRole(user.role) ? 1 : 0, id),
+      evidence.write,
+      evidence.guard,
+      abortIf(c.env, `EXISTS (SELECT 1 FROM users WHERE id = ?)
+          OR EXISTS (SELECT 1 FROM sessions WHERE user_id = ?)
+          OR EXISTS (SELECT 1 FROM user_oauth_identities WHERE user_id = ?)`, [id, id, id]),
+    ]);
+  } catch {
+    return accessMutationUnavailable(c);
+  }
   return c.redirect('/admin/users?flash=User+removed');
 });
 

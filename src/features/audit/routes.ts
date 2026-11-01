@@ -10,9 +10,10 @@ import { archiveHealth, reviewSignals } from './signals';
 import type { Env, Variables } from '../../types';
 import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
-import { contextActor, logAudit, writeAuditRows } from '../../core/db/audit';
+import { contextActor, logAudit, mutationAuditEvidence, writeAuditRows } from '../../core/db/audit';
 import { auditUnavailable, recordRead, recordTableReads } from '../../core/http/access-log';
-import { outageEnabled } from '../../core/db/audit-outages';
+import { abortIf } from '../../core/db/transaction-guard';
+import { outageEnabled, recordAuditOutage } from '../../core/db/audit-outages';
 import { outagePage, readOutage, reconcileOutage, type OutageReview } from './outages';
 import {
   CONTAINER_KINDS,
@@ -178,15 +179,35 @@ auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) =
     return c.json({ error: 'Classification reduction requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
   }
 
-  // Re-classifying a container updates it rather than failing: an operator
-  // correcting pii to phi should not have to delete the row first.
-  await c.env.DB.prepare(
-    `INSERT INTO data_classes (container_kind, container_key, class, note) VALUES (?, ?, ?, ?)
-     ON CONFLICT(container_kind, container_key) DO UPDATE SET class = excluded.class, note = excluded.note`,
-  ).bind(kind, key, dataClass, note || null).run();
-  clearDataClassCache();
+  // The classification and its attributable evidence share one D1 transaction.
+  // The note can contain free text and is deliberately excluded from the event.
+  // Re-classification updates the same policy without deleting its sensitivity floor.
+  try {
+    const evidence = mutationAuditEvidence(c, {
+      action: 'data_class.set', entityType: 'settings', entityId: `${kind}:${key}`, detail: { class: dataClass },
+    }, dataClass as DataClass);
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO data_classes (container_kind, container_key, class, note) VALUES (?, ?, ?, ?)
+         ON CONFLICT(container_kind, container_key) DO UPDATE SET class = excluded.class, note = excluded.note`,
+      ).bind(kind, key, dataClass, note || null),
+      evidence.write,
+      evidence.guard,
+      abortIf(c.env, 'NOT EXISTS (SELECT 1 FROM data_classes WHERE container_kind = ? AND container_key = ? AND class = ? AND note IS ?)',
+        [kind, key, dataClass, note || null]),
+    ]);
+  } catch {
+    // A failed transaction can have an unknown outcome if the connection was
+    // lost after commit. Do not promise a rollback or automatically retry it.
+    console.error('classification policy transaction failed');
+    // The failed statement is unknown. Report a coarse classification incident
+    // without asserting that the audit INSERT or the transaction failed to commit.
+    await recordAuditOutage(c.env, 'classification', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Classification change unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  } finally {
+    clearDataClassCache();
+  }
 
-  logAudit(c, 'data_class.set', 'settings', `${kind}:${key}`, { class: dataClass });
   return c.redirect('/admin/audit/classes?flash=audit.flash.saved');
 });
 

@@ -6,10 +6,13 @@ import { roleFormPage, rolesPage } from '../templates/roles';
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS } from '../../../types';
 import type { Env, Variables, Permission } from '../../../types';
 import { slugify, str } from '../../../core/http/forms';
-import { logAudit } from '../../../core/db/audit';
+import { mutationAuditEvidence, roleRemovalAuditEvidence } from '../../../core/db/audit';
+import { auditUnavailable, flushReadAudit } from '../../../core/http/access-log';
+import { accessMutationClass, accessMutationUnavailable, unsafeAccessEvidence } from '../mutation-audit';
+import { safeRoleAuditValue } from '../../../core/auth/role-mutation-sql';
 import { requirePermission } from '../../../core/auth/guards';
 import { renderPage } from '../../../core/render/chrome';
-import { clearRolePermissionsCache, effectivePermissions, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
+import { clearRolePermissionsCache, effectivePermissions, permissionsFor, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
 import { coreExtensions } from '../../../core/extensions';
 import {
   createCustomRole,
@@ -17,6 +20,10 @@ import {
   getRoleForEdit,
   listRolesForAdmin,
   saveRolePermissions,
+  readRolePermissionSnapshot,
+  rolePermissionsRecordable,
+  storedRolePermissions,
+  type RolePermissionSnapshot,
 } from '../../../core/auth/role-store';
 import type { AppContext } from '../../../core/http/context';
 
@@ -29,6 +36,20 @@ async function canManagePermissions(c: AppContext, permissions: Iterable<string>
   if (splitRoles(c.get('user').role).includes('admin')) return true;
   const actorPermissions = effectivePermissions(await resolveRolePermissions(c.env), c.get('user').role);
   return [...permissions].every((permission) => actorPermissions.has(permission as Permission));
+}
+
+/** Reject a policy changed after it was read for the authority check. An
+ * unmanaged built-in combines code defaults with any legacy stored grants. */
+function snapshotMatchesRole(name: string, builtin: boolean, permissions: Set<Permission>, snapshot: RolePermissionSnapshot): boolean {
+  if ((!builtin && !snapshot.managed) || (snapshot.managed && snapshot.builtin !== (builtin ? 1 : 0))) return false;
+  const defaults = builtin && !snapshot.managed ? [...permissionsFor(name)] : [];
+  const actual = [...new Set([...defaults, ...snapshot.grants])].sort();
+  const observed = [...permissions].sort();
+  return actual.length === observed.length && actual.every((value, index) => value === observed[index]);
+}
+
+function stalePolicy(c: AppContext): Response {
+  return c.json({ error: 'Role policy changed; reload and try again' }, 409, { 'Cache-Control': 'no-store' });
 }
 
 const BUILTIN_PERMISSIONS = new Set<string>(PERMISSIONS);
@@ -109,7 +130,20 @@ rolesRoutes.post('/roles', async (c) => {
   const label = str(form.get('label'));
   const name = str(form.get('name')) ? slugify(str(form.get('name'))) : slugify(label);
 
-  const error = await createCustomRole(c.env, name, label);
+  if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
+  const dataClass = await accessMutationClass(c.env, ['roles', 'users']);
+  if (dataClass === null) return auditUnavailable(c);
+  const refusedRead = await flushReadAudit(c);
+  if (refusedRead) return refusedRead;
+  let error: string | null;
+  try {
+    error = await createCustomRole(c.env, name, label, mutationAuditEvidence(c,
+      { action: 'role.create', entityType: 'role', entityId: name }, dataClass, { requirePreviousChange: true }));
+  } catch {
+    return accessMutationUnavailable(c);
+  } finally {
+    clearRolePermissionsCache();
+  }
   if (error) {
     return renderPage(c, roleFormPage, {
       isNew: true,
@@ -121,8 +155,6 @@ rolesRoutes.post('/roles', async (c) => {
       permissionOptions: [],
     });
   }
-  clearRolePermissionsCache();
-  logAudit(c, 'role.create', 'role', name, { label });
   return c.redirect(`/admin/roles/${encodeURIComponent(name)}/edit`);
 });
 
@@ -164,9 +196,25 @@ rolesRoutes.post('/roles/:name', async (c) => {
     return c.text('Forbidden: cannot grant or modify permissions beyond your own', 403);
   }
 
-  await saveRolePermissions(c.env, name, label, permissions);
-  clearRolePermissionsCache();
-  logAudit(c, 'role.update', 'role', name, { permissions: permissions.length });
+  if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
+  const dataClass = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
+  if (dataClass === null) return auditUnavailable(c);
+  const refusedRead = await flushReadAudit(c);
+  if (refusedRead) return refusedRead;
+  const grants = storedRolePermissions(permissions);
+  try {
+    const before = await readRolePermissionSnapshot(c.env, name);
+    if (!rolePermissionsRecordable(before.grants) || !rolePermissionsRecordable(grants)) return unsafeAccessEvidence(c);
+    if (!snapshotMatchesRole(name, role.builtin, role.permissions, before)) return stalePolicy(c);
+    await saveRolePermissions(c.env, name, label, grants, before, mutationAuditEvidence(c,
+      { action: 'role.update', entityType: 'role', entityId: name,
+        detail: { permissions: grants.length, grants, previous: { managed: before.managed, grants: before.grants } } },
+      dataClass, { requirePreviousChange: true }));
+  } catch {
+    return accessMutationUnavailable(c);
+  } finally {
+    clearRolePermissionsCache();
+  }
   return c.redirect('/admin/roles');
 });
 
@@ -174,11 +222,31 @@ rolesRoutes.post('/roles/:name/delete', async (c) => {
   const name = c.req.param('name');
   const role = await getRoleForEdit(c.env, name);
   if (!role) return c.notFound();
+  if (role.builtin) return c.text('Forbidden: built-in roles cannot be deleted', 403);
   if (!(await canManagePermissions(c, role.permissions))) {
     return c.text('Forbidden: cannot remove a more privileged role', 403);
   }
-  await deleteCustomRole(c.env, name);
-  clearRolePermissionsCache();
-  logAudit(c, 'role.delete', 'role', name);
+  if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
+  const dataClass = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
+  if (dataClass === null) return auditUnavailable(c);
+  const refusedRead = await flushReadAudit(c);
+  if (refusedRead) return refusedRead;
+  const operationId = crypto.randomUUID();
+  const occurredAt = new Date().toISOString();
+  try {
+    const before = await readRolePermissionSnapshot(c.env, name);
+    if (!rolePermissionsRecordable(before.grants)) return unsafeAccessEvidence(c);
+    if (!snapshotMatchesRole(name, role.builtin, role.permissions, before)) return stalePolicy(c);
+    await deleteCustomRole(c.env, name, {
+      operationId, occurredAt, before,
+      removals: roleRemovalAuditEvidence(c, name, operationId, occurredAt, dataClass),
+      deletion: mutationAuditEvidence(c, { action: 'role.delete', entityType: 'role', entityId: name,
+        detail: { operation_id: operationId, previous_grants: before.grants } }, dataClass, { requirePreviousChange: true }),
+    });
+  } catch {
+    return accessMutationUnavailable(c);
+  } finally {
+    clearRolePermissionsCache();
+  }
   return c.redirect('/admin/roles');
 });

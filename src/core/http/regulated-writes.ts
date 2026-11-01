@@ -1,6 +1,6 @@
 import type { Env } from '../../types';
 
-/** W4b is not implemented yet. Regulated admission permits protected reads,
+/** W4b remains incomplete. Regulated admission permits protected reads,
  * never an operator flag that bypasses durable business/policy receipts. */
 export function regulatedWritesBlocked(env: Pick<Env, 'REGULATED_MODE'>): boolean {
   return Boolean(env.REGULATED_MODE && env.REGULATED_MODE !== 'false');

@@ -77,13 +77,14 @@ export async function deliverOutageAlert(env: Env, incident: AuditOutage, journa
 export async function recordAuditOutage(env: Env, reason: OutageReason,
   rows: readonly AuditRow[] = [], actor?: AuditActor,
   checks?: AuditHealthChecks,
+  options: { captureIncomplete?: boolean } = {},
 ): Promise<string | null> {
   if (!outageEnabled(env)) return null;
   const actorId = (value: string | null | undefined) => value && /^[A-Za-z0-9:_-]{1,128}$/.test(value) ? value : null;
   const incident: AuditOutage = { version: 1, id: crypto.randomUUID(), observedAt: new Date().toISOString(), reason,
     source: monitorSource(env),
     actor: { userId: actorId(actor?.userId), via: actorId(actor?.via) },
-    eventCount: rows.length, captureComplete: rows.length <= 50, records: [],
+    eventCount: rows.length, captureComplete: rows.length <= 50 && !options.captureIncomplete, records: [],
     ...(checks ? { checks } : {}),
   };
   if (actor && (incident.actor.userId !== actor.userId || incident.actor.via !== actor.via)) incident.captureComplete = false;

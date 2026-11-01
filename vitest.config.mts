@@ -26,13 +26,13 @@ const assembledLocale = (features: Record<string, boolean>) =>
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({
-      wrangler: { configPath: './wrangler.toml' },
+      // Allow an isolated local-only fixture when deployment configuration or
+      // developer secrets should not be loaded into the test runtime.
+      wrangler: { configPath: process.env.CMS_TEST_WRANGLER_CONFIG || './wrangler.toml' },
       miniflare: {
-        // AUDIT_BUCKET is commented out in wrangler.toml, because the bucket
-        // has to be created per deployment and the sweep is inert without it.
-        // The tests still have to exercise the enabled path, so the harness
-        // provides it; the disabled path is covered by passing it as undefined.
-        r2Buckets: ['AUDIT_BUCKET'],
+        // Provide isolated buckets for audit archives and outage journals.
+        // Tests cover missing bindings separately by passing them as undefined.
+        r2Buckets: ['AUDIT_BUCKET', 'AUDIT_OUTAGE_BUCKET'],
         bindings: {
           JWT_SECRET: 'test-jwt-secret-0123456789abcdef0123456789abcdef',
           // Test value, so the suite does not depend on a developer's .dev.vars
