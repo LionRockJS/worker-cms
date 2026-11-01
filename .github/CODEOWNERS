@@ -1,0 +1,39 @@
+# Review ownership for the paths where a mistake is a compliance failure
+# rather than a bug (A.8.4 source-code access, A.5.3 separation of duties,
+# A.8.32 change control).
+#
+# ACTION REQUIRED: the rules below are commented out because they need a real
+# GitHub login or team. GitHub silently IGNORES an unknown owner, so an
+# invented one would look like review protection while enforcing nothing.
+# Replace OWNER with your login (e.g. @colin) or a team (@LionRockJS/security)
+# and uncomment. CODEOWNERS only has force when branch protection on main
+# requires review from code owners.
+
+# Audit, classification and the read/disclosure pipeline — the evidence path.
+# /src/core/db/audit.ts            OWNER
+# /src/core/db/audit-outages.ts    OWNER
+# /src/core/db/data-classes.ts     OWNER
+# /src/core/db/sensitivity.ts      OWNER
+# /src/core/http/                  OWNER
+# /src/features/audit/             OWNER
+
+# Anything that moves content or personal data out of the host.
+# /src/core/publish/               OWNER
+# /src/core/render/privacy.ts      OWNER
+# /src/features/plugins/           OWNER
+
+# Authentication, authorization and the session model.
+# /src/core/auth/                  OWNER
+
+# Schema: a migration is the one change that cannot be rolled back cleanly.
+# /migrations/                     OWNER
+# /src/core/schema.sql             OWNER
+
+# Deployment configuration and the CI gates themselves.
+# /.github/                        OWNER
+# /wrangler.example.toml           OWNER
+
+# The compliance record.
+# /docs/iso-27001-*                OWNER
+# /docs/hipaa-*                    OWNER
+# /docs/compliance-*               OWNER

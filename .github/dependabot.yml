@@ -1,0 +1,21 @@
+# Dependency intake (A.5.21, A.8.8). Grouping dev dependencies keeps the
+# review load on the ones that ship in the Worker.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development
+
+  # Workflow actions are dependencies too, and the thing SHA-pinning protects.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

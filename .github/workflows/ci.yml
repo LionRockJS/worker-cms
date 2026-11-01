@@ -1,0 +1,49 @@
+# The gate for every change. `npm test` is deliberately the whole verification
+# surface: it builds (pretest), then runs the profile, boundary and generated
+# checks before vitest, so a stale generated registry or a broken feature
+# boundary fails here rather than at deploy.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+      # No .dev.vars in CI: test bindings come from vitest.config.mts.
+      - run: npm test
+
+  # Reports known advisories without blocking a merge. Make this blocking once
+  # the existing backlog is triaged, so it fails on new findings only.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+        continue-on-error: true
