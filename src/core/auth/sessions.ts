@@ -1,10 +1,39 @@
-import type { JWTPayload } from '../../types';
+import type { Env, JWTPayload } from '../../types';
 import { generateTokenId, hashToken, signJWT, verifyJWT } from './jwt';
 
 export const ACCESS_TOKEN_TTL = 15 * 60;        // 15 minutes
 export const REFRESH_TOKEN_TTL = 7 * 24 * 3600; // 7 days
 export const REFRESH_ROTATION_GRACE_SECONDS = 30;
 export const MAX_SESSIONS_PER_USER = 5;
+
+/** How long a session survives with no refresh. Bounds an abandoned session
+ *  without ending one that is being worked in; a deployment holding regulated
+ *  data states its own policy (commonly 15–30 minutes) and must set it. */
+export const SESSION_IDLE_TTL_DEFAULT = 8 * 3600; // 8 hours
+
+/**
+ * Inactivity is observed when the access token is refreshed, because that is
+ * the only moment a request writes to the session row. Requests made inside an
+ * access token's lifetime are invisible to the database, so the idle window
+ * cannot be shorter than ACCESS_TOKEN_TTL without ending sessions that are
+ * actively in use. The consequence at the floor is conservative rather than
+ * permissive: a session can be refused up to ACCESS_TOKEN_TTL before its
+ * nominal deadline, never after it.
+ */
+export function parseSessionIdleTtl(value: string | undefined): number | null {
+  if (!/^\d{1,8}$/.test(value ?? '')) return null;
+  const seconds = Number(value);
+  return seconds >= ACCESS_TOKEN_TTL && seconds <= REFRESH_TOKEN_TTL ? seconds : null;
+}
+
+/** An unset or unusable value falls back to the default, which is stricter
+ *  than the refresh window — a misconfiguration never widens the window. */
+export function sessionIdleTtl(env: Pick<Env, 'SESSION_IDLE_TTL'>): number {
+  return parseSessionIdleTtl(env.SESSION_IDLE_TTL) ?? SESSION_IDLE_TTL_DEFAULT;
+}
+
+/** SQLite modifier for the idle cutoff. The value is digits-only by construction. */
+const idleCutoff = (idleTtl: number) => `-${idleTtl} seconds`;
 
 export interface AuthDbUser {
   id: number;
@@ -58,6 +87,7 @@ export async function rotateAuthSession(
   db: D1DatabaseClient,
   jwtSecret: string,
   refreshToken: string,
+  idleTtl: number = SESSION_IDLE_TTL_DEFAULT,
 ): Promise<RotateAuthSessionResult> {
   const refreshPayload = await verifyJWT(refreshToken, jwtSecret);
   if (!refreshPayload || refreshPayload.type !== 'refresh' || !refreshPayload.jti) {
@@ -65,7 +95,7 @@ export async function rotateAuthSession(
   }
 
   const refreshHash = await hashToken(refreshPayload.jti);
-  const session = await findRefreshSession(db, refreshHash);
+  const session = await findRefreshSession(db, refreshHash, idleTtl);
 
   if (!session) {
     return { ok: false, error: 'session_revoked' };
@@ -104,7 +134,7 @@ export async function rotateAuthSession(
   // Another request may have won between SELECT and UPDATE. Confirm that this
   // token is now the grace token before returning access-only success.
   if ((update.meta.changes ?? 0) === 0) {
-    const racedSession = await findRefreshSession(db, refreshHash);
+    const racedSession = await findRefreshSession(db, refreshHash, idleTtl);
     if (!racedSession || !racedSession.is_previous || racedSession.id !== session.id) {
       return { ok: false, error: 'session_revoked' };
     }
@@ -139,8 +169,9 @@ export async function revokeRefreshSession(
 export async function findRefreshSessionUserId(
   db: D1DatabaseClient,
   refreshJti: string,
+  idleTtl: number = SESSION_IDLE_TTL_DEFAULT,
 ): Promise<number | null> {
-  const session = await findRefreshSession(db, await hashToken(refreshJti));
+  const session = await findRefreshSession(db, await hashToken(refreshJti), idleTtl);
   return session?.user_id ?? null;
 }
 
@@ -152,8 +183,17 @@ export function capUserSessions(db: D1DatabaseClient, userId: number): Promise<D
   ).bind(userId, MAX_SESSIONS_PER_USER).run();
 }
 
-export function purgeExpiredSessions(db: D1DatabaseClient): Promise<D1Result> {
-  return db.prepare('DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP').run();
+/** An idle session is refused by findRefreshSession as soon as its window
+ *  passes; removing the row terminates it rather than leaving it listed. */
+export function purgeExpiredSessions(
+  db: D1DatabaseClient,
+  idleTtl: number = SESSION_IDLE_TTL_DEFAULT,
+): Promise<D1Result> {
+  return db.prepare(
+    `DELETE FROM sessions
+      WHERE expires_at <= CURRENT_TIMESTAMP
+         OR COALESCE(rotated_at, created_at) <= datetime('now', ?1)`,
+  ).bind(idleCutoff(idleTtl)).run();
 }
 
 function authPayload(
@@ -181,13 +221,18 @@ interface RefreshSession {
   is_previous: number;
 }
 
-async function findRefreshSession(db: D1DatabaseClient, refreshHash: string): Promise<RefreshSession | null> {
+async function findRefreshSession(
+  db: D1DatabaseClient,
+  refreshHash: string,
+  idleTtl: number,
+): Promise<RefreshSession | null> {
   return db.prepare(
     `SELECT id,
             user_id,
             CASE WHEN refresh_token_hash = ?1 THEN 0 ELSE 1 END AS is_previous
        FROM sessions
       WHERE expires_at > CURRENT_TIMESTAMP AND created_at > datetime('now', '-30 days')
+        AND COALESCE(rotated_at, created_at) > datetime('now', ?2)
         AND (
           refresh_token_hash = ?1
           OR (
@@ -196,7 +241,7 @@ async function findRefreshSession(db: D1DatabaseClient, refreshHash: string): Pr
           )
         )`,
   )
-    .bind(refreshHash)
+    .bind(refreshHash, idleCutoff(idleTtl))
     .first<RefreshSession>();
 }
 

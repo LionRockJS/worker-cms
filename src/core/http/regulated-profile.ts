@@ -1,5 +1,6 @@
 import type { Env } from '../../types';
 import { CONTAINER_KINDS, resolveDataClasses, type ContainerKind, type DataClassMap } from '../db/data-classes';
+import { parseSessionIdleTtl } from '../auth/sessions';
 
 export interface InventoryEntry { kind: ContainerKind; key: string; class: 'public' | 'pii' | 'phi' }
 
@@ -37,6 +38,10 @@ export async function assertRegulatedReady(env: Env, auditInstalled: boolean): P
   if (!auditInstalled || !env.AUDIT_BUCKET || !env.DB || !env.JWT_SECRET || env.JWT_SECRET.length < 32) {
     throw new Error('Regulated profile requires audit feature, archive binding, database and strong signing secret');
   }
+  // The default idle window bounds an abandoned session, but a deployment
+  // holding regulated data states its own inactivity policy rather than
+  // inheriting one. A value outside the usable range is a misconfiguration.
+  if (parseSessionIdleTtl(env.SESSION_IDLE_TTL) === null) throw new Error('Regulated profile requires an explicit session idle timeout');
   const origin = new URL(env.CANONICAL_ORIGIN ?? '');
   if (origin.protocol !== 'https:' || origin.origin !== env.CANONICAL_ORIGIN) throw new Error('Regulated canonical origin invalid');
   const classes: DataClassMap = await resolveDataClasses(env);

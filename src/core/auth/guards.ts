@@ -30,6 +30,7 @@ import {
   REFRESH_TOKEN_TTL,
   purgeExpiredSessions,
   rotateAuthSession,
+  sessionIdleTtl,
   validateAccessSession,
 } from './sessions';
 
@@ -67,11 +68,11 @@ export const authMiddleware = createMiddleware<{
     const refreshToken = readAuthCookie(c, refreshCookieName);
     if (!refreshToken) return null;
 
-    const rotated = await rotateAuthSession(c.env.DB, secret, refreshToken);
+    const rotated = await rotateAuthSession(c.env.DB, secret, refreshToken, sessionIdleTtl(c.env));
     if (!rotated.ok) return null;
 
     // Opportunistic hygiene: purge expired sessions without blocking the response.
-    c.executionCtx.waitUntil(purgeExpiredSessions(c.env.DB));
+    c.executionCtx.waitUntil(purgeExpiredSessions(c.env.DB, sessionIdleTtl(c.env)));
 
     // Set cookies
     setAuthCookie(c, accessCookieName, rotated.accessToken, ACCESS_TOKEN_TTL);

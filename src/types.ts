@@ -257,6 +257,9 @@ export interface Env {
   /** Shared OAuth redirect URI registered with all providers */
   OAUTH_REDIRECT_URI: string;
   CANONICAL_ORIGIN?: string;
+  /** Seconds a session survives without a refresh. Between ACCESS_TOKEN_TTL
+   *  and REFRESH_TOKEN_TTL; defaults to 8 hours. Required in regulated mode. */
+  SESSION_IDLE_TTL?: string;
   SITE_TITLE: string;
   /** Default timezone for a page's start/end window when none is set.
    *  UTC offset (e.g. "+0800") or IANA name. Falls back to "+0800". */

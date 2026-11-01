@@ -15,7 +15,7 @@ const inventory = [
 ];
 function profile(overrides: Partial<Env> = {}): Env {
   return { ...env, REGULATED_MODE: 'true', REGULATED_INVENTORY: JSON.stringify(inventory),
-    CANONICAL_ORIGIN: 'https://cms.example.com', ...overrides };
+    CANONICAL_ORIGIN: 'https://cms.example.com', SESSION_IDLE_TTL: '1800', ...overrides };
 }
 
 beforeEach(async () => {
@@ -30,7 +30,7 @@ beforeEach(async () => {
 
 describe('regulated deployment readiness', () => {
   it('guards real HTTP requests before route work and recovers after inventory repair', async () => {
-    const configured = { ...env, REGULATED_MODE: 'true', REGULATED_INVENTORY: JSON.stringify(inventory), CANONICAL_ORIGIN: 'https://cms.example.com' };
+    const configured = { ...env, REGULATED_MODE: 'true', REGULATED_INVENTORY: JSON.stringify(inventory), CANONICAL_ORIGIN: 'https://cms.example.com', SESSION_IDLE_TTL: '1800' };
     const request = new Request('https://cms.example.com/');
     const denied = await worker.fetch(request, { ...configured, REGULATED_INVENTORY: '[]' }, createExecutionContext());
     expect(denied.status).toBe(503);
@@ -53,6 +53,7 @@ describe('regulated deployment readiness', () => {
     { REGULATED_MODE: 'yes' }, { REGULATED_INVENTORY: '' }, { REGULATED_INVENTORY: '[]' },
     { REGULATED_INVENTORY: JSON.stringify([...inventory, inventory[0]]) },
     { AUDIT_BUCKET: undefined }, { JWT_SECRET: 'short' }, { CANONICAL_ORIGIN: 'http://cms.example.com' },
+    { SESSION_IDLE_TTL: undefined }, { SESSION_IDLE_TTL: '60' }, { SESSION_IDLE_TTL: 'soon' },
     { REGULATED_INVENTORY: JSON.stringify(inventory.map(row => ({ ...row, class: 'public' }))) },
   ])('rejects invalid/unready configuration %j', async (overrides) => {
     await expect(assertRegulatedReady(profile(overrides), true)).rejects.toThrow();

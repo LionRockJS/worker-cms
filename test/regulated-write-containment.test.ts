@@ -30,7 +30,7 @@ function configured() {
       'plugin_asset_approvals', 'plugin_file_prefix_approvals', 'plugin_page_type_approvals', 'audit_events', 'data_classes', 'pages', 'trash_pages']
       .map(key => ({ kind: 'table', key, class: 'public' })),
   ];
-  return { ...env, REGULATED_MODE: 'true', REGULATED_INVENTORY: JSON.stringify(inventory), CANONICAL_ORIGIN: 'https://cms.example.com' };
+  return { ...env, REGULATED_MODE: 'true', REGULATED_INVENTORY: JSON.stringify(inventory), CANONICAL_ORIGIN: 'https://cms.example.com', SESSION_IDLE_TTL: '1800' };
 }
 
 beforeEach(async () => {

@@ -33,6 +33,7 @@ import {
   REFRESH_TOKEN_TTL,
   capUserSessions,
   findRefreshSessionUserId,
+  sessionIdleTtl,
   createAuthSession,
   validateAccessSession,
   purgeExpiredSessions,
@@ -339,7 +340,7 @@ async function currentAuthenticatedUserId(c: AppContext): Promise<number | null>
   const refreshPayload = await verifyJWT(refreshToken, secret);
   if (!refreshPayload || refreshPayload.type !== 'refresh' || !refreshPayload.jti) return null;
 
-  return findRefreshSessionUserId(c.env.DB, refreshPayload.jti);
+  return findRefreshSessionUserId(c.env.DB, refreshPayload.jti, sessionIdleTtl(c.env));
 }
 
 async function findUserByOAuthIdentity(db: D1DatabaseClient, oauthId: string): Promise<AuthDbUser | null> {
@@ -713,7 +714,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
   // Session hygiene: cap concurrent sessions per user and purge expired rows.
   c.executionCtx.waitUntil(Promise.all([
     capUserSessions(c.env.DB, dbUser.id),
-    purgeExpiredSessions(c.env.DB),
+    purgeExpiredSessions(c.env.DB, sessionIdleTtl(c.env)),
   ]));
 
   setAuthCookie(c, accessCookieName, issued.accessToken, ACCESS_TOKEN_TTL);
@@ -792,7 +793,7 @@ authRoutes.post('/refresh', async (c) => {
     return c.json({ error: 'no_refresh_token' }, 401);
   }
 
-  const rotated = await rotateAuthSession(c.env.DB, c.env.JWT_SECRET, refreshToken);
+  const rotated = await rotateAuthSession(c.env.DB, c.env.JWT_SECRET, refreshToken, sessionIdleTtl(c.env));
   if (!rotated.ok) {
     // Only failures are recorded. A successful 15-minute rotation is not a new
     // sign-on, and one row per user per quarter-hour would bury the rejections
@@ -802,7 +803,7 @@ authRoutes.post('/refresh', async (c) => {
   }
 
   // Opportunistic hygiene: purge expired sessions without blocking the response.
-  c.executionCtx.waitUntil(purgeExpiredSessions(c.env.DB));
+  c.executionCtx.waitUntil(purgeExpiredSessions(c.env.DB, sessionIdleTtl(c.env)));
 
   setAuthCookie(c, accessCookieName, rotated.accessToken, ACCESS_TOKEN_TTL);
   if (rotated.refreshToken) {

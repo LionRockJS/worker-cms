@@ -4,7 +4,7 @@ Content management system on Workers
 ## Features
 
 - **OAuth 2.1** login via Eventuai, GitHub, Google, Microsoft, or Apple with PKCE (Proof Key for Code Exchange); Apple ID tokens are signature- and nonce-verified
-- **Dual JWT** security – short-lived access tokens (15 min) + rotatable refresh tokens (7 days) stored as httpOnly cookies; refresh tokens are hashed and stored in D1 for revocation
+- **Dual JWT** security – short-lived access tokens (15 min) + rotatable refresh tokens (7 days, terminated after 8 idle hours by default) stored as httpOnly cookies; refresh tokens are hashed and stored in D1 for revocation
 - **Capability-based access** – routes enforce granular permissions resolved from built-in or custom roles; delegated user/role managers cannot grant authority they do not already hold
 - **Separated D1 content stores** – the CMS database keeps auth, sessions, draft, trash, taxonomy, and media metadata; the published database keeps only live content (pages, tag links and the tag catalogue) for public reads. Both call the page tables `pages` / `page_tags` — same name, same shape — so a published database can serve as the next host's working set; this repo disambiguates by binding (`DB.pages` vs `PUBLISHED_DB.pages`)
 - **Page versioning** – `pages.lect` is the working copy and the single source of truth for a draft; every save appends a `page_versions` row. The log is an append-only backup: the newest row mirrors `pages.lect`, older rows are restore candidates. There is deliberately no current-version pointer
@@ -765,8 +765,13 @@ volumes.
 - Set `CANONICAL_ORIGIN` and use HTTPS. Configure `ALLOWED_EMAIL_DOMAINS` when
   the CMS is not intended to allow open viewer registration.
 - Access JWTs last 15 minutes and reference a revocable database session. Each
-  authenticated request checks the session and current user role. Refresh
-  sessions expire after seven idle days, with an absolute 30-day lifetime.
+  authenticated request checks the session and current user role. A session is
+  terminated after `SESSION_IDLE_TTL` without a refresh (8 hours by default,
+  minimum 15 minutes), with an absolute 30-day lifetime and a seven-day cap on
+  the refresh token itself. Inactivity is observed when the access token is
+  refreshed, so a session can be refused up to 15 minutes before its nominal
+  deadline, never after it. A regulated deployment must set the value
+  explicitly.
   Existing sockets recheck authorization before messages and deliveries, and
   sweep idle connections every 60 seconds.
 - Public media delivery requires a `media_files` registration. Plugin file API
