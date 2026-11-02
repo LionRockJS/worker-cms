@@ -30,3 +30,63 @@ CREATE TABLE IF NOT EXISTS audit_seals(
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_seals_last_seq ON audit_seals (last_seq);
+
+-- W5 archive protection. Additive only: audit_seals keeps its shape, and the
+-- columns below never ALTER an existing table, so the enable migration that
+-- carries this fragment is safe on a database that already has seals.
+
+-- One row (id = 1). The sweep lease serialises cron runs, so two ticks cannot
+-- archive overlapping ranges; the seal insert itself is also a compare-and-swap
+-- on the chain head, so even a runner whose lease lapsed cannot fork the chain.
+-- verified_seq is the prune ceiling: rows are deleted only up to the last seal
+-- whose archived bytes were read back and matched. anchored_seq is how far the
+-- chain has been handed to the independent checkpoint receiver.
+CREATE TABLE IF NOT EXISTS audit_archive_state(
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    lease_holder TEXT,
+    lease_expires_at INTEGER NOT NULL DEFAULT 0,
+    verified_seq INTEGER NOT NULL DEFAULT 0,
+    verified_hash TEXT,
+    verified_at TEXT,
+    anchored_seq INTEGER NOT NULL DEFAULT 0,
+    anchored_at TEXT,
+    -- Coarse fault fingerprint (kind plus segment key), so a persisting fault
+    -- raises one incident rather than one per tick.
+    fault TEXT,
+    fault_at TEXT,
+    -- Where the orphan reconciler resumes its bounded walk of the bucket.
+    orphan_cursor TEXT
+);
+
+INSERT OR IGNORE INTO audit_archive_state (id) VALUES (1);
+
+-- The segment a run intends to seal, frozen before the object is written.
+-- Keyed by the chain position it extends, so there is only ever one candidate
+-- per position: a retry recomputes these exact rows, checks any existing object
+-- against segment_hash instead of overwriting it, and seals from this row.
+CREATE TABLE IF NOT EXISTS audit_archive_intents(
+    cursor_seq INTEGER PRIMARY KEY,
+    first_seq INTEGER NOT NULL,
+    last_seq INTEGER NOT NULL,
+    event_count INTEGER NOT NULL,
+    segment_hash TEXT NOT NULL,
+    prev_hash TEXT,
+    rolling_hash TEXT NOT NULL,
+    r2_key TEXT NOT NULL,
+    -- Canonical segment format version; see SEGMENT_FORMATS in sweep.ts.
+    format INTEGER NOT NULL,
+    frozen_at TEXT NOT NULL
+);
+
+-- Archive objects found with no seal behind them. Never deleted by the CMS:
+-- with a bucket lock they cannot be, and either way they are evidence.
+-- status: superseded (inside sealed coverage, lines identical to the sealed
+-- copy), divergent (inside coverage, lines differ) or unsealed (outside it).
+CREATE TABLE IF NOT EXISTS audit_archive_orphans(
+    r2_key TEXT PRIMARY KEY,
+    first_seq INTEGER,
+    last_seq INTEGER,
+    object_hash TEXT,
+    status TEXT NOT NULL,
+    observed_at TEXT NOT NULL
+);

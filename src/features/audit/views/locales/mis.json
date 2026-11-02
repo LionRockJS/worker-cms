@@ -67,7 +67,12 @@
       "save": "Record review",
       "unavailable": "The outage journal is unavailable. Do not interpret this as no outages.",
       "disabled": "Outage monitoring is not enabled for this deployment."
-    }
+    },
+    "prune_ceiling": "Verified to (prune ceiling)",
+    "anchored": "Anchored externally to",
+    "anchor_unbound": "No checkpoint receiver bound: seals exist only in this database.",
+    "pending_since": "Segment frozen, not yet sealed, since",
+    "archive_fault": "Archive fault:"
   },
   "view_strings": {
     "sections_audit.audit_log": "Audit Log"

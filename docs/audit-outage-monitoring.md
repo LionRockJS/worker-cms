@@ -21,11 +21,12 @@ The service binding receives JSON POSTs. No arbitrary user-configured HTTP URL i
 | Path | Fields | Required receiver behavior |
 |---|---|---|
 | `/incidents` | `version`, `kind: audit-outage`, `source`, `incidentId`, `observedAt`, `reason`, `eventCount`, `journalRecorded`, `captureComplete` | Deduplicate `Idempotency-Key`/incident ID within the source; retain operational receipt and open/escalate an accountable investigation; return 2xx only when accepted |
-| `/heartbeat` | `version`, `kind: audit-heartbeat`, `source`, `checkedAt`, `primaryWritable`, `classificationAvailable`, `journalWritable`, `archiveHealthy`, `admissionReady`, `alertDeliveryHealthy` | Maintain per-source health, alert on failed checks/pending alert delivery and missed heartbeats, and record recovery independently |
+| `/heartbeat` | `version`, `kind: audit-heartbeat`, `source`, `checkedAt`, `primaryWritable`, `classificationAvailable`, `journalWritable`, `archiveHealthy`, `admissionReady`, `alertDeliveryHealthy`, `archiveSealedSeq`, `archiveHeadHash`, `archiveFault` (fault kind only) | Maintain per-source health, alert on failed checks/pending alert delivery and missed heartbeats, and record recovery independently. Alarm when `archiveHeadHash` differs from the stored checkpoint for `archiveSealedSeq` |
+| `/checkpoints` | `version`, `kind: audit-checkpoint`, `source`, `firstSeq`, `lastSeq`, `eventCount`, `segmentHash`, `prevHash`, `rollingHash`, `sealedAt` | Store write-once per source and `lastSeq` in storage the CMS cannot write. Return 2xx for an identical resend; return 409 and alarm for different hashes at a stored `lastSeq`, or a `prevHash` that is not the stored `rollingHash` of the preceding checkpoint. See [W5 archive protection](w5-archive-protection.md) |
 
 Alert payloads exclude actor IDs, record identifiers, container keys, raw actions/details, source IPs, email, URLs, query strings, credentials and content. A receiver acknowledgement is transport acceptance, not proof that a person investigated it.
 
-A health check performs a real audit probe insert and a nonce write/read in the journal. It reuses classification/readiness validation and existing archive health, verifies the newest archive segment and checks archive lag. It does not verify the entire archive, supplier eligibility or every application mutation. Wider archive verification remains in the existing review surface/W5 work.
+A health check performs a real audit probe insert and a nonce write/read in the journal. It reuses classification/readiness validation and existing archive health, verifies the newest archive segment and checks archive lag. It does not verify the entire archive, supplier eligibility or every application mutation. The sweep itself reads every new seal back before pruning and raises `reason: archive` incidents for archive faults; see [W5 archive protection](w5-archive-protection.md).
 
 ## Capture, retries and failure behavior
 

@@ -3,7 +3,7 @@ import { auditStatement, type AuditActor, type AuditRow } from '../../core/db/au
 import { resolveDataClasses } from '../../core/db/data-classes';
 import { deliverOutageAlert, incidentKey, monitorSource, outageEnabled, OUTAGE_PREFIX, recordAuditOutage, reviewKey,
   type AuditOutage, type AlertState } from '../../core/db/audit-outages';
-import { archiveHealth } from './signals';
+import { archiveHealth, type ArchiveHealth } from './signals';
 import { hotDaysFor } from './sweep';
 import { assertRegulatedReady } from '../../core/http/regulated-profile';
 
@@ -85,13 +85,20 @@ export async function monitorAuditOutages(env: Env): Promise<void> {
     const object = await env.AUDIT_OUTAGE_BUCKET.get(key);
     health.journalWritable = await object?.text() === token;
   } catch { /* Receiver remains independent of R2. */ }
+  let archive: ArchiveHealth | null = null;
   if (health.primaryWritable) {
     try {
-      const archive = await archiveHealth(env, 1);
+      archive = await archiveHealth(env, 1);
       const configured = Number(env.AUDIT_ARCHIVE_MAX_LAG_SECONDS ?? 3600);
       const lag = Number.isFinite(configured) && configured > 0 ? configured : 3600;
-      health.archiveHealthy = archive.bucketBound && !(archive.verification ?? []).some(v => !v.contentOk || !v.chainOk)
-        && (!archive.oldestUnarchived || Date.now() - Date.parse(archive.oldestUnarchived) <= lag * 1000);
+      const lagging = (since: string | null) => !!since && Date.now() - Date.parse(since) > lag * 1000;
+      // Lag is measured at every stage that can stall: unarchived events, a
+      // frozen segment that never sealed, seals not yet read back (which also
+      // halts pruning) and, once a receiver is bound, checkpoints not anchored.
+      health.archiveHealthy = archive.bucketBound && !archive.fault
+        && !(archive.verification ?? []).some(v => !v.contentOk || !v.chainOk)
+        && !lagging(archive.oldestUnarchived) && !lagging(archive.pendingSince) && !lagging(archive.oldestUnverified)
+        && !(archive.anchorConfigured && lagging(archive.oldestUnanchored));
     } catch { /* Existing archive code supplies the checks. */ }
   }
   if (env.AUDIT_OUTAGE_BUCKET) {
@@ -119,7 +126,12 @@ export async function monitorAuditOutages(env: Env): Promise<void> {
         body: JSON.stringify({ version: 1, kind: 'audit-heartbeat', source: monitorSource(env), checkedAt: health.checkedAt,
           primaryWritable: health.primaryWritable, classificationAvailable: health.classificationAvailable,
           journalWritable: health.journalWritable, archiveHealthy: health.archiveHealthy, admissionReady: health.admissionReady,
-          alertDeliveryHealthy: health.alertDeliveryHealthy }),
+          alertDeliveryHealthy: health.alertDeliveryHealthy,
+          // The chain head as this database sees it. The receiver compares it
+          // with the checkpoint it holds for that seq; only the fault's kind
+          // leaves the CMS, never the segment key.
+          archiveSealedSeq: archive?.toSeq ?? null, archiveHeadHash: archive?.headHash ?? null,
+          archiveFault: archive?.fault?.split(':')[0] ?? null }),
       });
       health.monitorReachable = response.ok;
       await response.body?.cancel();

@@ -47,6 +47,13 @@ function countEvents(): Promise<{ total: number } | null> {
 beforeEach(async () => {
   await env.DB.prepare('DELETE FROM audit_events').run();
   await env.DB.prepare('DELETE FROM audit_seals').run();
+  await env.DB.prepare('DELETE FROM audit_archive_intents').run();
+  await env.DB.prepare('DELETE FROM audit_archive_orphans').run();
+  await env.DB.prepare(
+    `UPDATE audit_archive_state SET lease_holder = NULL, lease_expires_at = 0, verified_seq = 0,
+       verified_hash = NULL, verified_at = NULL, anchored_seq = 0, anchored_at = NULL,
+       fault = NULL, fault_at = NULL, orphan_cursor = NULL WHERE id = 1`,
+  ).run();
   await emptyBucket();
 });
 
