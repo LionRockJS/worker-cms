@@ -1,3 +1,4 @@
+import { mutatePluginSettings,PluginSettingsUnavailableError } from '../settings-evidence';
 import { mutatePluginApproval,PluginApprovalUnavailableError } from '../approval-evidence';
 import { preparePluginRegistrationMutation,PluginRegistrationUnavailableError,PluginRegistrationConflictError } from '../registration-evidence';
 import { limitedBytes } from '../../../core/http/body-limit';
@@ -43,9 +44,7 @@ import {
   declaredLimits,
   limitScopeTypes,
   loadLimitValues,
-  saveLimitValues,
   type NormalizedLimitDef,
-  type PluginLimitValues,
 } from '../limits';
 import { callFeatureService } from '../../services';
 import {
@@ -63,7 +62,7 @@ import {
 import { pluginTrustLevel, type PluginManifest, type ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
-pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginApprovalUnavailableError)return c.json({error:'plugin_approval_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
+pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginSettingsUnavailableError)return c.json({error:'plugin_settings_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginApprovalUnavailableError)return c.json({error:'plugin_approval_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
 
 pluginsManageRoutes.use('/plugins-manage', requirePermission('plugin:manage'));
 pluginsManageRoutes.use('/plugins-manage/*', requirePermission('plugin:manage'));
@@ -746,29 +745,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/limits', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/limits', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
-  const allowed = await limitScopeTypes(c.env.DB, resolved.manifest);
-  const defs = declaredLimits(resolved.manifest, allowed);
-  const form = await c.req.formData();
-
-  // Only manifest-declared keys are saved; anything stale simply drops out.
-  const values: PluginLimitValues = {};
-  for (const def of defs) {
-    if (form.get(`unlimited_${def.key}`) != null) {
-      values[def.key] = null;
-      continue;
-    }
-    const raw = str(form.get(`value_${def.key}`));
-    if (!raw) continue; // unset — the manifest default (or unlimited) applies
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed >= 0) values[def.key] = Math.trunc(parsed);
-  }
-
-  await saveLimitValues(c.env, resolved.manifest.id, values);
-  logAudit(c, 'plugin.limits.update', 'plugin', resolved.manifest.id, values);
+  if(!await mutatePluginSettings(c,id,'limits',await c.req.formData()))return c.notFound();
   return c.redirect(`/admin/plugins-manage/${id}/limits?flash=saved`);
 });
 
@@ -848,25 +825,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/credits', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
-  const form = await c.req.formData();
-  // Hand every submitted price to the metering feature keyed by credit key; it
-  // owns which keys are real and what a blank means.
-  const submitted: Record<string, string> = {};
-  for (const [field, value] of form.entries()) {
-    if (field.startsWith('value_')) submitted[field.slice('value_'.length)] = str(value);
-  }
-
-  const values = await callFeatureService<Record<string, number>>(
-    'credits',
-    'save-pricing',
-    c.env,
-    { contributorId: resolved.manifest.id, submitted },
-  ) ?? {};
-  logAudit(c, 'plugin.credits.update', 'plugin', resolved.manifest.id, values);
+  if(!await mutatePluginSettings(c,id,'pricing',await c.req.formData()))return c.notFound();
   return c.redirect(`/admin/plugins-manage/${id}/credits?flash=saved`);
 });
 

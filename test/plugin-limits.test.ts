@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
+import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from '../src/features/plugins/registry';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { signJWT } from './auth-fixtures';
 import {
@@ -49,6 +49,10 @@ let ipCounter = 0;
 async function registerPlugin(): Promise<string> {
   const url = `https://plugin-${crypto.randomUUID()}.local`;
   await env.DB.prepare('INSERT INTO plugins (label, url, enabled, secret) VALUES (?, ?, 1, ?)').bind('Events', url, PLUGIN_SECRET).run();
+  const record=await env.DB.prepare('SELECT id FROM plugins WHERE url=?').bind(url).first<{id:number}>();
+  await env.DB.prepare('INSERT INTO plugin_identity_approvals(plugin_row_id,manifest_id) VALUES (?,?)').bind(record!.id,PLUGIN_ID).run();
+  for(const type of Object.keys(MANIFEST.contentTypes?.blueprint??{}))await env.DB.prepare("INSERT INTO plugin_page_type_approvals(plugin_id,page_type,access,approved_by) VALUES (?,?,'write','fixture-operator')").bind(PLUGIN_ID,type).run();
+  await env.DB.prepare("UPDATE plugins SET config='{\"cmsTrustedUi\":true}' WHERE id=?").bind(record!.id).run();
   __injectPluginFetcher(url, {
     fetch: async (input: RequestInfo | URL): Promise<Response> => {
       const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;

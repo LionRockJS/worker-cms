@@ -1,3 +1,5 @@
+import { json,fingerprint,snapshot,guard,type Row } from '../../core/db/bounded-mutation';
+export { json,fingerprint,snapshot,guard,type Row } from '../../core/db/bounded-mutation';
 import type { AppContext } from '../../core/http/context';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
 import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
@@ -20,23 +22,9 @@ export const OWNED=[
   {table:'plugin_file_prefix_approvals',fields:['id','plugin_id','prefix','approved_by','created_at','updated_at']},
   {table:'plugin_state',fields:['plugin_id','key','value','created_at','updated_at']},
 ];
-export type Row=Record<string,string|number|null>;
+
 export class PluginRegistrationUnavailableError extends Error {constructor(){super('Plugin registration change unavailable');}}
 export class PluginRegistrationConflictError extends Error {constructor(){super('A plugin with that URL is already registered.');}}
-export function json(value:unknown):string {const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Plugin manifest requires review');return text;}
-export async function fingerprint(value:string):Promise<string>{return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
-export async function snapshot<T>(c:AppContext,table:string,fields:string[],where='1',args:Array<string|number|null>=[]):Promise<T[]> {
-  const object=`json_object(${fields.map(f=>`'${f}',r.${f}`).join(',')})`;
-  const result=await c.env.DB.prepare(`WITH scoped AS (SELECT * FROM ${table} WHERE ${where} ORDER BY ${fields[0]} LIMIT 5001),
-    budget AS (SELECT COUNT(*) n,COALESCE(SUM(length(CAST(${object} AS BLOB))),0)+COUNT(*)+2 bytes FROM scoped r)
-    SELECT CASE WHEN n>5000 OR bytes>1000000 THEN json('{') ELSE (SELECT json_group_array(${object}) FROM scoped r) END snapshot FROM budget`).bind(...args).first<{snapshot:string}>();
-  if(!result)throw new Error('Plugin snapshot unavailable');const rows=JSON.parse(result.snapshot) as T[];
-  if(fields.includes('id')&&(rows as Row[]).some(r=>!Number.isSafeInteger(r.id)||Number(r.id)<=0))throw new Error('Unsafe plugin identity');return rows;
-}
-export function guard(c:AppContext,table:string,fields:string[],rows:object[],where='1',args:Array<string|number|null>=[]) {
-  return abortIf(c.env,`(SELECT COUNT(*) FROM ${table} WHERE ${where})<>? OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS
-    (SELECT 1 FROM ${table} r WHERE ${fields.map(f=>`r.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...args,rows.length,json(rows)]);
-}
 export function invalidate(){clearManifestCache();clearConfigCache();}
 async function unavailable(c:AppContext):Promise<never> {invalidate();await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});throw new PluginRegistrationUnavailableError();}
 /** Local host registration only. Remote enrollment/tenant configuration and

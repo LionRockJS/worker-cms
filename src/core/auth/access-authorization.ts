@@ -8,7 +8,7 @@ import { requestContext } from '../http/request-context';
 /** Prepared from one D1 snapshot; the admission guard must be the first
  * statement in the same batch as the access-management mutation/evidence. */
 export interface AccessAuthorization {
-  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage';
+  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' | 'credits:share' | 'authenticated';
   allowed: boolean;
   admin: boolean;
   permissions: Set<Permission>;
@@ -16,8 +16,14 @@ export interface AccessAuthorization {
   guard(): D1PreparedStatement;
 }
 
-export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage'): Promise<AccessAuthorization> {
+export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: Exclude<AccessAuthorization['capability'],'authenticated'>): Promise<AccessAuthorization> {
   return captureAuthorization(env, actor, permission, true);
+}
+
+/** Session-bound self-service authority; callers must restrict source ownership
+ * themselves. This never supplies an administrative capability. */
+export function captureSelfAuthorization(env: Env, actor: JWTPayload): Promise<AccessAuthorization> {
+  return captureAuthorization(env, actor, 'authenticated', true);
 }
 
 /** Trusted claimed-job callers must execute BOTH returned guards in the same
@@ -46,7 +52,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   const effective = effectivePermissions(roleMap, user.role);
   const admin = splitRoles(user.role).includes('admin');
   return {
-    capability: permission, allowed: admin || effective.has(permission), admin, permissions: effective, roleMap,
+    capability: permission, allowed: permission === 'authenticated' || admin || effective.has(permission), admin, permissions: effective, roleMap,
     guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
         WHERE u.id = ? AND u.role IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
           AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})
@@ -60,7 +66,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   };
 }
 
-export function assertAccessAuthorization(authorization: AccessAuthorization | undefined, capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' = 'roles:manage'): asserts authorization is AccessAuthorization {
+export function assertAccessAuthorization(authorization: AccessAuthorization | undefined, capability: Exclude<AccessAuthorization['capability'],'authenticated'> = 'roles:manage'): asserts authorization is AccessAuthorization {
   if (!authorization?.allowed || authorization.capability !== capability || !authorization.guard) throw new Error('Access mutation authorization is required');
 }
 

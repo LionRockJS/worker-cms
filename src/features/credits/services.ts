@@ -5,7 +5,7 @@
 // src/features/services.ts and never import this module or its contracts.
 
 import type { FeatureServiceEntry } from '../services';
-import type { CreditPricingRow } from './contracts';
+import type { CreditContributor,CreditPricingRow } from './contracts';
 import type { AppContext } from '../../core/http/context';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 import type { Env } from '../../types';
@@ -27,7 +27,7 @@ import {
   currencyLabelKey,
   currencyUnitKey,
   declaredCredits,
-  creditContributor,
+  creditsSettingKey,
   effectiveCreditsForId,
   emptyCurrencyTotals,
   getCreditBalances,
@@ -37,7 +37,6 @@ import {
   pageCreateAction,
   pageCreateCostForType,
   refundCurrencies,
-  saveCreditValues,
   spendCurrencies,
   type NormalizedCreditDef,
   type PluginCreditValues,
@@ -184,6 +183,12 @@ export const creditsServices: FeatureServiceEntry = {
   },
 
   async call(operation, env, input): Promise<unknown> {
+    if(operation==='prepare-admin-pricing'){
+      const {contributor,submitted}=input as {contributor:CreditContributor;submitted:Record<string,string>};
+      const values:PluginCreditValues=Object.create(null);
+      for(const def of declaredCredits(contributor)){const raw=(Object.hasOwn(submitted,def.key)?String(submitted[def.key]):'').trim();if(!raw)continue;const n=Number(raw);if(Number.isSafeInteger(Math.trunc(n))&&n>=0)values[def.key]=Math.trunc(n);}
+      return {key:creditsSettingKey(contributor.id),values};
+    }
     const request = typeof input === 'object' && input !== null
       ? input as { contributorId?: unknown; submitted?: unknown }
       : {};
@@ -191,12 +196,6 @@ export const creditsServices: FeatureServiceEntry = {
     if (!contributorId) return operation === 'pricing' ? [] : {};
 
     if (operation === 'pricing') return creditPricing(env, contributorId);
-    if (operation === 'save-pricing') {
-      const submitted = request.submitted && typeof request.submitted === 'object' && !Array.isArray(request.submitted)
-        ? request.submitted as Record<string, string>
-        : {};
-      return saveCreditPricing(env, contributorId, submitted);
-    }
     return undefined;
   },
 
@@ -222,24 +221,6 @@ async function creditPricing(env: Env, contributorId: string): Promise<CreditPri
   }));
 }
 
-async function saveCreditPricing(
-  env: Env,
-  contributorId: string,
-  submitted: Record<string, string>,
-): Promise<Record<string, number>> {
-  const contributor = await creditContributor(env, contributorId);
-  if (!contributor) return {};
-  // Only declared keys are saved; blank = unset, so the default applies.
-  const values: PluginCreditValues = {};
-  for (const def of declaredCredits(contributor)) {
-    const raw = (submitted[def.key] ?? '').trim();
-    if (!raw) continue;
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed >= 0) values[def.key] = Math.trunc(parsed);
-  }
-  await saveCreditValues(env, contributorId, values);
-  return values;
-}
 
 /**
  * The profile page's wallets: one card per currency, each with its own

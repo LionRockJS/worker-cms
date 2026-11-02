@@ -11,6 +11,7 @@ export const AUTH_DENIAL_REASONS = {
 } as const;
 export type AuthDenialAction = keyof typeof AUTH_DENIAL_REASONS | 'permission.denied';
 export const PERMISSION_DENIAL_REASONS = [
+  'credit_insufficient_balance', 'credit_self_transfer', 'credit_recipient_admin',
   'plugin_identity_claimed', 'plugin_identity_required', 'plugin_file_prefix_conflict',
   'locale_protected', 'locale_default_required', 'locale_ui_required', 'locale_fallback_invalid',
   'editor_required', 'target_role_exceeds_authority', 'requested_role_exceeds_authority',
