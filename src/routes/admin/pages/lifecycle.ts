@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 import { announcePageEvent } from '../../../core/page-events';
 import type { Env, Variables } from '../../../types';
 import { appendQuery, safeAdminReturnPath } from '../../../core/http/forms';
-import { trashDraftPage } from '../../../core/db/admin-queries';
+import { mutatePageLifecycle } from '../../../core/pages/lifecycle-mutation-evidence';
 import { describeFailures, publishPageToTargets, unpublishPageFromTargets } from '../../../core/publish';
 import type { PublishOutcome } from '../../../core/publish';
 import { requirePermission } from '../../../core/auth/guards';
@@ -109,10 +109,9 @@ pageLifecycleRoutes.post('/pages/:id/unpublish', requirePermission('content:publ
 pageLifecycleRoutes.post('/pages/:id/delete', requirePermission('content:delete'), async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
 
-  // Copy the page (and its version + tag history) into trash, preserving ids so
-  // a later restore keeps the same identity. Shared with the plugin write-back
-  // API so the trash schema lives in one place.
-  const page = await trashDraftPage(c.env.DB, pageId);
+  // Commit the local transfer and exact receipt before external withdrawal.
+  const result = await mutatePageLifecycle(c.env,c.get('user'),'trash',{ids:[pageId]},{request:c});
+  const page=result.pages[0];
   if (!page) return c.notFound();
 
   // Unpublish from every publish target now that the draft copy is gone.
@@ -124,7 +123,7 @@ pageLifecycleRoutes.post('/pages/:id/delete', requirePermission('content:delete'
     name: page.name,
     slug: page.slug,
     page_type: page.page_type,
-  });
+  },{durableEvidence:true});
 
   return c.redirect('/admin?flash=Page+moved+to+trash');
 });

@@ -5,10 +5,10 @@ import type { CmsFeature } from '../../core/feature';
  * delete screens, backed by the trash_* tables in schema/cms/features/trash.sql.
  * Its router is registered in ../routers.ts.
  *
- * NOTE: page deletion itself still routes through trashDraftPage() in
- * utils/admin-queries, so removing this feature hides the admin screens but
- * leaves deletes writing to the trash tables. Making deletes hard-delete when
- * the feature is absent is a separate change to the core delete path.
+ * Host lifecycle routes use the guarded core lifecycle service. Plugin API
+ * legacy DB helpers remain separate writers. Removing this feature hides its
+ * screens; retained trash tables are not dropped, and a fresh profile without
+ * trash storage refuses host trash operations rather than hard-deleting data.
  */
 export const trashFeature: CmsFeature = {
   id: 'trash',

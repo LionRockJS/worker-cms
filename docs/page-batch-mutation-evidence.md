@@ -47,3 +47,5 @@ Taxonomy/tag administration is covered by the subsequent [taxonomy record](taxon
 ## Subsequent snapshot-allocation fix
 
 Taxonomy validation reproduced an intermittent legacy `page_versions.id` collision during hundred-page replacement. Guarded bulk/editor snapshot inserts now allocate above the stored maximum and legacy time/nonce floor in their D1 transaction, with safe-number overflow refusal. Stable UUID attribution is unchanged. Numeric IDs are not promised never to recur after all historical rows are purged; UUIDs remain the lineage reference. Other legacy writers retain their original allocation until separately migrated. See the [taxonomy continuation](taxonomy-mutation-evidence.md).
+
+Host bulk delete now uses the subsequent [lifecycle transaction](page-lifecycle-mutation-evidence.md), including claimed-job authority. Other remaining-scope statements above describe this record's original increment; use the current [scope register](w4b-remaining-scope-2026-11-02.md).

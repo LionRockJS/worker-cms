@@ -5,12 +5,11 @@ import { countTrashMetadataByType } from './queries';
 
 import { Hono } from 'hono';
 import { trashPage } from './template';
-import type { Env, Variables, Page, PageTag, PageVersion } from '../../types';
-import { restoreTrashedPages } from '../../core/db/admin-queries';
+import type { Env, Variables, Page } from '../../types';
+import { mutatePageLifecycle } from '../../core/pages/lifecycle-mutation-evidence';
 import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { userCan } from '../../core/auth/permissions';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
-import { logAudit } from '../../core/db/audit';
 import { requireAnyPermission, requirePermission } from '../../core/auth/guards';
 
 export const trashRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -80,91 +79,9 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
 trashRoutes.post('/trash/:id/restore', requirePermission('trash:restore'), async (c) => {
   const trashId = parseInt(c.req.param('id'), 10);
 
-  const trashedPage = await c.env.DB.prepare('SELECT * FROM trash_pages WHERE id = ?')
-    .bind(trashId)
-    .first<Page>();
-  if (!trashedPage) return c.notFound();
+  const result=await mutatePageLifecycle(c.env,c.get('user'),'restore',{ids:[trashId]},{request:c});
+  if(!result.count)return c.notFound();
 
-  const originalParentId = trashedPage.source_page_id ?? trashedPage.page_id;
-  const draftParent = originalParentId == null
-    ? null
-    : await c.env.DB.prepare('SELECT id FROM pages WHERE id = ?').bind(originalParentId).first<{ id: number }>();
-  const restoredParentId = draftParent?.id ?? null;
-
-  // Restore into draft, preserving the original id so the page keeps the same
-  // identity it had before being trashed.
-  await c.env.DB.prepare(
-    `INSERT INTO pages (id, uuid, name, slug, weight, start, end, timezone, page_type, lect, page_id, creator, editors)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(uuid) DO UPDATE SET
-       name = excluded.name,
-       slug = excluded.slug,
-       weight = excluded.weight,
-       start = excluded.start,
-       end = excluded.end,
-       timezone = excluded.timezone,
-       page_type = excluded.page_type,
-       lect = excluded.lect,
-       page_id = excluded.page_id,
-       creator = excluded.creator,
-       editors = excluded.editors`,
-  )
-    .bind(
-      trashedPage.id,
-      trashedPage.uuid,
-      trashedPage.name,
-      trashedPage.slug,
-      trashedPage.weight,
-      trashedPage.start,
-      trashedPage.end,
-      trashedPage.timezone,
-      trashedPage.page_type,
-      trashedPage.lect,
-      restoredParentId,
-      trashedPage.creator,
-      trashedPage.editors,
-    )
-    .run();
-
-  const draftPage = await c.env.DB.prepare('SELECT id FROM pages WHERE uuid = ?')
-    .bind(trashedPage.uuid)
-    .first<{ id: number }>();
-
-  if (draftPage) {
-    // Bring version history back, preserving version ids so links to a
-    // specific snapshot survive the trash round-trip.
-    const trashVersions = await c.env.DB.prepare('SELECT * FROM trash_page_versions WHERE page_id = ?')
-      .bind(trashId)
-      .all<PageVersion>();
-    for (const version of trashVersions.results) {
-      await c.env.DB.prepare(
-        `INSERT OR IGNORE INTO page_versions (id, uuid, created_at, page_id, lect, action)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(version.id, version.uuid, version.created_at, draftPage.id, version.lect, version.action)
-        .run();
-    }
-
-    // Restore page tags to draft
-    const trashTags = await c.env.DB.prepare('SELECT * FROM trash_page_tags WHERE page_id = ?')
-      .bind(trashId)
-      .all<PageTag>();
-    for (const pt of trashTags.results) {
-      await c.env.DB.prepare(
-        `INSERT OR IGNORE INTO page_tags (uuid, page_id, tag_id, weight) VALUES (?, ?, ?, ?)`,
-      )
-        .bind(pt.uuid, draftPage.id, pt.tag_id, pt.weight)
-        .run();
-    }
-  }
-
-  // Remove from TRASH
-  await c.env.DB.prepare('DELETE FROM trash_pages WHERE id = ?').bind(trashId).run();
-
-  logAudit(c, 'page.restore', 'page', draftPage?.id ?? trashedPage.uuid, {
-    name: trashedPage.name,
-    slug: trashedPage.slug,
-  });
   return c.redirect('/admin/trash?flash=Page+restored+to+draft');
 });
 
@@ -181,8 +98,7 @@ trashRoutes.post('/trash/restore', requirePermission('trash:restore'), async (c)
   const pageType = (form.get('type') as string | null)?.trim() || null;
   const withinLastHour = (form.get('action') as string | null)?.trim() === '1h';
 
-  const count = await restoreTrashedPages(c.env.DB, { pageType, withinLastHour });
-  logAudit(c, 'page.restore_all', 'page', undefined, { count, type: pageType ?? 'all', scope: withinLastHour ? '1h' : 'all' });
+  const {count}=await mutatePageLifecycle(c.env,c.get('user'),'restore',{pageType,withinLastHour},{request:c});
 
   const noun = count === 1 ? 'page' : 'pages';
   const scope = withinLastHour ? ' from the last hour' : '';
@@ -193,8 +109,7 @@ trashRoutes.post('/trash/restore', requirePermission('trash:restore'), async (c)
 
 trashRoutes.post('/trash/:id/delete', requirePermission('trash:purge'), async (c) => {
   const trashId = parseInt(c.req.param('id'), 10);
-  await c.env.DB.prepare('DELETE FROM trash_pages WHERE id = ?').bind(trashId).run();
-  logAudit(c, 'page.purge', 'page', trashId);
+  await mutatePageLifecycle(c.env,c.get('user'),'purge',{ids:[trashId]},{request:c});
   return c.redirect('/admin/trash?flash=Page+permanently+deleted');
 });
 
@@ -208,18 +123,7 @@ trashRoutes.post('/trash/empty', requirePermission('trash:purge'), async (c) => 
   const pageType = (form.get('type') as string | null)?.trim() || null;
   const withinLastHour = (form.get('action') as string | null)?.trim() === '1h';
 
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  if (pageType) {
-    conditions.push('page_type = ?');
-    params.push(pageType);
-  }
-  if (withinLastHour) conditions.push(`created_at >= datetime('now', '-1 hour')`);
-
-  await c.env.DB.prepare(
-    `DELETE FROM trash_pages${conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''}`,
-  ).bind(...params).run();
-  logAudit(c, 'page.purge_all', 'page', undefined);
+  await mutatePageLifecycle(c.env,c.get('user'),'purge',{pageType,withinLastHour},{request:c});
 
   const label = pageType ? `${pageType}+pages` : 'Trash';
   const flash = withinLastHour ? `${label}+from+last+hour+emptied` : `${label}+emptied`;

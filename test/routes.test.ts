@@ -1885,10 +1885,10 @@ describe('admin routes', () => {
     expect(await env.DB.prepare('SELECT id FROM pages WHERE id = ?')
       .bind(101)
       .first<{ id: number }>()).not.toBeNull();
-    // Audit rows are written for every deleted page in one batched insert.
-    expect(await env.DB.prepare(
-      "SELECT COUNT(*) AS total FROM audit_events WHERE action = 'page.delete' AND target_id IN ('103', '104')",
-    ).first<{ total: number }>()).toEqual({ total: 2 });
+    // One atomic lifecycle receipt retains the complete selected-page manifest.
+    const receipt=await env.DB.prepare("SELECT target_count,detail FROM audit_events WHERE action='page.delete'").first<{target_count:number;detail:string}>();
+    expect(receipt?.target_count).toBe(2);
+    expect(JSON.parse(receipt!.detail).sources.map((page:{id:number})=>page.id).sort()).toEqual([103,104]);
   });
 
   // The jobs feature is what registers enqueueBulkAction. Dropping it leaves

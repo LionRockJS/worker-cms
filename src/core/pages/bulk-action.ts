@@ -1,3 +1,4 @@
+import { mutatePageLifecycle } from './lifecycle-mutation-evidence';
 import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext } from './batch-mutation-evidence';
 // Applying one action to many pages: publish, unpublish, move to trash, change tags,
 // or replace text in draft content.
@@ -16,7 +17,7 @@ import {
   unpublishPagesFromTargets,
 } from '../publish';
 import type { Env, JWTPayload, Page } from '../../types';
-import { trashDraftPages, type TrashedPageRef } from '../db/admin-queries';
+import type { TrashedPageRef } from '../db/admin-queries';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
 import { logAuditBatch, type AuditActor } from '../db/audit';
 import { submissionMirrorIds } from '../db/submission-ingest';
@@ -139,20 +140,20 @@ export async function applyBulkPageAction(
   }
 
   if (action === 'delete') {
+    if(ids.length>BULK_ACTION_PAGE_LIMIT)throw new Error('Invalid lifecycle slice');
     const deleted: TrashedPageRef[] = [];
-    for (const chunk of chunks(ids)) {
-      const trashed = await trashDraftPages(env.DB, chunk);
+    for (const chunk of [ids]) {
+      const local=await mutatePageLifecycle(env,user,'trash',{ids:chunk},context);
+      const trashed=local.pages;
       if (!trashed.length) continue;
-      // One bulk unpublish per chunk instead of a per-page delete: D1 collapses
-      // the whole slice into a single batch, so a 90-page chunk costs ~1 round
-      // trip to the published DB rather than ~3 per page.
+      // Withdraw the whole committed slice with one batch per target.
       const outcome = await unpublishPagesFromTargets(env, trashed, { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null });
       refused += outcome.refusedCount;
       outcome.failures.forEach((target) => failedTargets.add(target));
       deleted.push(...trashed);
       updated += trashed.length;
     }
-    await emitPageLifecycle(env, user, 'delete', deleted);
+    await emitPageLifecycle(env, user, 'delete', deleted,true);
     return { updated, refused, failedTargets };
   }
 
