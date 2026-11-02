@@ -18,12 +18,13 @@
     "apple:client-secret": "node tools/generate-apple-client-secret.mjs",
     "type-check": "tsc --noEmit",
     "pretest": "npm run build",
-    "test": "npm run check:profiles && npm run check:boundaries && npm run check:generated && vitest run",
+    "test": "npm run check:profiles && npm run check:boundaries && npm run check:generated && npm run check:inventory && vitest run",
     "check:profiles": "node tools/check-profiles.mjs --quiet",
     "check:boundaries": "node tools/check-boundaries.mjs --quiet",
     "build:features": "node tools/build-features.mjs",
     "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check",
-    "check:upgrade": "node --no-warnings tools/check-upgrade-path.mjs"
+    "check:upgrade": "node --no-warnings tools/check-upgrade-path.mjs",
+    "check:inventory": "node tools/check-inventory.mjs --quiet"
   },
   "dependencies": {
     "hono": "^4.13.14",
