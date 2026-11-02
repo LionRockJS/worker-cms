@@ -1,3 +1,4 @@
+import { ContentBatchEvidenceUnavailableError } from './batch-mutation-evidence';
 import type { Page, PageVersion } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization } from '../auth/access-authorization';
@@ -128,6 +129,6 @@ export async function removeDraftHistory(c: AppContext, before: Page, versionId?
 
 export async function contentMutationUnavailable(c: AppContext, error?: unknown): Promise<Response> {
   if (String(error).includes('sensitivity_reduction_requires_review')) throw error;
-  await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});
+  if (!(error instanceof ContentBatchEvidenceUnavailableError)) await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});
   return c.json({error:'Content change unavailable'},503,{'Cache-Control':'no-store'});
 }

@@ -277,6 +277,16 @@ export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClas
   return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange, undefined, options.policy);
 }
 
+/** Classified local mutations shared by HTTP and trusted job execution.
+ * Complete batch manifests belong in detail; the indexed target list is capped. */
+export function attributedMutationAuditEvidence(env: Env, user: JWTPayload, entry: AuditEntry, dataClass: AuditRow['dataClass'],
+  policy: DataClassMap, options: { context?: AppContext; targetIds?: string[]; via?: string } = {}): MutationAuditEvidence {
+  const row = { ...mutationRow(entry), dataClass };
+  if (options.targetIds) { row.targetIds = options.targetIds.slice(0, 200); row.targetCount = options.targetIds.length; }
+  return preparedAuditEvidence(env, row, actorFromUser(user, options.via ?? null), options.context ? requestFrom(options.context) : NO_REQUEST,
+    false, undefined, policy);
+}
+
 export interface AuditEnvelope { row: AuditRow; actor: AuditActor; request: AuditRequest }
 
 /** Refusals have no business mutation/target. Actor identity must come from an

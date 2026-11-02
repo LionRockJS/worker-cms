@@ -17,8 +17,18 @@ export interface AccessAuthorization {
 }
 
 export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write'): Promise<AccessAuthorization> {
+  return captureAuthorization(env, actor, permission, true);
+}
+
+/** Trusted claimed-job callers must execute BOTH returned guards in the same
+ * business batch. A persisted job delegates work; an old JWT is not its lease. */
+export async function captureContentJobAuthorization(env: Env, actor: JWTPayload, delegationGuard: D1PreparedStatement) {
+  return { authorization: await captureAuthorization(env, actor, 'content:write', false), delegationGuard };
+}
+
+async function captureAuthorization(env: Env, actor: JWTPayload, permission: AccessAuthorization['capability'], sessionRequired: boolean): Promise<AccessAuthorization> {
   actor = { ...actor };
-  if (!/^\d+$/.test(actor.sub) || !/^\d+$/.test(actor.sid ?? '') || !safeRoleAuditValue(actor.role)) throw new Error('Access authorization unavailable');
+  if (!/^\d+$/.test(actor.sub) || (sessionRequired && !/^\d+$/.test(actor.sid ?? '')) || !safeRoleAuditValue(actor.role)) throw new Error('Access authorization unavailable');
   const [users, roles, grants] = await env.DB.batch([
     env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(actor.sub),
     env.DB.prepare('SELECT name, builtin FROM roles ORDER BY name'),
@@ -37,16 +47,16 @@ export async function captureAccessAuthorization(env: Env, actor: JWTPayload, pe
   const admin = splitRoles(user.role).includes('admin');
   return {
     capability: permission, allowed: admin || effective.has(permission), admin, permissions: effective, roleMap,
-    guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u JOIN sessions s ON s.user_id = u.id
-        WHERE u.id = ? AND u.role IS ? AND s.id = ? AND ? > CAST(strftime('%s', 'now') AS INTEGER)
-          AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))
+    guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
+        WHERE u.id = ? AND u.role IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
+          AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})
       OR (SELECT COUNT(*) FROM roles) <> ?
       OR EXISTS (SELECT name, builtin FROM roles EXCEPT
         SELECT json_extract(value, '$.name'), json_extract(value, '$.builtin') FROM json_each(?))
       OR (SELECT COUNT(*) FROM role_permissions) <> ?
       OR EXISTS (SELECT role, permission FROM role_permissions EXCEPT
         SELECT json_extract(value, '$.role'), json_extract(value, '$.permission') FROM json_each(?))`,
-    [actor.sub, actor.role, actor.sid!, actor.exp, managed.length, JSON.stringify(managed), permissions.length, JSON.stringify(permissions)]),
+    [actor.sub, actor.role, ...(sessionRequired ? [actor.sid!, actor.exp] : []), managed.length, JSON.stringify(managed), permissions.length, JSON.stringify(permissions)]),
   };
 }
 

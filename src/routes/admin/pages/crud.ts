@@ -1,3 +1,4 @@
+import { updateDraftWeights } from '../../../core/pages/batch-mutation-evidence';
 import { saveDraftContent, removeDraftHistory, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // Page create / read / edit / update, plus the weight controls.
@@ -26,7 +27,7 @@ import { uiTranslator } from '../../../core/i18n';
 import { requirePermission } from '../../../core/auth/guards';
 import { userCan } from '../../../core/auth/permissions';
 import { notifyPageSaved } from '../../../core/db/page-store';
-import { contextActor, logAudit } from '../../../core/db/audit';
+import { contextActor } from '../../../core/db/audit';
 import { recordPageReads } from '../../../core/http/access-log';
 import { publishFlash } from './lifecycle';
 import {
@@ -215,22 +216,16 @@ pageCrudRoutes.post('/pages/batch-weight', requirePermission('content:write'), a
 
   if (!Array.isArray(updates)) return c.json({ error: 'Invalid input' }, 400);
 
-  const statements = [];
+  const weights: Array<{id:number;weight:number}> = [];
   for (const update of updates) {
     const id = Number(update?.id);
     const weight = Number(update?.weight);
-    if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(weight)) {
-      return c.json({ error: 'Invalid input' }, 400);
-    }
-    statements.push(c.env.DB.prepare('UPDATE pages SET weight = ? WHERE id = ?').bind(weight, id));
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isFinite(weight)) return c.json({error:'Invalid input'},400);
+    weights.push({id,weight});
   }
-
-  if (!statements.length) return c.json({ success: true });
-
-  const results = await c.env.DB.batch(statements);
-  if (results.some((r) => !r.success)) {
-    return c.json({ error: 'Some updates failed' }, 500);
-  }
+  if (weights.length>5000 || new Set(weights.map(w=>w.id)).size!==weights.length) return c.json({error:'Invalid input'},400);
+  try { await updateDraftWeights(c.env,c.get('user'),weights,{request:c}); }
+  catch (error) { return contentMutationUnavailable(c,error); }
 
   return c.json({ success: true });
 });
@@ -268,12 +263,12 @@ pageCrudRoutes.post('/pages/reorder', requirePermission('content:write'), async 
   if (before.length > pageSize) return c.json({ error: 'Invalid input' }, 400);
 
   const sequence = await c.env.DB.prepare(
-    `SELECT id, weight FROM pages WHERE page_type = ?
+    `SELECT id, uuid, name, weight, page_type FROM pages WHERE page_type = ?
      ORDER BY weight ASC, name ASC, id ASC
      LIMIT ?`,
   )
     .bind(pageType, REORDER_MAX_SEQUENCE + 1)
-    .all<ReorderSequenceRow>();
+    .all<ReorderSequenceRow & {uuid:string;name:string;page_type:string|null}>();
 
   if (sequence.results.length > REORDER_MAX_SEQUENCE) {
     return c.json({ error: 'Too many pages to reorder; set weights directly' }, 409);
@@ -282,22 +277,9 @@ pageCrudRoutes.post('/pages/reorder', requirePermission('content:write'), async 
   const plan = planPageReorder(sequence.results, (pageNumber - 1) * pageSize, before, after);
   if (plan.stale) return c.json({ error: 'List changed; reload to reorder' }, 409);
 
-  for (const chunk of reorderChunks(plan.updates)) {
-    const results = await c.env.DB.batch(chunk.map((update) => (
-      c.env.DB.prepare('UPDATE pages SET weight = ? WHERE id = ?').bind(update.weight, update.id)
-    )));
-    if (results.some((result) => !result.success)) {
-      return c.json({ error: 'Some updates failed' }, 500);
-    }
-  }
-
-  if (plan.updates.length) {
-    logAudit(c, 'page.reorder', 'page_type', pageType, {
-      page: pageNumber,
-      moved: before.length,
-      renumbered: plan.updates.length,
-    });
-  }
+  try {
+    await updateDraftWeights(c.env,c.get('user'),plan.updates,{request:c},{pageType,rows:sequence.results});
+  } catch (error) { return contentMutationUnavailable(c,error); }
 
   // The window's final weights let the client refresh the weight fields (and
   // the live-weight drift markers) without reloading the whole list.
@@ -310,13 +292,6 @@ function pageIdList(value: unknown): number[] | null {
   const ids = value.map((entry) => Number(entry));
   if (ids.some((id) => !Number.isInteger(id) || id <= 0)) return null;
   return new Set(ids).size === ids.length ? ids : null;
-}
-
-/** One D1 batch per chunk; keeps a first-time normalize off the statement cap. */
-function reorderChunks(updates: ReorderSequenceRow[], size = 50): ReorderSequenceRow[][] {
-  const out: ReorderSequenceRow[][] = [];
-  for (let index = 0; index < updates.length; index += size) out.push(updates.slice(index, index + size));
-  return out;
 }
 
 // ── Read page (read-only view) ────────────────────────────────────────────────
@@ -469,12 +444,10 @@ pageCrudRoutes.post('/pages/:id/weight', requirePermission('content:write'), asy
   const weight = num(form.get('weight'));
   const returnPath = safeAdminReturnPath(form.get('return_to'));
 
-  const result = await c.env.DB.prepare('UPDATE pages SET weight = ? WHERE id = ?')
-    .bind(weight, pageId)
-    .run();
-
-  const flash = result.success ? 'flash=Draft+weight+updated' : 'flash=Weight+update+failed';
-  return c.redirect(appendQuery(returnPath, flash));
+  if (!Number.isSafeInteger(pageId) || pageId<=0 || !Number.isFinite(weight)) return c.json({error:'Invalid input'},400);
+  try { await updateDraftWeights(c.env,c.get('user'),[{id:pageId,weight}],{request:c}); }
+  catch (error) { return contentMutationUnavailable(c,error); }
+  return c.redirect(appendQuery(returnPath,'flash=Draft+weight+updated'));
 });
 
 // ── Update page ───────────────────────────────────────────────────────────────

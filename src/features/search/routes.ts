@@ -221,7 +221,7 @@ async function bulkAdvancedSearchInline(
     targetTagIds: input.targetTagIds,
     searchText: input.searchText,
     replacementText: input.replacementText,
-  });
+  },{request:c});
   const remaining = targetIds.length - slice.length;
   const flash = bulkActionFlash(
     input.action,

@@ -1,3 +1,4 @@
+import { abortIf } from '../../core/db/transaction-guard';
 // Running a claimed job: replay a recorded admin request, or walk a bulk page
 // action one bounded slice at a time, re-queueing itself until the set is done.
 //
@@ -48,7 +49,7 @@ export async function runCmsAdminJob(env: Env, jobId: string): Promise<void> {
       throw new Error(`Unsupported admin job type ${job.type}`);
     }
   } catch (error) {
-    await failAdminJob(env.DB, job.id, error);
+    await failAdminJob(env.DB, job.id, error, job);
     console.error(`[cms] admin job ${job.id} failed`, error);
   }
 }
@@ -82,7 +83,7 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
     },
   });
 
-  await completeAdminJob(env.DB, job.id, result.status, result.location);
+  await completeAdminJob(env.DB, job.id, result.status, result.location, job);
 }
 
 async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Promise<void> {
@@ -122,7 +123,9 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
     targetTagIds: input.targetTagIds,
     searchText: input.searchText,
     replacementText: input.replacementText,
-  });
+  }, {job:{id:job.id,attempt:job.attempts,guard:abortIf(env,`NOT EXISTS (SELECT 1 FROM admin_jobs WHERE id=? AND type='advanced_search_bulk_action'
+    AND status='running' AND attempts=? AND body IS ? AND updated_at IS ? AND json_valid(user_json)
+    AND CAST(json_extract(user_json,'$.sub') AS TEXT)=?)`,[job.id,job.attempts,job.body,job.updatedAt,job.user.sub])}});
   const updated = (input.updated ?? 0) + outcome.updated;
   const refused = (input.refused ?? 0) + outcome.refused;
   const failedTargets = Array.from(new Set([...(input.failedTargets ?? []), ...outcome.failedTargets]));
@@ -136,7 +139,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
       refused,
       failedTargets,
     };
-    await requeueAdminJob(env.DB, job.id, JSON.stringify(nextInput));
+    if (!await requeueAdminJob(env.DB, job.id, JSON.stringify(nextInput), job)) return;
     if (env.ADMIN_JOBS_QUEUE) {
       await env.ADMIN_JOBS_QUEUE.send({ kind: 'cms_admin_job', jobId: job.id });
     } else {
@@ -148,7 +151,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
   await completeAdminJob(env.DB, job.id, 200, appendQuery(
     input.returnTo,
     `flash=${encodeURIComponent(bulkActionFlash(input.action, updated, refused, failedTargets))}`,
-  ));
+  ), job);
 }
 
 function parseAdvancedSearchBulkActionJob(body: string | null): AdvancedSearchBulkActionPayload {

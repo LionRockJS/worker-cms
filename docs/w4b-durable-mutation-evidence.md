@@ -1,6 +1,6 @@
 # W4b durable mutation evidence
 
-**Status: local identity/session/access-policy foundations and the draft-editor content/history slice are implemented. W4b remains open with [six remaining work packages](w4b-remaining-scope-2026-11-02.md); regulated writes remain blocked.** This is repository evidence, not deployment acceptance or a standards-compliance finding.
+**Status: local identity/session/access-policy foundations and the draft-editor content/history and weights/reorder/local-bulk slices are implemented. W4b remains open with [six remaining work packages](w4b-remaining-scope-2026-11-02.md); regulated writes remain blocked.** This is repository evidence, not deployment acceptance or a standards-compliance finding.
 
 The existing audit envelope supplies the actor, request and event metadata. The new mutation evidence builder creates an audit write and a guard for the exact event. The covered D1 mutations and those statements run in one batch, with additional postconditions for the business state. A failed statement or invariant aborts the batch; a connection failure after a possible commit can leave an ambiguous outcome, so an operator must reconcile current state and the corresponding event before retrying.
 
@@ -78,7 +78,7 @@ See the [authentication-denial record](authentication-denial-evidence.md) for ex
 
 ## Still required before regulated write release
 
-The current [scope register](w4b-remaining-scope-2026-11-02.md) defines six open packages: remaining core content writers; other host configuration/access mutations; contributor/service/background writers; external/multi-store recovery; shared operation identities and uncertain-result handling; and coverage/deployment acceptance. Its provisional remaining estimate is 30–53 engineering person-days plus external acceptance lead time. Earlier chronological limitations below/above are superseded only for operations explicitly covered by later records.
+The current [scope register](w4b-remaining-scope-2026-11-02.md) defines six open packages: remaining core content writers; other host configuration/access mutations; contributor/service/background writers; external/multi-store recovery; shared operation identities and uncertain-result handling; and coverage/deployment acceptance. Its revised provisional remaining estimate is 27–48 engineering person-days plus external acceptance lead time. Earlier chronological limitations below/above are superseded only for operations explicitly covered by later records.
 
 W3 publication schema/destination approvals, governed declassification and W5 archive/retention protection remain release dependencies. Keep regulated-write and PHI-publication containment until all release prerequisites are accepted. Existing installations still need the earlier reviewed outbox and classification-version upgrades; the content slice adds no new schema.
 
@@ -109,3 +109,13 @@ Following `38aa132`, draft creation/save, version restoration and single/all his
 The [content record](content-mutation-evidence.md) describes exact scope, uncertainty, manifests and separate external/credit side effects. The [remaining-scope register](w4b-remaining-scope-2026-11-02.md) groups remaining work into six packages, estimated at 30–53 engineering person-days plus external acceptance lead time. It supersedes using the original plan's 5–8 day estimate for the broader remaining inventory. Other writers, retry identities and multi-store recovery remain open; regulated containment is retained. No new schema, production migration, deployment or push occurred.
 
 Validation: **69 new content regressions** pass. The final serial suite passed **1,760 tests across 76 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. These are local results, not deployed acceptance.
+
+## Durable page weights, reorder and local bulk continuation — 2 November 2026
+
+Following `2c385b7`, single/batch weights and reorder commit exact classified manifests with their state changes. Reorder checks the full observed sequence and uses one set-based transaction, removing partial independently committed chunks. Local bulk text/tag edits commit each bounded slice and every per-page receipt together; text changes retain exact history snapshots, tag evidence retains before/after internal IDs, and shared operation IDs correlate the slice. Post-commit hooks omit duplicate best-effort audit metadata.
+
+Current authority, policy generations, page/membership/taxonomy/UUID-floor state and final invariants are checked. Trusted queued local slices additionally check claimed job ownership/body/attempt/state; stale workers cannot overwrite newer claim finalization. Historical JWT expiry is not treated as a persisted job's lease. A lost commit acknowledgment remains unavailable, and job cursor advancement is still a separate commit requiring R5 reconciliation.
+
+The [batch record](page-batch-mutation-evidence.md) describes exact scope, privacy, bounds, deferred authority and uncertainty. The [scope register](w4b-remaining-scope-2026-11-02.md) keeps six packages open, with R1 narrowed and a revised provisional total of 27–48 engineering person-days plus external acceptance lead time. No schema change, deployment, production migration or push occurred; regulated containment remains.
+
+Validation: **100 new batch-evidence regressions** pass. The integrated serial suite passed **1,860 tests across 77 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. The final per-slice completeness assertions also passed in the 100-test focused run. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. These are local results, not deployed acceptance.

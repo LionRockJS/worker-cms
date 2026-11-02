@@ -159,11 +159,17 @@ export async function claimAdminJob(db: D1DatabaseClient, id: string): Promise<A
   return getAdminJob(db, id);
 }
 
+/** A stale worker must not overwrite a newer claim or changed payload. */
+const claimedJobSql = ` AND status='running' AND attempts=? AND body IS ? AND updated_at IS ?
+  AND (CASE WHEN json_valid(user_json) THEN CAST(json_extract(user_json,'$.sub') AS TEXT) ELSE NULL END) IS ?`;
+const claimedJobBindings = (claim: AdminJobRecord) => [claim.attempts,claim.body,claim.updatedAt,claim.user?.sub??null];
+
 export async function completeAdminJob(
   db: D1DatabaseClient,
   id: string,
   resultStatus: number,
   resultLocation: string | null,
+  claim?: AdminJobRecord,
 ): Promise<void> {
   const now = jobTimestamp();
   await db.prepare(
@@ -174,35 +180,37 @@ export async function completeAdminJob(
          error = NULL,
          completed_at = ?,
          updated_at = ?
-     WHERE id = ?`,
-  ).bind(resultStatus, resultLocation, now, now, id).run();
+     WHERE id = ?${claim ? claimedJobSql : ''}`,
+  ).bind(resultStatus, resultLocation, now, now, id,...(claim ? claimedJobBindings(claim):[])).run();
 }
 
 export async function requeueAdminJob(
   db: D1DatabaseClient,
   id: string,
   body: string,
-): Promise<void> {
+  claim?: AdminJobRecord,
+): Promise<boolean> {
   const now = jobTimestamp();
-  await db.prepare(
+  const result = await db.prepare(
     `UPDATE admin_jobs
      SET status = 'queued',
          body = ?,
          error = NULL,
          updated_at = ?
-     WHERE id = ?`,
-  ).bind(body, now, id).run();
+     WHERE id = ?${claim ? claimedJobSql : ''}`,
+  ).bind(body, now, id,...(claim ? claimedJobBindings(claim):[])).run();
+  return changes(result)===1;
 }
 
-export async function failAdminJob(db: D1DatabaseClient, id: string, error: unknown): Promise<void> {
+export async function failAdminJob(db: D1DatabaseClient, id: string, error: unknown, claim?: AdminJobRecord): Promise<void> {
   const now = jobTimestamp();
   await db.prepare(
     `UPDATE admin_jobs
      SET status = 'failed',
          error = ?,
          updated_at = ?
-     WHERE id = ?`,
-  ).bind(errorText(error), now, id).run();
+     WHERE id = ?${claim ? claimedJobSql : ''}`,
+  ).bind(errorText(error), now, id,...(claim ? claimedJobBindings(claim):[])).run();
 }
 
 export async function getAdminJob(db: D1DatabaseClient, id: string): Promise<AdminJobRecord | null> {

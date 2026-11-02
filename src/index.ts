@@ -1,3 +1,4 @@
+import { ContentBatchEvidenceUnavailableError } from './core/pages/batch-mutation-evidence';
 import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
 // ============================================================
 // 0xCMS - main entry point
@@ -187,6 +188,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof ContentBatchEvidenceUnavailableError) return c.json({ error: 'content_batch_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof AuthDenialEvidenceUnavailableError) return c.json({ error: 'authentication_denial_evidence_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof SessionEvidenceUnavailableError) return c.json({ error: 'session_lifecycle_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof RegulatedWritesUnavailableError) return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });

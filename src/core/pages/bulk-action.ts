@@ -1,3 +1,4 @@
+import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext } from './batch-mutation-evidence';
 // Applying one action to many pages: publish, unpublish, move to trash, change tags,
 // or replace text in draft content.
 //
@@ -93,6 +94,7 @@ export async function applyBulkPageAction(
   action: BulkPageAction,
   ids: number[],
   options: BulkPageActionOptions = {},
+  context: ContentBatchContext = {},
 ): Promise<BulkPageActionOutcome> {
   if (action !== 'unpublish') assertRegulatedWritesAllowed(env);
   const failedTargets = new Set<string>();
@@ -101,52 +103,39 @@ export async function applyBulkPageAction(
 
   if (!ids.length) return { updated, refused, failedTargets };
 
-  if (action === 'add_tag') {
-    const pages = await draftPagesByIds(env.DB, ids);
-    const taggedPageIds = await addTagsToDraftPages(
-      env.DB,
-      pages.map((page) => page.id),
-      options.targetTagIds ?? [],
-    );
-    const tagged = new Set(taggedPageIds);
-    await emitPageLifecycle(env, user, 'update', pages.filter((page) => tagged.has(page.id)));
-    return { updated: taggedPageIds.length, refused, failedTargets };
-  }
-
-  if (action === 'remove_tag') {
-    const pages = await draftPagesByIds(env.DB, ids);
-    const untaggedPageIds = await removeTagsFromDraftPages(
-      env.DB,
-      pages.map((page) => page.id),
-      options.targetTagIds ?? [],
-    );
-    const untagged = new Set(untaggedPageIds);
-    await emitPageLifecycle(env, user, 'update', pages.filter((page) => untagged.has(page.id)));
-    return { updated: untaggedPageIds.length, refused, failedTargets };
-  }
-
-  if (action === 'replace_text') {
-    const searchText = options.searchText ?? '';
-    if (!searchText) return { updated, refused, failedTargets };
-
-    const changed: Page[] = [];
-    const statements: D1PreparedStatement[] = [];
-    for (const page of await draftPagesByIds(env.DB, ids)) {
-      const replaced = replaceLectText(safeParseLect(page.lect), searchText, options.replacementText ?? '');
-      const name = replaceLiteralText(page.name, searchText, options.replacementText ?? '');
-      if (!replaced.changed && name === page.name) continue;
-      const lect = replaced.changed
-        ? stringifyLect(withDraftMetadata(replaced.lect, Number.parseInt(user.sub, 10) || 0))
-        : page.lect;
-      statements.push(
-        env.DB.prepare('UPDATE pages SET name = ?, lect = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(name, lect, page.id),
-        env.DB.prepare("INSERT INTO page_versions (page_id, lect, action) VALUES (?, ?, 'bulk-replace')").bind(page.id, lect),
-      );
-      changed.push({ ...page, name, lect });
+  if (action === 'add_tag' || action === 'remove_tag' || action === 'replace_text') {
+    if (ids.length>BULK_ACTION_PAGE_LIMIT || ids.some(id=>!Number.isSafeInteger(id)||id<=0)) throw new Error('Invalid bulk target manifest');
+    const pages = await draftPagesByIds(env.DB,[...new Set(ids)]);
+    const changes: LocalPageChange[] = [];
+    if (action === 'replace_text') {
+      const searchText=options.searchText??'';
+      if (!searchText) return {updated,refused,failedTargets};
+      for (const page of pages) {
+        const replaced=replaceLectText(safeParseLect(page.lect),searchText,options.replacementText??'');
+        const name=replaceLiteralText(page.name,searchText,options.replacementText??'');
+        if (!replaced.changed && name===page.name) continue;
+        const lect=replaced.changed ? stringifyLect(withDraftMetadata(replaced.lect,Number.parseInt(user.sub,10)||0)):page.lect;
+        changes.push({before:page,name,lect});
+      }
+    } else {
+      const tagIds=[...new Set((options.targetTagIds??[]).filter(id=>Number.isSafeInteger(id)&&id>0))];
+      if (tagIds.length>5000) throw new Error('Bulk tag manifest requires review');
+      const [tags,links]=await env.DB.batch([
+        env.DB.prepare('SELECT id FROM tags WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id').bind(JSON.stringify(tagIds)),
+        env.DB.prepare('SELECT page_id,tag_id FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT 5001').bind(JSON.stringify(pages.map(p=>p.id))),
+      ]);
+      if (links.results.length>5000) throw new Error('Bulk tag manifest requires review');
+      const existing=new Set((tags.results as Array<{id:number}>).map(t=>t.id));
+      for (const page of pages) {
+        const old=(links.results as Array<{page_id:number;tag_id:number}>).filter(l=>l.page_id===page.id).map(l=>l.tag_id);
+        const next=action==='add_tag' ? [...new Set([...old,...existing])] : old.filter(id=>!existing.has(id));
+        if (action==='add_tag' ? [...existing].every(id=>old.includes(id)) : next.length===old.length) continue;
+        changes.push({before:page,tags:next,previousTagIds:old});
+      }
     }
-    if (statements.length) await env.DB.batch(statements);
-    await emitPageLifecycle(env, user, 'update', changed);
-    return { updated: changed.length, refused, failedTargets };
+    await applyLocalPageChanges(env,user,changes,context);
+    await emitPageLifecycle(env,user,'update',changes.map(c=>({...c.before,name:c.name??c.before.name})),true);
+    return {updated:changes.length,refused,failedTargets};
   }
 
   if (action === 'delete') {
@@ -299,9 +288,10 @@ async function emitPageLifecycle(
   user: JWTPayload,
   event: PageEvent,
   pages: PageEventPage[],
+  durableEvidence = false,
 ): Promise<void> {
   if (!pages.length) return;
-  const auditPromise = logAuditBatch(env, user, pages.map((page) => ({
+  const auditPromise = durableEvidence ? Promise.resolve() : logAuditBatch(env, user, pages.map((page) => ({
     action: `page.${event}`,
     entityType: 'page',
     entityId: page.id,
@@ -324,121 +314,6 @@ export async function draftPagesByIds(db: D1DatabaseClient, ids: number[]): Prom
   }
   const byId = new Map(pages.map((page) => [page.id, page]));
   return ids.map((id) => byId.get(id)).filter((page): page is Page => !!page);
-}
-
-/**
- * Adds every requested existing tag that is missing from each page. The
- * page_tags table predates a composite unique constraint, so the NOT EXISTS
- * predicate is intentional: repeating a bulk action must not create duplicate
- * links even on databases that still have the original schema.
- */
-export async function addTagsToDraftPages(
-  db: D1DatabaseClient,
-  pageIds: number[],
-  tagIds: number[],
-): Promise<number[]> {
-  const pages = Array.from(new Set(pageIds.filter((id) => Number.isInteger(id) && id > 0)));
-  const tags = Array.from(new Set(tagIds.filter((id) => Number.isInteger(id) && id > 0)));
-  if (!pages.length || !tags.length) return [];
-
-  const changedPageIds = new Set<number>();
-  // Keep each statement comfortably below D1's bound-parameter limit even if
-  // a caller selects a large number of target tags.
-  for (const pageChunk of chunks(pages, 45)) {
-    for (const tagChunk of chunks(tags, 45)) {
-      const pagePlaceholders = pageChunk.map(() => '?').join(',');
-      const tagPlaceholders = tagChunk.map(() => '?').join(',');
-      const missing = await db.prepare(
-        `SELECT DISTINCT p.id
-         FROM pages p
-         CROSS JOIN tags t
-         WHERE p.id IN (${pagePlaceholders})
-           AND t.id IN (${tagPlaceholders})
-           AND NOT EXISTS (
-             SELECT 1 FROM page_tags existing
-             WHERE existing.page_id = p.id AND existing.tag_id = t.id
-           )`,
-      )
-        .bind(...pageChunk, ...tagChunk)
-        .all<{ id: number }>();
-
-      await db.prepare(
-        `INSERT INTO page_tags (page_id, tag_id)
-         SELECT p.id, t.id
-         FROM pages p
-         CROSS JOIN tags t
-         WHERE p.id IN (${pagePlaceholders})
-           AND t.id IN (${tagPlaceholders})
-           AND NOT EXISTS (
-             SELECT 1 FROM page_tags existing
-             WHERE existing.page_id = p.id AND existing.tag_id = t.id
-           )`,
-      )
-        .bind(...pageChunk, ...tagChunk)
-        .run();
-
-      missing.results.forEach((page) => changedPageIds.add(page.id));
-    }
-  }
-
-  for (const pageChunk of chunks([...changedPageIds])) {
-    const placeholders = pageChunk.map(() => '?').join(',');
-    await db.prepare(`UPDATE pages SET updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`)
-      .bind(...pageChunk)
-      .run();
-  }
-
-  return pages.filter((id) => changedPageIds.has(id));
-}
-
-/** Removes every requested existing tag from each page that has it. */
-export async function removeTagsFromDraftPages(
-  db: D1DatabaseClient,
-  pageIds: number[],
-  tagIds: number[],
-): Promise<number[]> {
-  const pages = Array.from(new Set(pageIds.filter((id) => Number.isInteger(id) && id > 0)));
-  const tags = Array.from(new Set(tagIds.filter((id) => Number.isInteger(id) && id > 0)));
-  if (!pages.length || !tags.length) return [];
-
-  const changedPageIds = new Set<number>();
-  for (const pageChunk of chunks(pages, 45)) {
-    for (const tagChunk of chunks(tags, 45)) {
-      const pagePlaceholders = pageChunk.map(() => '?').join(',');
-      const tagPlaceholders = tagChunk.map(() => '?').join(',');
-      const existing = await db.prepare(
-        `SELECT DISTINCT p.id
-         FROM pages p
-         JOIN page_tags existing ON existing.page_id = p.id
-         JOIN tags t ON t.id = existing.tag_id
-         WHERE p.id IN (${pagePlaceholders})
-           AND existing.tag_id IN (${tagPlaceholders})`,
-      )
-        .bind(...pageChunk, ...tagChunk)
-        .all<{ id: number }>();
-
-      await db.prepare(
-        `DELETE FROM page_tags
-         WHERE page_id IN (${pagePlaceholders})
-           AND tag_id IN (${tagPlaceholders})
-           AND EXISTS (SELECT 1 FROM pages WHERE pages.id = page_tags.page_id)
-           AND EXISTS (SELECT 1 FROM tags WHERE tags.id = page_tags.tag_id)`,
-      )
-        .bind(...pageChunk, ...tagChunk)
-        .run();
-
-      existing.results.forEach((page) => changedPageIds.add(page.id));
-    }
-  }
-
-  for (const pageChunk of chunks([...changedPageIds])) {
-    const placeholders = pageChunk.map(() => '?').join(',');
-    await db.prepare(`UPDATE pages SET updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`)
-      .bind(...pageChunk)
-      .run();
-  }
-
-  return pages.filter((id) => changedPageIds.has(id));
 }
 
 function chunks<T>(values: T[], size = 90): T[][] {
