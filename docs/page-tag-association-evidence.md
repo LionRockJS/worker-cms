@@ -28,7 +28,7 @@ Generic failures return `page_tag_change_unavailable`, 503/no-store, and attempt
 
 ## Remaining scope
 
-This slice covers host HTTP associations only; plugin/service, ingestion and collaboration writers remain R3, with external effects under R4. During the remaining writer inventory, the host quick-create alias `POST /admin/pages/new_post/:pageType` in `src/routes/admin/pages/dashboard.ts` was confirmed to still use separate page/history writes and a best-effort event. R1 remains open for that alias and final writer reconciliation. The legacy exported history-delete helper has no current production caller, but belongs in the inventory if reused. Use the [current six-package scope register](w4b-remaining-scope-2026-11-02.md).
+This slice covers host HTTP associations only; plugin/service, ingestion and collaboration writers remain R3, with external effects under R4. During the remaining writer inventory, the host quick-create alias `POST /admin/pages/new_post/:pageType` in `src/routes/admin/pages/dashboard.ts` was confirmed to still use separate page/history writes and a best-effort event. The subsequent [quick-create record](quick-create-mutation-evidence.md) converts that alias and reconciles the inventoried local R1 host routes. The legacy exported history-delete helper has no current production caller, but belongs in the inventory if reused. Use the [current scope register](w4b-remaining-scope-2026-11-02.md).
 
 No schema change, production migration, push, deployment or compliance sign-off occurred. Regulated writes remain blocked.
 

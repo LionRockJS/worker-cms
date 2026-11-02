@@ -64,7 +64,7 @@ async function prepare(c: AppContext, before: Page | undefined, next: DraftConte
     WHERE t.id = json_extract(e.value,'$.id') AND t.taxonomy_slug IS json_extract(e.value,'$.taxonomy_slug')))`,[JSON.stringify(tagRows)]));
   const versionIds = (versions.results as Array<{id:number}>).map(row=>row.id);
   guards.push(versionSetGuard(c,before?.id ?? -1,versionIds));
-  return { guards, policy, retained, dataClass: dataClass as 'none'|'pii'|'phi', targetTags, versionIds };
+  return { guards, authority, policy, retained, dataClass: dataClass as 'none'|'pii'|'phi', targetTags, versionIds };
 }
 function versionSetGuard(c: AppContext, pageId: number, ids: number[]) {
   return abortIf(c.env, `(SELECT COUNT(*) FROM page_versions WHERE page_id = ?) <> ?
@@ -106,6 +106,7 @@ export async function saveDraftContent(c: AppContext, next: DraftContent, tags: 
       OR COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid = ?),0) > ?
       OR (? IS NOT NULL AND (SELECT id FROM pages WHERE uuid = ?) IS NOT ?)`,
     [uuid,prepared.retained ?? 0,uuid,prepared.dataClass === 'phi' ? 2 : prepared.dataClass === 'pii' ? 1 : 0,before?.id ?? null,uuid,before?.id ?? null]),
+    prepared.authority.guard(),
     c.env.DB.prepare('SELECT * FROM pages WHERE uuid = ?').bind(uuid));
   const results = await c.env.DB.batch(statements);
   const saved = results[results.length-1].results[0] as Page | undefined;

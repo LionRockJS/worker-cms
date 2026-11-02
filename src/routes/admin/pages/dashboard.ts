@@ -1,3 +1,4 @@
+import { saveDraftContent, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // The dashboard and page listings: all pages, per-type lists, and the
 // create-by-type entry points.
@@ -15,7 +16,7 @@ import { dashboardPageHref, dashboardPageNumber, dashboardPageSize, dashboardSta
 import { coreExtensions } from '../../../core/extensions';
 import { reservePageCreate } from '../../../features/services';
 import { lectFromForm, publicationStatusForPage, withDraftMetadata, withLiveStatus } from '../../../core/db/page-logic';
-import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages, listDashboardDraftPageUuids, listDashboardDraftPagesByUuids, savePageVersion } from '../../../core/db/admin-queries';
+import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages, listDashboardDraftPageUuids, listDashboardDraftPagesByUuids } from '../../../core/db/admin-queries';
 import { liveMapForDraftPages } from '../../../core/publish';
 import { draftLectProjector } from '../../../core/publish/projection';
 import { recordPageReads } from '../../../core/http/access-log';
@@ -440,25 +441,17 @@ pageDashboardRoutes.post('/pages/new_post/:pageType', requirePermission('content
   const createReservation = await reservePageCreate(c, pageType);
   if (!createReservation.ok) return c.text(createReservation.message, createReservation.status as 400 | 402);
 
+  let page: Page;
   try {
-    const result = await c.env.DB.prepare(
-      `INSERT INTO pages (name, slug, weight, page_type, lect, creator, editors)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(name, slug, num(form.get('weight')), pageType, lect, creator || null, editorsFromForm(form))
-      .run();
-    const page = await c.env.DB.prepare('SELECT id FROM pages WHERE rowid = ?')
-      .bind(result.meta.last_row_id)
-      .first<{ id: number }>();
-    if (!page) return c.notFound();
-
-    await savePageVersion(c.env.DB, page.id, lect, 'create');
-
-    announcePageEvent(c, 'create', { id: page.id, page_type: pageType, name, slug });
-
-    return c.redirect(`/admin/pages/${page.id}/edit`);
+    page = await saveDraftContent(c, {
+      name, slug, weight: num(form.get('weight')), page_type: pageType, lect,
+      start: null, end: null, timezone: null, page_id: null,
+      creator: creator || null, editors: editorsFromForm(form),
+    }, []);
   } catch (error) {
     await createReservation.refund();
-    throw error;
+    return contentMutationUnavailable(c, error);
   }
+  announcePageEvent(c, 'create', { id: page.id, uuid: page.uuid, page_type: pageType, name, slug }, { durableEvidence: true });
+  return c.redirect(`/admin/pages/${page.id}/edit`);
 });
