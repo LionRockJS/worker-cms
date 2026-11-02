@@ -1,6 +1,6 @@
 import type { AppContext } from '../http/context';
 import type { User } from '../../types';
-import { classFor, resolveDataClasses } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
 import { contextActor, mutationAuditEnvelope, mutationAuditEvidence } from '../db/audit';
 import { auditOutboxEvidence, drainAuditMutationOutbox } from '../db/audit-mutation-outbox';
 import { abortIf } from '../db/transaction-guard';
@@ -38,7 +38,7 @@ async function classification(c: AppContext, revocation: boolean) {
     const policy = await resolveDataClasses(c.env, true);
     if (policy.ok) {
       const classes = ['users', 'user_oauth_identities', 'roles', 'role_permissions', 'sessions'].map(table => classFor(policy, 'table', table));
-      return { dataClass: classes.includes('phi') ? 'phi' as const : classes.includes('pii') ? 'pii' as const : 'none' as const, unavailable: false };
+      return { policy, dataClass: classes.includes('phi') ? 'phi' as const : classes.includes('pii') ? 'pii' as const : 'none' as const, unavailable: false };
     }
   } catch { /* Revocation retains conservative private evidence on lookup failure. */ }
   if (!revocation) throw new Error('Profile classification unavailable');
@@ -54,14 +54,14 @@ export async function updateOwnProfileName(c: AppContext, name: string): Promise
   if (!safeRoleAuditValue(before.role)) throw new Error('Profile evidence requires review');
   const refused = await flushReadAudit(c);
   if (refused) throw new Error('Protected read evidence unavailable');
-  const statements = [sessionGuard(c), accountGuard(c, before)];
+  const statements = [classificationPolicyGuard(c.env, policy.policy!), sessionGuard(c), accountGuard(c, before)];
   if (name !== before.name) {
     const evidence = mutationAuditEvidence(c, { action: 'profile.update', entityType: 'user', entityId: before.id,
-      detail: { fields: ['name'] } }, policy.dataClass, { requirePreviousChange: true });
+      detail: { fields: ['name'] } }, policy.dataClass, { requirePreviousChange: true, policy: policy.policy });
     statements.push(c.env.DB.prepare('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(name, before.id),
       evidence.write, evidence.guard);
   }
-  statements.push(accountGuard(c, { ...before, name }), sessionGuard(c));
+  statements.push(accountGuard(c, { ...before, name }), sessionGuard(c), classificationPolicyGuard(c.env, policy.policy!));
   await c.env.DB.batch(statements);
 }
 
@@ -97,7 +97,7 @@ export async function disconnectOwnIdentity(c: AppContext, identityId: number): 
   if (rolesUnavailable) actor.roles = null;
   const envelope = mutationAuditEnvelope(c, { action: 'user.oauth-disconnect', entityType: 'user_oauth_identity', entityId: identityId,
     detail: { user_id: String(before.id), primary_replaced: primaryReplaced, replacement_identity_id: replacement?.id ?? null,
-      classification_unavailable: policy.unavailable, roles_unavailable: rolesUnavailable } }, policy.dataClass, actor);
+      classification_unavailable: policy.unavailable, roles_unavailable: rolesUnavailable } }, 'phi', actor);
   const evidence = auditOutboxEvidence(c.env, envelope);
   const statements = [sessionGuard(c), accountGuard(c, before), identitiesGuard(c, before.id, identities)];
   if (primaryReplaced) {

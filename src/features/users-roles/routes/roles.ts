@@ -133,14 +133,14 @@ rolesRoutes.post('/roles', async (c) => {
   const name = str(form.get('name')) ? slugify(str(form.get('name'))) : slugify(label);
 
   if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
-  const dataClass = await accessMutationClass(c.env, ['roles', 'users']);
-  if (dataClass === null) return auditUnavailable(c);
+  const classification = await accessMutationClass(c.env, ['roles', 'users']);
+  if (classification === null) return auditUnavailable(c);
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   let error: string | null;
   try {
     error = await createCustomRole(c.env, name, label, mutationAuditEvidence(c,
-      { action: 'role.create', entityType: 'role', entityId: name }, dataClass, { requirePreviousChange: true }), authorization);
+      { action: 'role.create', entityType: 'role', entityId: name }, classification.dataClass, { requirePreviousChange: true, policy: classification.policy }), authorization);
   } catch {
     return accessMutationUnavailable(c);
   } finally {
@@ -205,8 +205,8 @@ rolesRoutes.post('/roles/:name', async (c) => {
   }
 
   if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
-  const dataClass = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
-  if (dataClass === null) return auditUnavailable(c);
+  const classification = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
+  if (classification === null) return auditUnavailable(c);
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   const grants = storedRolePermissions(permissions);
@@ -217,7 +217,7 @@ rolesRoutes.post('/roles/:name', async (c) => {
     await saveRolePermissions(c.env, name, label, grants, before, mutationAuditEvidence(c,
       { action: 'role.update', entityType: 'role', entityId: name,
         detail: { permissions: grants.length, grants, previous: { managed: before.managed, grants: before.grants } } },
-      dataClass, { requirePreviousChange: true }), authorization);
+      classification.dataClass, { requirePreviousChange: true, policy: classification.policy }), authorization);
   } catch {
     return accessMutationUnavailable(c);
   } finally {
@@ -241,8 +241,8 @@ rolesRoutes.post('/roles/:name/delete', async (c) => {
     return c.text('Forbidden: cannot remove a more privileged role', 403);
   }
   if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
-  const dataClass = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
-  if (dataClass === null) return auditUnavailable(c);
+  const classification = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
+  if (classification === null) return auditUnavailable(c);
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   const operationId = crypto.randomUUID();
@@ -253,9 +253,9 @@ rolesRoutes.post('/roles/:name/delete', async (c) => {
     if (!snapshotMatchesRole(name, role.builtin, role.permissions, before)) return stalePolicy(c);
     await deleteCustomRole(c.env, name, {
       operationId, occurredAt, before,
-      removals: roleRemovalAuditEvidence(c, name, operationId, occurredAt, dataClass),
+      removals: roleRemovalAuditEvidence(c, name, operationId, occurredAt, classification.dataClass),
       deletion: mutationAuditEvidence(c, { action: 'role.delete', entityType: 'role', entityId: name,
-        detail: { operation_id: operationId, previous_grants: before.grants } }, dataClass, { requirePreviousChange: true }),
+        detail: { operation_id: operationId, previous_grants: before.grants } }, classification.dataClass, { requirePreviousChange: true, policy: classification.policy }),
     }, authorization);
   } catch {
     return accessMutationUnavailable(c);

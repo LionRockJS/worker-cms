@@ -1,6 +1,6 @@
 # W4b durable mutation evidence
 
-**Status: classification, role/user access-management, OAuth registration, existing-account OAuth mutations, self-service profile/disconnection and supported session lifecycle and host authentication-denial evidence plus transaction-bound delegated access authority and named user/role policy refusals implemented locally; W4b remains open and regulated writes remain blocked.** This is repository evidence, not a deployment acceptance or a standards-compliance finding.
+**Status: classification, role/user access-management, OAuth registration, existing-account OAuth mutations, self-service profile/disconnection and supported session lifecycle and host authentication-denial evidence plus transaction-bound delegated access authority and named user/role policy refusals and transaction-bound classification generations implemented locally; W4b remains open and regulated writes remain blocked.** This is repository evidence, not a deployment acceptance or a standards-compliance finding.
 
 The existing audit envelope supplies the actor, request and event metadata. The new mutation evidence builder creates an audit write and a guard for the exact event. The covered D1 mutations and those statements run in one batch, with additional postconditions for the business state. A failed statement or invariant aborts the batch; a connection failure after a possible commit can leave an ambiguous outcome, so an operator must reconcile current state and the corresponding event before retrying.
 
@@ -95,3 +95,13 @@ Named object-policy refusals use durable primary/outbox denial evidence with bou
 This adds no schema or regulated-write bypass. Classification remains pre-transaction; other policy versions, content/plugin/service mutations, general operation identities and deployed recovery/capacity acceptance remain open.
 
 Validation: the final serial suite passed **1,652 tests across 74 files**, including 55 new authorization regressions. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. The full-suite log contains no cancellation, uncaught-exception or unhandled-error diagnostic. These are local results, not deployed acceptance.
+
+## Classification policy-version continuation — 2 November 2026
+
+Following `de0d298`, core classification resolution now reads policy/floors and a persistent generation in one statement. Covered user/role, OAuth registration/link/profile, own-name and session issuance/rotation/grace transactions verify that generation with exact success evidence. A changed-and-restored policy still invalidates the older generation. Current core management proofs also check their captured classification generation, including direct role-store calls.
+
+Classification writes check the starting generation plus current management authority/session, and verify the expected new generation after their own policy/floor writes. Events retain the starting/final versions. Missing version machinery fails classification closed. Containment and denial producers preserve availability during policy repair by always retaining conservative PHI evidence; their outbox contracts and retry semantics remain intact.
+
+The [policy-version record](classification-policy-version.md) describes exact scope, rollout and limits. Existing installations require the additive core upgrade before deploying this code. Historical sections above describe earlier increments; their pre-transaction-classification limitation is superseded for the operations listed in the new record. Other mutation/approval policies and external recovery remain open. No production migration, deployment, push or compliance sign-off occurred.
+
+Validation: **39 new regressions** pass. The final serial suite passed **1,691 tests across 75 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. The synthetic existing-schema upgrade and idempotent reapplication also passed. These are local results, not deployed acceptance.

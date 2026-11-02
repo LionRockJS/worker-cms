@@ -167,13 +167,13 @@ usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
   }
 
   if (!safeRoleAuditValue(user.role) || !safeRoleAuditValue(nextRole)) return unsafeAccessEvidence(c);
-  const dataClass = await accessMutationClass(c.env, ['users', 'roles', 'role_permissions']);
-  if (dataClass === null) return auditUnavailable(c);
+  const classification = await accessMutationClass(c.env, ['users', 'roles', 'role_permissions']);
+  if (classification === null) return auditUnavailable(c);
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   try {
     const evidence = mutationAuditEvidence(c, { action: 'user.roles', entityType: 'user', entityId: id,
-      detail: { role_before: user.role, role: nextRole } }, dataClass, { requirePreviousChange: true });
+      detail: { role_before: user.role, role: nextRole } }, classification.dataClass, { requirePreviousChange: true, policy: classification.policy });
     await c.env.DB.batch([
       authorization.guard(),
       // Recheck the observed target and last-admin guard inside the transaction.
@@ -222,14 +222,14 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
   }
 
   if (!safeRoleAuditValue(user.role)) return unsafeAccessEvidence(c);
-  const dataClass = await accessMutationClass(c.env, ['users', 'roles', 'sessions', 'user_oauth_identities']);
-  if (dataClass === null) return auditUnavailable(c);
+  const classification = await accessMutationClass(c.env, ['users', 'roles', 'sessions', 'user_oauth_identities']);
+  if (classification === null) return auditUnavailable(c);
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   try {
     const sessions = (await c.env.DB.prepare('SELECT id FROM sessions WHERE user_id = ? ORDER BY id').bind(id).all<{ id: number }>()).results.map(row => row.id);
     const evidence = mutationAuditEvidence(c, { action: 'user.delete', entityType: 'user', entityId: id,
-      detail: { role_before: user.role, ...(sessions.length ? { revoked_session_ids: sessions } : {}) } }, dataClass, { requirePreviousChange: true });
+      detail: { role_before: user.role, ...(sessions.length ? { revoked_session_ids: sessions } : {}) } }, classification.dataClass, { requirePreviousChange: true, policy: classification.policy });
     await c.env.DB.batch([
       authorization.guard(),
       abortIf(c.env, `(SELECT COUNT(*) FROM sessions WHERE user_id = ?) <> ?

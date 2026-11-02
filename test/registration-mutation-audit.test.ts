@@ -67,7 +67,7 @@ it.each(['none', 'pii', 'phi'] as const)('commits account, viewer role, identity
     actor_user_id: String(user!.id), actor_roles: 'viewer', acting_via: 'oauth:eventuai', session_sid: null,
     event_class: 'admin', data_class: dataClass, retention_class: 'admin_config', outcome: 'success',
     request_id: 'w4b-registration', source_ip: `10.81.0.${requestNumber}`, user_agent: 'Synthetic registration test' });
-  expect(JSON.parse(String(events[0].detail))).toEqual({ provider: 'eventuai', role_after: 'viewer' });
+  expect(JSON.parse(String(events[0].detail))).toEqual({ classification_policy_version: expect.any(Number), provider: 'eventuai', role_after: 'viewer' });
   for (const value of [...Object.values(profile).filter(value => typeof value === 'string'), 'synthetic-provider-token', 'synthetic-code']) {
     expect(JSON.stringify(events)).not.toContain(value);
   }

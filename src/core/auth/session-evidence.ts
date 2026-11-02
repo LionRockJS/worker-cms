@@ -28,11 +28,9 @@ export async function sessionPolicy(env: Env, revocation = false) {
     return { dataClass: 'phi' as const, unavailable: true };
   }
   const classes = ['users', 'sessions', 'roles', 'role_permissions', 'user_oauth_identities'].map(table => classFor(policy, 'table', table));
-  // Logout can run while regulated inventory admission is unavailable. Never
-  // downgrade its evidence during that repair path, including policy/inventory
-  // disagreement about a previously lower-classified source.
-  const regulatedRevocation = revocation && Boolean(env.REGULATED_MODE && env.REGULATED_MODE !== 'false');
-  return { dataClass: classes.includes('phi') || regulatedRevocation ? 'phi' as const
+  // Containment must survive unavailable/changing policy. Always retain PHI
+  // evidence for revocations, even if a lower class was observed before the batch.
+  return { policy, dataClass: classes.includes('phi') || revocation ? 'phi' as const
     : classes.includes('pii') ? 'pii' as const : 'none' as const, unavailable: false };
 }
 

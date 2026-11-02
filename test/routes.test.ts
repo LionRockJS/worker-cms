@@ -310,7 +310,7 @@ describe('auth routes', () => {
       "SELECT actor_user_id, outcome, detail FROM audit_events WHERE action = 'auth.login' ORDER BY seq DESC LIMIT 1",
     ).first<{ actor_user_id: string; outcome: string; detail: string }>(), { timeout: 2000 }).toMatchObject({
       outcome: 'success',
-      detail: JSON.stringify({ provider: 'eventuai' }),
+      detail: expect.stringMatching(/"provider":"eventuai","classification_policy_version":\d+/),
     });
   });
 

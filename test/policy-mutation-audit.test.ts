@@ -73,9 +73,10 @@ it('commits attributable policy evidence with a PII assignment and PHI upgrade',
   expect(rows).toHaveLength(2);
   expect(new Set(rows.map(row => row.event_id)).size).toBe(2);
   expect(rows).toMatchObject([
-    { action: 'data_class.set', event_class: 'admin', data_class: 'pii', retention_class: 'admin_config', outcome: 'success', actor_user_id: '8100', actor_roles: 'admin', target_type: 'settings', target_id: 'page_type:w4b-chart', detail: '{"class":"pii"}' },
-    { action: 'data_class.set', event_class: 'admin', data_class: 'phi', retention_class: 'admin_config', outcome: 'success', actor_user_id: '8100', actor_roles: 'admin', target_type: 'settings', target_id: 'page_type:w4b-chart', detail: '{"class":"phi"}' },
+    { action: 'data_class.set', event_class: 'admin', data_class: 'pii', retention_class: 'admin_config', outcome: 'success', actor_user_id: '8100', actor_roles: 'admin', target_type: 'settings', target_id: 'page_type:w4b-chart', detail: expect.any(String) },
+    { action: 'data_class.set', event_class: 'admin', data_class: 'phi', retention_class: 'admin_config', outcome: 'success', actor_user_id: '8100', actor_roles: 'admin', target_type: 'settings', target_id: 'page_type:w4b-chart', detail: expect.any(String) },
   ]);
+  rows.forEach((row, i) => expect(JSON.parse(String(row.detail))).toEqual({ class: i ? 'phi' : 'pii', classification_policy_version_before: expect.any(Number), classification_policy_version_after: expect.any(Number) }));
   expect(rows[1].request_id).toBe(`w4b-${requestNumber}`);
   expect(rows[1].source_ip).toBe(`10.81.0.${requestNumber}`);
   expect(JSON.stringify(rows)).not.toContain('synthetic note');

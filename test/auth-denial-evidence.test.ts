@@ -141,7 +141,7 @@ it('omits unsafe legacy role values without preventing the refusal', async () =>
 it.each(['none', 'pii', 'phi', 'invalid'])('classifies anonymous denial evidence with %s policy, preserving conservative failure metadata', async dataClass => {
   if (dataClass !== 'none') await env.DB.prepare("INSERT INTO data_classes (container_kind, container_key, class) VALUES ('table', 'sessions', ?)").bind(dataClass).run();
   expect((await call('/auth/callback')).status).toBe(302);
-  const row = (await events())[0]; expect(row.data_class).toBe(dataClass === 'invalid' ? 'phi' : dataClass);
+  const row = (await events())[0]; expect(row.data_class).toBe('phi');
   expect(JSON.parse(String(row.detail))).toEqual({ reason: 'missing_params', ...(dataClass === 'invalid' ? { classification_unavailable: true } : {}) });
 });
 

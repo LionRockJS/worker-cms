@@ -19,6 +19,7 @@ import type { Env } from '../../types';
 import { requestContext } from '../http/request-context';
 import { recordAuditOutage } from './audit-outages';
 import { sensitivitySchemaFailureSql } from './sensitivity';
+import { abortIf } from './transaction-guard';
 
 export type ContainerKind = 'page_type' | 'taxonomy' | 'media_prefix' | 'plugin' | 'table';
 export type DataClass = 'pii' | 'phi';
@@ -48,6 +49,8 @@ export interface DataClassMap {
    * unknown policy as unclassified.
    */
   ok: boolean;
+  /** Persistent generation read in the same statement as the classification. */
+  version?: number;
 }
 
 const EMPTY: DataClassMap = { exact: new Map(), prefixes: [], size: 0, ok: false };
@@ -63,20 +66,25 @@ export async function resolveDataClasses(env: Env, fresh = false, reportFailure 
   if (!env.DB) return EMPTY;
 
   let ok = true;
-  const rows = await env.DB.prepare(`SELECT container_kind, container_key, class FROM data_classes
-    UNION ALL SELECT container_kind, container_key, CASE level WHEN 2 THEN 'phi' WHEN 1 THEN 'pii' ELSE 'invalid' END AS class FROM data_class_floors
-    UNION ALL SELECT 'table', 'sensitivity_schema', 'invalid' WHERE ${sensitivitySchemaFailureSql}`)
-    .all<{ container_kind: string; container_key: string; class: string }>()
-    // Preserve the failure state so reads and publication can fail closed.
+  const rows = await env.DB.prepare(`WITH policy AS (
+    SELECT container_kind, container_key, class FROM data_classes
+    UNION ALL SELECT container_kind, container_key, CASE level WHEN 2 THEN 'phi' WHEN 1 THEN 'pii' ELSE 'invalid' END FROM data_class_floors
+    UNION ALL SELECT 'table', 'sensitivity_schema', 'invalid' WHERE ${sensitivitySchemaFailureSql}
+    UNION ALL SELECT 'table', 'classification_version_schema', 'invalid' WHERE ${classificationVersionSchemaFailureSql}
+  ) SELECT p.container_kind, p.container_key, p.class, v.version
+    FROM classification_policy_version v LEFT JOIN policy p ON 1 = 1 WHERE v.id = 1`)
+    .all<{ container_kind: string | null; container_key: string; class: string; version: number }>()
     .catch((error) => {
       console.error('data_classes lookup failed', error);
       ok = false;
-      return { results: [] as Array<{ container_kind: string; container_key: string; class: string }> };
+      return { results: [] as Array<{ container_kind: string | null; container_key: string; class: string; version: number }> };
     });
-
-  const map: DataClassMap = { exact: new Map(), prefixes: [], size: 0, ok };
+  const version = rows.results[0]?.version;
+  ok = ok && Number.isSafeInteger(version) && version >= 0;
+  const map: DataClassMap = { exact: new Map(), prefixes: [], size: 0, ok, version };
   const effective = new Map<string, { kind: ContainerKind; key: string; class: DataClass }>();
   for (const row of rows.results) {
+    if (row.container_kind === null) continue;
     if (!isDataClass(row.class) || !CONTAINER_KINDS.includes(row.container_kind as ContainerKind) || !row.container_key.trim()) {
       map.ok = false;
       continue;
@@ -131,4 +139,21 @@ export function retentionClassFor(dataClass: DataClass): string {
  */
 export function failsClosed(dataClass: DataClass): boolean {
   return dataClass === 'phi';
+}
+
+/** Missing version machinery refuses classification rather than silently
+ * accepting a generation that no longer follows policy writes. */
+export const classificationVersionSchemaFailureSql = `(SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name IN (
+  'classification_version_data_classes_insert', 'classification_version_data_classes_update', 'classification_version_data_classes_delete',
+  'classification_version_data_class_floors_insert', 'classification_version_data_class_floors_update', 'classification_version_data_class_floors_delete')) <> 6`;
+
+export function classificationPolicyFailureSql(policy: DataClassMap): string {
+  if (!policy.ok || !Number.isSafeInteger(policy.version)) throw new Error('Versioned classification required');
+  return `NOT EXISTS (SELECT 1 FROM classification_policy_version WHERE id = 1 AND version = ${policy.version})
+    OR (${classificationVersionSchemaFailureSql}) OR (${sensitivitySchemaFailureSql})`;
+}
+
+/** Same batch as mutation/evidence; a changed generation aborts all writes. */
+export function classificationPolicyGuard(env: Env, policy: DataClassMap): D1PreparedStatement {
+  return abortIf(env, classificationPolicyFailureSql(policy));
 }

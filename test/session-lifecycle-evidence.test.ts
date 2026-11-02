@@ -77,7 +77,7 @@ it.each(['none', 'pii', 'phi'])('commits session creation and %s sign-in evidenc
   expect(audit[0]).toMatchObject({ action: 'auth.login', target_type: 'session', target_id: result.accessPayload.sid,
     session_sid: result.accessPayload.sid, actor_user_id: String(user.id), actor_roles: 'editor', data_class: dataClass,
     event_class: 'auth', retention_class: 'auth', outcome: 'success' });
-  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'internal' });
+  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'internal', classification_policy_version: expect.any(Number) });
   await privateEvidence(); expect(JSON.stringify(audit)).not.toContain(result.refreshJti);
 });
 
@@ -125,7 +125,7 @@ it('records a classified rotation with request attribution and no token material
   const audit = await events(); expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ action: 'auth.session.rotate', target_id: String(sid), actor_user_id: String(user.id), actor_roles: 'editor',
     session_sid: String(sid), data_class: 'phi', request_id: 'session-lifecycle-test', retention_class: 'auth' });
-  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'explicit-refresh' }); await privateEvidence();
+  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'explicit-refresh', classification_policy_version: expect.any(Number) }); await privateEvidence();
 });
 
 it('uses durable rotation evidence for silent middleware refresh', async () => {
@@ -137,7 +137,7 @@ it('uses durable rotation evidence for silent middleware refresh', async () => {
   await waitOnExecutionContext(ctx); expect(response.status).toBe(200);
   const audit = await events(); expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ action: 'auth.session.rotate', request_id: 'silent-refresh-test' });
-  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'silent-refresh' });
+  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'silent-refresh', classification_policy_version: expect.any(Number) });
 });
 
 it.each([
@@ -264,7 +264,7 @@ it.each(['invalid-class', 'unsafe-role'])('preserves conservative logout evidenc
   else await env.DB.prepare("UPDATE users SET role = 'private-role@example.invalid'").run();
   expect((await api('/auth/logout')).status).toBe(302); expect(await rows()).toEqual([]);
   const audit = (await events())[0];
-  expect(audit).toMatchObject({ data_class: mode === 'invalid-class' ? 'phi' : 'none', actor_roles: mode === 'unsafe-role' ? null : 'editor' });
+  expect(audit).toMatchObject({ data_class: 'phi', actor_roles: mode === 'unsafe-role' ? null : 'editor' });
   expect(JSON.parse(String(audit.detail))[mode === 'invalid-class' ? 'classification_unavailable' : 'roles_unavailable']).toBe(true);
   expect(JSON.stringify(audit)).not.toContain('private-role@example.invalid');
 });
@@ -339,5 +339,5 @@ it('records the complete session revocation set inside atomic user deletion evid
   await waitOnExecutionContext(ctx); expect(response.status).toBe(302);
   expect(await env.DB.prepare('SELECT id FROM sessions WHERE user_id = ?').bind(user.id).all()).toMatchObject({ results: [] });
   const event = await env.DB.prepare("SELECT detail, data_class FROM audit_events WHERE action = 'user.delete'").first();
-  expect(event?.data_class).toBe('phi'); expect(JSON.parse(String(event?.detail))).toEqual({ role_before: 'editor', revoked_session_ids: [sid] });
+  expect(event?.data_class).toBe('phi'); expect(JSON.parse(String(event?.detail))).toEqual({ role_before: 'editor', revoked_session_ids: [sid], classification_policy_version: expect.any(Number) });
 });

@@ -79,7 +79,7 @@ it.each(['none', 'pii', 'phi'])('atomically edits only the display name with %s 
   const rows = await events(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'profile.update', target_id: String(userId), actor_user_id: String(userId), actor_roles: 'viewer',
     data_class: dataClass, event_class: 'admin', retention_class: 'admin_config', request_id: 'self-profile-mutation' });
-  expect(JSON.parse(String(rows[0].detail))).toEqual({ fields: ['name'] });
+  expect(JSON.parse(String(rows[0].detail))).toEqual({ classification_policy_version: expect.any(Number), fields: ['name'] });
   privateValuesAbsent(rows);
 });
 
@@ -155,7 +155,7 @@ it.each(['invalid-class', 'unsafe-role'])('keeps conservative revocation evidenc
   else await env.DB.prepare("UPDATE users SET role = 'person@example.invalid' WHERE id = ?").bind(userId).run();
   expect((await disconnect()).status).toBe(302);
   const rows = await events(); expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ data_class: mode === 'invalid-class' ? 'phi' : 'none', actor_roles: mode === 'unsafe-role' ? null : 'viewer' });
+  expect(rows[0]).toMatchObject({ data_class: 'phi', actor_roles: mode === 'unsafe-role' ? null : 'viewer' });
   expect(JSON.parse(String(rows[0].detail))[mode === 'invalid-class' ? 'classification_unavailable' : 'roles_unavailable']).toBe(true);
   privateValuesAbsent(rows); expect(JSON.stringify(rows)).not.toContain('person@example.invalid');
 });

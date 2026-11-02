@@ -1,3 +1,5 @@
+import { captureAccessAuthorization } from '../../core/auth/access-authorization';
+import { recordPolicyDenial } from '../../core/auth/denials';
 // The audit log reader.
 //
 // Read-only on purpose: nothing here updates or deletes audit_events. Pruning
@@ -16,6 +18,7 @@ import { abortIf } from '../../core/db/transaction-guard';
 import { outageEnabled, recordAuditOutage } from '../../core/db/audit-outages';
 import { outagePage, readOutage, reconcileOutage, type OutageReview } from './outages';
 import {
+  classificationPolicyGuard,
   CONTAINER_KINDS,
   DATA_CLASSES,
   clearDataClassCache,
@@ -183,16 +186,24 @@ auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) =
   // The note can contain free text and is deliberately excluded from the event.
   // Re-classification updates the same policy without deleting its sensitivity floor.
   try {
+    const authorization = await captureAccessAuthorization(c.env, c.get('user'), 'menu:manage');
+    if (!authorization.allowed) {
+      await recordPolicyDenial(c, 'management_permission_changed');
+      return c.text('Forbidden: classification management permission changed', 403);
+    }
     const evidence = mutationAuditEvidence(c, {
-      action: 'data_class.set', entityType: 'settings', entityId: `${kind}:${key}`, detail: { class: dataClass },
+      action: 'data_class.set', entityType: 'settings', entityId: `${kind}:${key}`, detail: { class: dataClass, classification_policy_version_before: effective.version, classification_policy_version_after: effective.version! + 2 },
     }, dataClass as DataClass);
     await c.env.DB.batch([
+      authorization.guard(),
+      classificationPolicyGuard(c.env, effective),
       c.env.DB.prepare(
         `INSERT INTO data_classes (container_kind, container_key, class, note) VALUES (?, ?, ?, ?)
          ON CONFLICT(container_kind, container_key) DO UPDATE SET class = excluded.class, note = excluded.note`,
       ).bind(kind, key, dataClass, note || null),
       evidence.write,
       evidence.guard,
+      classificationPolicyGuard(c.env, { ...effective, version: effective.version! + 2 }),
       abortIf(c.env, 'NOT EXISTS (SELECT 1 FROM data_classes WHERE container_kind = ? AND container_key = ? AND class = ? AND note IS ?)',
         [kind, key, dataClass, note || null]),
     ]);

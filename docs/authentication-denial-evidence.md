@@ -47,3 +47,7 @@ Other regulated mutations, broader policy-version/authorization revalidation, ge
 ## Local validation
 
 The 44 new regressions cover bounded reasons and metadata, anonymous/current actor attribution, private URL suppression, endpoint throttling, primary failures (including unavailable table/ignored/rewritten rows), complete outbox fallback, simultaneous persistence failure, uncertain commits, malformed-envelope retention and monitoring privacy. The final serial suite passed 1,597 tests across 73 files. Build, TypeScript, feature-profile, boundary, generated consistency and whitespace checks pass. These are local results; deployed operating acceptance remains open.
+
+## Subsequent classification-version continuation
+
+The [policy-version continuation](classification-policy-version.md) makes new denial evidence conservatively PHI-classified even when a lower valid policy was observed. This prevents an upward policy race from leaving a lower-classified refusal, while keeping denials available during policy repair. Unavailable-policy markers and existing exact primary/outbox contracts remain. Deployment retention/capacity acceptance must account for this conservative classification.

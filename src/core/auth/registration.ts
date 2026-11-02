@@ -22,7 +22,7 @@ export async function registerOAuthUser(c: AppContext, identity: RegistrationIde
   const classes = ['users', 'user_oauth_identities', 'roles', 'role_permissions']
     .map(table => classFor(policy, 'table', table));
   const dataClass = classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none';
-  const audit = registrationAuditEvidence(c, identity.oauthId, identity.provider, dataClass);
+  const audit = registrationAuditEvidence(c, identity.oauthId, identity.provider, dataClass, policy);
   const db = c.env.DB;
   const results = await db.batch([
     // Never adopt an orphan identity or overwrite an account on callback retry.

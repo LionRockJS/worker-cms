@@ -79,7 +79,7 @@ it('atomically creates a classified role and attributable audit without its free
   expect(await env.DB.prepare('SELECT name FROM roles WHERE name = ?').bind(role).first()).toEqual({ name: role });
   const rows = await records(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'role.create', data_class: 'pii', retention_class: 'admin_config', outcome: 'success',
-    actor_user_id: '8100', actor_roles: 'admin', request_id: `w4b-role-${requestNumber}`, target_type: 'role', target_id: role, detail: null });
+    actor_user_id: '8100', actor_roles: 'admin', request_id: `w4b-role-${requestNumber}`, target_type: 'role', target_id: role, detail: expect.any(String) });
   expect(rows[0].session_sid).toBeTruthy();
   expect(JSON.stringify(rows)).not.toContain('person@example.invalid');
 });
@@ -142,7 +142,7 @@ it('atomically replaces grants and records the complete actual PHI-classified gr
   expect(await env.DB.prepare('SELECT label FROM roles WHERE name = ?').bind(role).first()).toEqual({ label: 'Changed private label' });
   const rows = await records(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'role.update', data_class: 'phi', actor_user_id: '8100', target_id: role });
-  expect(JSON.parse(rows[0].detail)).toEqual({ permissions: 3, grants: ['content:read', 'content:write', 'tag:write'], previous: { managed: true, grants: ['content:read'] } });
+  expect(JSON.parse(rows[0].detail)).toEqual({ classification_policy_version: expect.any(Number), permissions: 3, grants: ['content:read', 'content:write', 'tag:write'], previous: { managed: true, grants: ['content:read'] } });
   expect(JSON.stringify(rows)).not.toContain('Changed private label');
 });
 
@@ -160,7 +160,7 @@ it('records an empty built-in permission override without restoring default gran
   expect((await call('/admin/roles/moderator')).status).toBe(302);
   expect(await grants('moderator')).toEqual([]);
   expect(await env.DB.prepare("SELECT builtin FROM roles WHERE name = 'moderator'").first()).toEqual({ builtin: 1 });
-  expect(JSON.parse((await records())[0].detail)).toEqual({ permissions: 0, grants: [], previous: { managed: false, grants: [] } });
+  expect(JSON.parse((await records())[0].detail)).toEqual({ classification_policy_version: expect.any(Number), permissions: 0, grants: [], previous: { managed: false, grants: [] } });
 });
 
 it.each(['audit', 'ignored-audit', 'deleted-audit', 'rewritten-audit', 'changed-grants-after-update', 'changed-grants-after-audit', 'grant', 'ignored-grant', 'ignored-role-update'])("rolls back the entire role replacement on %s failure", async (failure) => {
@@ -309,7 +309,7 @@ it('atomically records a user role change with its actual before/after values', 
   expect(await userRole(8101)).toBe('editor');
   const rows = await records(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'user.roles', data_class: 'pii', actor_user_id: '8100', target_id: '8101' });
-  expect(JSON.parse(rows[0].detail)).toEqual({ role_before: 'viewer', role: 'editor' });
+  expect(JSON.parse(rows[0].detail)).toEqual({ classification_policy_version: expect.any(Number), role_before: 'viewer', role: 'editor' });
 });
 
 it.each(['update', 'audit'])('rolls back when the final user role differs after the %s', async (phase) => {
@@ -382,6 +382,6 @@ it('records user deletion without copying the email into durable evidence', asyn
   expect(await userRole(8101)).toBeUndefined();
   const rows = await records(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'user.delete', data_class: 'pii', target_id: '8101' });
-  expect(JSON.parse(rows[0].detail)).toEqual({ role_before: 'editor' });
+  expect(JSON.parse(rows[0].detail)).toEqual({ classification_policy_version: expect.any(Number), role_before: 'editor' });
   expect(JSON.stringify(rows)).not.toContain('@example.invalid');
 });

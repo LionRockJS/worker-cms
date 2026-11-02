@@ -51,3 +51,7 @@ Production schedules, alert receipt/escalation, backlog capacity, account-specif
 - The existing refresh-observed inactivity semantics and approved timeout values are retained. This does not resolve W6's separate meaningful-activity/background-refresh policy questions.
 
 Local validation: 59 new regressions cover primary/outbox failures, expiry/ownership/concurrency guards, cookie handling, uncertain commits, bounded maintenance, user-deletion receipts and regulated audit-schema recovery. The final serial suite passed 1,553 tests across 72 files; build, TypeScript, feature profiles, boundaries, generated consistency and whitespace checks pass. See the [W4b progress entry](compliance-p0-progress-2026-10-30.md).
+
+## Subsequent classification-version continuation
+
+The [policy-version continuation](classification-policy-version.md) adds persistent generation checks and version attribution to session creation, rotation and access-only grace evidence. Session removal/cleanup instead always retains conservative PHI evidence, including under a known lower classification, to preserve containment during policy changes or repair. Existing installations require the new additive upgrade before version-aware classification can resolve successfully.

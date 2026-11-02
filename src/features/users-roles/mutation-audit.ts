@@ -21,11 +21,11 @@ Promise<{ authorization: AccessAuthorization; refused?: undefined } | { authoriz
 
 /** The highest classification of the tables whose policy/identifiers change.
  * Null means policy could not be resolved; 'none' is a valid ordinary install. */
-export async function accessMutationClass(env: Env, tables: readonly string[]): Promise<'none' | 'pii' | 'phi' | null> {
+export async function accessMutationClass(env: Env, tables: readonly string[]): Promise<{ dataClass: 'none' | 'pii' | 'phi'; policy: import('../../core/db/data-classes').DataClassMap } | null> {
   const policy = await resolveDataClasses(env, true);
   if (!policy.ok) return null;
   const classes = tables.map(table => classFor(policy, 'table', table));
-  return classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none';
+  return { policy, dataClass: classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none' };
 }
 
 /** The failed statement and commit outcome can be unknown after a transport

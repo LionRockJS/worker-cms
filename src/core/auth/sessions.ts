@@ -107,7 +107,7 @@ export async function rotateAuthSession(env: Env, refreshToken: string,
       const access = await issueAccessToken(user, env.JWT_SECRET, String(session.id));
       const condition = refreshCondition(session, hash, idleTtl, payload.exp, true);
       const envelope = sessionAuditEnvelope(c, 'auth.session.grace', user.id, user.role, session.id, policy.dataClass, { source });
-      const evidence = sessionAuditEvidence(env, envelope);
+      const evidence = sessionAuditEvidence(env, envelope, { policy: policy.policy });
       const guard = () => abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE ${condition.sql})`, condition.bindings);
       await env.DB.batch([sessionUserGuard(env, user), guard(), evidence.write, evidence.guard, sessionUserGuard(env, user), guard()]);
       return { ok: true as const, ...access };
@@ -118,7 +118,7 @@ export async function rotateAuthSession(env: Env, refreshToken: string,
     const condition = refreshCondition(session, hash, idleTtl, payload.exp);
     const snapshot = sessionSnapshotCondition(session);
     const envelope = sessionAuditEnvelope(c, 'auth.session.rotate', user.id, user.role, session.id, policy.dataClass, { source });
-    const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true });
+    const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true, policy: policy.policy });
     try {
       await env.DB.batch([
         sessionUserGuard(env, user),
@@ -293,7 +293,7 @@ export async function createAuthSession(env: Env, user: AuthDbUser, c?: AppConte
     const hash = await hashToken(issued.refreshJti);
     const envelope = sessionAuditEnvelope(c, 'auth.login', user.id, user.role, null, policy.dataClass,
       identity ? { provider: identity.provider } : { source: 'internal' });
-    const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true, refreshHash: hash });
+    const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true, refreshHash: hash, policy: policy.policy });
     const guard = () => abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE user_id = ? AND refresh_token_hash = ?
       AND previous_refresh_token_hash IS NULL AND rotated_at IS NULL AND created_at <= CURRENT_TIMESTAMP
       AND expires_at > CURRENT_TIMESTAMP AND expires_at <= MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days')))`, [user.id, hash]);

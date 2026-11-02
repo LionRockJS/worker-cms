@@ -21,6 +21,7 @@
 // any other identifier that erasure has to be able to reach.
 // ============================================================
 
+import { classificationPolicyFailureSql, type DataClassMap } from './data-classes';
 import type { Env, JWTPayload } from '../../types';
 import type { AppContext } from '../http/context';
 import { recordAuditOutage } from './audit-outages';
@@ -229,13 +230,14 @@ export interface MutationAuditEvidence {
 }
 
 function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest,
-  requirePreviousChange = false, lookup?: AuditLookup): MutationAuditEvidence {
+  requirePreviousChange = false, lookup?: AuditLookup, policy?: DataClassMap): MutationAuditEvidence {
+  if (policy) row = { ...row, detail: { ...row.detail, classification_policy_version: policy.version } };
   const prepared = { ...row, eventId: row.eventId ?? crypto.randomUUID(), occurredAt: row.occurredAt ?? new Date().toISOString() };
   const { values: expected, expressions } = auditParameters(prepared, actor, request, lookup);
   const matches = AUDIT_COLUMNS.map((column, index) => `${column} IS ${expressions[index]}`).join(' AND ');
   // A zero-row insert, or a trigger that removes/rewrites the new row, must
   // roll back the business mutation without depending on a table constraint.
-  const guard = abortIf(env, `changes() <> 1 OR NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})`, expected);
+  const guard = abortIf(env, `changes() <> 1 OR NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})${policy ? ` OR (${classificationPolicyFailureSql(policy)})` : ''}`, expected);
   return { write: statement(env, prepared, actor, request, requirePreviousChange, lookup), guard };
 }
 
@@ -243,23 +245,23 @@ function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, reque
  * any session. The validated provider authenticates the new account; there is
  * no CMS session yet. Do not use this for existing-account identity linking. */
 export function registrationAuditEvidence(c: AppContext, oauthId: string, provider: string,
-  dataClass: AuditRow['dataClass']): MutationAuditEvidence {
+  dataClass: AuditRow['dataClass'], policy?: DataClassMap): MutationAuditEvidence {
   const row = mutationRow({ action: 'user.create', entityType: 'user', detail: { provider, role_after: 'viewer' } });
   row.dataClass = dataClass;
   row.targetCount = 1;
   return preparedAuditEvidence(c.env, row,
-    { userId: null, roles: 'viewer', sessionSid: null, via: `oauth:${provider}` }, requestFrom(c), true, { newUserOAuthId: oauthId });
+    { userId: null, roles: 'viewer', sessionSid: null, via: `oauth:${provider}` }, requestFrom(c), true, { newUserOAuthId: oauthId }, policy);
 }
 
 /** A verified provider authenticates an existing account. Identity linking
  * additionally carries the CMS session that authorized the link. Values in
  * detail must be field names/internal IDs, never provider subjects or profiles. */
 export function oauthAccountAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
-  actor: AuditActor, identityOAuthId?: string): MutationAuditEvidence {
+  actor: AuditActor, identityOAuthId?: string, policy?: DataClassMap): MutationAuditEvidence {
   const row = mutationRow(entry);
   row.dataClass = dataClass;
   if (identityOAuthId !== undefined) row.targetCount = 1;
-  return preparedAuditEvidence(c.env, row, actor, requestFrom(c), true, { identityOAuthId });
+  return preparedAuditEvidence(c.env, row, actor, requestFrom(c), true, { identityOAuthId }, policy);
 }
 
 /** Prepare off-request mutation evidence; caller must batch it with the write. */
@@ -269,10 +271,10 @@ export function auditEvidence(env: Env, row: AuditRow, actor: AuditActor): Mutat
 
 /** Prepare request-attributed evidence and its guard for the same D1 batch. */
 export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
-  options: { requirePreviousChange?: boolean } = {}): MutationAuditEvidence {
+  options: { requirePreviousChange?: boolean; policy?: DataClassMap } = {}): MutationAuditEvidence {
   const row = mutationRow(entry);
   row.dataClass = dataClass;
-  return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange);
+  return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange, undefined, options.policy);
 }
 
 export interface AuditEnvelope { row: AuditRow; actor: AuditActor; request: AuditRequest }
@@ -296,9 +298,9 @@ export function sessionAuditEnvelope(c: AppContext | undefined, action: string, 
     request: c ? requestFrom(c) : NO_REQUEST };
 }
 
-export function sessionAuditEvidence(env: Env, envelope: AuditEnvelope, options: { requirePreviousChange?: boolean; refreshHash?: string } = {}): MutationAuditEvidence {
+export function sessionAuditEvidence(env: Env, envelope: AuditEnvelope, options: { requirePreviousChange?: boolean; refreshHash?: string; policy?: DataClassMap } = {}): MutationAuditEvidence {
   return preparedAuditEvidence(env, envelope.row, envelope.actor, envelope.request, options.requirePreviousChange,
-    { sessionRefreshHash: options.refreshHash });
+    { sessionRefreshHash: options.refreshHash }, options.policy);
 }
 
 /** Outbox evidence uses the same envelope as the primary audit stream. */

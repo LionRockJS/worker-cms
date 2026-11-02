@@ -111,7 +111,7 @@ it.each(['none', 'pii', 'phi'] as const)('atomically links an identity with clas
     actor_user_id: String(id), actor_roles: 'editor', acting_via: 'oauth:eventuai', data_class: dataClass,
     event_class: 'admin', retention_class: 'admin_config', outcome: 'success', request_id: 'w4b-oauth-account', user_agent: 'Synthetic OAuth account test' });
   expect(rows[0].session_sid).toBe(issued.accessPayload.sid);
-  expect(JSON.parse(String(rows[0].detail))).toEqual({ provider: 'eventuai', user_id: String(id) });
+  expect(JSON.parse(String(rows[0].detail))).toEqual({ classification_policy_version: expect.any(Number), provider: 'eventuai', user_id: String(id) });
   privateDataAbsent(rows);
 });
 
@@ -123,7 +123,7 @@ it.each(['none', 'pii', 'phi'] as const)('atomically refreshes the profile with 
   const rows = await events(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'user.oauth-profile', target_type: 'user', target_id: String(id), actor_user_id: String(id),
     actor_roles: 'editor', session_sid: null, acting_via: 'oauth:eventuai', data_class: dataClass, retention_class: 'admin_config' });
-  expect(JSON.parse(String(rows[0].detail))).toEqual({ provider: 'eventuai', fields: ['email', 'name', 'avatar_url'] });
+  expect(JSON.parse(String(rows[0].detail))).toEqual({ classification_policy_version: expect.any(Number), provider: 'eventuai', fields: ['email', 'name', 'avatar_url'] });
   privateDataAbsent(rows);
 });
 
@@ -140,7 +140,7 @@ it('preserves the CMS name, roles and another account owning the provider email'
   await env.DB.prepare("INSERT INTO users (oauth_id, email, role) VALUES ('github:other', ?, 'viewer')").bind(profile.email).run();
   expect((await login()).headers.get('Location')).toBe('/admin');
   expect(await account()).toMatchObject({ name: 'CMS chosen name', role: 'editor', email: 'old-private@example.invalid', avatar_url: '' });
-  expect(JSON.parse(String((await events())[0].detail))).toEqual({ provider: 'eventuai', fields: ['avatar_url'] });
+  expect(JSON.parse(String((await events())[0].detail))).toEqual({ classification_policy_version: expect.any(Number), provider: 'eventuai', fields: ['avatar_url'] });
 });
 
 it('refreshes a Google avatar and missing display name without retaining their values in the evidence', async () => {
@@ -149,7 +149,7 @@ it('refreshes a Google avatar and missing display name without retaining their v
   expect((await callback()).headers.get('Location')).toBe('/admin');
   expect(await account()).toMatchObject({ name: profile.name, avatar_url: profile.picture, email: profile.email });
   const rows = await events(); expect(rows).toHaveLength(1);
-  expect(JSON.parse(String(rows[0].detail))).toEqual({ provider: 'google', fields: ['email', 'name', 'avatar_url'] });
+  expect(JSON.parse(String(rows[0].detail))).toEqual({ classification_policy_version: expect.any(Number), provider: 'google', fields: ['email', 'name', 'avatar_url'] });
   privateDataAbsent(rows);
 });
 

@@ -5,7 +5,7 @@ import { oauthLinkSessionGuard } from './oauth-link-session';
 import { identityGuard } from './oauth-identity-guard';
 import { safeRoleAuditValue } from './role-mutation-sql';
 import { oauthAccountAuditEvidence } from '../db/audit';
-import { classFor, resolveDataClasses } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
 
 interface OAuthAccountIdentity {
@@ -33,7 +33,7 @@ async function accountClass(c: AppContext) {
   if (!policy.ok) throw new Error('OAuth account classification unavailable');
   const classes = ['users', 'user_oauth_identities', 'roles', 'role_permissions', 'sessions']
     .map(table => classFor(policy, 'table', table));
-  return classes.includes('phi') ? 'phi' as const : classes.includes('pii') ? 'pii' as const : 'none' as const;
+  return { policy, dataClass: classes.includes('phi') ? 'phi' as const : classes.includes('pii') ? 'pii' as const : 'none' as const };
 }
 
 function snapshotGuard(c: AppContext, user: AccountSnapshot) {
@@ -54,7 +54,7 @@ function batchUser(results: D1Result[]): AuthDbUser {
 /** Explicit linking needs both a verified provider and a still-valid CMS
  * session for this same account. Repeated links validate but do not mutate. */
 export async function linkOAuthIdentity(c: AppContext, identity: OAuthAccountIdentity, session: OAuthLinkSession): Promise<AuthDbUser> {
-  const dataClass = await accountClass(c);
+  const { policy, dataClass } = await accountClass(c);
   const user = await accountSnapshot(c, session.userId, identity);
   const existing = await c.env.DB.prepare(`SELECT user_id, provider, provider_user_id, oauth_id FROM user_oauth_identities
     WHERE oauth_id = ? OR (provider = ? AND provider_user_id = ?)`)
@@ -63,11 +63,11 @@ export async function linkOAuthIdentity(c: AppContext, identity: OAuthAccountIde
   if (existing.results.some(row => row.user_id !== user.id || row.oauth_id !== identity.oauthId
       || row.provider !== identity.provider || row.provider_user_id !== identity.providerUserId)) throw new OAuthIdentityConflictError();
   const legacyOwnerGuard = () => abortIf(c.env, 'EXISTS (SELECT 1 FROM users WHERE oauth_id = ? AND id <> ?)', [identity.oauthId, user.id]);
-  const statements = [oauthLinkSessionGuard(c, session), snapshotGuard(c, user), legacyOwnerGuard()];
+  const statements = [classificationPolicyGuard(c.env, policy), oauthLinkSessionGuard(c, session), snapshotGuard(c, user), legacyOwnerGuard()];
   if (!existing.results.length) {
     const audit = oauthAccountAuditEvidence(c, { action: 'user.oauth-link', entityType: 'user_oauth_identity',
       detail: { provider: identity.provider, user_id: String(user.id) } }, dataClass,
-    { userId: String(user.id), roles: user.role, sessionSid: String(session.sessionId), via: `oauth:${identity.provider}` }, identity.oauthId);
+    { userId: String(user.id), roles: user.role, sessionSid: String(session.sessionId), via: `oauth:${identity.provider}` }, identity.oauthId, policy);
     statements.push(
       abortIf(c.env, 'EXISTS (SELECT 1 FROM user_oauth_identities WHERE oauth_id = ? OR (provider = ? AND provider_user_id = ?))',
         [identity.oauthId, identity.provider, identity.providerUserId]),
@@ -76,29 +76,29 @@ export async function linkOAuthIdentity(c: AppContext, identity: OAuthAccountIde
       audit.write, audit.guard,
     );
   }
-  statements.push(identityGuard(c.env, identity, user.id), snapshotGuard(c, user), legacyOwnerGuard(), oauthLinkSessionGuard(c, session), selectUser(c, user.id));
+  statements.push(identityGuard(c.env, identity, user.id), snapshotGuard(c, user), legacyOwnerGuard(), oauthLinkSessionGuard(c, session), classificationPolicyGuard(c.env, policy), selectUser(c, user.id));
   return batchUser(await c.env.DB.batch(statements));
 }
 
 /** Refresh only provider-owned profile fields. The collision decision and
  * observed account/identity state are checked again inside the transaction. */
 export async function updateOAuthProfile(c: AppContext, userId: number, identity: OAuthAccountIdentity): Promise<AuthDbUser> {
-  const dataClass = await accountClass(c);
+  const { policy, dataClass } = await accountClass(c);
   const before = await accountSnapshot(c, userId, identity);
   const after = { ...before, email: before.email_claimed ? before.email : identity.email,
     // Match SQLite trim(name): only ordinary spaces count as a missing name.
     name: /^ *$/.test(before.name) ? identity.name : before.name, avatar_url: identity.avatarUrl };
   const fields = (['email', 'name', 'avatar_url'] as const).filter(field => before[field] !== after[field]);
-  const statements = [snapshotGuard(c, before), identityGuard(c.env, identity, userId, true),
+  const statements = [classificationPolicyGuard(c.env, policy), snapshotGuard(c, before), identityGuard(c.env, identity, userId, true),
     abortIf(c.env, '(SELECT EXISTS (SELECT 1 FROM users WHERE email = ? AND id <> ?)) <> ?',
       [identity.email, userId, before.email_claimed])];
   if (fields.length) {
     const audit = oauthAccountAuditEvidence(c, { action: 'user.oauth-profile', entityType: 'user', entityId: userId,
       detail: { provider: identity.provider, fields } }, dataClass,
-    { userId: String(userId), roles: before.role, sessionSid: null, via: `oauth:${identity.provider}` });
+    { userId: String(userId), roles: before.role, sessionSid: null, via: `oauth:${identity.provider}` }, undefined, policy);
     statements.push(c.env.DB.prepare('UPDATE users SET email = ?, name = ?, avatar_url = ? WHERE id = ?')
       .bind(after.email, after.name, after.avatar_url, userId), audit.write, audit.guard);
   }
-  statements.push(snapshotGuard(c, after), identityGuard(c.env, identity, userId, true), selectUser(c, userId));
+  statements.push(snapshotGuard(c, after), identityGuard(c.env, identity, userId, true), classificationPolicyGuard(c.env, policy), selectUser(c, userId));
   return batchUser(await c.env.DB.batch(statements));
 }

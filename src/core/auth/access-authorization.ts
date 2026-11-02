@@ -1,13 +1,14 @@
 import type { Env, JWTPayload, Permission } from '../../types';
 import { buildRolePermissions, effectivePermissions, splitRoles } from './roles';
 import { safeRoleAuditValue } from './role-mutation-sql';
+import { resolveDataClasses, classificationPolicyFailureSql } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
 import { requestContext } from '../http/request-context';
 
 /** Prepared from one D1 snapshot; the admission guard must be the first
  * statement in the same batch as the access-management mutation/evidence. */
 export interface AccessAuthorization {
-  capability: 'users:manage' | 'roles:manage';
+  capability: 'users:manage' | 'roles:manage' | 'menu:manage';
   allowed: boolean;
   admin: boolean;
   permissions: Set<Permission>;
@@ -15,7 +16,7 @@ export interface AccessAuthorization {
   guard(): D1PreparedStatement;
 }
 
-export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: 'users:manage' | 'roles:manage'): Promise<AccessAuthorization> {
+export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: 'users:manage' | 'roles:manage' | 'menu:manage'): Promise<AccessAuthorization> {
   actor = { ...actor };
   if (!/^\d+$/.test(actor.sub) || !/^\d+$/.test(actor.sid ?? '') || !safeRoleAuditValue(actor.role)) throw new Error('Access authorization unavailable');
   const [users, roles, grants] = await env.DB.batch([
@@ -27,6 +28,8 @@ export async function captureAccessAuthorization(env: Env, actor: JWTPayload, pe
   if (!user || user.role !== actor.role) throw new Error('Access actor changed');
   const managed = roles.results as Array<{ name: string; builtin: number }>;
   const permissions = grants.results as Array<{ role: string; permission: string }>;
+  const policy = await resolveDataClasses(env, true);
+  const policyFailure = classificationPolicyFailureSql(policy);
   const roleMap = buildRolePermissions(managed, permissions);
   const context = requestContext.getStore();
   if (context) context.rolePermissions = roleMap;
@@ -34,7 +37,7 @@ export async function captureAccessAuthorization(env: Env, actor: JWTPayload, pe
   const admin = splitRoles(user.role).includes('admin');
   return {
     capability: permission, allowed: admin || effective.has(permission), admin, permissions: effective, roleMap,
-    guard: () => abortIf(env, `NOT EXISTS (SELECT 1 FROM users u JOIN sessions s ON s.user_id = u.id
+    guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u JOIN sessions s ON s.user_id = u.id
         WHERE u.id = ? AND u.role IS ? AND s.id = ? AND ? > CAST(strftime('%s', 'now') AS INTEGER)
           AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))
       OR (SELECT COUNT(*) FROM roles) <> ?
@@ -47,7 +50,7 @@ export async function captureAccessAuthorization(env: Env, actor: JWTPayload, pe
   };
 }
 
-export function assertAccessAuthorization(authorization: AccessAuthorization | undefined, capability: 'users:manage' | 'roles:manage' = 'roles:manage'): asserts authorization is AccessAuthorization {
+export function assertAccessAuthorization(authorization: AccessAuthorization | undefined, capability: 'users:manage' | 'roles:manage' | 'menu:manage' = 'roles:manage'): asserts authorization is AccessAuthorization {
   if (!authorization?.allowed || authorization.capability !== capability || !authorization.guard) throw new Error('Access mutation authorization is required');
 }
 

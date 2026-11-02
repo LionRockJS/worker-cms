@@ -25,3 +25,7 @@ The 55 new regressions cover successful delegated mutations, concurrent actor/se
 Validation: the final serial suite passed **1,652 tests across 74 files**, including 55 new authorization regressions. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. The full-suite log contains no cancellation, uncaught-exception or unhandled-error diagnostic. These are local results, not deployed acceptance.
 
 Classification remains resolved before the transaction; broader classification/policy-version and approval checks remain open. Other content, plugin/service and external mutations, general operation identities and cross-store recovery remain W4b work. This increment adds no schema or regulated-write bypass. Production migration, deployment, schedule/receiver configuration, retention/capacity/recovery acceptance and compliance sign-off were not performed.
+
+## Subsequent classification-version checks
+
+The [policy-version continuation](classification-policy-version.md) supersedes the earlier pre-transaction classification limitation for the covered access-management routes. Core authorization captures a classification generation and rechecks it in the admission guard, including direct role stores. The route evidence additionally records/checks its explicit classification generation. Classification changes now use the same authority mechanism for `menu:manage`. Other approvals/policy versions and mutation families remain open.
