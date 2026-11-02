@@ -8,7 +8,7 @@ import { requestContext } from '../http/request-context';
 /** Prepared from one D1 snapshot; the admission guard must be the first
  * statement in the same batch as the access-management mutation/evidence. */
 export interface AccessAuthorization {
-  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write';
+  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage';
   allowed: boolean;
   admin: boolean;
   permissions: Set<Permission>;
@@ -16,7 +16,7 @@ export interface AccessAuthorization {
   guard(): D1PreparedStatement;
 }
 
-export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write'): Promise<AccessAuthorization> {
+export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage'): Promise<AccessAuthorization> {
   return captureAuthorization(env, actor, permission, true);
 }
 
@@ -60,7 +60,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   };
 }
 
-export function assertAccessAuthorization(authorization: AccessAuthorization | undefined, capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' = 'roles:manage'): asserts authorization is AccessAuthorization {
+export function assertAccessAuthorization(authorization: AccessAuthorization | undefined, capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' = 'roles:manage'): asserts authorization is AccessAuthorization {
   if (!authorization?.allowed || authorization.capability !== capability || !authorization.guard) throw new Error('Access mutation authorization is required');
 }
 

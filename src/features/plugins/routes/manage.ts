@@ -1,3 +1,4 @@
+import { preparePluginRegistrationMutation,PluginRegistrationUnavailableError,PluginRegistrationConflictError } from '../registration-evidence';
 import { limitedBytes } from '../../../core/http/body-limit';
 // ============================================================
 // Plugin management — register / enable / disable / configure plugins,
@@ -22,13 +23,6 @@ import { clearConfigCache } from '../../../core/db/content-config';
 import {
   listPlugins,
   getPlugin,
-  getPluginByUrl,
-  createPlugin,
-  updatePlugin,
-  deletePlugin,
-  setPluginEnabled,
-  setPluginSecret,
-  generatePluginSecret,
   type PluginInput,
 } from '../store';
 import { approveAsset, computeIntegrity, getAssetApproval, inspectAssetHealth, listApprovals, revokeAllAssets, revokeAsset } from '../assets';
@@ -50,8 +44,7 @@ import {
   revokeAllFilePrefixes,
   revokeFilePrefix,
 } from '../file-prefixes';
-import { deleteAllPluginState } from '../state';
-import { getIdentityForRow, movePluginState, releaseIdentity, repinIdentity } from '../identity';
+import { movePluginState, repinIdentity } from '../identity';
 import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from '../registry';
 import { pluginTenantId } from '../proxy';
 import { enrollPluginTenant, manifestAllowsAutoTenant, revokePluginTenant } from '../enroll';
@@ -80,6 +73,7 @@ import {
 import { pluginTrustLevel, type PluginManifest, type PluginPageTypeAccess, type ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
+pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
 
 pluginsManageRoutes.use('/plugins-manage', requirePermission('plugin:manage'));
 pluginsManageRoutes.use('/plugins-manage/*', requirePermission('plugin:manage'));
@@ -295,16 +289,14 @@ pluginsManageRoutes.post('/plugins-manage', async (c) => {
   if (!input) {
     return renderPage(c, pluginFormPage, { isNew: true, ...raw, error: error ?? undefined });
   }
-  // Auto-generate a dedicated secret for the new plugin; the edit page (where we
-  // land next) shows it so the admin can copy it onto the plugin Worker.
-  const dbError = await createPlugin(c.env.DB, { ...input, secret: generatePluginSecret() });
-  if (dbError) {
-    return renderPage(c, pluginFormPage, { isNew: true, ...raw, error: dbError });
+  const mutation = await preparePluginRegistrationMutation(c);
+  try {
+    const created = await mutation.create(input);
+    return c.redirect(`/admin/plugins-manage/${created.id}/edit?flash=secret-generated`);
+  } catch (error) {
+    if (error instanceof PluginRegistrationConflictError) return renderPage(c, pluginFormPage, { isNew: true, ...raw, error: error.message });
+    throw error;
   }
-  invalidate();
-  logAudit(c, 'plugin.create', 'plugin', input.url, { label: input.label, enabled: input.enabled });
-  const created = await getPluginByUrl(c.env.DB, input.url);
-  return c.redirect(created ? `/admin/plugins-manage/${created.id}/edit?flash=secret-generated` : '/admin/plugins-manage');
 });
 
 // ── Edit ────────────────────────────────────────────────────────────────────
@@ -447,11 +439,9 @@ pluginsManageRoutes.post('/plugins-manage/:id/disconnect', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/rotate-secret', async (c) => {
   const id = Number(c.req.param('id'));
-  const plugin = await getPlugin(c.env.DB, id);
-  if (!plugin) return c.notFound();
-  await setPluginSecret(c.env.DB, id, generatePluginSecret());
-  invalidate();
-  logAudit(c, 'plugin.rotate_secret', 'plugin', plugin.url);
+  const mutation = await preparePluginRegistrationMutation(c);
+  if (!mutation.row(id)) return c.notFound();
+  const plugin = await mutation.rotate(id);
 
   // Rotation breaks the connection the instant it lands, so push the new
   // secret straight away for plugins that accept enrollment — otherwise the
@@ -473,30 +463,24 @@ pluginsManageRoutes.post('/plugins-manage/:id/rotate-secret', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id', async (c) => {
   const id = Number(c.req.param('id'));
-  const plugin = await getPlugin(c.env.DB, id);
-  if (!plugin) return c.notFound();
-
+  const mutation = await preparePluginRegistrationMutation(c);
+  if (!mutation.row(id)) return c.notFound();
   const { input, error, raw } = readForm(await c.req.formData());
-  if (!input) {
-    return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: error ?? undefined });
+  if (!input) return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: error ?? undefined });
+  try {
+    await mutation.update(id,input);
+  } catch (error) {
+    if (error instanceof PluginRegistrationConflictError) return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: error.message });
+    throw error;
   }
-  if (input.url !== plugin.url) input.config = JSON.stringify({ ...JSON.parse(input.config || '{}'), cmsTrustedUi: false });
-  const dbError = await updatePlugin(c.env.DB, id, input);
-  if (dbError) {
-    return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: dbError });
-  }
-  invalidate();
-  logAudit(c, 'plugin.update', 'plugin', input.url, { label: input.label, enabled: input.enabled });
   return c.redirect('/admin/plugins-manage');
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/toggle', async (c) => {
   const id = Number(c.req.param('id'));
-  const plugin = await getPlugin(c.env.DB, id);
-  if (!plugin) return c.notFound();
-  await setPluginEnabled(c.env.DB, id, !plugin.enabled);
-  invalidate();
-  logAudit(c, 'plugin.toggle', 'plugin', plugin.url, { enabled: !plugin.enabled });
+  const mutation = await preparePluginRegistrationMutation(c);
+  if (!mutation.row(id)) return c.notFound();
+  await mutation.toggle(id);
   return c.redirect('/admin/plugins-manage');
 });
 
@@ -538,40 +522,11 @@ pluginsManageRoutes.post('/plugins-manage/:id/identity', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found) return c.notFound();
-  const { row: plugin, resolved } = found;
-
-  // Everything a plugin owns outside the registry row — approvals and host-held
-  // state — is keyed by MANIFEST id, not by this row, so deleting the row alone
-  // orphans it: invisible in the admin, yet silently inherited by whatever is
-  // registered next under the same manifest id.
-  //
-  // The pinned identity is what makes that purge reliable: it is stored against
-  // the row, so a plugin that is disabled or offline right now (the common case
-  // when an admin is removing a dead plugin) still deletes with its approvals
-  // instead of leaving a claimable id behind. The live manifest is only a
-  // fallback for rows registered before identity pinning existed.
-  const pinned = await getIdentityForRow(c.env.DB, id);
-  const manifestId = pinned?.manifest_id || resolved?.manifest.id || '';
-  if (manifestId) {
-    await Promise.all([
-      deleteAllPluginState(c.env.DB, manifestId),
-      revokeAllAssets(c.env.DB, manifestId),
-      revokeAllPageTypeAccess(c.env.DB, manifestId),
-      revokeAllFilePrefixes(c.env.DB, manifestId),
-    ]);
-  } else {
-    console.warn(
-      `Deleted plugin ${plugin.url} without a pinned identity or a resolvable manifest; any approvals `
-      + 'and plugin_state rows it owned remain and must be cleared manually.',
-    );
-  }
-  await releaseIdentity(c.env.DB, id);
-
-  await deletePlugin(c.env.DB, id);
-  invalidate();
-  logAudit(c, 'plugin.delete', 'plugin', plugin.url, { plugin_id: manifestId, purged: !!manifestId });
+  const mutation = await preparePluginRegistrationMutation(c);
+  if (!mutation.row(id)) return c.notFound();
+  // Use the captured pin even when disabled/offline. Unpinned legacy rows
+  // remove only their registry entry; do not infer ownership from a live URL.
+  await mutation.remove(id);
   return c.redirect('/admin/plugins-manage');
 });
 
