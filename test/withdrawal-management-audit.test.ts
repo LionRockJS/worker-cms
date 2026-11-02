@@ -64,6 +64,8 @@ beforeEach(async () => {
   await classify('page_type', 'chart');
   rowId = Number((await env.DB.prepare('INSERT INTO plugins (label, url, enabled, secret, config) VALUES (?, ?, 1, ?, ?) RETURNING id')
     .bind('Managed', pluginUrl, secret, JSON.stringify({ cmsTrustedUi: true })).first<{ id: number }>())!.id);
+  // Management approval mutations inspect without taking automatic identity claims.
+  await env.DB.prepare('INSERT INTO plugin_identity_approvals(plugin_row_id, manifest_id) VALUES (?, ?)').bind(rowId, pluginId).run();
   await approvePageTypeAccess(env.DB, pluginId, 'chart', 'write', 'test');
   __injectPluginFetcher(pluginUrl, { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).pathname;

@@ -1,3 +1,4 @@
+import { mutatePluginApproval,PluginApprovalUnavailableError } from '../approval-evidence';
 import { preparePluginRegistrationMutation,PluginRegistrationUnavailableError,PluginRegistrationConflictError } from '../registration-evidence';
 import { limitedBytes } from '../../../core/http/body-limit';
 // ============================================================
@@ -25,26 +26,15 @@ import {
   getPlugin,
   type PluginInput,
 } from '../store';
-import { approveAsset, computeIntegrity, getAssetApproval, inspectAssetHealth, listApprovals, revokeAllAssets, revokeAsset } from '../assets';
+import { computeIntegrity, inspectAssetHealth, listApprovals } from '../assets';
 import {
-  approvePageTypeAccess,
-  approvePageTypeAccessBatch,
-  getPageTypeApproval,
   isPageTypeWildcard,
   listPageTypeApprovals,
-  revokeAllPageTypeAccess,
-  revokePageTypeAccess,
 } from '../page-types';
 import {
-  approveFilePrefix,
-  FilePrefixConflictError,
   findFilePrefixConflict,
-  getFilePrefixApproval,
   listFilePrefixApprovals,
-  revokeAllFilePrefixes,
-  revokeFilePrefix,
 } from '../file-prefixes';
-import { movePluginState, repinIdentity } from '../identity';
 import { PLUGIN_ORIGIN, PLUGIN_PREFIX } from '../registry';
 import { pluginTenantId } from '../proxy';
 import { enrollPluginTenant, manifestAllowsAutoTenant, revokePluginTenant } from '../enroll';
@@ -70,10 +60,10 @@ import {
   type PluginLimitRow,
   type PluginListItem,
 } from '../templates/manage';
-import { pluginTrustLevel, type PluginManifest, type PluginPageTypeAccess, type ResolvedPlugin } from '../types';
+import { pluginTrustLevel, type PluginManifest, type ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
-pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
+pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginApprovalUnavailableError)return c.json({error:'plugin_approval_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
 
 pluginsManageRoutes.use('/plugins-manage', requirePermission('plugin:manage'));
 pluginsManageRoutes.use('/plugins-manage/*', requirePermission('plugin:manage'));
@@ -496,28 +486,9 @@ pluginsManageRoutes.post('/plugins-manage/:id/toggle', async (c) => {
  */
 pluginsManageRoutes.post('/plugins-manage/:id/identity', async (c) => {
   const id = Number(c.req.param('id'));
-  const plugin = await getPlugin(c.env.DB, id);
-  if (!plugin) return c.notFound();
-
-  const state = (await pluginIdentityStates(c.env)).find((entry) => entry.rowId === id);
-  if (!state || !state.servedId) return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-unreachable`);
-  if (state.status === 'ok') return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-ok`);
-
-  const previousId = state.pinnedId;
-  if (!(await repinIdentity(c.env.DB, id, state.servedId, c.get('user').email))) {
-    return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-claimed`);
-  }
-  if (previousId && previousId !== state.servedId) {
-    await Promise.all([
-      revokeAllAssets(c.env.DB, previousId),
-      revokeAllPageTypeAccess(c.env.DB, previousId),
-      revokeAllFilePrefixes(c.env.DB, previousId),
-    ]);
-    await movePluginState(c.env.DB, previousId, state.servedId);
-  }
-  invalidate();
-  logAudit(c, 'plugin.identity.approve', 'plugin', plugin.url, { from: previousId, to: state.servedId });
-  return c.redirect(`/admin/plugins-manage/${id}/edit?flash=identity-approved`);
+  const result = await mutatePluginApproval(c, {id, action:'plugin.identity.approve'});
+  if (result === 'missing') return c.notFound();
+  return c.redirect(`/admin/plugins-manage/${id}/edit?flash=${result === 'unreachable' ? 'identity-unreachable' : result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
@@ -612,40 +583,20 @@ pluginsManageRoutes.get('/plugins-manage/:id/assets', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/assets/approve', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
   const form = await c.req.formData();
-  const path = str(form.get('path'));
-  const declared = (resolved.manifest.assets ?? []).some((asset) => asset.path === path);
-  if (!declared) return c.text('Unknown asset path', 400);
-
-  try { await auditPluginManagement(c.env, resolved.manifest.id, 'asset-approve-fetch', contextActor(c)); }
-  catch { return auditUnavailable(c); }
-
-  const upstream = await resolved.fetcher.fetch(`${PLUGIN_ORIGIN}${path}`);
-  if (!upstream.ok) return c.redirect(`/admin/plugins-manage/${id}/assets?flash=fetch-failed`);
-  const integrity = await computeIntegrity(await limitedBytes(upstream));
-  await approveAsset(c.env.DB, resolved.manifest.id, path, integrity, c.get('user').email);
-  logAudit(c, 'plugin.asset.approve', 'plugin', resolved.manifest.id, { path, integrity });
-  return c.redirect(`/admin/plugins-manage/${id}/assets?flash=approved`);
+  const result = await mutatePluginApproval(c, {id, action:'plugin.asset.approve', key:str(form.get('path'))});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown asset path', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/assets?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/assets/revoke', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
   const form = await c.req.formData();
-  const path = str(form.get('path'));
-  const existing = await getAssetApproval(c.env.DB, resolved.manifest.id, path);
-  if (existing) {
-    await revokeAsset(c.env.DB, resolved.manifest.id, path);
-    logAudit(c, 'plugin.asset.revoke', 'plugin', resolved.manifest.id, { path });
-  }
-  return c.redirect(`/admin/plugins-manage/${id}/assets?flash=revoked`);
+  const result = await mutatePluginApproval(c, {id, action:'plugin.asset.revoke', key:str(form.get('path'))});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown asset path', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/assets?flash=${result}`);
 });
 
 // ── File-prefix approvals ─────────────────────────────────────────────────
@@ -700,47 +651,20 @@ pluginsManageRoutes.get('/plugins-manage/:id/files', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/files/approve', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
-  const prefix = str((await c.req.formData()).get('prefix'));
-  if (!(resolved.manifest.filePrefixes ?? []).includes(prefix)) {
-    return c.text('Unknown file prefix', 400);
-  }
-
-  try {
-    await approveFilePrefix(c.env.DB, resolved.manifest.id, prefix, c.get('user').email);
-  } catch (error) {
-    if (error instanceof FilePrefixConflictError) {
-      logAudit(c, 'plugin.file_prefix.approve', 'plugin', resolved.manifest.id, {
-        prefix,
-        ok: false,
-        conflict_plugin_id: error.conflict.plugin_id,
-        conflict_prefix: error.conflict.prefix,
-      });
-      return c.redirect(`/admin/plugins-manage/${id}/files?flash=conflict`);
-    }
-    throw error;
-  }
-
-  logAudit(c, 'plugin.file_prefix.approve', 'plugin', resolved.manifest.id, { prefix, ok: true });
-  return c.redirect(`/admin/plugins-manage/${id}/files?flash=approved`);
+  const form = await c.req.formData();
+  const result = await mutatePluginApproval(c, {id, action:'plugin.file_prefix.approve', key:str(form.get('prefix'))});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown file prefix', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/files?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/files/revoke', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
-  const prefix = str((await c.req.formData()).get('prefix'));
-  const existing = await getFilePrefixApproval(c.env.DB, resolved.manifest.id, prefix);
-  if (existing) {
-    await revokeFilePrefix(c.env.DB, resolved.manifest.id, prefix);
-    logAudit(c, 'plugin.file_prefix.revoke', 'plugin', resolved.manifest.id, { prefix });
-  }
-  return c.redirect(`/admin/plugins-manage/${id}/files?flash=revoked`);
+  const form = await c.req.formData();
+  const result = await mutatePluginApproval(c, {id, action:'plugin.file_prefix.revoke', key:str(form.get('prefix'))});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown file prefix', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/files?flash=${result}`);
 });
 
 // ── Quota limits ───────────────────────────────────────────────────────────
@@ -950,21 +874,6 @@ pluginsManageRoutes.post('/plugins-manage/:id/credits', async (c) => {
 // Manifest readTypes/writeTypes are delegated access requests. They are only
 // honored by /__cms after an admin approves the specific plugin/type/access row.
 
-function declaredPageTypeAccess(
-  manifest: PluginManifest,
-  pageType: string,
-  access: PluginPageTypeAccess,
-): boolean {
-  const declared = access === 'read'
-    ? manifest.contentTypes?.readTypes ?? []
-    : manifest.contentTypes?.writeTypes ?? [];
-  return declared.includes(pageType) || (access === 'write' && Object.hasOwn(manifest.contentTypes?.blueprint ?? {}, pageType));
-}
-
-function pageTypeAccess(value: string): PluginPageTypeAccess | null {
-  return value === 'read' || value === 'write' ? value : null;
-}
-
 pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   const id = Number(c.req.param('id'));
   const found = await resolvedPluginFor(c.env, id, true);
@@ -1036,62 +945,28 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
 
 pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve-all', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const manifest = found.resolved.requestedManifest ?? found.resolved.manifest;
-  const scopes: Array<{ pageType: string; access: PluginPageTypeAccess }> = [
-    ...new Set(manifest.contentTypes?.readTypes ?? []),
-  ].map((pageType) => ({ pageType, access: 'read' }));
-  for (const pageType of new Set([
-    ...(manifest.contentTypes?.writeTypes ?? []),
-    ...Object.keys(manifest.contentTypes?.blueprint ?? {}),
-  ])) {
-    scopes.push({ pageType, access: 'write' });
-  }
-
-  await approvePageTypeAccessBatch(c.env.DB, manifest.id, scopes, c.get('user').email);
-  invalidate();
-  logAudit(c, 'plugin.page_type.approve_all', 'plugin', manifest.id, { scopes });
-  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=approved-all`);
+  const result = await mutatePluginApproval(c, {id, action:'plugin.page_type.approve_all'});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown page type access', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
   const form = await c.req.formData();
-  const pageType = str(form.get('page_type'));
-  const access = pageTypeAccess(str(form.get('access')));
-  if (!access || !declaredPageTypeAccess((resolved.requestedManifest ?? resolved.manifest), pageType, access)) {
-    return c.text('Unknown page type access', 400);
-  }
-
-  await approvePageTypeAccess(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id, pageType, access, c.get('user').email);
-  invalidate();
-  logAudit(c, 'plugin.page_type.approve', 'plugin', (resolved.requestedManifest ?? resolved.manifest).id, { page_type: pageType, access });
-  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=approved`);
+  const result = await mutatePluginApproval(c, {id, action:'plugin.page_type.approve', key:str(form.get('page_type')), access:str(form.get('access'))});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown page type access', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/page-types/revoke', async (c) => {
   const id = Number(c.req.param('id'));
-  const found = await resolvedPluginFor(c.env, id);
-  if (!found?.resolved) return c.notFound();
-  const { resolved } = found;
-
   const form = await c.req.formData();
-  const pageType = str(form.get('page_type'));
-  const access = pageTypeAccess(str(form.get('access')));
-  if (!access) return c.text('Unknown page type access', 400);
-
-  const existing = await getPageTypeApproval(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id, pageType, access);
-  if (existing) {
-    await revokePageTypeAccess(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id, pageType, access);
-    invalidate();
-    logAudit(c, 'plugin.page_type.revoke', 'plugin', (resolved.requestedManifest ?? resolved.manifest).id, { page_type: pageType, access });
-  }
-  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=revoked`);
+  const result = await mutatePluginApproval(c, {id, action:'plugin.page_type.revoke', key:str(form.get('page_type')), access:str(form.get('access'))});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  if (result === 'invalid') return c.text('Unknown page type access', 400);
+  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=${result}`);
 });
 
 /** After any registry mutation, drop the plugin-list, manifest, and merged-config caches. */

@@ -98,9 +98,9 @@ export function __clearInjectedFetchers(): void {
   injectedFetchers.clear();
 }
 
-async function loadManifest(url: string, fetcher: Fetcher): Promise<PluginManifest | null> {
+async function loadManifest(url: string, fetcher: Fetcher, fresh = false): Promise<PluginManifest | null> {
   const cached = manifestCache.get(url);
-  if (cached && cached.expires > Date.now()) return cached.manifest;
+  if (!fresh && cached && cached.expires > Date.now()) return cached.manifest;
 
   try {
     const response = await fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/manifest`);
@@ -126,6 +126,15 @@ async function loadManifest(url: string, fetcher: Fetcher): Promise<PluginManife
     console.error(`Plugin ${url} manifest fetch failed:`, error);
     return null;
   }
+}
+
+/** Approval inspection must not take a first-use identity claim or resolve
+ * unrelated plugins. Return a fresh declaration tied to the captured row. */
+export async function inspectPluginManifest(record: PluginRecord): Promise<{ manifest: PluginManifest; fetcher: Fetcher } | null> {
+  if (!record.enabled) return null;
+  const fetcher = fetcherForUrl(record.url);
+  const manifest = await loadManifest(record.url, fetcher, true);
+  return manifest ? { manifest, fetcher } : null;
 }
 
 async function readLimitedText(response: Response, limit: number): Promise<string> {

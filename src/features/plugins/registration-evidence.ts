@@ -11,21 +11,21 @@ import { clearManifestCache } from './registry';
 import { generatePluginSecret,type PluginInput } from './store';
 import type { PluginRecord,PluginIdentityApproval } from './types';
 
-const REGISTRY=['id','uuid','created_at','updated_at','label','url','enabled','config','sort_order','secret'];
-const IDENTITY=['plugin_row_id','manifest_id','created_at','updated_at','approved_by'];
+export const REGISTRY=['id','uuid','created_at','updated_at','label','url','enabled','config','sort_order','secret'];
+export const IDENTITY=['plugin_row_id','manifest_id','created_at','updated_at','approved_by'];
 const MUTABLE=['label','url','enabled','config','sort_order','secret'] as const;
-const OWNED=[
+export const OWNED=[
   {table:'plugin_asset_approvals',fields:['id','plugin_id','path','integrity','approved_by','created_at','updated_at']},
   {table:'plugin_page_type_approvals',fields:['id','plugin_id','page_type','access','approved_by','created_at','updated_at']},
   {table:'plugin_file_prefix_approvals',fields:['id','plugin_id','prefix','approved_by','created_at','updated_at']},
   {table:'plugin_state',fields:['plugin_id','key','value','created_at','updated_at']},
 ];
-type Row=Record<string,string|number|null>;
+export type Row=Record<string,string|number|null>;
 export class PluginRegistrationUnavailableError extends Error {constructor(){super('Plugin registration change unavailable');}}
 export class PluginRegistrationConflictError extends Error {constructor(){super('A plugin with that URL is already registered.');}}
-function json(value:unknown):string {const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Plugin manifest requires review');return text;}
-async function fingerprint(value:string):Promise<string>{return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
-async function snapshot<T>(c:AppContext,table:string,fields:string[],where='1',args:Array<string|number|null>=[]):Promise<T[]> {
+export function json(value:unknown):string {const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Plugin manifest requires review');return text;}
+export async function fingerprint(value:string):Promise<string>{return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
+export async function snapshot<T>(c:AppContext,table:string,fields:string[],where='1',args:Array<string|number|null>=[]):Promise<T[]> {
   const object=`json_object(${fields.map(f=>`'${f}',r.${f}`).join(',')})`;
   const result=await c.env.DB.prepare(`WITH scoped AS (SELECT * FROM ${table} WHERE ${where} ORDER BY ${fields[0]} LIMIT 5001),
     budget AS (SELECT COUNT(*) n,COALESCE(SUM(length(CAST(${object} AS BLOB))),0)+COUNT(*)+2 bytes FROM scoped r)
@@ -33,11 +33,11 @@ async function snapshot<T>(c:AppContext,table:string,fields:string[],where='1',a
   if(!result)throw new Error('Plugin snapshot unavailable');const rows=JSON.parse(result.snapshot) as T[];
   if(fields.includes('id')&&(rows as Row[]).some(r=>!Number.isSafeInteger(r.id)||Number(r.id)<=0))throw new Error('Unsafe plugin identity');return rows;
 }
-function guard(c:AppContext,table:string,fields:string[],rows:object[],where='1',args:Array<string|number|null>=[]) {
+export function guard(c:AppContext,table:string,fields:string[],rows:object[],where='1',args:Array<string|number|null>=[]) {
   return abortIf(c.env,`(SELECT COUNT(*) FROM ${table} WHERE ${where})<>? OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS
     (SELECT 1 FROM ${table} r WHERE ${fields.map(f=>`r.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...args,rows.length,json(rows)]);
 }
-function invalidate(){clearManifestCache();clearConfigCache();}
+export function invalidate(){clearManifestCache();clearConfigCache();}
 async function unavailable(c:AppContext):Promise<never> {invalidate();await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});throw new PluginRegistrationUnavailableError();}
 /** Local host registration only. Remote enrollment/tenant configuration and
  * approval/TOFU writers retain separate identity and outcome contracts. */
@@ -45,7 +45,7 @@ export async function preparePluginRegistrationMutation(c:AppContext){
   assertRegulatedWritesAllowed(c.env);
   try{return await prepare(c);}catch{return unavailable(c);}
 }
-async function prepare(c:AppContext){
+export async function capturePluginMutationContext(c:AppContext){
   const authority=await captureAccessAuthorization(c.env,c.get('user'),'plugin:manage');if(!authority.allowed)throw new Error('Plugin authority unavailable');
   const policy=await resolveDataClasses(c.env,true);if(!policy.ok)throw new Error('Plugin classification unavailable');
   const [plugins,identities]=await Promise.all([snapshot<PluginRecord>(c,'plugins',REGISTRY),snapshot<PluginIdentityApproval>(c,'plugin_identity_approvals',IDENTITY)]);
@@ -57,6 +57,10 @@ async function prepare(c:AppContext){
   const admission=()=>[authority.guard(),classificationPolicyGuard(c.env,policy),guard(c,'plugins',REGISTRY,plugins),guard(c,'plugin_identity_approvals',IDENTITY,identities)];
   const finish=()=>[authority.guard(),classificationPolicyGuard(c.env,policy)];
   async function run<T>(work:()=>Promise<T>):Promise<T>{assertRegulatedWritesAllowed(c.env);try{if(await flushReadAudit(c))throw new Error('Plugin read evidence unavailable');const result=await work();invalidate();return result;}catch(error){if(error instanceof PluginRegistrationConflictError)throw error;return unavailable(c);}}
+  return {plugins,identities,policy,dataClass,admission,finish,run};
+}
+async function prepare(c:AppContext){
+  const {plugins,identities,policy,dataClass,admission,finish,run}=await capturePluginMutationContext(c);
   const row=(id:number)=>{if(!Number.isSafeInteger(id)||id<=0)throw new Error('Invalid plugin identity');return plugins.find(p=>p.id===id);};
   async function save(action:'plugin.create'|'plugin.update'|'plugin.toggle'|'plugin.rotate_secret',input:PluginInput|undefined,id?:number):Promise<PluginRecord>{return run(async()=>{
     const before=id===undefined?undefined:row(id);if(id!==undefined&&!before)throw new Error('Plugin disappeared');
