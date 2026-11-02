@@ -274,6 +274,12 @@ export async function loadAppBrandingSettings(env: Env, fallbackName = '0xCMS'):
 }
 
 export async function saveAppBrandingSettings(env: Env, input: { appName: unknown; appIcon: unknown; primaryColor?: unknown; appFont?: unknown }, fallbackName = '0xCMS'): Promise<AppBrandingSettings> {
+  const settings = normalizeAppBrandingSettings(input, fallbackName);
+  await saveSetting(env, APP_BRANDING_SETTING_KEY, JSON.stringify(settings));
+  return settings;
+}
+
+export function normalizeAppBrandingSettings(input: { appName: unknown; appIcon: unknown; primaryColor?: unknown; appFont?: unknown }, fallbackName = '0xCMS'): AppBrandingSettings {
   const defaults = defaultAppBrandingSettings(fallbackName);
   const appName = typeof input.appName === 'string' && input.appName.trim()
     ? input.appName.trim().slice(0, 80)
@@ -285,9 +291,7 @@ export async function saveAppBrandingSettings(env: Env, input: { appName: unknow
   const appFont = typeof input.appFont === 'string' && APP_FONT_VALUES.has(input.appFont)
     ? input.appFont as AppFont
     : defaults.appFont;
-  const settings = { appName, appIcon, primaryColor, appFont };
-  await saveSetting(env, APP_BRANDING_SETTING_KEY, JSON.stringify(settings));
-  return settings;
+  return { appName, appIcon, primaryColor, appFont };
 }
 
 export async function loadAdminHomeSettings(env: Env): Promise<AdminHomeSettings> {
@@ -303,19 +307,26 @@ export async function loadAdminHomeSettings(env: Env): Promise<AdminHomeSettings
 }
 
 export async function saveAdminHomeSettings(env: Env, input: { href: unknown }): Promise<AdminHomeSettings> {
-  const settings = { href: adminHomePath(input.href) };
+  const settings = normalizeAdminHomeSettings(input);
   await saveSetting(env, ADMIN_HOME_SETTING_KEY, JSON.stringify(settings));
   return settings;
 }
 
+export function normalizeAdminHomeSettings(input: { href: unknown }): AdminHomeSettings {
+  return { href: adminHomePath(input.href) };
+}
+
 export async function loadSidebarChromeSettings(env: Env): Promise<SidebarChromeSettings> {
+  return sidebarChromeSettingsFromRaw(await getSetting(env, SIDEBAR_MENU_SETTING_KEY));
+}
+
+export function sidebarChromeSettingsFromRaw(raw: string | null): SidebarChromeSettings {
   const settings = defaultSidebarMenuSettings();
   let settingsGroupWeight = DEFAULT_SETTINGS_GROUP_WEIGHT;
   let pluginWeights: Record<string, number> = {};
   let pluginIcons: Record<string, AppIcon> = {};
   let hiddenPluginKeys = new Set<string>();
   let labels: SidebarLabels = {};
-  const raw = await getSetting(env, SIDEBAR_MENU_SETTING_KEY);
   if (!raw) return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels };
 
   try {
@@ -367,7 +378,18 @@ export async function saveSidebarMenuSettings(
   weights: Record<string, unknown> = {},
   options: { labels?: SidebarLabels; settingsGroupWeight?: unknown; pluginWeights?: Record<string, unknown>; pluginIcons?: Record<string, unknown>; pluginVisibleKeys?: string[] } = {},
 ): Promise<SidebarChromeSettings> {
-  const labels = normalizeSidebarLabels(options.labels ?? (await loadSidebarChromeSettings(env)).labels);
+  const built = buildSidebarMenuSettings(visibleKeys, weights, {
+    ...options, labels: options.labels ?? (await loadSidebarChromeSettings(env)).labels,
+  });
+  await saveSetting(env, SIDEBAR_MENU_SETTING_KEY, built.value);
+  return built.settings;
+}
+
+export function buildSidebarMenuSettings(
+  visibleKeys: string[], weights: Record<string, unknown> = {},
+  options: { labels?: SidebarLabels; settingsGroupWeight?: unknown; pluginWeights?: Record<string, unknown>; pluginIcons?: Record<string, unknown>; pluginVisibleKeys?: string[] } = {},
+): { value: string; settings: SidebarChromeSettings } {
+  const labels = normalizeSidebarLabels(options.labels ?? {});
   const visible = new Set(visibleKeys.map(legacySidebarMenuKey).filter((key): key is SidebarMenuItemKey => !!key));
   visible.add('system');
   const settings = defaultSidebarMenuSettings();
@@ -401,7 +423,7 @@ export async function saveSidebarMenuSettings(
   const groupWeights = settingsGroupWeight === DEFAULT_SETTINGS_GROUP_WEIGHT
     ? {}
     : { settings: settingsGroupWeight };
-  await saveSetting(env, SIDEBAR_MENU_SETTING_KEY, JSON.stringify({
+  const value = JSON.stringify({
     hidden,
     weights: savedWeights,
     groupWeights,
@@ -409,8 +431,8 @@ export async function saveSidebarMenuSettings(
     pluginIcons,
     hiddenPlugins: [...hiddenPluginKeys],
     labels,
-  }));
-  return { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels };
+  });
+  return { value, settings: { items: settings, settingsGroupWeight, pluginWeights, pluginIcons, hiddenPluginKeys, labels } };
 }
 
 function normalizeSidebarLabels(value: unknown): SidebarLabels {

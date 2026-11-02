@@ -1,3 +1,4 @@
+import { prepareHostSettingsMutation } from '../../core/db/settings-mutation-evidence';
 import { Hono } from 'hono';
 import { requirePermission } from '../../core/auth/guards';
 import { coreExtensions } from '../../core/extensions';
@@ -5,7 +6,6 @@ import { localeRegistry } from '../../core/i18n';
 import { featureInstalled } from '../../features';
 import { systemSettingsPage } from '../../core/templates/settings';
 import type { Env, Variables } from '../../types';
-import { logAudit } from '../../core/db/audit';
 import { renderPage } from '../../core/render/chrome';
 import {
   APP_FONT_OPTIONS,
@@ -22,11 +22,12 @@ import {
   loadShowCredits,
   normalizeSystemTimezone,
   pluginSidebarKey,
-  saveAdminHomeSettings,
-  saveAppBrandingSettings,
-  saveSidebarMenuSettings,
-  saveSystemTimezone,
-  saveShowCredits,
+  normalizeAdminHomeSettings,
+  normalizeAppBrandingSettings,
+  buildSidebarMenuSettings,
+  sidebarChromeSettingsFromRaw,
+  APP_BRANDING_SETTING_KEY, ADMIN_HOME_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY,
+  SHOW_CREDITS_SETTING_KEY, SIDEBAR_MENU_SETTING_KEY, DEFAULT_SYSTEM_TIMEZONE,
 } from '../../core/db/settings';
 
 export const settingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -194,15 +195,16 @@ settingsRoutes.post('/settings/menu', async (c) => c.redirect('/admin/settings/s
 settingsRoutes.post('/settings/system', async (c) => {
   const form = await c.req.formData();
   const submittedTimezone = form.get('system_timezone');
+  if (submittedTimezone !== null && !normalizeSystemTimezone(submittedTimezone)) return c.redirect('/admin/settings/system?error=invalid-timezone', 303);
+  const mutation = await prepareHostSettingsMutation(c);
   const systemTimezone = submittedTimezone === null
-    ? await loadSystemTimezone(c.env)
-    : normalizeSystemTimezone(submittedTimezone);
-  if (!systemTimezone) return c.redirect('/admin/settings/system?error=invalid-timezone', 303);
+    ? normalizeSystemTimezone(mutation.value(SYSTEM_TIMEZONE_SETTING_KEY)) ?? DEFAULT_SYSTEM_TIMEZONE
+    : normalizeSystemTimezone(submittedTimezone)!;
   const pluginItems = await (coreExtensions().sidebarNav?.(c.env) ?? []);
   // Entries this build does not show were never rendered, so the form says
   // nothing about them. Carry their saved state forward instead of reading the
   // silence as "hidden" — otherwise re-enabling a feature brings it back off.
-  const saved = await loadSidebarChromeSettings(c.env);
+  const saved = sidebarChromeSettingsFromRaw(mutation.value(SIDEBAR_MENU_SETTING_KEY));
   const isShown = (item: typeof SIDEBAR_MENU_ITEMS[number]) => featureInstalled(menuItemFeature(item));
   const visibleKeys = [
     ...form.getAll('visible_items').map(String),
@@ -233,29 +235,21 @@ settingsRoutes.post('/settings/system', async (c) => {
     labels[key] = translations;
   }
   const pluginVisibleKeys = form.getAll('plugin_visible_items').map(String);
-  await Promise.all([
-    saveAppBrandingSettings(c.env, {
-      appName: form.get('app_name'),
-      appIcon: form.get('app_icon'),
-      primaryColor: form.get('primary_color'),
-      appFont: form.get('app_font'),
-    }, c.env.SITE_TITLE ?? '0xCMS'),
-    saveAdminHomeSettings(c.env, {
-      href: form.get('admin_home_path'),
-    }),
-    saveSystemTimezone(c.env, systemTimezone),
-    // A missing field (older form or a build without credits) preserves the preference.
+  const branding = normalizeAppBrandingSettings({
+    appName: form.get('app_name'), appIcon: form.get('app_icon'),
+    primaryColor: form.get('primary_color'), appFont: form.get('app_font'),
+  }, c.env.SITE_TITLE ?? '0xCMS');
+  const sidebar = buildSidebarMenuSettings(visibleKeys, weights, {
+    labels, settingsGroupWeight: form.get('settings_group_weight'), pluginWeights, pluginIcons, pluginVisibleKeys,
+  });
+  await mutation.commit([
+    { key: APP_BRANDING_SETTING_KEY, value: JSON.stringify(branding) },
+    { key: ADMIN_HOME_SETTING_KEY, value: JSON.stringify(normalizeAdminHomeSettings({href: form.get('admin_home_path')})) },
+    { key: SYSTEM_TIMEZONE_SETTING_KEY, value: systemTimezone },
     ...(featureInstalled('credits') && form.has('show_credits')
-      ? [saveShowCredits(c.env, form.get('show_credits') === 'true')]
+      ? [{key: SHOW_CREDITS_SETTING_KEY, value: String(form.get('show_credits') === 'true')} as const]
       : []),
-    saveSidebarMenuSettings(c.env, visibleKeys, weights, {
-      labels,
-      settingsGroupWeight: form.get('settings_group_weight'),
-      pluginWeights,
-      pluginIcons,
-      pluginVisibleKeys,
-    }),
+    { key: SIDEBAR_MENU_SETTING_KEY, value: sidebar.value },
   ]);
-  logAudit(c, 'settings.system.update', 'settings', 'admin.system');
   return c.redirect('/admin/settings/system?flash=saved');
 });
