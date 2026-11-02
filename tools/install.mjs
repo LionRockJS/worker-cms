@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
@@ -16,6 +16,8 @@ import {
 } from './apple-client-secret.mjs';
 
 const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
+const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
+const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const PROVIDERS = {
@@ -52,8 +54,11 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 Usage:
   npm run setup
 
-The wizard creates or reuses D1, R2, and Queue resources, updates
-wrangler.toml, applies migrations, configures OAuth secrets, and deploys.`);
+The wizard asks for one namespace and derives every resource name from it
+(<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit); each can
+still be overridden. It creates or reuses D1, R2, and Queue resources, updates
+wrangler.toml and the audit switch in cms.features.json, applies migrations,
+configures OAuth secrets, and deploys.`);
   process.exit(0);
 }
 
@@ -147,8 +152,9 @@ async function ensureD1(name) {
   const listed = run(['d1', 'list', '--json'], { capture: true });
   const databases = parseJsonOutput(listed.stdout);
   let database = databases.find((item) => item.name === name);
+  const reused = Boolean(database);
 
-  if (database) {
+  if (reused) {
     console.log(`Reusing D1 database ${name}.`);
   } else {
     console.log(`Creating D1 database ${name}...`);
@@ -159,7 +165,7 @@ async function ensureD1(name) {
 
   const id = database?.uuid || database?.id || database?.database_id;
   if (!id) throw new Error(`Could not find the database ID for ${name}.`);
-  return id;
+  return { id, reused };
 }
 
 function outputContainsName(output, name) {
@@ -311,6 +317,27 @@ async function updateConfig(settings) {
   console.log('Updated wrangler.toml.');
 }
 
+async function featureEnabled(id) {
+  const { features } = JSON.parse(await readFile(FEATURES_PATH, 'utf8'));
+  return features[id] === true;
+}
+
+/**
+ * Flips one switch in cms.features.json in place, so the rest of the file
+ * (its escaped "//" note included) is left byte-for-byte alone. Returns
+ * whether anything changed.
+ */
+async function setFeature(id, enabled) {
+  const original = await readFile(FEATURES_PATH, 'utf8');
+  const pattern = new RegExp(`("${id}"\\s*:\\s*)(true|false)`);
+  if (!pattern.test(original)) throw new Error(`Could not find "${id}" in cms.features.json.`);
+  const updated = original.replace(pattern, `$1${enabled}`);
+  if (updated === original) return false;
+  await writeFile(FEATURES_PATH, updated);
+  console.log(`${enabled ? 'Enabled' : 'Disabled'} the ${id} feature in cms.features.json.`);
+  return true;
+}
+
 /**
  * Apple has no static client secret: the secret is an ES256 JWT signed with the
  * .p8 key downloaded from the developer portal. Collect the pieces and mint it
@@ -366,23 +393,59 @@ async function main() {
     console.log('Cloudflare authentication confirmed.');
   }
 
-  const workerName = await ask('Worker name', 'worker-cms', resourceName);
-  const databaseName = await ask('Private D1 database name', 'cms', resourceName);
-  const publishedDatabaseName = await ask(
+  // Every resource name derives from one namespace. The longest suffix is
+  // "-admin-jobs" (11 chars), and R2/Queue names stop at 63.
+  const namespace = await ask(
+    'Deployment namespace (prefixes every resource name)',
+    'cms',
+    (value) => resourceName(value) && value.length <= 52,
+  );
+  const derived = {
+    workerName: namespace,
+    databaseName: namespace,
+    publishedDatabaseName: `${namespace}-published`,
+    bucketName: `${namespace}-media`,
+    queueName: `${namespace}-admin-jobs`,
+    auditBucketName: `${namespace}-audit`,
+  };
+  console.log(`
+  Worker              ${derived.workerName}
+  Private D1          ${derived.databaseName}
+  Published D1        ${derived.publishedDatabaseName}
+  Media R2 bucket     ${derived.bucketName}
+  Admin job Queue     ${derived.queueName}
+  Audit R2 bucket     ${derived.auditBucketName} (if enabled)
+`);
+  const customize = !await confirm('Use these names?');
+  const name = (label, value, validate = resourceName) =>
+    customize ? ask(label, value, validate) : value;
+
+  const workerName = await name('Worker name', derived.workerName);
+  const databaseName = await name('Private D1 database name', derived.databaseName);
+  const publishedDatabaseName = await name(
     'Published D1 database name',
-    'cms-published',
+    derived.publishedDatabaseName,
     (value) => resourceName(value) && value !== databaseName,
   );
-  const bucketName = await ask('Private R2 media bucket name', 'worker-cms-media', resourceName);
-  const queueName = await ask('Admin job Queue name', 'cms-admin-jobs', resourceName);
+  const bucketName = await name('Private R2 media bucket name', derived.bucketName);
+  const queueName = await name('Admin job Queue name', derived.queueName);
+  // Recording audit_events is core and always on; the feature is the review
+  // screens plus the archive sweep, so the bucket only matters with it on.
+  console.log(
+    '\nThe audit feature adds the /admin/audit review screens and the archive sweep.\n'
+    + 'Audit events are recorded either way.',
+  );
+  const auditEnabled = await confirm('Enable the audit feature?', await featureEnabled('audit'));
   // Default on: the sweep is what archives *and* prunes audit_events, so
   // declining leaves that table growing in D1 with nothing to trim it.
-  console.log(
-    '\nThe audit archive seals audit events to R2 and is what prunes them from D1.\n'
-    + 'Without it the audit log is still written, but never archived or trimmed.',
-  );
-  const auditBucketName = await confirm('Enable the audit archive?')
-    ? await ask('Audit archive R2 bucket name', `${workerName}-audit`, resourceName)
+  if (auditEnabled) {
+    console.log(
+      '\nThe audit archive seals audit events to R2 and is what prunes them from D1.\n'
+      + 'Without it the audit log is still written, but never archived or trimmed.',
+    );
+  }
+  const auditBucketName = auditEnabled && await confirm('Enable the audit archive?')
+    ? await name('Audit archive R2 bucket name', derived.auditBucketName)
     : null;
   const canonicalOrigin = (await ask(
     'Public HTTPS origin (custom domain or workers.dev URL)',
@@ -412,8 +475,8 @@ async function main() {
   }
 
   console.log('\nCreating or reusing Cloudflare resources...');
-  const databaseId = await ensureD1(databaseName);
-  const publishedDatabaseId = await ensureD1(publishedDatabaseName);
+  const { id: databaseId, reused: databaseReused } = await ensureD1(databaseName);
+  const { id: publishedDatabaseId } = await ensureD1(publishedDatabaseName);
   ensureR2(bucketName);
   if (auditBucketName) ensureR2(auditBucketName);
   ensureQueue(queueName);
@@ -432,10 +495,29 @@ async function main() {
     clientIds,
     microsoftTenant,
   });
+  if (await setFeature('audit', auditEnabled)) {
+    // Regenerate the feature registries and baseline so the migrations applied
+    // below match the profile; deploy rebuilds everything again anyway.
+    runNpm(['run', 'build:features']);
+    runNpm(['run', 'build:migrations']);
+  }
 
   if (await confirm('Apply production D1 migrations now?')) {
     run(['d1', 'migrations', 'apply', databaseName, '--remote']);
     run(['d1', 'migrations', 'apply', publishedDatabaseName, '--remote']);
+  }
+
+  // A fresh database gets the audit/classification tables from the baseline.
+  // An existing one already applied the baseline, so it needs the hand-applied
+  // upgrades that wrangler's migrations_dir does not descend into.
+  if (databaseReused) {
+    const manual = (await readdir(MANUAL_MIGRATIONS)).filter((file) => file.endsWith('.sql')).sort();
+    console.log(`
+${databaseName} already existed. Apply any of these upgrades it does not have yet,
+in this order (read each file's header first; *_sensitivity_trash.sql needs the
+trash tables), before using the deployed code:
+${manual.map((file) => `  npx wrangler d1 execute ${databaseName} --remote --file migrations/manual/${file}`).join('\n')}
+`);
   }
 
   const deployed = await confirm('Deploy 0xCMS now?');
