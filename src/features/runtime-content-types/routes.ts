@@ -1,3 +1,4 @@
+import { prepareRuntimeTypeMutation,RuntimeTypeMutationUnavailableError } from './mutation-evidence';
 // Database-defined type management (full CRUD) for the two parallel type
 // tables: page_types and block_types. Config-file entries are shown read-only
 // alongside the editable database rows; the merge into the effective CmsConfig
@@ -14,7 +15,6 @@ import { cmsConfig, type CmsConfig } from '../../cms-config';
 import type { Env, Variables, Permission } from '../../types';
 import { coreExtensions, type ContentTypeContributorInfo } from '../../core/extensions';
 import { num, str } from '../../core/http/forms';
-import { logAudit } from '../../core/db/audit';
 import { recordTableReads, recordTaxonomyReads } from '../../core/http/access-log';
 import { requirePermission } from '../../core/auth/guards';
 import { renderPage } from '../../core/render/chrome';
@@ -23,7 +23,6 @@ import { clearConfigCache, resolveCmsConfig } from '../../core/db/content-config
 import {
   listDbPageTypes,
   loadPageTypeExtensions,
-  savePageTypeExtension,
 } from '../../core/db/page-type-store';
 import { listDbBlockTypes } from '../../core/db/block-type-store';
 import { configOnlyTypes, validateTypeForm } from '../../core/db/type-admin';
@@ -48,8 +47,6 @@ interface TypeCrudSpec<Row extends DbTypeRow, Values extends BaseTypeFormValues>
   /** URL segment and table name, e.g. 'page_types'. */
   table: 'page_types' | 'block_types';
   permission: Permission;
-  /** Audit action prefix and entity type, e.g. 'page_type'. */
-  audit: string;
   copy: TypeAdminCopy;
   /** Static config map the slug must not collide with. */
   configSlugs: Record<string, unknown>;
@@ -61,7 +58,7 @@ interface TypeCrudSpec<Row extends DbTypeRow, Values extends BaseTypeFormValues>
   formValues: (form: FormData) => Values;
   /** Columns beyond slug/name/blueprint/weight, with their binds. */
   extraColumns: string[];
-  extraBinds: (values: Values) => unknown[];
+  extraBinds: (values: Values) => Array<string | null>;
   modelFromValues: (mode: 'new' | 'edit', values: Values, error: string) => TypeFormModel;
   modelFromRow: (mode: 'edit' | 'view', row: Row) => TypeFormModel;
   /** Read-only model for a config/plugin-defined slug, or null → 404. */
@@ -74,7 +71,7 @@ interface TypeCrudSpec<Row extends DbTypeRow, Values extends BaseTypeFormValues>
   /** Page types only — read-only (config/plugin) types accept extra block/taxonomy selections. */
   extension?: {
     decorateViewModel: (c: AppContext, config: CmsConfig, slug: string, model: TypeFormModel) => Promise<TypeFormModel>;
-    save: (c: AppContext, config: CmsConfig, slug: string, values: Values) => Promise<void>;
+    save: (c: AppContext, slug: string, values: Values) => Promise<boolean>;
   };
 }
 
@@ -82,6 +79,7 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
   spec: TypeCrudSpec<Row, Values>,
 ): Hono<{ Bindings: Env; Variables: Variables }> {
   const routes = new Hono<{ Bindings: Env; Variables: Variables }>();
+  routes.onError((error,c) => { if(error instanceof RuntimeTypeMutationUnavailableError)return c.json({error:'runtime_type_change_unavailable'},503,{'Cache-Control':'no-store'});throw error; });
   const base = `/${spec.table}`;
   const columns = ['slug', 'name', 'blueprint', ...spec.extraColumns, 'weight'];
 
@@ -129,13 +127,10 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
     const error = await validate(c, spec, values, slug);
     if (error) return renderForm(c, spec.modelFromValues('new', values, error));
 
-    const result = await c.env.DB.prepare(
-      `INSERT INTO ${spec.table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
-    )
-      .bind(...binds(values, slug))
-      .run();
-    clearConfigCache();
-    logAudit(c, `${spec.audit}.create`, spec.audit, result.meta.last_row_id, { slug, name: values.name });
+    const mutation = await prepareRuntimeTypeMutation(c, spec.table);
+    const submitted = binds(values,slug);
+    const valuesByColumn = Object.fromEntries(columns.map((column,index) => [column,submitted[index]]));
+    await mutation.save(valuesByColumn);
     return c.redirect(spec.copy.routeBase);
   });
 
@@ -154,11 +149,8 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
   const extension = spec.extension;
   if (extension) {
     routes.post(`${base}/view/:slug`, requirePermission(spec.permission), async (c) => {
-      const config = await resolveCmsConfig(c.env);
       const slug = c.req.param('slug');
-      if (!spec.modelFromConfig(config, slug)) return c.notFound();
-      await extension.save(c, config, slug, spec.formValues(await c.req.formData()));
-      clearConfigCache();
+      if (!(await extension.save(c, slug, spec.formValues(await c.req.formData())))) return c.notFound();
       return c.redirect(`${spec.copy.routeBase}/view/${encodeURIComponent(slug)}`);
     });
   }
@@ -173,8 +165,8 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
 
   routes.post(`${base}/:id`, requirePermission(spec.permission), async (c) => {
     const id = parseInt(c.req.param('id'), 10);
-    const existing = await fetchRow(c.env.DB, id);
-    if (!existing) return c.notFound();
+    const mutation = await prepareRuntimeTypeMutation(c, spec.table);
+    if (!mutation.row(id)) return c.notFound();
 
     const form = await c.req.formData();
     const values = spec.formValues(form);
@@ -183,23 +175,16 @@ function dbTypeRoutes<Row extends DbTypeRow, Values extends BaseTypeFormValues>(
     const error = await validate(c, spec, values, slug, id);
     if (error) return renderForm(c, { ...spec.modelFromValues('edit', values, error), id });
 
-    await c.env.DB.prepare(
-      `UPDATE ${spec.table}
-          SET ${columns.map((column) => `${column} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-    )
-      .bind(...binds(values, slug), id)
-      .run();
-    clearConfigCache();
-    logAudit(c, `${spec.audit}.update`, spec.audit, id, { slug, name: values.name });
+    const submitted = binds(values,slug);
+    const valuesByColumn = Object.fromEntries(columns.map((column,index) => [column,submitted[index]]));
+    await mutation.save(valuesByColumn,id);
     return c.redirect(spec.copy.routeBase);
   });
 
   routes.post(`${base}/:id/delete`, requirePermission(spec.permission), async (c) => {
     const id = parseInt(c.req.param('id'), 10);
-    await c.env.DB.prepare(`DELETE FROM ${spec.table} WHERE id = ?`).bind(id).run();
-    clearConfigCache();
-    logAudit(c, `${spec.audit}.delete`, spec.audit, id);
+    const mutation = await prepareRuntimeTypeMutation(c, spec.table);
+    await mutation.remove(id);
     return c.redirect(spec.copy.routeBase);
   });
 
@@ -264,7 +249,6 @@ function availableTaxonomies(config: CmsConfig, dbTaxonomies: Array<{ slug: stri
 export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | null; taxonomy_lists: string | null }, PageTypeFormValues>({
   table: 'page_types',
   permission: 'pagetype:write',
-  audit: 'page_type',
   copy: {
     routeBase: '/admin/page_types',
     title: 'Page Types',
@@ -371,14 +355,16 @@ export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | 
         lockedTaxonomies: (config.taxonomyLists[slug] ?? []).filter((entry) => !extensionTaxonomies.has(entry)),
       };
     },
-    save: async (c, config, slug, values) => {
-      const [extensions, taxonomies] = await Promise.all([
-        loadPageTypeExtensions(c.env),
-        c.env.DB.prepare('SELECT slug, name FROM taxonomies ORDER BY name ASC').all<{ slug: string; name: string }>(),
-      ]);
+    save: async (c, slug, values) => {
+      const mutation = await prepareRuntimeTypeMutation(c, 'page_types');
+      const extensions = await mutation.extensions();
+      clearConfigCache();
+      const config = await resolveCmsConfig(c.env);
+      if (!Object.hasOwn(config.blueprint,slug)) return false;
+      const taxonomies = mutation.taxonomies;
       const current = extensions[slug] ?? { blocks: [], taxonomies: [] };
       const knownBlocks = new Set(Object.keys(config.blocks));
-      const knownTaxonomies = new Set(availableTaxonomies(config, taxonomies.results).map((taxonomy) => taxonomy.slug));
+      const knownTaxonomies = new Set(availableTaxonomies(config, taxonomies).map((taxonomy) => taxonomy.slug));
       // Config/plugin-owned entries never enter the extension, so unchecking
       // them (or replaying a stale form) cannot shrink the base lists.
       const lockedBlocks = new Set((config.blockLists[slug] ?? []).filter((entry) => !current.blocks.includes(entry)));
@@ -387,8 +373,8 @@ export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | 
         blocks: [...new Set(values.blockLists)].filter((entry) => knownBlocks.has(entry) && !lockedBlocks.has(entry)),
         taxonomies: [...new Set(values.taxonomyLists)].filter((entry) => knownTaxonomies.has(entry) && !lockedTaxonomies.has(entry)),
       };
-      await savePageTypeExtension(c.env, slug, extension);
-      logAudit(c, 'page_type.extend', 'page_type', slug, { blocks: extension.blocks, taxonomies: extension.taxonomies });
+      await mutation.extend(slug, extension);
+      return true;
     },
   },
 });
@@ -398,7 +384,6 @@ export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | 
 export const blockTypesRoutes = dbTypeRoutes<DbTypeRow, BaseTypeFormValues>({
   table: 'block_types',
   permission: 'blocktype:write',
-  audit: 'block_type',
   copy: {
     routeBase: '/admin/block_types',
     title: 'Block Types',
