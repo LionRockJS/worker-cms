@@ -33,9 +33,11 @@ export interface LocaleMessage {
   updated_at: string;
 }
 
+export class LocaleInputValidationError extends Error {}
+
 export function normalizeLocaleCode(value: unknown): string {
   const code = String(value ?? '').trim().toLowerCase().replace(/_/g, '-');
-  if (!LOCALE_CODE.test(code)) throw new Error('Locale code must be a valid lowercase BCP 47 language tag');
+  if (!LOCALE_CODE.test(code)) throw new LocaleInputValidationError('Locale code must be a valid lowercase BCP 47 language tag');
   return code;
 }
 
@@ -65,8 +67,12 @@ export async function localeRegistry(env: Env): Promise<{
 
 export async function loadDefaultContentLanguage(env: Env, locales?: LocaleRecord[]): Promise<string> {
   const available = locales ?? await listLocales(env);
+  return defaultContentLanguageFromRows(available, await getSetting(env, CONTENT_DEFAULT_LANGUAGE_SETTING_KEY));
+}
+
+export function defaultContentLanguageFromRows(available: LocaleRecord[], raw: string | null): string {
   const contentLocales = available.filter((locale) => locale.content_enabled === 1);
-  const configured = (await getSetting(env, CONTENT_DEFAULT_LANGUAGE_SETTING_KEY))?.trim().toLowerCase();
+  const configured = raw?.trim().toLowerCase();
   return contentLocales.find((locale) => locale.code === configured)?.code
     ?? contentLocales.find((locale) => locale.code === DEFAULT_CONTENT_LANGUAGE)?.code
     ?? contentLocales[0]?.code
@@ -83,17 +89,22 @@ export async function saveDefaultContentLanguage(env: Env, codeValue: unknown): 
   return code;
 }
 
-export async function saveLocale(env: Env, input: Record<string, unknown>, existingCode?: string): Promise<string> {
+export function normalizeLocaleInput(input: Record<string, unknown>, currentDefault: string, existingCode?: string) {
   const code = normalizeLocaleCode(existingCode ?? input.code);
   const label = String(input.label ?? '').trim().slice(0, 100);
-  if (!label) throw new Error('Language label is required');
-  const currentDefault = await loadDefaultContentLanguage(env);
+  if (!label) throw new LocaleInputValidationError('Language label is required');
   const contentEnabled = code === currentDefault ? 1 : truthy(input.content_enabled);
   const uiEnabled = code === DEFAULT_CONTENT_LANGUAGE ? 0 : truthy(input.ui_enabled);
-  const direction = input.direction === 'rtl' ? 'rtl' : 'ltr';
+  const direction: LocaleRecord['direction'] = input.direction === 'rtl' ? 'rtl' : 'ltr';
   const fallback = input.fallback_code ? normalizeLocaleCode(input.fallback_code) : null;
-  if (fallback === code) throw new Error('A locale cannot fall back to itself');
+  if (fallback === code) throw new LocaleInputValidationError('A locale cannot fall back to itself');
   const weight = finiteInteger(input.weight);
+
+  return { code, label, content_enabled: contentEnabled, ui_enabled: uiEnabled, direction, fallback_code: fallback, weight };
+}
+
+export async function saveLocale(env: Env, input: Record<string, unknown>, existingCode?: string): Promise<string> {
+  const { code, label, content_enabled: contentEnabled, ui_enabled: uiEnabled, direction, fallback_code: fallback, weight } = normalizeLocaleInput(input, await loadDefaultContentLanguage(env), existingCode);
 
   if (existingCode && uiEnabled === 0) {
     const remaining = await env.DB.prepare(
@@ -134,6 +145,18 @@ export async function listLocaleMessages(env: Env, localeCode: unknown): Promise
   return result.results;
 }
 
+export function normalizeLocaleMessageInput(localeCode: unknown, keyValue: unknown, messageValue: unknown) {
+  const code = normalizeLocaleCode(localeCode);
+  const key = String(keyValue ?? '').trim();
+  const value = String(messageValue ?? '').trim().slice(0, 4000);
+  if (!MESSAGE_KEY.test(key)) throw new LocaleInputValidationError('Translation key contains unsupported characters');
+  if (!value) throw new LocaleInputValidationError('Translation value is required');
+  if (value.includes('{{') || value.includes('{%') || /[<>]/.test(value)) {
+    throw new LocaleInputValidationError('Translation values must be plain text');
+  }
+  return { code, key, value };
+}
+
 export async function saveLocaleMessage(
   env: Env,
   localeCode: unknown,
@@ -141,14 +164,7 @@ export async function saveLocaleMessage(
   messageValue: unknown,
   updatedBy?: string,
 ): Promise<void> {
-  const code = normalizeLocaleCode(localeCode);
-  const key = String(keyValue ?? '').trim();
-  const value = String(messageValue ?? '').trim().slice(0, 4000);
-  if (!MESSAGE_KEY.test(key)) throw new Error('Translation key contains unsupported characters');
-  if (!value) throw new Error('Translation value is required');
-  if (value.includes('{{') || value.includes('{%') || /[<>]/.test(value)) {
-    throw new Error('Translation values must be plain text');
-  }
+  const { code, key, value } = normalizeLocaleMessageInput(localeCode, keyValue, messageValue);
   await env.DB.prepare(
     `INSERT INTO locale_messages (locale_code, message_key, value, updated_by)
      VALUES (?, ?, ?, ?)

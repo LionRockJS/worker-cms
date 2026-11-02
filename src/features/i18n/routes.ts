@@ -1,3 +1,6 @@
+import { mutateLocaleAdmin,LocaleMutationUnavailableError } from './mutation-evidence';
+import { LocaleInputValidationError } from '../../core/i18n';
+import type { AppContext } from '../../core/http/context';
 // Language and translation administration: which locales exist, which are
 // enabled for content and for the UI, and per-locale message overrides.
 //
@@ -8,23 +11,21 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../../types';
 import { requirePermission } from '../../core/auth/guards';
 import { renderPage } from '../../core/render/chrome';
-import { logAudit } from '../../core/db/audit';
 import { languagesPage, translationsPage, type LocaleViewRow } from './template';
-import { clearConfigCache } from '../../core/db/content-config';
 import {
-  deleteLocale,
-  deleteLocaleMessage,
   listLocaleMessages,
   listLocales,
   localeRegistry,
-  normalizeLocaleCode,
   loadBundledLocaleCatalog,
-  saveDefaultContentLanguage,
-  saveLocale,
-  saveLocaleMessage,
 } from '../../core/i18n';
 
 export const i18nRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
+i18nRoutes.onError((error,c)=>{if(error instanceof LocaleMutationUnavailableError)return c.json({error:'locale_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
+
+function validationRedirect(c:AppContext,error:unknown,href:string):Response {
+  if(error instanceof LocaleInputValidationError)return c.redirect(`${href}${href.includes('?')?'&':'?'}error=${encodeURIComponent(error.message)}`,303);
+  throw error;
+}
 
 i18nRoutes.use('/settings/languages', requirePermission('menu:manage'));
 i18nRoutes.use('/settings/languages/*', requirePermission('menu:manage'));
@@ -76,47 +77,39 @@ i18nRoutes.get('/settings/languages', async (c) => {
 i18nRoutes.post('/settings/languages/default', async (c) => {
   const form = await c.req.formData();
   try {
-    const code = await saveDefaultContentLanguage(c.env, form.get('default_language'));
-    clearConfigCache();
-    logAudit(c, 'locale.default.update', 'locale', code);
+    await mutateLocaleAdmin(c,{action:'default',code:form.get('default_language')});
     return c.redirect('/admin/settings/languages?flash=Default+language+saved', 303);
   } catch (error) {
-    return c.redirect(`/admin/settings/languages?error=${encodeURIComponent(error instanceof Error ? error.message : 'Unable to save default language')}`, 303);
+    return validationRedirect(c,error,'/admin/settings/languages');
   }
 });
 
 i18nRoutes.post('/settings/languages', async (c) => {
   const form = await c.req.formData();
   try {
-    const code = await saveLocale(c.env, Object.fromEntries(form));
-    clearConfigCache();
-    logAudit(c, 'locale.create', 'locale', code);
+    await mutateLocaleAdmin(c,{action:'create',input:Object.fromEntries(form)});
     return c.redirect('/admin/settings/languages?flash=Language+added', 303);
   } catch (error) {
-    return c.redirect(`/admin/settings/languages?error=${encodeURIComponent(error instanceof Error ? error.message : 'Unable to add language')}`, 303);
+    return validationRedirect(c,error,'/admin/settings/languages');
   }
 });
 
 i18nRoutes.post('/settings/languages/:code', async (c) => {
   const form = await c.req.formData();
   try {
-    const code = await saveLocale(c.env, Object.fromEntries(form), c.req.param('code'));
-    clearConfigCache();
-    logAudit(c, 'locale.update', 'locale', code);
+    await mutateLocaleAdmin(c,{action:'update',input:Object.fromEntries(form),code:c.req.param('code')});
     return c.redirect('/admin/settings/languages?flash=Language+saved', 303);
   } catch (error) {
-    return c.redirect(`/admin/settings/languages?error=${encodeURIComponent(error instanceof Error ? error.message : 'Unable to save language')}`, 303);
+    return validationRedirect(c,error,'/admin/settings/languages');
   }
 });
 
 i18nRoutes.post('/settings/languages/:code/delete', async (c) => {
   try {
-    await deleteLocale(c.env, c.req.param('code'));
-    clearConfigCache();
-    logAudit(c, 'locale.delete', 'locale', c.req.param('code'));
+    await mutateLocaleAdmin(c,{action:'delete',code:c.req.param('code')});
     return c.redirect('/admin/settings/languages?flash=Language+deleted', 303);
   } catch (error) {
-    return c.redirect(`/admin/settings/languages?error=${encodeURIComponent(error instanceof Error ? error.message : 'Unable to delete language')}`, 303);
+    return validationRedirect(c,error,'/admin/settings/languages');
   }
 });
 
@@ -157,17 +150,19 @@ i18nRoutes.post('/settings/translations', async (c) => {
   const form = await c.req.formData();
   const locale = String(form.get('locale') ?? 'en');
   try {
-    await saveLocaleMessage(c.env, locale, form.get('key'), form.get('value'), String(c.get('user').sub));
-    logAudit(c, 'locale_message.upsert', 'locale', locale);
+    await mutateLocaleAdmin(c,{action:'message-save',code:locale,key:form.get('key'),value:form.get('value')});
     return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}&flash=Translation+saved`, 303);
   } catch (error) {
-    return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}&error=${encodeURIComponent(error instanceof Error ? error.message : 'Unable to save translation')}`, 303);
+    return validationRedirect(c,error,`/admin/settings/translations?locale=${encodeURIComponent(locale)}`);
   }
 });
 
 i18nRoutes.post('/settings/translations/:locale/:key/delete', async (c) => {
-  const locale = normalizeLocaleCode(c.req.param('locale'));
-  await deleteLocaleMessage(c.env, locale, c.req.param('key'));
-  logAudit(c, 'locale_message.delete', 'locale', locale);
-  return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}&flash=Translation+deleted`, 303);
+  const requested = c.req.param('locale');
+  try {
+    const locale = await mutateLocaleAdmin(c,{action:'message-delete',code:requested,key:c.req.param('key')});
+    return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}&flash=Translation+deleted`, 303);
+  } catch(error) {
+    return validationRedirect(c,error,`/admin/settings/translations?locale=${encodeURIComponent(requested)}`);
+  }
 });

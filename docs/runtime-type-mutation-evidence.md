@@ -32,7 +32,7 @@ This isolate's config cache is invalidated after success and uncertain failure s
 
 Guarded service failures return `runtime_type_change_unavailable`, 503/no-store, and attempt coarse incomplete health evidence without payload values. A lost acknowledgment can leave the schema and receipt committed while returning unavailable. No automatic replay, rollback claim, general receipt lookup or request idempotency is added. Reconcile state and receipt before retrying; shared operation/recovery contracts remain R5.
 
-Five W4b packages remain open. This completes the named local runtime-type/extension slice of R2, not all host configuration. Locale/message administration is next; plugin/configuration/approval and financial administration still remain. Contributor/service writers, external effects and global/deployment acceptance retain R3–R6 scope. See the [scope register](w4b-remaining-scope-2026-11-02.md).
+Five W4b packages remain open. This completes the named local runtime-type/extension slice of R2, not all host configuration. Locale/message administration is covered by the subsequent [locale/message record](locale-message-mutation-evidence.md); plugin/configuration/approval and financial administration still remain. Contributor/service writers, external effects and global/deployment acceptance retain R3–R6 scope. See the [scope register](w4b-remaining-scope-2026-11-02.md).
 
 No production migration, push, deployment or compliance sign-off occurred; regulated writes remain blocked.
 

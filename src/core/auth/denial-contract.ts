@@ -10,7 +10,9 @@ export const AUTH_DENIAL_REASONS = {
   'auth.access': ['missing_credentials', 'invalid_credentials', 'unknown'],
 } as const;
 export type AuthDenialAction = keyof typeof AUTH_DENIAL_REASONS | 'permission.denied';
-export const PERMISSION_DENIAL_REASONS = ['editor_required', 'target_role_exceeds_authority', 'requested_role_exceeds_authority',
+export const PERMISSION_DENIAL_REASONS = [
+  'locale_protected', 'locale_default_required', 'locale_ui_required', 'locale_fallback_invalid',
+  'editor_required', 'target_role_exceeds_authority', 'requested_role_exceeds_authority',
   'grant_exceeds_authority', 'locked_role', 'builtin_role', 'self_deletion', 'last_administrator', 'management_permission_changed', 'unknown'] as const;
 export type PermissionDenialReason = typeof PERMISSION_DENIAL_REASONS[number];
 export const permissionDenialReason = (value: string) => (PERMISSION_DENIAL_REASONS as readonly string[]).includes(value) ? value : 'unknown';
