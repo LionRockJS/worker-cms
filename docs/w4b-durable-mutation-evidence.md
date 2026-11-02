@@ -1,6 +1,6 @@
 # W4b durable mutation evidence
 
-**Status: classification, role/user access-management, OAuth registration, existing-account OAuth mutations, self-service profile/disconnection and supported session lifecycle and host authentication-denial evidence implemented locally; W4b remains open and regulated writes remain blocked.** This is repository evidence, not a deployment acceptance or a standards-compliance finding.
+**Status: classification, role/user access-management, OAuth registration, existing-account OAuth mutations, self-service profile/disconnection and supported session lifecycle and host authentication-denial evidence plus transaction-bound delegated access authority and named user/role policy refusals implemented locally; W4b remains open and regulated writes remain blocked.** This is repository evidence, not a deployment acceptance or a standards-compliance finding.
 
 The existing audit envelope supplies the actor, request and event metadata. The new mutation evidence builder creates an audit write and a guard for the exact event. The covered D1 mutations and those statements run in one batch, with additional postconditions for the business state. A failed statement or invariant aborts the batch; a connection failure after a possible commit can leave an ambiguous outcome, so an operator must reconcile current state and the corresponding event before retrying.
 
@@ -85,3 +85,13 @@ See the [authentication-denial record](authentication-denial-evidence.md) for ex
 - Complete W5 archive and retention protection and deployment-specific acceptance. Keep the regulated-write and PHI-publication gates in place until their release prerequisites are met.
 
 Earlier slices required no schema migration. This continuation adds the core outbox table/index and an additive upgrade for existing installations; no regulated-write bypass is introduced.
+
+## Delegated access authority and policy-denial continuation — 2 November 2026
+
+The prior denial slice is committed on `main` as `5656af1`. Covered user/role mutations now capture current actor roles and the role/grant catalogue together, then recheck that authority plus the owning unexpired session/JWT as the first statement of their business/evidence transaction. Exact catalogue checks catch same-count replacements and changes to implicit built-in authority. Core role stores require the matching authorization and enforce delegated grant ceilings; legitimate self-demotion/grant reduction remains possible. Existing target/evidence guards remain enforced.
+
+Named object-policy refusals use durable primary/outbox denial evidence with bounded reasons and registered route patterns, excluding target names and form values. Mixed-case administrator identities and reserved role names receive consistent protection. Uncertain transport/commit failures remain unavailable rather than being mislabeled as definitive policy denials. See the [access authorization record](access-management-authorization.md) for semantics, conservative catalogue conflicts and operational limits.
+
+This adds no schema or regulated-write bypass. Classification remains pre-transaction; other policy versions, content/plugin/service mutations, general operation identities and deployed recovery/capacity acceptance remain open.
+
+Validation: the final serial suite passed **1,652 tests across 74 files**, including 55 new authorization regressions. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. The full-suite log contains no cancellation, uncaught-exception or unhandled-error diagnostic. These are local results, not deployed acceptance.

@@ -3,6 +3,21 @@ import type { AppContext } from '../../core/http/context';
 import { classFor, resolveDataClasses } from '../../core/db/data-classes';
 import { contextActor } from '../../core/db/audit';
 import { recordAuditOutage } from '../../core/db/audit-outages';
+import { captureAccessAuthorization, type AccessAuthorization } from '../../core/auth/access-authorization';
+import { recordPolicyDenial } from '../../core/auth/denials';
+
+/** Fresh authority for both the route's decision and the mutation batch. */
+export async function authorizeAccessMutation(c: AppContext, permission: 'users:manage' | 'roles:manage'):
+Promise<{ authorization: AccessAuthorization; refused?: undefined } | { authorization?: undefined; refused: Response }> {
+  let authorization: AccessAuthorization;
+  try { authorization = await captureAccessAuthorization(c.env, c.get('user'), permission); }
+  catch { return { refused: await accessMutationUnavailable(c) }; }
+  if (!authorization.allowed) {
+    await recordPolicyDenial(c, 'management_permission_changed');
+    return { refused: c.text('Forbidden: access management permission changed', 403) };
+  }
+  return { authorization };
+}
 
 /** The highest classification of the tables whose policy/identifiers change.
  * Null means policy could not be resolved; 'none' is a valid ordinary install. */

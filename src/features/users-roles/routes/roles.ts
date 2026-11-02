@@ -3,16 +3,18 @@
 
 import { Hono } from 'hono';
 import { roleFormPage, rolesPage } from '../templates/roles';
-import { PERMISSIONS, PERMISSION_DESCRIPTIONS } from '../../../types';
+import { PERMISSIONS, PERMISSION_DESCRIPTIONS, USER_ROLES } from '../../../types';
 import type { Env, Variables, Permission } from '../../../types';
 import { slugify, str } from '../../../core/http/forms';
 import { mutationAuditEvidence, roleRemovalAuditEvidence } from '../../../core/db/audit';
 import { auditUnavailable, flushReadAudit } from '../../../core/http/access-log';
-import { accessMutationClass, accessMutationUnavailable, unsafeAccessEvidence } from '../mutation-audit';
+import { accessMutationClass, accessMutationUnavailable, unsafeAccessEvidence, authorizeAccessMutation } from '../mutation-audit';
 import { safeRoleAuditValue } from '../../../core/auth/role-mutation-sql';
 import { requirePermission } from '../../../core/auth/guards';
+import { recordPolicyDenial } from '../../../core/auth/denials';
+import type { AccessAuthorization } from '../../../core/auth/access-authorization';
 import { renderPage } from '../../../core/render/chrome';
-import { clearRolePermissionsCache, effectivePermissions, permissionsFor, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
+import { clearRolePermissionsCache, permissionsFor } from '../../../core/auth/roles';
 import { coreExtensions } from '../../../core/extensions';
 import {
   createCustomRole,
@@ -32,10 +34,8 @@ export const rolesRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rolesRoutes.use('/roles', requirePermission('roles:manage'));
 rolesRoutes.use('/roles/*', requirePermission('roles:manage'));
 
-async function canManagePermissions(c: AppContext, permissions: Iterable<string>): Promise<boolean> {
-  if (splitRoles(c.get('user').role).includes('admin')) return true;
-  const actorPermissions = effectivePermissions(await resolveRolePermissions(c.env), c.get('user').role);
-  return [...permissions].every((permission) => actorPermissions.has(permission as Permission));
+function canManagePermissions(authorization: AccessAuthorization, permissions: Iterable<string>): boolean {
+  return authorization.admin || [...permissions].every(permission => authorization.permissions.has(permission as Permission));
 }
 
 /** Reject a policy changed after it was read for the authority check. An
@@ -126,6 +126,8 @@ rolesRoutes.get('/roles/new', async (c) => {
 });
 
 rolesRoutes.post('/roles', async (c) => {
+  const { authorization, refused } = await authorizeAccessMutation(c, 'roles:manage');
+  if (refused) return refused;
   const form = await c.req.formData();
   const label = str(form.get('label'));
   const name = str(form.get('name')) ? slugify(str(form.get('name'))) : slugify(label);
@@ -138,7 +140,7 @@ rolesRoutes.post('/roles', async (c) => {
   let error: string | null;
   try {
     error = await createCustomRole(c.env, name, label, mutationAuditEvidence(c,
-      { action: 'role.create', entityType: 'role', entityId: name }, dataClass, { requirePreviousChange: true }));
+      { action: 'role.create', entityType: 'role', entityId: name }, dataClass, { requirePreviousChange: true }), authorization);
   } catch {
     return accessMutationUnavailable(c);
   } finally {
@@ -177,10 +179,15 @@ rolesRoutes.get('/roles/:name/edit', async (c) => {
 });
 
 rolesRoutes.post('/roles/:name', async (c) => {
+  const { authorization, refused } = await authorizeAccessMutation(c, 'roles:manage');
+  if (refused) return refused;
   const name = c.req.param('name');
   const role = await getRoleForEdit(c.env, name);
   if (!role) return c.notFound();
-  if (role.locked) return c.text('Forbidden: the admin role cannot be edited', 403);
+  if (role.locked || name.trim().toLowerCase() === 'admin') {
+    await recordPolicyDenial(c, 'locked_role');
+    return c.text('Forbidden: the admin role cannot be edited', 403);
+  }
 
   const form = await c.req.formData();
   const label = role.builtin ? role.label : (str(form.get('label')) || role.label);
@@ -192,7 +199,8 @@ rolesRoutes.post('/roles/:name', async (c) => {
   if (permissions.some((permission) => !assignable.has(permission))) {
     return c.text('Invalid permission', 400);
   }
-  if (!(await canManagePermissions(c, role.permissions)) || !(await canManagePermissions(c, permissions))) {
+  if (!canManagePermissions(authorization, role.permissions) || !canManagePermissions(authorization, permissions)) {
+    await recordPolicyDenial(c, 'grant_exceeds_authority');
     return c.text('Forbidden: cannot grant or modify permissions beyond your own', 403);
   }
 
@@ -209,7 +217,7 @@ rolesRoutes.post('/roles/:name', async (c) => {
     await saveRolePermissions(c.env, name, label, grants, before, mutationAuditEvidence(c,
       { action: 'role.update', entityType: 'role', entityId: name,
         detail: { permissions: grants.length, grants, previous: { managed: before.managed, grants: before.grants } } },
-      dataClass, { requirePreviousChange: true }));
+      dataClass, { requirePreviousChange: true }), authorization);
   } catch {
     return accessMutationUnavailable(c);
   } finally {
@@ -219,11 +227,17 @@ rolesRoutes.post('/roles/:name', async (c) => {
 });
 
 rolesRoutes.post('/roles/:name/delete', async (c) => {
+  const { authorization, refused } = await authorizeAccessMutation(c, 'roles:manage');
+  if (refused) return refused;
   const name = c.req.param('name');
   const role = await getRoleForEdit(c.env, name);
   if (!role) return c.notFound();
-  if (role.builtin) return c.text('Forbidden: built-in roles cannot be deleted', 403);
-  if (!(await canManagePermissions(c, role.permissions))) {
+  if (role.builtin || (USER_ROLES as readonly string[]).includes(name.trim().toLowerCase())) {
+    await recordPolicyDenial(c, 'builtin_role');
+    return c.text('Forbidden: built-in roles cannot be deleted', 403);
+  }
+  if (!canManagePermissions(authorization, role.permissions)) {
+    await recordPolicyDenial(c, 'grant_exceeds_authority');
     return c.text('Forbidden: cannot remove a more privileged role', 403);
   }
   if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
@@ -242,7 +256,7 @@ rolesRoutes.post('/roles/:name/delete', async (c) => {
       removals: roleRemovalAuditEvidence(c, name, operationId, occurredAt, dataClass),
       deletion: mutationAuditEvidence(c, { action: 'role.delete', entityType: 'role', entityId: name,
         detail: { operation_id: operationId, previous_grants: before.grants } }, dataClass, { requirePreviousChange: true }),
-    });
+    }, authorization);
   } catch {
     return accessMutationUnavailable(c);
   } finally {

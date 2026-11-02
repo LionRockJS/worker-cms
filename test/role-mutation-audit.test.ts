@@ -5,6 +5,8 @@ import worker from '../src/index';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { readRolePermissionSnapshot, saveRolePermissions } from '../src/core/auth/role-store';
 import { auditEvidence } from '../src/core/db/audit';
+import { captureAccessAuthorization } from '../src/core/auth/access-authorization';
+import { verifyJWT } from '../src/core/auth/jwt';
 import { signJWT } from './auth-fixtures';
 
 let cookie: string;
@@ -214,7 +216,10 @@ it('rejects a stale role/grant snapshot without overwriting newer permissions', 
   const audit = auditEvidence(env, { action: 'role.update', eventClass: 'admin', dataClass: 'none', retentionClass: 'admin_config',
     outcome: 'success', targetType: 'role', targetId: role, targetIds: null, targetCount: 1,
     containerKey: null, queryFingerprint: null, detail: null }, { userId: null, roles: null, sessionSid: null, via: null });
-  await expect(saveRolePermissions(env, role, 'Changed', ['content:write'], before, audit)).rejects.toThrow();
+  const actor = await verifyJWT(cookie.slice('access_token='.length), env.JWT_SECRET);
+  if (!actor) throw new Error('Fixture actor unavailable');
+  const authorization = await captureAccessAuthorization(env, actor, 'roles:manage');
+  await expect(saveRolePermissions(env, role, 'Changed', ['content:write'], before, audit, authorization)).rejects.toThrow();
   expect(await grants()).toEqual(['content:read', 'tag:write']);
   expect(await env.DB.prepare('SELECT label FROM roles WHERE name = ?').bind(role).first()).toEqual({ label: 'Original role' });
   expect(await records()).toEqual([]);

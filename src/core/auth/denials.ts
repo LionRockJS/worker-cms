@@ -1,10 +1,11 @@
 import type { AppContext } from '../http/context';
+import { routePath } from 'hono/route';
 import { authDenialEnvelope, auditDeliveryEvidence, contextActor, type AuditActor } from '../db/audit';
 import { auditOutboxEvidence } from '../db/audit-mutation-outbox';
 import { recordAuditOutage } from '../db/audit-outages';
 import { sessionPolicy } from './session-evidence';
 import { safeRoleAuditValue } from './role-mutation-sql';
-import { denialPermission, denialReason, denialRoute, validDenialDetail, type AuthDenialAction } from './denial-contract';
+import { denialPermission, denialReason, denialRoute, permissionDenialReason, validDenialDetail, type AuthDenialAction, type PermissionDenialReason } from './denial-contract';
 
 export class AuthDenialEvidenceUnavailableError extends Error {
   constructor() { super('Authentication denial evidence unavailable'); }
@@ -26,7 +27,7 @@ export async function recordAuthDenial(c: AppContext, action: AuthDenialAction, 
     if (input.permission) detail.permission = denialPermission(input.permission) ? input.permission : 'unrecordable';
     else if (input.permissions) detail.permissions = input.permissions.length <= 8192 && input.permissions.split(',').length <= 32
       && input.permissions.split(',').every(denialPermission) ? input.permissions : 'unrecordable';
-    else detail.reason = 'editor_required';
+    else detail.reason = permissionDenialReason(input.reason ?? 'unknown');
     detail.path = denialRoute(input.path ?? '') ? input.path : '/admin/*';
     if (actor.roles !== null && !safeRoleAuditValue(actor.roles)) { actor.roles = null; detail.roles_unavailable = true; }
   } else detail.reason = denialReason(action, input.reason ?? 'unknown');
@@ -49,4 +50,9 @@ export async function recordAuthDenial(c: AppContext, action: AuthDenialAction, 
     return unavailable(c);
   }
   await recordAuditOutage(c.env, 'audit-write', [], undefined, undefined, { captureIncomplete: true });
+}
+
+/** Route-level policy refusals use the same durable/private denial contract. */
+export function recordPolicyDenial(c: AppContext, reason: PermissionDenialReason): Promise<void> {
+  return recordAuthDenial(c, 'permission.denied', { reason, path: routePath(c, -1) });
 }

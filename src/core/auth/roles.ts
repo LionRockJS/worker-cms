@@ -81,30 +81,28 @@ export function splitRoles(value: string): string[] {
   return [...new Set(value.split(',').map((role) => role.trim().toLowerCase()).filter(Boolean))];
 }
 
+/** One resolver for both ordinary reads and atomic authorization snapshots. */
+export function buildRolePermissions(managed: ReadonlyArray<{ name: string }>, grants: ReadonlyArray<{ role: string; permission: string }>): Map<string, Set<Permission>> {
+  const map = new Map<string, Set<Permission>>();
+  for (const role of USER_ROLES) map.set(role, new Set(ROLE_PERMISSIONS[role]));
+  for (const row of managed) map.set(row.name, new Set());
+  for (const row of grants) {
+    const set = map.get(row.role) ?? new Set<Permission>();
+    set.add(row.permission as Permission);
+    map.set(row.role, set);
+  }
+  map.set('admin', new Set(PERMISSIONS));
+  return map;
+}
+
 /** Resolves the effective role → permission map from the database. */
 export async function resolveRolePermissions(env: Env, fresh = false): Promise<Map<string, Set<Permission>>> {
   const context = requestContext.getStore();
   if (!fresh && context?.rolePermissions) return context.rolePermissions;
 
-  const map = new Map<string, Set<Permission>>();
-  // Seed built-in defaults.
-  for (const role of USER_ROLES) map.set(role, new Set(ROLE_PERMISSIONS[role]));
-
-  if (env.DB) {
-    // Roles present in the table own their permission set explicitly (start empty).
-    const managed = await env.DB.prepare('SELECT name FROM roles').all<{ name: string }>();
-    for (const row of managed.results) map.set(row.name, new Set());
-
-    const grants = await env.DB.prepare('SELECT role, permission FROM role_permissions').all<{ role: string; permission: string }>();
-    for (const row of grants.results) {
-      const set = map.get(row.role) ?? new Set<Permission>();
-      set.add(row.permission as Permission);
-      map.set(row.role, set);
-    }
-  }
-
-  // Admin is always all-powerful and never stored/editable.
-  map.set('admin', new Set(PERMISSIONS));
+  const managed = env.DB ? (await env.DB.prepare('SELECT name FROM roles').all<{ name: string }>()).results : [];
+  const grants = env.DB ? (await env.DB.prepare('SELECT role, permission FROM role_permissions').all<{ role: string; permission: string }>()).results : [];
+  const map = buildRolePermissions(managed, grants);
 
   if (context) context.rolePermissions = map;
   return map;

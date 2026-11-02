@@ -11,6 +11,7 @@ Local W4b continuation, 2 November 2026. The earlier OAuth/profile/session work 
 | Explicit refresh refusal | `auth.refresh`, denied, for missing/malformed/expired/revoked credentials and the service's bounded failure codes. |
 | Protected-route authentication admission | One `auth.access` denial for missing or invalid credentials, before returning the existing login redirect or JSON 401. Rejected JWT claims are not authenticated actors. |
 | Editor admission and shared one/any-capability guards | `permission.denied`, with the database-backed authenticated actor/session and bounded permission metadata. The registered route pattern is recorded, not request path parameters or query terms. |
+| Delegated user/role object policy | Bounded reasons for stronger roles/grants, locked/built-in roles, self-deletion, last-administrator protection and management capability loss. See the [transaction-bound authorization record](access-management-authorization.md). |
 | Authentication endpoint rate limiter | One denial for the corresponding start/callback/refresh action, with `rate_limited`, before returning 429. Non-authentication rate-limit callers keep their existing behavior. |
 
 The response status/body/redirect remains the existing refusal when evidence commits to either store. Neither the protected handler nor credential-issuing code runs as a consequence of persistence failure. Failure of both evidence stores returns generic 503/no-store, preserving refusal and any prior local cookie clearing; an incomplete coarse outage incident/alert is attempted when monitoring is configured.
@@ -37,11 +38,11 @@ Authentication metadata inherits the highest effective user/session/role/grant/O
 
 ## Limits and operating acceptance
 
-This covers the named host OAuth/admin guards. Route-specific object/delegated-role checks, plugin/service authentication and other contributor/edge authorization boundaries still need their own coverage review and instrumentation where required. Secret/origin/readiness failures and provider/DB transport errors are not falsely relabeled as authenticated credential denials by this recorder.
+This covers the named host OAuth/admin guards. Named user/role object-policy checks are covered by the subsequent authorization increment. Other object checks, plugin/service authentication and contributor/edge authorization boundaries still need coverage review and instrumentation where required. Secret/origin/readiness failures and provider/DB transport errors are not falsely relabeled as authenticated credential denials by this recorder.
 
 Primary audit and outbox share D1. A database-wide failure can prevent detailed denial capture; the 503 and independent coarse monitoring path do not prove complete forensic evidence. Production schedule/alert delivery, capacity, retention, recovery and provider/organization controls remain acceptance work. Failed requests add durable records, including expected anonymous/editor/rate-limit refusals; no sampling/drop policy is silently introduced. Existing endpoint throttling is retained, and deployed abuse/backlog budgets must be exercised.
 
-Other regulated mutations, policy-version/authorization revalidation, general operation IDs and external/plugin/R2 recovery remain open W4b work. Regulated business writes and PHI publication stay contained. No deployment, production migration, push or compliance sign-off was performed here.
+Other regulated mutations, broader policy-version/authorization revalidation, general operation IDs and external/plugin/R2 recovery remain open W4b work. Regulated business writes and PHI publication stay contained. No deployment, production migration, push or compliance sign-off was performed here.
 
 ## Local validation
 

@@ -13,6 +13,7 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 import { safeRoleAuditValue, UNSAFE_USER_ROLE_SQL, USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from './role-mutation-sql';
 import type { MutationAuditEvidence, RoleRemovalAuditEvidence } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
+import { assertAccessAuthorization, assertDelegatedRolePermissions, type AccessAuthorization } from './access-authorization';
 
 export interface RoleSummary {
   name: string;
@@ -122,15 +123,17 @@ export function storedRolePermissions(permissions: readonly string[]): string[] 
  * transaction. The final update checks the complete grant set before the
  * caller's required-change audit statement is inserted. */
 export async function saveRolePermissions(env: Env, name: string, label: string, permissions: string[],
-  before: RolePermissionSnapshot, audit: MutationAuditEvidence): Promise<void> {
+  before: RolePermissionSnapshot, audit: MutationAuditEvidence, authorization: AccessAuthorization): Promise<void> {
   assertRegulatedWritesAllowed(env);
   if (!audit?.write || !audit.guard) throw new Error('Role mutation evidence is required');
-  if (name === 'admin') throw new Error('The admin role cannot be edited');
+  assertAccessAuthorization(authorization);
+  if (name.trim().toLowerCase() === 'admin') throw new Error('The admin role cannot be edited');
   const valid = storedRolePermissions(permissions);
   if (!safeRoleAuditValue(name) || !rolePermissionsRecordable(before.grants) || !rolePermissionsRecordable(valid)) throw new Error('Role evidence is unsafe');
+  assertDelegatedRolePermissions(authorization, name, valid);
   const builtin = BUILTIN.has(name) ? 1 : 0;
   const exists = 'EXISTS (SELECT 1 FROM roles WHERE name = ? AND builtin = ?)';
-  const statements: D1PreparedStatement[] = [roleSnapshotGuard(env, name, before)];
+  const statements: D1PreparedStatement[] = [authorization.guard(), roleSnapshotGuard(env, name, before)];
   // Built-in roles may be implicit until the first permission override.
   if (builtin) statements.push(env.DB.prepare('INSERT OR IGNORE INTO roles (name, label, builtin) VALUES (?, ?, 1)').bind(name, label));
   statements.push(env.DB.prepare(`DELETE FROM role_permissions WHERE role = ? AND ${exists}`).bind(name, name, builtin));
@@ -155,18 +158,20 @@ export async function saveRolePermissions(env: Env, name: string, label: string,
 
 /** Creates a custom role and its audit together. Returns a validation error. */
 export async function createCustomRole(env: Env, name: string, label: string,
-  audit: MutationAuditEvidence): Promise<string | null> {
+  audit: MutationAuditEvidence, authorization: AccessAuthorization): Promise<string | null> {
   assertRegulatedWritesAllowed(env);
   if (!audit?.write || !audit.guard) throw new Error('Role mutation evidence is required');
+  assertAccessAuthorization(authorization);
   if (!safeRoleAuditValue(name)) throw new Error('Role evidence is unsafe');
   if (!name) return 'Slug is required.';
   if (!label) return 'Name is required.';
-  if (BUILTIN.has(name)) return `"${name}" is a built-in role.`;
+  if (BUILTIN.has(name.trim().toLowerCase())) return `"${name}" is a built-in role.`;
   const existing = await env.DB.prepare('SELECT name FROM roles WHERE name = ?').bind(name).first();
   if (existing) return `Role "${name}" already exists.`;
   const orphan = await env.DB.prepare('SELECT 1 FROM role_permissions WHERE role = ? LIMIT 1').bind(name).first();
   if (orphan) return 'Existing permission records for this role require review.';
   await env.DB.batch([
+    authorization.guard(),
     // Creating a role must not silently activate pre-existing orphan grants.
     abortIf(env, 'EXISTS (SELECT 1 FROM role_permissions WHERE role = ?)', [name]),
     env.DB.prepare('INSERT INTO roles (name, label, builtin) VALUES (?, ?, 0)').bind(name, label),
@@ -190,11 +195,13 @@ export interface RoleDeletionEvidence {
 /** Deletes a custom role, removes it from users and persists complete per-user
  * evidence in one transaction. A guard compares the number and final values of
  * updated users with their audit rows, aborting on ignored/partial operations. */
-export async function deleteCustomRole(env: Env, name: string, evidence: RoleDeletionEvidence): Promise<void> {
+export async function deleteCustomRole(env: Env, name: string, evidence: RoleDeletionEvidence, authorization: AccessAuthorization): Promise<void> {
   assertRegulatedWritesAllowed(env);
   if (!evidence?.removals?.write || !evidence.deletion?.write || !evidence.deletion.guard) throw new Error('Role mutation evidence is required');
-  if (BUILTIN.has(name)) return;
+  assertAccessAuthorization(authorization);
+  if (BUILTIN.has(name.trim().toLowerCase())) return;
   if (!safeRoleAuditValue(name) || !rolePermissionsRecordable(evidence.before.grants)) throw new Error('Role evidence is unsafe');
+  assertDelegatedRolePermissions(authorization, name);
   const { actor, request, dataClass } = evidence.removals;
   const eventFilter = `a.occurred_at = ? AND a.action = 'user.roles' AND json_extract(a.detail, '$.operation_id') = ?`;
   const countEvidence = `SELECT COUNT(*) FROM audit_events AS a WHERE ${eventFilter}`;
@@ -219,6 +226,7 @@ export async function deleteCustomRole(env: Env, name: string, evidence: RoleDel
   const inconsistentParams = [evidence.occurredAt, evidence.operationId, dataClass, actor.userId, actor.roles,
     actor.via, actor.sessionSid, request.requestId, request.sourceIp, request.userAgent, name];
   await env.DB.batch([
+    authorization.guard(),
     roleSnapshotGuard(env, name, evidence.before),
     // Legacy role lists can contain identifying free text; fail before copying
     // any such value into an audit row, including on a concurrent change.

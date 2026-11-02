@@ -7,14 +7,16 @@ import { usersPage, userFormPage } from '../templates/users';
 import type { Env, Variables, User } from '../../../types';
 import { mutationAuditEvidence } from '../../../core/db/audit';
 import { abortIf } from '../../../core/db/transaction-guard';
-import { accessMutationClass, accessMutationUnavailable, unsafeAccessEvidence } from '../mutation-audit';
+import { accessMutationClass, accessMutationUnavailable, unsafeAccessEvidence, authorizeAccessMutation } from '../mutation-audit';
 import { safeRoleAuditValue } from '../../../core/auth/role-mutation-sql';
 import { requirePermission } from '../../../core/auth/guards';
+import { recordPolicyDenial } from '../../../core/auth/denials';
+import type { AccessAuthorization } from '../../../core/auth/access-authorization';
 import { userCan } from '../../../core/auth/permissions';
 import { renderPage } from '../../../core/render/chrome';
 import { maskPrivateValue } from '../../../core/render/privacy';
 import { allRoleOptions } from '../../../core/auth/role-store';
-import { ROLE_LABELS, builtinRoleTranslationKey, effectivePermissions, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
+import { ROLE_LABELS, builtinRoleTranslationKey, effectivePermissions, splitRoles } from '../../../core/auth/roles';
 import { featureAdminScreenProps } from '../../services';
 import type { AppContext } from '../../../core/http/context';
 
@@ -45,19 +47,17 @@ function rolesForView(role: string, options: Array<{ name: string; label: string
 }
 
 function hasAdminRole(role: string): boolean {
-  return role.split(',').map((r) => r.trim()).includes('admin');
+  return splitRoles(role).includes('admin');
 }
 
 /** A delegated user manager may only manage/assign roles whose effective
  * permissions are a subset of their own. This prevents users:manage from
  * becoming an implicit path to the locked admin role or other stronger roles. */
-async function canManageRoleValue(c: AppContext, role: string): Promise<boolean> {
-  if (splitRoles(c.get('user').role).includes('admin')) return true;
+function canManageRoleValue(authorization: AccessAuthorization, role: string): boolean {
+  if (authorization.admin) return true;
   if (hasAdminRole(role)) return false;
-  const map = await resolveRolePermissions(c.env);
-  const actorPermissions = effectivePermissions(map, c.get('user').role);
-  const targetPermissions = effectivePermissions(map, role);
-  return [...targetPermissions].every((permission) => actorPermissions.has(permission));
+  const targetPermissions = effectivePermissions(authorization.roleMap, role);
+  return [...targetPermissions].every(permission => authorization.permissions.has(permission));
 }
 
 function providerFromOAuthId(oauthId: string): string {
@@ -135,6 +135,8 @@ usersRoutes.get('/users/:id/edit', async (c) => {
 });
 
 usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
+  const { authorization, refused } = await authorizeAccessMutation(c, 'users:manage');
+  if (refused) return refused;
   const id = parseInt(c.req.param('id'), 10);
   const user = await c.env.DB.prepare('SELECT id, name, email, role FROM users WHERE id = ?')
     .bind(id)
@@ -147,17 +149,19 @@ usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
   const selected = [...new Set(form.getAll('roles').map(String).filter((role) => valid.has(role)))];
   const nextRole = selected.length ? selected.join(',') : 'viewer';
 
-  if (!(await canManageRoleValue(c, user.role)) || !(await canManageRoleValue(c, nextRole))) {
+  if (!canManageRoleValue(authorization, user.role) || !canManageRoleValue(authorization, nextRole)) {
+    await recordPolicyDenial(c, !canManageRoleValue(authorization, user.role) ? 'target_role_exceeds_authority' : 'requested_role_exceeds_authority');
     return c.text('Forbidden: cannot assign or modify a more privileged role', 403);
   }
 
   // Lockout guard: never let the last admin lose the admin role.
-  const losesAdmin = user.role.split(',').map((r) => r.trim()).includes('admin') && !selected.includes('admin');
+  const losesAdmin = hasAdminRole(user.role) && !selected.includes('admin');
   if (losesAdmin) {
     const otherAdmins = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE id != ? AND (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%'")
       .bind(id)
       .first<{ n: number }>();
     if ((otherAdmins?.n ?? 0) === 0) {
+      await recordPolicyDenial(c, 'last_administrator');
       return userForm(c, user, 'Cannot remove the admin role from the last administrator.');
     }
   }
@@ -171,6 +175,7 @@ usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
     const evidence = mutationAuditEvidence(c, { action: 'user.roles', entityType: 'user', entityId: id,
       detail: { role_before: user.role, role: nextRole } }, dataClass, { requirePreviousChange: true });
     await c.env.DB.batch([
+      authorization.guard(),
       // Recheck the observed target and last-admin guard inside the transaction.
       c.env.DB.prepare(`UPDATE users SET role = ? WHERE id = ? AND role = ?
         AND (? = 0 OR EXISTS (SELECT 1 FROM users WHERE id != ? AND (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%'))`)
@@ -186,10 +191,13 @@ usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
 });
 
 usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (c) => {
+  const { authorization, refused } = await authorizeAccessMutation(c, 'users:manage');
+  if (refused) return refused;
   const id = parseInt(c.req.param('id'), 10);
   const currentUserId = Number(c.get('user').sub);
   if (!Number.isInteger(id) || id <= 0) return c.notFound();
   if (id === currentUserId) {
+    await recordPolicyDenial(c, 'self_deletion');
     return c.redirect('/admin/users?error=You+cannot+remove+your+own+user');
   }
 
@@ -198,7 +206,8 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
     .first<Pick<User, 'id' | 'role'>>();
   if (!user) return c.notFound();
 
-  if (!(await canManageRoleValue(c, user.role))) {
+  if (!canManageRoleValue(authorization, user.role)) {
+    await recordPolicyDenial(c, 'target_role_exceeds_authority');
     return c.text('Forbidden: cannot remove a more privileged user', 403);
   }
 
@@ -207,6 +216,7 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
       .bind(id)
       .first<{ n: number }>();
     if ((otherAdmins?.n ?? 0) === 0) {
+      await recordPolicyDenial(c, 'last_administrator');
       return c.redirect('/admin/users?error=Cannot+remove+the+last+administrator');
     }
   }
@@ -221,6 +231,7 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
     const evidence = mutationAuditEvidence(c, { action: 'user.delete', entityType: 'user', entityId: id,
       detail: { role_before: user.role, ...(sessions.length ? { revoked_session_ids: sessions } : {}) } }, dataClass, { requirePreviousChange: true });
     await c.env.DB.batch([
+      authorization.guard(),
       abortIf(c.env, `(SELECT COUNT(*) FROM sessions WHERE user_id = ?) <> ?
         OR EXISTS (SELECT 1 FROM sessions WHERE user_id = ? AND id NOT IN (SELECT value FROM json_each(?)))`,
         [id, sessions.length, id, JSON.stringify(sessions)]),

@@ -10,6 +10,10 @@ export const AUTH_DENIAL_REASONS = {
   'auth.access': ['missing_credentials', 'invalid_credentials', 'unknown'],
 } as const;
 export type AuthDenialAction = keyof typeof AUTH_DENIAL_REASONS | 'permission.denied';
+export const PERMISSION_DENIAL_REASONS = ['editor_required', 'target_role_exceeds_authority', 'requested_role_exceeds_authority',
+  'grant_exceeds_authority', 'locked_role', 'builtin_role', 'self_deletion', 'last_administrator', 'management_permission_changed', 'unknown'] as const;
+export type PermissionDenialReason = typeof PERMISSION_DENIAL_REASONS[number];
+export const permissionDenialReason = (value: string) => (PERMISSION_DENIAL_REASONS as readonly string[]).includes(value) ? value : 'unknown';
 
 export function denialReason(action: Exclude<AuthDenialAction, 'permission.denied'>, value: string): string {
   return (AUTH_DENIAL_REASONS[action] as readonly string[]).includes(value) ? value : 'unknown';
@@ -29,7 +33,7 @@ export function validDenialDetail(action: string, detail: Record<string, unknown
     if (typeof detail.path !== 'string' || !denialRoute(detail.path)) return false;
     if (typeof detail.permission === 'string' && (detail.permission === 'unrecordable' || denialPermission(detail.permission))) required = ['permission', 'path'];
     else if (typeof detail.permissions === 'string' && permissionSet(detail.permissions)) required = ['permissions', 'path'];
-    else if (detail.reason === 'editor_required') required = ['reason', 'path'];
+    else if (typeof detail.reason === 'string' && permissionDenialReason(detail.reason) === detail.reason) required = ['reason', 'path'];
     else return false;
   } else {
     if (!Object.hasOwn(AUTH_DENIAL_REASONS, action) || typeof detail.reason !== 'string'
