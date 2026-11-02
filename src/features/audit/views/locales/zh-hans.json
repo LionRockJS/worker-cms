@@ -67,7 +67,12 @@
       "save": "Record review",
       "unavailable": "The outage journal is unavailable. Do not interpret this as no outages.",
       "disabled": "Outage monitoring is not enabled for this deployment."
-    }
+    },
+    "prune_ceiling": "已验证至（清除上限）",
+    "anchored": "外部锚定至",
+    "anchor_unbound": "未绑定检查点接收器：归档印记只存在于此数据库。",
+    "pending_since": "分段已冻结但尚未封存，始于",
+    "archive_fault": "归档故障："
   },
   "view_strings": {
     "sections_audit.audit_log": "审计日志"

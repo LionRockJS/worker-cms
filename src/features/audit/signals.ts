@@ -15,6 +15,7 @@
 // ============================================================
 
 import type { Env } from '../../types';
+import { monitorSource } from '../../core/db/audit-outages';
 import { verifyAuditArchive, type SealVerification } from './sweep';
 
 /** Records one actor may read from one classified container in a day before it
@@ -71,6 +72,22 @@ export interface ArchiveHealth {
    *  reporting a healthy archive that does not exist. */
   verification: SealVerification[] | null;
   bucketBound: boolean;
+  /** The chain head, which the heartbeat reports so the receiver can compare
+   *  it with the checkpoints it already holds. */
+  headHash: string | null;
+  /** Prune ceiling: the last seq whose segment was read back and matched. */
+  verifiedSeq: number;
+  /** Oldest seal not yet read back, which reveals a stalled verification. */
+  oldestUnverified: string | null;
+  /** Whether a checkpoint receiver is bound, and how far it has accepted. */
+  anchorConfigured: boolean;
+  anchoredSeq: number;
+  oldestUnanchored: string | null;
+  /** When the current frozen-but-unsealed segment was frozen, if any. */
+  pendingSince: string | null;
+  /** The sweep's current fault fingerprint (kind:key), cleared on a clean run. */
+  fault: string | null;
+  faultAt: string | null;
 }
 
 /**
@@ -161,15 +178,25 @@ async function contributorAlone(env: Env): Promise<ReviewSignal> {
 
 /** Whether the archive is keeping up, and whether it still verifies. */
 export async function archiveHealth(env: Env, verificationLimit = 25): Promise<ArchiveHealth> {
-  const [seals, backlog] = await Promise.all([
+  const [seals, backlog, protection] = await Promise.all([
     env.DB.prepare(
-      'SELECT COUNT(*) AS seals, MIN(first_seq) AS fromSeq, MAX(last_seq) AS toSeq FROM audit_seals',
-    ).first<{ seals: number; fromSeq: number | null; toSeq: number | null }>(),
+      `SELECT COUNT(*) AS seals, MIN(first_seq) AS fromSeq, MAX(last_seq) AS toSeq,
+              (SELECT rolling_hash FROM audit_seals ORDER BY last_seq DESC LIMIT 1) AS headHash
+         FROM audit_seals`,
+    ).first<{ seals: number; fromSeq: number | null; toSeq: number | null; headHash: string | null }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS backlog, MIN(occurred_at) AS oldest
          FROM audit_events
         WHERE seq > (SELECT COALESCE(MAX(last_seq), 0) FROM audit_seals)`,
     ).first<{ backlog: number; oldest: string | null }>(),
+    env.DB.prepare(
+      `SELECT s.verified_seq AS verifiedSeq, s.anchored_seq AS anchoredSeq, s.fault, s.fault_at AS faultAt,
+              (SELECT MIN(sealed_at) FROM audit_seals WHERE last_seq > s.verified_seq) AS oldestUnverified,
+              (SELECT MIN(sealed_at) FROM audit_seals WHERE last_seq > s.anchored_seq) AS oldestUnanchored,
+              (SELECT MIN(frozen_at) FROM audit_archive_intents) AS pendingSince
+         FROM audit_archive_state s WHERE s.id = 1`,
+    ).first<{ verifiedSeq: number; anchoredSeq: number; fault: string | null; faultAt: string | null;
+      oldestUnverified: string | null; oldestUnanchored: string | null; pendingSince: string | null }>(),
   ]);
 
   const bucketBound = !!env.AUDIT_BUCKET;
@@ -183,6 +210,15 @@ export async function archiveHealth(env: Env, verificationLimit = 25): Promise<A
     // there is a bucket to read from, and only over the newest window.
     verification: bucketBound ? await verifyAuditArchive(env, verificationLimit) : null,
     bucketBound,
+    headHash: seals?.headHash ?? null,
+    verifiedSeq: protection?.verifiedSeq ?? 0,
+    oldestUnverified: protection?.oldestUnverified ?? null,
+    anchorConfigured: !!env.AUDIT_MONITOR && !!monitorSource(env),
+    anchoredSeq: protection?.anchoredSeq ?? 0,
+    oldestUnanchored: protection?.oldestUnanchored ?? null,
+    pendingSince: protection?.pendingSince ?? null,
+    fault: protection?.fault ?? null,
+    faultAt: protection?.faultAt ?? null,
   };
 }
 

@@ -198,6 +198,13 @@ export async function auditReviewPage(views: Fetcher, opts: BaseTemplateProps & 
     verifiedCount: (health.verification ?? []).length,
     failureCount: failures.length,
     hasFailures: failures.length > 0,
+    verifiedSeq: health.verifiedSeq,
+    anchorConfigured: health.anchorConfigured,
+    anchoredSeq: health.anchoredSeq,
+    pendingSince: health.pendingSince,
+    archiveFault: health.fault ? health.fault.split(':')[0] : null,
+    archiveFaultKey: health.fault ? health.fault.split(':').slice(1).join(':') : null,
+    archiveFaultAt: health.faultAt,
 
     // Signals
     signals: signals.map((signal) => ({

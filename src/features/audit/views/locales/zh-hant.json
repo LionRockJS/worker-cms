@@ -67,7 +67,12 @@
       "save": "Record review",
       "unavailable": "The outage journal is unavailable. Do not interpret this as no outages.",
       "disabled": "Outage monitoring is not enabled for this deployment."
-    }
+    },
+    "prune_ceiling": "已驗證至（清除上限）",
+    "anchored": "外部錨定至",
+    "anchor_unbound": "未綁定檢查點接收器：封存印記只存在於此資料庫。",
+    "pending_since": "區段已凍結但尚未封存，始於",
+    "archive_fault": "封存故障："
   },
   "view_strings": {
     "sections_audit.audit_log": "審計日誌"
