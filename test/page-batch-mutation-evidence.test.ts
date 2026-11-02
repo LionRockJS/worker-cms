@@ -107,7 +107,10 @@ it.each(['status','attempt','body','owner','role'])('refuses a queued slice if i
 
 it('commits a full hundred-page replacement slice with complete correlated receipts',async()=>{
   await env.DB.prepare('DELETE FROM pages').run();await env.DB.prepare("WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<100) INSERT INTO pages(id,uuid,name,slug,weight,page_type,lect) SELECT n,'uuid-'||n,'Private Old '||n,'slug-'||n,5,'article','{}' FROM seq").run();
-  expect((await applyBulkPageAction(env,user,'replace_text',Array.from({length:100},(_,i)=>i+1),bulkOptions)).updated).toBe(100);
+  let batchError:unknown;
+  const DB={withSession:()=>DB,prepare:env.DB.prepare.bind(env.DB),batch:async(statements:D1PreparedStatement[])=>{try{return await env.DB.batch(statements);}catch(error){batchError=error;throw error;}}};
+  const result=await applyBulkPageAction({...env,DB:DB as Env['DB']},user,'replace_text',Array.from({length:100},(_,i)=>i+1),bulkOptions).catch(error=>{throw batchError??error;});
+  expect(result.updated).toBe(100);
   const rows=await events();expect(rows).toHaveLength(100);rows.forEach((row,index)=>expect(JSON.parse(String(row.detail))).toMatchObject({operation_target_count:100,operation_index:index}));expect(new Set(rows.map(r=>JSON.parse(String(r.detail)).operation_id)).size).toBe(1);expect((await env.DB.prepare('SELECT * FROM page_versions').all()).results).toHaveLength(100);
 });
 it('retains a committed job slice receipt when the commit acknowledgment is lost',async()=>{
@@ -148,4 +151,14 @@ it('reports a weight persistence outage once through coarse monitoring',async()=
   await env.DB.prepare(`CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'synthetic'); END`).run();
   const alerts:Array<unknown>=[];const response=await api('/admin/pages/batch-weight',{updates:[{id:9991,weight:20}]},{AUDIT_OUTAGE_MONITORING:'true',AUDIT_MONITOR_SOURCE:'batch-local',AUDIT_MONITOR:{fetch:async(_input:RequestInfo|URL,init?:RequestInit)=>{alerts.push(JSON.parse(String(init?.body)));return new Response(null,{status:200});}} as Fetcher});
   expect(response.status).toBe(503);expect(alerts).toHaveLength(1);expect(JSON.stringify(alerts)).not.toContain('Private');
+});
+
+it('allocates durable snapshot ids above existing rows without relying on the legacy nonce',async()=>{
+  const marker=Number.MAX_SAFE_INTEGER-10000;await env.DB.prepare("INSERT INTO page_versions(id,page_id,lect,action) VALUES (?,9992,'{}','existing')").bind(marker).run();
+  expect((await applyBulkPageAction(env,user,'replace_text',[9991],bulkOptions)).updated).toBe(1);
+  const row=await env.DB.prepare('SELECT id FROM page_versions WHERE page_id=9991').first<{id:number}>();expect(row!.id).toBeGreaterThan(marker);expect(Number.isSafeInteger(row!.id)).toBe(true);expect(await events()).toHaveLength(1);
+});
+it('rolls back content and receipts if snapshot allocation exceeds safe numeric identity',async()=>{
+  await env.DB.prepare("INSERT INTO page_versions(id,page_id,lect,action) VALUES (?,9991,'{}','existing')").bind(Number.MAX_SAFE_INTEGER).run();const before=await state();
+  expect(await call('replace_text')).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);
 });

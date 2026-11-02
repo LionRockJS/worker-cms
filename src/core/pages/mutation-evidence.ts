@@ -1,3 +1,4 @@
+import { NEXT_SNAPSHOT_ID_SQL } from './snapshot-id';
 import { ContentBatchEvidenceUnavailableError } from './batch-mutation-evidence';
 import type { Page, PageVersion } from '../../types';
 import type { AppContext } from '../http/context';
@@ -89,7 +90,7 @@ export async function saveDraftContent(c: AppContext, next: DraftContent, tags: 
   for (const tag of prepared.targetTags) statements.push(c.env.DB.prepare('INSERT INTO page_tags (page_id,tag_id) SELECT id, ? FROM pages WHERE uuid = ?').bind(tag,uuid));
   const action = source ? 'restore' : before ? 'update' : 'create';
   const storedAction = versionAction ?? action;
-  statements.push(c.env.DB.prepare('INSERT INTO page_versions (uuid,page_id,lect,action) SELECT ?,id,?,? FROM pages WHERE uuid = ?')
+  statements.push(c.env.DB.prepare(`INSERT INTO page_versions (id,uuid,page_id,lect,action) SELECT ${NEXT_SNAPSHOT_ID_SQL},?,id,?,? FROM pages WHERE uuid = ?`)
     .bind(versionUuid,next.lect,storedAction,uuid));
   const evidence = mutationAuditEvidence(c,{action:`page.${action}`,entityType:'page',entityId:uuid,
     detail:{fields:before ? contentFields.filter(f=>before[f]!==next[f]) : [...contentFields],version_uuid:versionUuid,
@@ -97,7 +98,7 @@ export async function saveDraftContent(c: AppContext, next: DraftContent, tags: 
   statements.push(evidence.write,evidence.guard,
     abortIf(c.env,`NOT EXISTS (SELECT 1 FROM pages WHERE uuid = ? AND ${contentFields.map(f=>`${f} IS ?`).join(' AND ')})`,[uuid,...contentFields.map(f=>next[f])]),
     tagsGuard(c,uuid,prepared.targetTags),
-    abortIf(c.env,`NOT EXISTS (SELECT 1 FROM page_versions v JOIN pages p ON p.id = v.page_id WHERE p.uuid = ? AND v.uuid = ? AND v.lect IS ? AND v.action = ?)
+    abortIf(c.env,`NOT EXISTS (SELECT 1 FROM page_versions v JOIN pages p ON p.id = v.page_id WHERE p.uuid = ? AND v.uuid = ? AND v.lect IS ? AND v.action = ? AND v.id BETWEEN 1 AND 9007199254740991)
       OR (SELECT COUNT(*) FROM page_versions WHERE page_id = (SELECT id FROM pages WHERE uuid = ?)) <> ?
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_versions WHERE id = e.value AND page_id = (SELECT id FROM pages WHERE uuid = ?)))`,
     [uuid,versionUuid,next.lect,storedAction,uuid,prepared.versionIds.length+1,JSON.stringify(prepared.versionIds),uuid]),

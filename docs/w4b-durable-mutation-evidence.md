@@ -1,6 +1,6 @@
 # W4b durable mutation evidence
 
-**Status: local identity/session/access-policy foundations and the draft-editor content/history and weights/reorder/local-bulk slices are implemented. W4b remains open with [six remaining work packages](w4b-remaining-scope-2026-11-02.md); regulated writes remain blocked.** This is repository evidence, not deployment acceptance or a standards-compliance finding.
+**Status: local identity/session/access-policy foundations and the draft-editor content/history and weights/reorder/local-bulk and taxonomy/tag slices are implemented. W4b remains open with [six remaining work packages](w4b-remaining-scope-2026-11-02.md); regulated writes remain blocked.** This is repository evidence, not deployment acceptance or a standards-compliance finding.
 
 The existing audit envelope supplies the actor, request and event metadata. The new mutation evidence builder creates an audit write and a guard for the exact event. The covered D1 mutations and those statements run in one batch, with additional postconditions for the business state. A failed statement or invariant aborts the batch; a connection failure after a possible commit can leave an ambiguous outcome, so an operator must reconcile current state and the corresponding event before retrying.
 
@@ -78,7 +78,7 @@ See the [authentication-denial record](authentication-denial-evidence.md) for ex
 
 ## Still required before regulated write release
 
-The current [scope register](w4b-remaining-scope-2026-11-02.md) defines six open packages: remaining core content writers; other host configuration/access mutations; contributor/service/background writers; external/multi-store recovery; shared operation identities and uncertain-result handling; and coverage/deployment acceptance. Its revised provisional remaining estimate is 27–48 engineering person-days plus external acceptance lead time. Earlier chronological limitations below/above are superseded only for operations explicitly covered by later records.
+The current [scope register](w4b-remaining-scope-2026-11-02.md) defines six open packages: remaining core content writers; other host configuration/access mutations; contributor/service/background writers; external/multi-store recovery; shared operation identities and uncertain-result handling; and coverage/deployment acceptance. Its revised provisional remaining estimate is 25–45 engineering person-days plus external acceptance lead time. Earlier chronological limitations below/above are superseded only for operations explicitly covered by later records.
 
 W3 publication schema/destination approvals, governed declassification and W5 archive/retention protection remain release dependencies. Keep regulated-write and PHI-publication containment until all release prerequisites are accepted. Existing installations still need the earlier reviewed outbox and classification-version upgrades; the content slice adds no new schema.
 
@@ -119,3 +119,13 @@ Current authority, policy generations, page/membership/taxonomy/UUID-floor state
 The [batch record](page-batch-mutation-evidence.md) describes exact scope, privacy, bounds, deferred authority and uncertainty. The [scope register](w4b-remaining-scope-2026-11-02.md) keeps six packages open, with R1 narrowed and a revised provisional total of 27–48 engineering person-days plus external acceptance lead time. No schema change, deployment, production migration or push occurred; regulated containment remains.
 
 Validation: **100 new batch-evidence regressions** pass. The integrated serial suite passed **1,860 tests across 77 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. The final per-slice completeness assertions also passed in the 100-test focused run. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. These are local results, not deployed acceptance.
+
+## Durable taxonomy and tag continuation — 2 November 2026
+
+Following `714b8a8`, taxonomy/tag create/edit/delete and batch tag weights now commit local state and exact classified receipts together. Complete regrouping, orphaning, live/trash link-removal and child-parent manifests accompany their local cascades. Current capability/session/catalogue, target/relationship state, optional schema and classification generations are guarded. Classified renames permit exactly their own retained-floor-copy generation increment; unreviewed reductions retain 409. UUID targets and bounded internal manifests replace free-text label/slug audit detail.
+
+The [taxonomy record](taxonomy-mutation-evidence.md) explains scope, privacy, generated numeric IDs, optional trash, uncertainty and separate publication effects. Repeat withdrawal for an already-missing local tag does not invent another local mutation. No schema upgrade, deployment or production migration occurred; regulated containment remains. All six W4b packages remain open, with R1 narrowed to trash/lifecycle work and a revised provisional total of 25–45 engineering person-days plus external acceptance time in the [scope register](w4b-remaining-scope-2026-11-02.md).
+
+Validation also reproduced an existing hundred-row history ID collision. Guarded editor/local-bulk inserts now allocate numeric IDs above existing rows inside the transaction and check JavaScript's safe-integer limit. UUID identities remain stable. This is a local writer fix, not a migration of all legacy ID defaults or completion of general operation identity/recovery.
+
+Validation: **103 new taxonomy/tag regressions and two snapshot-allocation regressions** pass. The final serial suite passed **1,965 tests across 78 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. After reproducing the legacy ID collision, a bounded stress check passed 100 hundred-page slices (10,000 snapshots) with the guarded allocation. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. These are local results, not deployed acceptance.

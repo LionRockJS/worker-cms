@@ -32,4 +32,8 @@ Validation: **69 new content regressions** pass. The final serial suite passed *
 
 ## Remaining scope
 
-Weights/reorder and local bulk text/tag workflows are covered by the subsequent [batch record](page-batch-mutation-evidence.md). Taxonomy/tag administration, trash/delete/restore/purge, publication/pull/withdrawal, plugin/service APIs, ingestion and background writes still need their own coverage/recovery work. Other host configuration/access writers and general operation identities remain open. The [six-package scope register](w4b-remaining-scope-2026-11-02.md) gives the remaining estimate and release dependencies. No production migration, deployment, push or compliance sign-off occurred.
+Weights/reorder and local bulk text/tag workflows are covered by the subsequent [batch record](page-batch-mutation-evidence.md). Taxonomy/tag administration is covered by the subsequent [taxonomy record](taxonomy-mutation-evidence.md). Trash/delete/restore/purge, publication/pull/withdrawal, plugin/service APIs, ingestion and background writes still need their own coverage/recovery work. Other host configuration/access writers and general operation identities remain open. The [six-package scope register](w4b-remaining-scope-2026-11-02.md) gives the remaining estimate and release dependencies. No production migration, deployment, push or compliance sign-off occurred.
+
+## Subsequent snapshot-allocation fix
+
+The [taxonomy continuation](taxonomy-mutation-evidence.md) also fixes a reproduced snapshot ID collision in the guarded editor/bulk writers. Their inserts allocate numeric IDs within the transaction above existing rows and the legacy time/nonce floor, and reject unsafe-number overflow. Stable version UUID evidence and guarded rollback semantics remain unchanged. This does not migrate every legacy writer or replace R5's general operation identity work.

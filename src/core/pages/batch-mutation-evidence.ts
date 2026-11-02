@@ -1,3 +1,4 @@
+import { NEXT_SNAPSHOT_ID_SQL } from './snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization, captureContentJobAuthorization } from '../auth/access-authorization';
@@ -142,7 +143,8 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
       statements.push(env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) SELECT ?, value FROM json_each(?)').bind(page.id,bounded([...new Set(change.tags)])));
     } else {
       const uuid=crypto.randomUUID();expectedVersions.push({uuid,page_id:page.id,lect:page.lect});
-      statements.push(env.DB.prepare("INSERT INTO page_versions(uuid,page_id,lect,action) VALUES (?,?,?,'bulk-replace')").bind(uuid,page.id,page.lect),abortIf(env,'changes() <> 1'));
+      statements.push(env.DB.prepare(`INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,'bulk-replace')`).bind(uuid,page.id,page.lect),
+        abortIf(env,'changes() <> 1 OR NOT EXISTS (SELECT 1 FROM page_versions WHERE uuid=? AND id BETWEEN 1 AND 9007199254740991)',[uuid]));
     }
     const detail = change.tags ? {fields:['tags'],tags_before:prepared.linkRows.filter(l=>l.page_id===page.id).map(l=>l.tag_id),tags_after:[...new Set(change.tags)],tag_count:new Set(change.tags).size} : {fields:['name','lect'],version_uuid:expectedVersions.at(-1)!.uuid};
     const receipt=prepared.evidence({action:'page.update',entityType:'page',entityId:page.id,detail:{...detail,operation_target_count:changes.length,operation_index:index}},prepared.dataClass(page));

@@ -1,3 +1,5 @@
+import { saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/pages/taxonomy-mutation-evidence';
+import { contentMutationUnavailable } from '../../core/pages/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // Tag and taxonomy management.
 
@@ -79,10 +81,7 @@ tagsRoutes.post('/taxonomies', requirePermission('taxonomy:write'), async (c) =>
   const name = str(form.get('name'));
   const slug = str(form.get('slug')) || slugify(name);
   if (!name || !slug) return c.redirect('/admin/taxonomies/new?error=missing');
-  const result = await c.env.DB.prepare('INSERT INTO taxonomies (name, slug) VALUES (?, ?)')
-    .bind(name, slug)
-    .run();
-  logAudit(c, 'taxonomy.create', 'taxonomy', result.meta.last_row_id, { name, slug });
+  try { await saveTaxonomy(c,{name,slug}); } catch(error) { return contentMutationUnavailable(c,error); }
   return c.redirect('/admin/taxonomies');
 });
 
@@ -100,22 +99,14 @@ tagsRoutes.post('/taxonomies/:id', requirePermission('taxonomy:write'), async (c
   const form = await c.req.formData();
   const name = str(form.get('name'));
   const slug = str(form.get('slug')) || slugify(name);
+  if(!name||!slug)return c.redirect(`/admin/taxonomies/${id}/edit?error=missing`);
   const existing = await c.env.DB.prepare('SELECT * FROM taxonomies WHERE id = ?')
     .bind(id)
     .first<Taxonomy>();
   if (!existing) return c.notFound();
-  await c.env.DB.prepare('UPDATE taxonomies SET name = ?, slug = ? WHERE id = ?')
-    .bind(name, slug, id)
-    .run();
-  if (existing.slug !== slug) {
-    // Collect first: after the rewrite there is no way to tell which tags moved.
-    const moved = await tagIdsInTaxonomy(c.env.DB, existing.slug);
-    await c.env.DB.prepare('UPDATE tags SET taxonomy_slug = ? WHERE taxonomy_slug = ?')
-      .bind(slug, existing.slug)
-      .run();
-    await publishTagsToTargets(c.env, moved, contextActor(c));
-  }
-  logAudit(c, 'taxonomy.update', 'taxonomy', id, { name, slug });
+  let moved:number[];
+  try { moved=await saveTaxonomy(c,{name,slug},existing); } catch(error) { return contentMutationUnavailable(c,error); }
+  if(moved.length) await publishTagsToTargets(c.env,moved,contextActor(c));
   return c.redirect('/admin/taxonomies');
 });
 
@@ -125,11 +116,9 @@ tagsRoutes.post('/taxonomies/:id/delete', requirePermission('taxonomy:write'), a
     .bind(id)
     .first<Taxonomy>();
   if (!taxonomy) return c.notFound();
-  const orphaned = await tagIdsInTaxonomy(c.env.DB, taxonomy.slug);
-  await c.env.DB.prepare('UPDATE tags SET taxonomy_slug = NULL WHERE taxonomy_slug = ?').bind(taxonomy.slug).run();
-  await c.env.DB.prepare('DELETE FROM taxonomies WHERE id = ?').bind(id).run();
-  await publishTagsToTargets(c.env, orphaned, contextActor(c));
-  logAudit(c, 'taxonomy.delete', 'taxonomy', id);
+  let orphaned:number[];
+  try { orphaned=await deleteTaxonomy(c,taxonomy); } catch(error) { return contentMutationUnavailable(c,error); }
+  if(orphaned.length) await publishTagsToTargets(c.env,orphaned,contextActor(c));
   return c.redirect('/admin/taxonomies');
 });
 
@@ -161,26 +150,12 @@ tagsRoutes.post('/tags/batch-weight', requirePermission('tag:write'), async (c) 
 
   if (!Array.isArray(updates)) return c.json({ error: 'Invalid input' }, 400);
 
-  const statements = [];
-  for (const update of updates) {
-    const id = Number(update?.id);
-    const weight = Number(update?.weight);
-    if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(weight)) {
-      return c.json({ error: 'Invalid input' }, 400);
-    }
-    statements.push(c.env.DB.prepare('UPDATE tags SET weight = ? WHERE id = ?').bind(weight, id));
-  }
-
-  if (!statements.length) return c.json({ success: true });
-
-  const results = await c.env.DB.batch(statements);
-  if (results.some((r) => !r.success)) {
-    return c.json({ error: 'Some updates failed' }, 500);
-  }
-
-  // Weight is the order published readers group by, so reordering has to reach
-  // the targets the same way a rename does.
-  await publishTagsToTargets(c.env, updates.map((update) => Number(update.id)), contextActor(c));
+  const weights:Array<{id:number;weight:number}>=[];
+  for(const update of updates){const id=Number(update?.id);const weight=Number(update?.weight);if(!Number.isSafeInteger(id)||id<=0||!Number.isFinite(weight))return c.json({error:'Invalid input'},400);weights.push({id,weight});}
+  if(weights.length>5000||new Set(weights.map(u=>u.id)).size!==weights.length)return c.json({error:'Invalid input'},400);
+  let changed:number[];
+  try{changed=await updateTagWeights(c,weights);}catch(error){return contentMutationUnavailable(c,error);}
+  if(changed.length)await publishTagsToTargets(c.env,changed,contextActor(c));
 
   return c.json({ success: true });
 });
@@ -210,13 +185,9 @@ tagsRoutes.post('/tags', requirePermission('tag:write'), async (c) => {
   ensureDefaultLectName(lect, name);
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
-  const result = await c.env.DB.prepare(
-    'INSERT INTO tags (name, slug, weight, taxonomy_slug, parent_tag, lect) VALUES (?, ?, ?, ?, ?, ?)',
-  )
-    .bind(name, slug, weight, taxonomySlug, parentTagId, stringifyLect(lect))
-    .run();
-  await publishTagToTargets(c.env, result.meta.last_row_id, contextActor(c));
-  logAudit(c, 'tag.create', 'tag', result.meta.last_row_id, { name, slug, weight, taxonomySlug });
+  let id:number;
+  try{id=await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)});}catch(error){return contentMutationUnavailable(c,error);}
+  await publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
 
@@ -241,26 +212,15 @@ tagsRoutes.post('/tags/:id', requirePermission('tag:write'), async (c) => {
   ensureDefaultLectName(lect, name);
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
-  await c.env.DB.prepare(
-    'UPDATE tags SET name = ?, slug = ?, weight = ?, taxonomy_slug = ?, parent_tag = ?, lect = ? WHERE id = ?',
-  )
-    .bind(name, slug, weight, taxonomySlug, parentTagId, stringifyLect(lect), id)
-    .run();
-  await publishTagToTargets(c.env, id, contextActor(c));
-  logAudit(c, 'tag.update', 'tag', id, { name, slug, weight, taxonomySlug });
+  try{await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)},existing);}catch(error){return contentMutationUnavailable(c,error);}
+  await publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
 
 tagsRoutes.post('/tags/:id/delete', requirePermission('tag:write'), async (c) => {
   const id = parseInt(c.req.param('id'), 10);
-  await Promise.all([
-    c.env.DB.prepare('DELETE FROM page_tags WHERE tag_id = ?').bind(id).run(),
-    removeTagFromTargets(c.env, id, contextActor(c)),
-    c.env.DB.prepare('DELETE FROM trash_page_tags WHERE tag_id = ?').bind(id).run(),
-    c.env.DB.prepare('UPDATE tags SET parent_tag = NULL WHERE parent_tag = ?').bind(id).run(),
-  ]);
-  await c.env.DB.prepare('DELETE FROM tags WHERE id = ?').bind(id).run();
-  logAudit(c, 'tag.delete', 'tag', id);
+  try{await deleteTag(c,id);}catch(error){return contentMutationUnavailable(c,error);}
+  await removeTagFromTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
 
@@ -270,14 +230,6 @@ async function taxonomyForm(c: AppContext, taxonomy?: TaxonomyFormData, readOnly
     taxonomy,
     readOnly,
   });
-}
-
-/** Tags currently grouped under a taxonomy slug, for pushing a bulk re-group. */
-async function tagIdsInTaxonomy(db: D1DatabaseClient, taxonomySlug: string): Promise<number[]> {
-  const rows = await db.prepare('SELECT id FROM tags WHERE taxonomy_slug = ?')
-    .bind(taxonomySlug)
-    .all<{ id: number }>();
-  return rows.results.map((row) => row.id);
 }
 
 interface TagSchema {
