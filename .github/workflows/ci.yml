@@ -31,6 +31,24 @@ jobs:
       # No .dev.vars in CI: test bindings come from vitest.config.mts.
       - run: npm test
 
+  # An existing database upgraded through numbered and manual migrations must
+  # end where a fresh install does. --from is the oldest revision still
+  # deployed anywhere; f9719a3 predates every manual migration. Move it forward
+  # only when no deployment is older (W0 records the deployed revisions).
+  upgrade-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run check:upgrade -- --from f9719a3
+
   # Reports known advisories without blocking a merge. Make this blocking once
   # the existing backlog is triaged, so it fails on new findings only.
   audit:

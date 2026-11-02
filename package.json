@@ -22,7 +22,8 @@
     "check:profiles": "node tools/check-profiles.mjs --quiet",
     "check:boundaries": "node tools/check-boundaries.mjs --quiet",
     "build:features": "node tools/build-features.mjs",
-    "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check"
+    "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check",
+    "check:upgrade": "node --no-warnings tools/check-upgrade-path.mjs"
   },
   "dependencies": {
     "hono": "^4.13.14",
