@@ -5,7 +5,8 @@
 // This fails when a binding, variable or secret in the Env type, a binding in
 // wrangler.example.toml, or a D1 table in either baseline has no inventory
 // entry, or when an entry no longer exists in source. It also validates the
-// shape of compliance/control-register.json. Adding a resource therefore
+// shape of compliance/control-register.json, and checks that every inventoried
+// supplier has an entry in compliance/supplier-register.json (W10). Adding a resource therefore
 // forces the inventory change into the same commit — the update process the
 // standard asks to be demonstrated.
 //
@@ -132,6 +133,34 @@ function checkRegister(errors) {
   return register;
 }
 
+/** Every inventoried supplier is in the register, and every register entry
+ *  points at one. An executed agreement must say where it is recorded. */
+function checkSuppliers(errors, inventory) {
+  const register = JSON.parse(read('compliance/supplier-register.json'));
+  const agreement = new Set(Object.keys(register.statuses?.agreement ?? {}));
+  const assessment = new Set(Object.keys(register.statuses?.assessment ?? {}));
+  const holds = new Set(Object.keys(inventory.holds ?? {}));
+  const suppliers = new Map(inventory.assets.filter((a) => a.kind === 'supplier').map((a) => [a.id, a]));
+  const covered = new Set();
+  const ids = new Set();
+  for (const supplier of register.suppliers) {
+    const where = supplier.id ?? '(no id)';
+    if (!supplier.id || ids.has(supplier.id)) errors.push(`suppliers: missing or duplicate id ${where}`);
+    ids.add(supplier.id);
+    if (!suppliers.has(supplier.inventoryId)) errors.push(`suppliers: ${where} points at ${supplier.inventoryId}, which is not an inventoried supplier`);
+    else covered.add(supplier.inventoryId);
+    if (!supplier.name || !Array.isArray(supplier.services) || !supplier.phi || !supplier.exit) errors.push(`suppliers: ${where} needs a name, services, PHI note and exit`);
+    if (!Array.isArray(supplier.dataShared) || supplier.dataShared.some((h) => !holds.has(h))) errors.push(`suppliers: ${where} has an unknown dataShared value`);
+    if (!agreement.has(supplier.agreement?.status)) errors.push(`suppliers: ${where} has an unknown agreement status`);
+    if (supplier.agreement?.status !== 'not-evidenced' && !supplier.agreement?.reference) errors.push(`suppliers: ${where} records an agreement status without a reference`);
+    if (!assessment.has(supplier.assessment?.status)) errors.push(`suppliers: ${where} has an unknown assessment status`);
+    if (supplier.assessment?.status === 'done' && !supplier.assessment?.date) errors.push(`suppliers: ${where} records an assessment without a date`);
+    if (!('owner' in supplier)) errors.push(`suppliers: ${where} needs an owner (null until assigned)`);
+  }
+  for (const id of suppliers.keys()) if (!covered.has(id)) errors.push(`suppliers: inventoried supplier ${id} has no register entry`);
+  return register;
+}
+
 function reconcile(configPath, bindingAssets) {
   const config = configNames(readFileSync(configPath, 'utf8'), false);
   const declared = new Set([...config.bindings, ...config.vars]);
@@ -155,11 +184,14 @@ function main() {
   const errors = [];
   const { inventory, bindingAssets } = checkInventory(errors);
   const register = checkRegister(errors);
+  const suppliers = checkSuppliers(errors, inventory);
   for (const error of errors) console.error(`ERROR ${error}`);
   if (!args.quiet || errors.length) {
     const unowned = inventory.assets.filter((asset) => !asset.owner).length;
     const unassigned = register.controls.filter((control) => !control.owner).length;
+    const unagreed = suppliers.suppliers.filter((supplier) => supplier.agreement.status === 'not-evidenced').length;
     console.log(`Inventory: ${inventory.assets.length} assets, ${unowned} without an owner. Register: ${register.controls.length} controls, ${unassigned} without an owner.`);
+    console.log(`Suppliers: ${suppliers.suppliers.length}, ${unagreed} without a recorded agreement.`);
   }
   if (args.config) reconcile(args.config, bindingAssets);
   process.exitCode = errors.length ? 1 : 0;

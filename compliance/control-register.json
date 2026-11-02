@@ -59,7 +59,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w8-inventory-and-register.md"
+        "docs/w8-inventory-and-register.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -144,7 +145,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/p0-manual-acceptance-2026-10-31.md"
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -242,7 +244,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w8-inventory-and-register.md"
+        "docs/w8-inventory-and-register.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -260,7 +263,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -280,7 +284,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -298,7 +303,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -439,7 +445,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -482,7 +489,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/p0-manual-acceptance-2026-10-31.md"
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -524,7 +532,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -695,7 +704,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/p0-manual-acceptance-2026-10-31.md",
-        "docs/w4b-remaining-scope-2026-11-02.md"
+        "docs/w4b-remaining-scope-2026-11-02.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -715,7 +725,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -838,7 +849,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -965,7 +977,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -984,7 +997,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -1006,7 +1020,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
@@ -1146,7 +1161,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w10-supplier-cloud-governance.md"
       ]
     },
     {
