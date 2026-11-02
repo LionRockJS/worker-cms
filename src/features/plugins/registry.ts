@@ -391,12 +391,17 @@ export async function pluginNav(env: Env): Promise<Array<{ pluginId: string; lab
     // nav entry: with several entries, one label cannot disambiguate them, so
     // they keep their manifest labels.
     const override = items.length === 1 ? (plugin.label ?? '').trim() : '';
+    const declared = pluginPermissions(plugin.manifest).map((permission) => permission.value);
     return items.map((item) => ({
       pluginId: plugin.manifest.id,
       label: override || item.label,
       href: `/admin/plugins/${plugin.manifest.id}/${item.href.replace(/^\/+/, '')}`,
       roles: item.roles,
-      permissions: pluginPermissions(plugin.manifest).map((permission) => permission.value),
+      // An item may narrow itself to some of the plugin's permissions; it can
+      // never widen past them (an undeclared value leaves nothing to match).
+      permissions: Array.isArray(item.permissions) && item.permissions.length
+        ? declared.filter((permission) => item.permissions!.includes(permission))
+        : declared,
       group: item.group,
       // Nav labels are only looked up in the translation catalog for plugins
       // that ship one (manifest `i18n: true`); others render their manifest

@@ -40,6 +40,10 @@ export interface PluginNavItem {
   href: string;
   /** Roles allowed to see the item; omit/empty to show for all editor roles. */
   roles?: string[];
+  /** The plugin's own permissions (`<id>:<suffix>`), any of which shows the
+   *  item to a non-admin; omit/empty to show for any of the plugin's
+   *  permissions. Values outside the plugin's declared permissions are ignored. */
+  permissions?: string[];
   /** Which sidebar group the item belongs to. "settings" nests it under the
    *  Settings group; omitted (default) places it at the top level. */
   group?: 'settings';

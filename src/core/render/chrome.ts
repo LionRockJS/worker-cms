@@ -104,6 +104,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     if (key === 'languages') return permissions.has('menu:manage');
     if (key === 'system') return permissions.has('menu:manage');
     if (key === 'content') return permissions.has('content:read') || permissions.has('media:upload');
+    if (key === 'audit') return permissions.has('audit:read');
     return true;
   };
   const orderedSidebarItems = SIDEBAR_MENU_ITEMS

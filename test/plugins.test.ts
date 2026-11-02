@@ -998,6 +998,58 @@ describe('plugin admin proxy', () => {
     ]));
   });
 
+  it('shows a non-admin only the plugin nav items their permissions name, and no Audit Log', async () => {
+    testEnv.PLUGIN_SECRET = 'server-secret';
+    const url = 'https://plugin-nav-perms.local';
+    await env.DB.prepare('INSERT INTO plugins (label, url, enabled) VALUES (?, ?, 1)').bind('', url).run();
+    const manifest = {
+      ...EVENTS_MANIFEST,
+      permissions: [
+        { value: 'events:request', label: 'Request' },
+        { value: 'events:build', label: 'Build' },
+        { value: 'events:admin', label: 'Admin' },
+      ],
+      nav: [
+        { label: 'Events', href: 'dashboard' },
+        { label: 'Builder', href: 'builder', permissions: ['events:build'] },
+        { label: 'Event settings', href: 'settings', group: 'settings', permissions: ['events:admin'] },
+        // Naming a permission the plugin never declared hides the item rather than widening it.
+        { label: 'Stray', href: 'stray', permissions: ['content:read'] },
+      ],
+    };
+    __injectPluginFetcher(url, {
+      fetch: async (input: RequestInfo | URL): Promise<Response> => {
+        const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(u).pathname === '/__plugin/manifest') return Response.json(manifest);
+        return new Response('nf', { status: 404 });
+      },
+    } as unknown as Fetcher);
+    await env.DB.prepare("INSERT OR IGNORE INTO roles (name, label, builtin) VALUES ('staff', 'Staff', 0)").run();
+    for (const permission of ['plugin:access', 'events:request']) {
+      await env.DB.prepare("INSERT OR IGNORE INTO role_permissions (role, permission) VALUES ('staff', ?)").bind(permission).run();
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJWT({
+      sub: '3', email: 'staff@example.com', name: 'Staff', role: 'staff',
+      type: 'access', exp: now + 900, iat: now,
+    }, env.JWT_SECRET);
+    const response = await worker.fetch(new Request('http://localhost/admin/profile', {
+      headers: { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' },
+    }));
+
+    expect(response.status).toBe(200);
+    const payload = renderPayload(await response.text());
+    expect(payload.layoutData.pluginNav).toEqual([
+      { label: 'Events', href: '/admin/plugins/events/dashboard' },
+    ]);
+    expect(payload.layoutData.pluginSettingsNav).toEqual([]);
+    const settingsHrefs = (payload.layoutData.sidebarSettingsNav as Array<{ href: string }>).map((item) => item.href);
+    expect(settingsHrefs).not.toContain('/admin/audit');
+    await env.DB.prepare("DELETE FROM role_permissions WHERE role = 'staff'").run();
+    await env.DB.prepare("DELETE FROM roles WHERE name = 'staff'").run();
+  });
+
   it('includes plugin navigation translations in the admin catalog on core pages', async () => {
     testEnv.PLUGIN_SECRET = 'server-secret';
     const url = 'https://plugin-nav-locale.local';
