@@ -37,3 +37,6 @@
 # /docs/iso-27001-*                OWNER
 # /docs/hipaa-*                    OWNER
 # /docs/compliance-*               OWNER
+# Asset inventory and control register: owners, reviewers and statuses (W8).
+# /compliance/                     OWNER
+# /tools/check-inventory.mjs       OWNER

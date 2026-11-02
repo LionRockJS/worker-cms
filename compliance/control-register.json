@@ -1,0 +1,1219 @@
+{
+  "description": "Closure register for the 59 ISO/IEC 27001:2022 Annex A controls this plan covers (W8): the original 27 plus 13 repo-led and 19 hybrid. The other 34 Annex A controls and clauses 4-10 need their own applicability work. Three separate states per control: source (what the repository shows), external (deployment and organisational evidence) and effective (reviewed by someone other than the implementer). Nothing is effective until an owner and reviewer are named and external evidence is verified. Titles are paraphrases; confirm against the licensed standard.",
+  "statuses": {
+    "source": {
+      "implemented": "Implemented in source",
+      "partial": "Implemented in source with a known gap",
+      "supporting": "Supporting feature only",
+      "gap": "Known gap, nothing implemented",
+      "not-evidenced": "No repository evidence reviewed",
+      "not-assessed": "Not yet assessed"
+    },
+    "external": {
+      "not-evidenced": "No deployment or organisational evidence recorded",
+      "partial": "Some external evidence recorded",
+      "verified": "External evidence verified and recorded"
+    }
+  },
+  "controls": [
+    {
+      "id": "A.5.3",
+      "title": "Separation of conflicting duties",
+      "group": "repo-led",
+      "workGroup": "G4",
+      "packages": [
+        "W3",
+        "W4",
+        "W9"
+      ],
+      "closure": "Approved conflicting-duties policy and effective independent approval of selected high-risk changes",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w4b-remaining-scope-2026-11-02.md"
+      ]
+    },
+    {
+      "id": "A.5.7",
+      "title": "Threat intelligence",
+      "group": "hybrid",
+      "workGroup": "G1",
+      "packages": [
+        "W8",
+        "W10",
+        "W14"
+      ],
+      "closure": "Relevant feeds mapped to deployed assets, named analyst triage and recorded action",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w8-inventory-and-register.md"
+      ]
+    },
+    {
+      "id": "A.5.9",
+      "title": "Asset inventory",
+      "group": "original",
+      "packages": [
+        "W0",
+        "W8"
+      ],
+      "closure": "Reconciled, owned inventory and a demonstrated update process",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w8-inventory-and-register.md"
+      ]
+    },
+    {
+      "id": "A.5.12",
+      "title": "Classification",
+      "group": "original",
+      "packages": [
+        "W1",
+        "W8",
+        "W12"
+      ],
+      "closure": "Approved classification inventory; fail-closed tests; controlled reclassification",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w8-inventory-and-register.md"
+      ]
+    },
+    {
+      "id": "A.5.13",
+      "title": "Classification labels",
+      "group": "repo-led",
+      "workGroup": "G3",
+      "packages": [
+        "W1",
+        "W12"
+      ],
+      "closure": "Approved label scheme with tested propagation and handling guidance",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md"
+      ]
+    },
+    {
+      "id": "A.5.14",
+      "title": "Transfers",
+      "group": "original",
+      "packages": [
+        "W3",
+        "W10",
+        "W12"
+      ],
+      "closure": "Approved destination/purpose policy and tested complete-snapshot restrictions",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md"
+      ]
+    },
+    {
+      "id": "A.5.15",
+      "title": "Access policy",
+      "group": "original",
+      "packages": [
+        "W9"
+      ],
+      "closure": "Approved access model, implemented restrictions and tested permitted/denied cases",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.16",
+      "title": "Identity lifecycle",
+      "group": "original",
+      "packages": [
+        "W9"
+      ],
+      "closure": "Unique identity assignment and provisioning/change/termination evidence",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.17",
+      "title": "Authentication credentials",
+      "group": "original",
+      "packages": [
+        "W9"
+      ],
+      "closure": "Credential handling/rotation/recovery rules and controlled rotation evidence",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.18",
+      "title": "Access rights",
+      "group": "original",
+      "packages": [
+        "W6",
+        "W9"
+      ],
+      "closure": "Access approvals/review and effective demotion/offboarding/revocation tests",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w6-session-inactivity.md"
+      ]
+    },
+    {
+      "id": "A.5.19",
+      "title": "Supplier security",
+      "group": "original",
+      "packages": [
+        "W8",
+        "W10"
+      ],
+      "closure": "Owned supplier inventory, risk assessments and scheduled/triggered reviews",
+      "source": "not-evidenced",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w8-inventory-and-register.md"
+      ]
+    },
+    {
+      "id": "A.5.20",
+      "title": "Supplier agreements",
+      "group": "original",
+      "packages": [
+        "W10"
+      ],
+      "closure": "Executed applicable security terms and recorded obligations/coverage",
+      "source": "not-evidenced",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.21",
+      "title": "ICT supply-chain security",
+      "group": "repo-led",
+      "workGroup": "G1",
+      "packages": [
+        "W10",
+        "W14"
+      ],
+      "closure": "SBOM/provenance, approved supplier/artifact intake and dependency/plugin change review",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.23",
+      "title": "Cloud security",
+      "group": "original",
+      "packages": [
+        "W10"
+      ],
+      "closure": "Approved service configuration, responsibility matrix and exercised exit procedure",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.24",
+      "title": "Incident preparedness",
+      "group": "original",
+      "packages": [
+        "W13"
+      ],
+      "closure": "Owned response plan, current contacts and completed exercise/corrective actions",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.25",
+      "title": "Security-event assessment",
+      "group": "hybrid",
+      "workGroup": "G7",
+      "packages": [
+        "W5",
+        "W13"
+      ],
+      "closure": "Human severity/incident determination and accountable decision records",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w5-archive-protection.md"
+      ]
+    },
+    {
+      "id": "A.5.26",
+      "title": "Incident response",
+      "group": "hybrid",
+      "workGroup": "G7",
+      "packages": [
+        "W4",
+        "W9",
+        "W13"
+      ],
+      "closure": "Authorized containment, recovery and documented response outcomes",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w4b-remaining-scope-2026-11-02.md"
+      ]
+    },
+    {
+      "id": "A.5.28",
+      "title": "Evidence collection",
+      "group": "original",
+      "packages": [
+        "W4",
+        "W5",
+        "W13"
+      ],
+      "closure": "Attributable records, protected integrity evidence and exercised preservation/retrieval",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w4b-remaining-scope-2026-11-02.md",
+        "docs/w5-archive-protection.md"
+      ]
+    },
+    {
+      "id": "A.5.29",
+      "title": "Security during disruption",
+      "group": "hybrid",
+      "workGroup": "G6",
+      "packages": [
+        "W11"
+      ],
+      "closure": "Approved secure emergency operation and tested disruption behavior",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.30",
+      "title": "ICT continuity",
+      "group": "original",
+      "packages": [
+        "W11"
+      ],
+      "closure": "Approved recovery objectives and successful continuity/recovery exercise",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.32",
+      "title": "Intellectual-property protection",
+      "group": "repo-led",
+      "workGroup": "G1",
+      "packages": [
+        "W10",
+        "W14"
+      ],
+      "closure": "Licence notices/policy checks plus legal confirmation of applicable software/content rights",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.5.33",
+      "title": "Record protection",
+      "group": "original",
+      "packages": [
+        "W5",
+        "W12"
+      ],
+      "closure": "Access/retention/hold policy; protected recoverable records; archive/recovery tests",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w5-archive-protection.md"
+      ]
+    },
+    {
+      "id": "A.5.34",
+      "title": "Privacy",
+      "group": "original",
+      "packages": [
+        "W1",
+        "W2",
+        "W3",
+        "W10",
+        "W12"
+      ],
+      "closure": "Applicable purposes/obligations, protected data paths and exercised privacy procedures",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md"
+      ]
+    },
+    {
+      "id": "A.5.36",
+      "title": "Policy and standards compliance",
+      "group": "repo-led",
+      "workGroup": "G2",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Automated policy checks plus human review and controlled, time-bounded exceptions",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.6.7",
+      "title": "Remote-work security",
+      "group": "hybrid",
+      "workGroup": "G4",
+      "packages": [
+        "W9",
+        "W10"
+      ],
+      "closure": "Verified remote gateway/device controls and approved remote-work procedures",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.6.8",
+      "title": "Reporting security events",
+      "group": "hybrid",
+      "workGroup": "G7",
+      "packages": [
+        "W13"
+      ],
+      "closure": "Accessible reporting channel, workforce instructions and demonstrated response",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.7.7",
+      "title": "Clear desks and screens",
+      "group": "hybrid",
+      "workGroup": "G3",
+      "packages": [
+        "W6",
+        "W9",
+        "W12"
+      ],
+      "closure": "App concealment/locking plus implemented clear-desk/workstation rules",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w6-session-inactivity.md"
+      ]
+    },
+    {
+      "id": "A.8.2",
+      "title": "Privileged rights",
+      "group": "original",
+      "packages": [
+        "W9"
+      ],
+      "closure": "Reviewed privileged membership, appropriate separation and tested privileged authentication",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.3",
+      "title": "Information access restrictions",
+      "group": "original",
+      "packages": [
+        "W1",
+        "W2",
+        "W9"
+      ],
+      "closure": "Private media and required record/container restrictions verified in deployment",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md"
+      ]
+    },
+    {
+      "id": "A.8.4",
+      "title": "Source-code access",
+      "group": "hybrid",
+      "workGroup": "G2",
+      "packages": [
+        "W9",
+        "W14"
+      ],
+      "closure": "Git-host membership/branch controls, bypass restrictions and review records",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.5",
+      "title": "Authentication",
+      "group": "original",
+      "packages": [
+        "W6",
+        "W9"
+      ],
+      "closure": "Session and identity assurance policy with idle, revocation and bypass tests",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w6-session-inactivity.md"
+      ]
+    },
+    {
+      "id": "A.8.6",
+      "title": "Capacity planning",
+      "group": "repo-led",
+      "workGroup": "G6",
+      "packages": [
+        "W0",
+        "W5",
+        "W11"
+      ],
+      "closure": "Capacity/load budgets, measured tests, metrics and assigned scaling/alert response",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w5-archive-protection.md"
+      ]
+    },
+    {
+      "id": "A.8.7",
+      "title": "Malware defenses",
+      "group": "hybrid",
+      "workGroup": "G8",
+      "packages": [
+        "W2",
+        "W4",
+        "W10"
+      ],
+      "closure": "Approved scanner, protected quarantine/delivery and external malware safeguards",
+      "source": "gap",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w4b-remaining-scope-2026-11-02.md"
+      ]
+    },
+    {
+      "id": "A.8.8",
+      "title": "Technical vulnerability management",
+      "group": "repo-led",
+      "workGroup": "G1",
+      "packages": [
+        "W10",
+        "W14"
+      ],
+      "closure": "Vulnerability inventory, scanning, triage, deadlines and verified remediation/exception handling",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.9",
+      "title": "Configuration control",
+      "group": "repo-led",
+      "workGroup": "G2",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Configuration baseline and observed deployed drift detection/remediation",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.10",
+      "title": "Deletion",
+      "group": "original",
+      "packages": [
+        "W12"
+      ],
+      "closure": "Demonstrated end-to-end deletion/expiry and hold handling, including copies",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.11",
+      "title": "Data masking",
+      "group": "repo-led",
+      "workGroup": "G3",
+      "packages": [
+        "W1",
+        "W4",
+        "W9",
+        "W12"
+      ],
+      "closure": "Approved masking policy and no original values delivered to unauthorized users",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w4b-remaining-scope-2026-11-02.md"
+      ]
+    },
+    {
+      "id": "A.8.12",
+      "title": "Leakage prevention",
+      "group": "original",
+      "packages": [
+        "W2",
+        "W3",
+        "W12"
+      ],
+      "closure": "Verified public/private boundary, approved transfers and negative disclosure tests",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md"
+      ]
+    },
+    {
+      "id": "A.8.13",
+      "title": "Backups",
+      "group": "original",
+      "packages": [
+        "W11"
+      ],
+      "closure": "Controlled recoverable copies and measured successful restore with integrity checks",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.14",
+      "title": "Processing redundancy",
+      "group": "hybrid",
+      "workGroup": "G6",
+      "packages": [
+        "W10",
+        "W11"
+      ],
+      "closure": "Actual provider/service redundancy architecture and demonstrated failover against objectives",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.15",
+      "title": "Logging",
+      "group": "original",
+      "packages": [
+        "W1",
+        "W4",
+        "W5"
+      ],
+      "closure": "Coverage matrix; durable attributable events; failure/retry/retention evidence",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/p0-manual-acceptance-2026-10-31.md",
+        "docs/w4b-remaining-scope-2026-11-02.md",
+        "docs/w5-archive-protection.md"
+      ]
+    },
+    {
+      "id": "A.8.16",
+      "title": "Monitoring",
+      "group": "original",
+      "packages": [
+        "W5",
+        "W13"
+      ],
+      "closure": "Effective signals, delivered alerts and retained review/escalation outcomes",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w5-archive-protection.md"
+      ]
+    },
+    {
+      "id": "A.8.17",
+      "title": "Clock synchronization",
+      "group": "hybrid",
+      "workGroup": "G6",
+      "packages": [
+        "W4",
+        "W11"
+      ],
+      "closure": "Provider clock assurance and verified UTC/ordering/skew behavior",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w4b-remaining-scope-2026-11-02.md"
+      ]
+    },
+    {
+      "id": "A.8.18",
+      "title": "Privileged utility programs",
+      "group": "hybrid",
+      "workGroup": "G2",
+      "packages": [
+        "W9",
+        "W14"
+      ],
+      "closure": "Restricted cloud/DB/CI utility access with explicit targets and audit evidence",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.19",
+      "title": "Operational software installation",
+      "group": "hybrid",
+      "workGroup": "G1",
+      "packages": [
+        "W9",
+        "W14"
+      ],
+      "closure": "Approved immutable artifacts and enforced production-install/deployment permissions",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.20",
+      "title": "Network protection",
+      "group": "hybrid",
+      "workGroup": "G4",
+      "packages": [
+        "W9",
+        "W10"
+      ],
+      "closure": "Application egress/boundary tests plus deployed gateway/network policy",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.21",
+      "title": "Network service security",
+      "group": "hybrid",
+      "workGroup": "G4",
+      "packages": [
+        "W10"
+      ],
+      "closure": "Secure network-service configuration, provider assurance and service review",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.22",
+      "title": "Network separation",
+      "group": "hybrid",
+      "workGroup": "G2",
+      "packages": [
+        "W9",
+        "W10",
+        "W14"
+      ],
+      "closure": "Verified service/account/network isolation, not just separate table or binding names",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.24",
+      "title": "Cryptography",
+      "group": "original",
+      "packages": [
+        "W9"
+      ],
+      "closure": "Approved use/key policy and verified transport/storage/key-lifecycle configuration",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.25",
+      "title": "Secure development",
+      "group": "original",
+      "packages": [
+        "W14"
+      ],
+      "closure": "Security requirements/threat review and operating development controls",
+      "source": "supporting",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.26",
+      "title": "Application security requirements",
+      "group": "repo-led",
+      "workGroup": "G5",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Approved application-security requirements linked to acceptance evidence",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.27",
+      "title": "Secure architecture and engineering",
+      "group": "repo-led",
+      "workGroup": "G5",
+      "packages": [
+        "W9",
+        "W14"
+      ],
+      "closure": "Reviewed trust/data-flow design and enforced engineering/least-privilege boundaries",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.28",
+      "title": "Secure coding",
+      "group": "repo-led",
+      "workGroup": "G5",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Adopted coding patterns, meaningful checks and review of representative changes",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.29",
+      "title": "Security testing",
+      "group": "original",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Release-specific negative/security test results, review and defect disposition",
+      "source": "implemented",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.30",
+      "title": "Outsourced development",
+      "group": "hybrid",
+      "workGroup": "G1",
+      "packages": [
+        "W10",
+        "W14"
+      ],
+      "closure": "Where applicable: vendor terms, restricted contributor access and approved deliverable review",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md"
+      ]
+    },
+    {
+      "id": "A.8.31",
+      "title": "Development/test/production separation",
+      "group": "hybrid",
+      "workGroup": "G2",
+      "packages": [
+        "W7",
+        "W9",
+        "W14"
+      ],
+      "closure": "Isolated resources/data/credentials plus enforced CI environment permissions",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.32",
+      "title": "Change management",
+      "group": "original",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Traceable approved change, protected delivery gates and exercised rollback",
+      "source": "partial",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.33",
+      "title": "Test-data protection",
+      "group": "repo-led",
+      "workGroup": "G5",
+      "packages": [
+        "W7",
+        "W12",
+        "W14"
+      ],
+      "closure": "Synthetic/minimized fixtures and approved, protected test-information lifecycle",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    },
+    {
+      "id": "A.8.34",
+      "title": "Protection during audit testing",
+      "group": "hybrid",
+      "workGroup": "G5",
+      "packages": [
+        "W7",
+        "W14"
+      ],
+      "closure": "Explicit audit-test authorization, protected targets/data, monitored execution and cleanup",
+      "source": "not-assessed",
+      "external": "not-evidenced",
+      "effective": false,
+      "owner": null,
+      "reviewer": null,
+      "nextReview": null,
+      "evidence": [
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w7-release-acceptance.md"
+      ]
+    }
+  ]
+}
