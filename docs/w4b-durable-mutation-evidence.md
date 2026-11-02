@@ -1,6 +1,6 @@
 # W4b durable mutation evidence
 
-**Status: classification, role/user access-management, OAuth registration, existing-account OAuth mutations, self-service profile/disconnection and supported session lifecycle and host authentication-denial evidence plus transaction-bound delegated access authority and named user/role policy refusals and transaction-bound classification generations implemented locally; W4b remains open and regulated writes remain blocked.** This is repository evidence, not a deployment acceptance or a standards-compliance finding.
+**Status: local identity/session/access-policy foundations and the draft-editor content/history slice are implemented. W4b remains open with [six remaining work packages](w4b-remaining-scope-2026-11-02.md); regulated writes remain blocked.** This is repository evidence, not deployment acceptance or a standards-compliance finding.
 
 The existing audit envelope supplies the actor, request and event metadata. The new mutation evidence builder creates an audit write and a guard for the exact event. The covered D1 mutations and those statements run in one batch, with additional postconditions for the business state. A failed statement or invariant aborts the batch; a connection failure after a possible commit can leave an ambiguous outcome, so an operator must reconcile current state and the corresponding event before retrying.
 
@@ -78,13 +78,9 @@ See the [authentication-denial record](authentication-denial-evidence.md) for ex
 
 ## Still required before regulated write release
 
-- Inventory and instrument the remaining regulated content and access mutations. Route-specific/object/delegated-role/plugin/service denial coverage, remaining regulated content writes, migrations/direct SQL and other audit callers remain outside the covered slices. Named host denials and supported session lifecycle APIs are covered locally; this is not every authentication/authorization boundary or complete forensic capture under simultaneous store failure. Account creation evidence does not prove a login/session event was durably recorded.
-- Add durable operation identifiers across retries, idempotent recovery and handling for post-commit uncertainty. Complete policy-version and remaining concurrency/authorization checks at execution. Existing-account OAuth now guards account/identity state and linking session authority inside its transaction; classification and some other slices still resolve policy/authorization before their transaction. The deletion operation ID links its events, but a new HTTP retry receives a new ID.
-- Implement durable outbox, bounded retry/visibility and reconciliation for external, R2, queued and plugin side effects. A D1 batch is not a cross-service transaction.
-- Complete classification/declassification governance and W3 host-owned publication schema/destination approvals and policy evidence. Revalidate authority and policy for deferred work.
-- Complete W5 archive and retention protection and deployment-specific acceptance. Keep the regulated-write and PHI-publication gates in place until their release prerequisites are met.
+The current [scope register](w4b-remaining-scope-2026-11-02.md) defines six open packages: remaining core content writers; other host configuration/access mutations; contributor/service/background writers; external/multi-store recovery; shared operation identities and uncertain-result handling; and coverage/deployment acceptance. Its provisional remaining estimate is 30–53 engineering person-days plus external acceptance lead time. Earlier chronological limitations below/above are superseded only for operations explicitly covered by later records.
 
-Earlier slices required no schema migration. This continuation adds the core outbox table/index and an additive upgrade for existing installations; no regulated-write bypass is introduced.
+W3 publication schema/destination approvals, governed declassification and W5 archive/retention protection remain release dependencies. Keep regulated-write and PHI-publication containment until all release prerequisites are accepted. Existing installations still need the earlier reviewed outbox and classification-version upgrades; the content slice adds no new schema.
 
 ## Delegated access authority and policy-denial continuation — 2 November 2026
 
@@ -105,3 +101,11 @@ Classification writes check the starting generation plus current management auth
 The [policy-version record](classification-policy-version.md) describes exact scope, rollout and limits. Existing installations require the additive core upgrade before deploying this code. Historical sections above describe earlier increments; their pre-transaction-classification limitation is superseded for the operations listed in the new record. Other mutation/approval policies and external recovery remain open. No production migration, deployment, push or compliance sign-off occurred.
 
 Validation: **39 new regressions** pass. The final serial suite passed **1,691 tests across 75 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. The synthetic existing-schema upgrade and idempotent reapplication also passed. These are local results, not deployed acceptance.
+
+## Durable draft-editor content continuation — 2 November 2026
+
+Following `38aa132`, draft creation/save, version restoration and single/all history removal now have exact classified evidence in the same private-D1 transaction as their page/history/tag changes. Current content authority/session, policy generation, target snapshot, memberships, taxonomy ownership and UUID sensitivity are checked; final guards reject ignored/rewritten or partial state. Events use stable page UUIDs and exclude content/free-text metadata. Post-commit create/update announcements suppress duplicate best-effort audit events.
+
+The [content record](content-mutation-evidence.md) describes exact scope, uncertainty, manifests and separate external/credit side effects. The [remaining-scope register](w4b-remaining-scope-2026-11-02.md) groups remaining work into six packages, estimated at 30–53 engineering person-days plus external acceptance lead time. It supersedes using the original plan's 5–8 day estimate for the broader remaining inventory. Other writers, retry identities and multi-store recovery remain open; regulated containment is retained. No new schema, production migration, deployment or push occurred.
+
+Validation: **69 new content regressions** pass. The final serial suite passed **1,760 tests across 76 files**, with no cancellation, uncaught-exception or unhandled-error diagnostic in its log. Build, TypeScript, feature-profile, import-boundary, generated consistency and whitespace checks passed. These are local results, not deployed acceptance.

@@ -16,10 +16,11 @@ export type { PageEvent, PageEventPage };
 /**
  * Fire-and-forget announcement. Safe to call from any admin handler: it never
  * throws and never blocks the response. Listeners are optional — with none
- * registered this still writes the audit row.
+ * registered this writes the audit row unless the caller already committed
+ * durableEvidence with its mutation.
  */
-export function announcePageEvent(c: AppContext, event: PageEvent, page: PageEventPage): void {
-  logAudit(c, `page.${event}`, 'page', page.id, {
+export function announcePageEvent(c: AppContext, event: PageEvent, page: PageEventPage, options: { durableEvidence?: boolean } = {}): void {
+  if (!options.durableEvidence) logAudit(c, `page.${event}`, 'page', page.id, {
     name: page.name,
     slug: page.slug,
     page_type: page.page_type,

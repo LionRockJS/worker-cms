@@ -1,0 +1,35 @@
+# W4b remaining scope and estimate — 2 November 2026
+
+This is a source-based planning estimate after the durable draft-editor content increment following `38aa132`. **Six work packages remain open.** These are delivery groups, not six individual bugs or six commits. There is no defensible percentage-complete calculation yet: the remaining writers have substantially different complexity, and deployed/plugin boundaries still require reconciliation.
+
+## Delivered foundations
+
+Local implementation now covers classification changes, role/user access management, OAuth registration/link/profile changes, self-service profile/disconnection, supported session lifecycle, named host authentication/user-role policy refusals, transaction-bound classification generations and the draft-editor operations described in the [content record](content-mutation-evidence.md). Shared exact audit receipts, the bounded revocation/denial outbox and regulated containment already exist and should be reused.
+
+The new editor slice covers five operation families: page creation, page save (including structured edits), restoration from a history snapshot, single history removal and complete history removal. Page content, its new version, tags and success evidence share one private-D1 transaction. Weight controls, bulk workflows, lifecycle transfers and other callers are explicitly outside that slice.
+
+## Remaining packages
+
+| ID | Work package | Concrete remaining scope and source anchors | Engineering estimate |
+|---|---|---|---|
+| R1 | Finish core content writers | Single/batch weights and reorder in `src/routes/admin/pages/crud.ts`; bulk text/tag edits and lifecycle orchestration in `src/core/pages/bulk-action.ts`; tags/taxonomies in `src/routes/admin/tags.ts`; draft deletion/trash restore/purge in `src/core/db/admin-queries.ts` and `src/features/trash/`. Add bounded complete manifests, atomic local evidence, execution-time authority/policy checks and partial-batch outcomes. | 7–12 person-days |
+| R2 | Other host configuration and access changes | Settings, runtime page/block types and blueprint extensions, locales/messages, plugin registration/configuration/secrets/identity/assets/prefix/page-type approvals and credit/financial-ledger administration. Main anchors: `src/routes/admin/settings.ts`, `src/features/runtime-content-types/routes.ts`, `src/features/i18n/routes.ts`, `src/features/plugins/routes/manage.ts`, `src/features/credits/routes/panels.ts`. Review route-specific denials and free-text/secret exclusion while converting actual mutation evidence. | 5–9 person-days |
+| R3 | Contributor, service and background writers | Plugin API create/update/duplicate/batch/delete in `src/features/plugins/api/pages.ts` and related API modules; ingestion/import/copy paths, jobs and queue execution. Reuse neutral core transaction helpers with verified service/delegation attribution, scope/approval/classification revalidation at execution and durable batch outcomes. Do not manufacture an HTTP user to call the editor service. | 7–12 person-days |
+| R4 | External and multi-store effects | Publication/withdrawal across D1/R2/plugin targets, media upload/delete, hooks and external plugin operations: durable intent, bounded retries, exact delivery receipts, partial-result reconciliation and recovery tools. Existing publication/read/withdrawal and hook safeguards are foundations, not evidence that this entire package is absent. Extend/reconcile those paths rather than rebuilding them. Business mutations and external delivery must have distinct outcomes. | 5–9 person-days |
+| R5 | Shared operation identity and uncertain-result recovery | Durable request/operation identities across retries, duplicate/conflict detection, receipt lookup, controlled retry/reconciliation and cross-step correlation. Extend the existing same-event outbox idempotency; it currently does not make a new HTTP request or arbitrary business mutation idempotent. Coordinate optional create-credit reservations and compensation with content outcomes. | 3–6 person-days |
+| R6 | Coverage reconciliation and release evidence | Inventory every in-scope writer and actor type, verify optional-feature/direct-store boundaries, add fault/concurrency/recovery acceptance, migration/rollback drills, staging capacity and receipt/retention/backlog/alert checks. Record deployment evidence and obtain responsible-owner acceptance. Direct SQL/import/migration operators need an explicit evidence contract. | 3–5 person-days of engineering, plus external acceptance lead time |
+
+**Total remaining engineering planning range: 30–53 person-days**, approximately **6–11 working weeks for one engineer** at five days/week, before external waiting time. This includes implementation, focused regressions, integration testing and technical documentation. It excludes production data remediation, third-party plugin rewrites outside this repository, organizational compliance work and certification. This range estimates human engineering effort, not how many chat iterations an agent will need.
+
+Confidence is moderate to low until R6's writer inventory is complete. Optional-feature selection, external plugin contracts, operational limits and acceptable recovery semantics can change the range. R3 estimates local D1 writer integration; R4 estimates external effect orchestration; R5 estimates shared retry/recovery infrastructure once. Keep those boundaries when refining to avoid counting the same infrastructure three times. The original plan's 5–8 day W4b estimate predates this broader writer/recovery inventory and should not be used as the remaining estimate.
+
+## Suggested delivery order
+
+1. R1: weights/reorder and local bulk edits, then tags/taxonomies and trash. These reuse the transaction/evidence machinery most directly.
+2. Inventory R2/R3 in parallel with that engineering planning, then convert the verified local writers. Complete existing object/service denial gaps alongside their owning mutation paths.
+3. Define R5's operation contract before adding R4's cross-store recovery, then integrate both with deferred R3 jobs. Preserve existing regulated gates throughout.
+4. Finish R6 fault/recovery/deployment acceptance against an explicit writer register and deployed configuration.
+
+R6's inventory should begin early; its final acceptance remains last. A package can require several reviewable commits and migrations.
+
+W3 persistent publication schema/destination approvals, governed declassification and W5 archive/retention protection are **release dependencies**, not silently included as completed W4b tasks. W0/W1/W2/W3/W4a operational acceptance also remains tracked separately. Closing these six W4b packages alone does not authorize regulated writes or establish ISO 27001/HIPAA compliance.

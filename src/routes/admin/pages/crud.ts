@@ -1,3 +1,4 @@
+import { saveDraftContent, removeDraftHistory, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // Page create / read / edit / update, plus the weight controls.
 //
@@ -18,19 +19,18 @@ import type { Env, Variables, Page, PageVersion } from '../../../types';
 import { appendQuery, dashboardPageNumber, dashboardPageSize, editorsFromForm, languageFromRequest, nullableStr, num, safeAdminReturnPath, str, userIdFromContext } from '../../../core/http/forms';
 import { validatePageBasics } from '../../../core/db/validation';
 import { applyStructuredAction, isStructuredEditorAction, lectForPage, lectFromForm, planPageReorder, withDraftMetadata, type ReorderSequenceRow } from '../../../core/db/page-logic';
-import { editorTaxonomy, ensureUniqueDraftSlug, fetchEditorUsers, fetchUserName, parentPageOption, resolveParentPageId, savePageVersion } from '../../../core/db/admin-queries';
+import { editorTaxonomy, ensureUniqueDraftSlug, fetchEditorUsers, fetchUserName, parentPageOption, resolveParentPageId } from '../../../core/db/admin-queries';
 import { publishPageToTargets } from '../../../core/publish';
 import { renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { requirePermission } from '../../../core/auth/guards';
 import { userCan } from '../../../core/auth/permissions';
-import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
+import { notifyPageSaved } from '../../../core/db/page-store';
 import { contextActor, logAudit } from '../../../core/db/audit';
 import { recordPageReads } from '../../../core/http/access-log';
 import { publishFlash } from './lifecycle';
 import {
   defaultTimezone,
-  deletePageVersion,
   editorPageData,
   maybePluginEditView,
   maybePluginReadView,
@@ -195,44 +195,17 @@ pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
   );
 
   try {
-  // Insert page
   const uniqueSlug = await ensureUniqueDraftSlug(c.env.DB, slug);
-  const pageResult = await c.env.DB.prepare(
-    `INSERT INTO pages (name, slug, weight, start, end, timezone, page_type, lect, page_id, creator, editors)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      name,
-      uniqueSlug,
-      weightVal,
-      startVal,
-      endVal,
-      timezoneVal,
-      pageTypeVal,
-      lectVal,
-      await resolveParentPageId(c.env.DB, pageIdVal),
-      creator || null,
-      editorsVal,
-    )
-    .run();
+  const saved = await saveDraftContent(c, {name,slug:uniqueSlug,weight:weightVal,start:startVal,end:endVal,timezone:timezoneVal,
+    page_type:pageTypeVal,lect:lectVal,page_id:await resolveParentPageId(c.env.DB,pageIdVal),creator:creator || null,editors:editorsVal},form.getAll('tag_ids'));
+  const pageId = saved.id;
 
-  // The schema uses a custom DEFAULT id expression (not INTEGER PRIMARY KEY),
-  // so last_row_id is the internal rowid — we must SELECT the actual id back.
-  const pageRow = await c.env.DB.prepare('SELECT id FROM pages WHERE rowid = ?')
-    .bind(pageResult.meta.last_row_id)
-    .first<{ id: number }>();
-  const pageId = pageRow!.id;
-
-  // Insert page version
-  await savePageVersion(c.env.DB, pageId, lectVal, 'create');
-  await setDraftPageTags(c.env.DB, pageId, form.getAll('tag_ids'), false);
-
-  announcePageEvent(c, 'create', { id: pageId, page_type: pageTypeVal, name, slug: uniqueSlug });
+  announcePageEvent(c, 'create', { id: pageId, uuid:saved.uuid, page_type: pageTypeVal, name, slug: uniqueSlug }, {durableEvidence:true});
 
   return c.redirect(appendQuery(backHref, 'flash=Page+created+successfully'));
   } catch (error) {
     if (createReservation?.ok) await createReservation.refund();
-    throw error;
+    return contentMutationUnavailable(c,error);
   }
 });
 
@@ -526,16 +499,15 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   if (action.startsWith('delete-version:')) {
     const versionId = parseInt(action.split(':')[1], 10);
     if (!Number.isFinite(versionId)) return c.notFound();
-    const deleted = await deletePageVersion(c.env.DB, page, versionId);
+    let deleted: boolean;
+    try { deleted = await removeDraftHistory(c,page,versionId); } catch (error) { return contentMutationUnavailable(c,error); }
     if (!deleted) return c.notFound();
     return c.redirect(`/admin/pages/${pageId}/edit?flash=Version+removed`);
   }
 
   if (action === 'delete-versions') {
     // History only — the page's own lect is what gets edited and published.
-    await c.env.DB.prepare('DELETE FROM page_versions WHERE page_id = ?')
-      .bind(pageId)
-      .run();
+    try { await removeDraftHistory(c,page); } catch (error) { return contentMutationUnavailable(c,error); }
     return c.redirect(`/admin/pages/${pageId}/edit?flash=Versions+cleaned`);
   }
 
@@ -553,10 +525,9 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
     // and is appended to history. The pre-revert content stays in history as
     // the snapshot written by the save before this one, so the revert itself
     // is reversible and visible in the version list.
-    await c.env.DB.prepare('UPDATE pages SET lect = ? WHERE id = ?')
-      .bind(revertedLect, pageId)
-      .run();
-    await savePageVersion(c.env.DB, pageId, revertedLect, 'restore');
+    try {
+      await saveDraftContent(c,{...page,lect:revertedLect},undefined,page,version);
+    } catch (error) { return contentMutationUnavailable(c,error); }
     return c.redirect(`/admin/pages/${pageId}/edit?flash=Version+restored`);
   }
 
@@ -617,38 +588,12 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   );
   const lectVal = stringifyLect(withDraftMetadata(lect, userIdFromContext(c)));
 
-  // Update page metadata
   const uniqueSlug = await ensureUniqueDraftSlug(c.env.DB, slug, pageId);
-  await c.env.DB.prepare(
-    `UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, page_type=?, lect=?, page_id=?, editors=? WHERE id=?`,
-  )
-    .bind(
-      name,
-      uniqueSlug,
-      weightVal,
-      startVal,
-      endVal,
-      timezoneVal,
-      pageTypeVal,
-      lectVal,
-      await resolveParentPageId(c.env.DB, pageIdVal),
-      editorsVal,
-      pageId,
-    )
-    .run();
-
-  await savePageVersion(
-    c.env.DB,
-    pageId,
-    lectVal,
-    action || 'update',
-  );
-
-  // Commit the live collaboration overlay: clears uncommitted ops so save-then-leave
-  // doesn't revert, and pushes the saved values as everyone's new baseline.
+  try {
+    await saveDraftContent(c,{name,slug:uniqueSlug,weight:weightVal,start:startVal,end:endVal,timezone:timezoneVal,
+      page_type:pageTypeVal,lect:lectVal,page_id:await resolveParentPageId(c.env.DB,pageIdVal),creator:page.creator,editors:editorsVal},form.getAll('tag_ids'),page,undefined,action || 'update');
+  } catch (error) { return contentMutationUnavailable(c,error); }
   await notifyPageSaved(c.env, pageId);
-
-  await setDraftPageTags(c.env.DB, pageId, form.getAll('tag_ids'), true);
 
   // Preserve where the editor returns to (e.g. a plugin dashboard) across saves,
   // so the back arrow / Cancel button still point there after a save reload.
@@ -679,7 +624,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
     return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}${returnToParam}${nativeParam}`);
   }
 
-  if (!autoRepublish) announcePageEvent(c, 'update', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug });
+  if (!autoRepublish) announcePageEvent(c, 'update', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug }, {durableEvidence:true});
 
   const savedFlash = autoRepublish && !republishRefused
     ? 'Page+updated+and+published+successfully'
