@@ -169,8 +169,9 @@ DEFAULT_TIMEZONE = "+0800"
 # wrangler secret put GOOGLE_CLIENT_SECRET
 # wrangler secret put PLUGIN_SECRET   # optional outbound-only fallback for legacy plugin rows
 
-# How long a session survives with no refresh, in seconds. Between 900 and
-# 604800; defaults to 28800 (8 hours). An abandoned session is refused and its
+# How long a session survives with no activity from its user, in seconds.
+# Between 900 and 604800; defaults to 28800 (8 hours). An open but untouched
+# admin tab does not count as activity. An abandoned session is refused and its
 # row removed after this long. Set it to your own inactivity policy — a
 # deployment holding regulated data must set it explicitly (commonly 1800).
 # SESSION_IDLE_TTL = "1800"

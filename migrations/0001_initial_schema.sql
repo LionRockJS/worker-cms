@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS sessions(
     -- Previous hash is retained briefly to tolerate concurrent token rotation.
     previous_refresh_token_hash TEXT,
     rotated_at DATETIME,
+    -- Last refresh made on behalf of a person. Background keepalives rotate
+    -- the token without moving it, so an abandoned tab still goes idle.
+    last_activity_at DATETIME,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 

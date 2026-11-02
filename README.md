@@ -766,14 +766,16 @@ volumes.
   the CMS is not intended to allow open viewer registration.
 - Access JWTs last 15 minutes and reference a revocable database session. Each
   authenticated request checks the session and current user role. A session is
-  terminated after `SESSION_IDLE_TTL` without a refresh (8 hours by default,
-  minimum 15 minutes), with an absolute 30-day lifetime and a seven-day cap on
-  the refresh token itself. Inactivity is observed when the access token is
-  refreshed, so a session can be refused up to 15 minutes before its nominal
-  deadline, never after it. A regulated deployment must set the value
-  explicitly.
-  Existing sockets recheck authorization before messages and deliveries, and
-  sweep idle connections every 60 seconds.
+  terminated after `SESSION_IDLE_TTL` without activity from its user (8 hours
+  by default, minimum 15 minutes), with an absolute 30-day lifetime and a
+  seven-day cap on the refresh token itself. The admin keepalive and presence
+  polling refresh in the background and do not count: an open, untouched tab
+  goes idle. Activity is observed when the access token is refreshed, so a
+  session can be refused before its nominal deadline, never after it. A
+  regulated deployment must set the value explicitly. See
+  [docs/w6-session-inactivity.md](docs/w6-session-inactivity.md).
+  Existing sockets recheck authorization, including the idle deadline, before
+  messages and deliveries, and sweep connections every 60 seconds.
 - Personal data (names, email, phone) is masked **server-side** on the users
   and contact-page lists. Only `pii:reveal` gets the cleartext in the response;
   without it the values never leave the Worker, and the browser-side reveal

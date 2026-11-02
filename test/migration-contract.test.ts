@@ -99,7 +99,7 @@ describe('flattened migration contract', () => {
   it('preserves security-critical columns and seed rows', async () => {
     const { results: sessionColumns } = await env.DB.prepare('PRAGMA table_info(sessions)').all<{ name: string }>();
     expect(sessionColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      'refresh_token_hash', 'previous_refresh_token_hash', 'rotated_at',
+      'refresh_token_hash', 'previous_refresh_token_hash', 'rotated_at', 'last_activity_at',
     ]));
     const { results: pluginColumns } = await env.DB.prepare('PRAGMA table_info(plugins)').all<{ name: string }>();
     expect(pluginColumns.map((column) => column.name)).toEqual(expect.arrayContaining(['secret', 'enabled']));

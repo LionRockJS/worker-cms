@@ -1,6 +1,6 @@
 import { resolveDataClasses } from '../db/data-classes';
 import { regulatedPages } from '../publish/regulated';
-import { validateAccessSession } from '../auth/sessions';
+import { sessionIdleTtl, validateAccessSession } from '../auth/sessions';
 import { effectivePermissions, resolveRolePermissions } from '../auth/roles';
 // Durable Object: one instance per page, handles hybrid WebSocket live sync.
 //
@@ -402,7 +402,7 @@ export class PageSyncDO implements DurableObject {
     const user = await validateAccessSession(this.env.DB, {
       sub: attachment.userId, sid: attachment.sid, exp: attachment.exp,
       type: 'access', iat: 0, name: '', email: '', role: '',
-    });
+    }, sessionIdleTtl(this.env));
     return !!user && effectivePermissions(await resolveRolePermissions(this.env), user.role).has('content:write');
   }
 

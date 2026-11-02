@@ -26,6 +26,12 @@ export const SESSION_IDLE_TTL_DEFAULT = 8 * 3600; // 8 hours
  * actively in use. The consequence at the floor is conservative rather than
  * permissive: a session can be refused up to ACCESS_TOKEN_TTL before its
  * nominal deadline, never after it.
+ *
+ * Only a refresh made on behalf of a person moves `last_activity_at`, and only
+ * to when that person last acted (see activityAge). A refresh triggered by a
+ * request carrying BACKGROUND_HEADER (the admin keepalive with no interaction
+ * since its last report, presence polling) rotates the token but leaves the
+ * idle deadline where it was.
  */
 export function parseSessionIdleTtl(value: string | undefined): number | null {
   if (!/^\d{1,8}$/.test(value ?? '')) return null;
@@ -41,6 +47,29 @@ export function sessionIdleTtl(env: Pick<Env, 'SESSION_IDLE_TTL'>): number {
 
 /** SQLite modifier for the idle cutoff. The value is digits-only by construction. */
 const idleCutoff = (idleTtl: number) => `-${idleTtl} seconds`;
+
+/** Sent by scripted requests nobody asked for, so they keep a page working
+ *  without counting as activity. Honest-client policy, not a security
+ *  boundary: anyone holding the cookie can make a request that counts. */
+export const BACKGROUND_HEADER = 'X-CMS-Background';
+
+/** Seconds since the person last interacted with the page, sent by the admin
+ *  keepalive. A tick is not the moment of activity; recording the tick time
+ *  would let a session outlive its deadline by up to one keepalive interval. */
+export const IDLE_FOR_HEADER = 'X-CMS-Idle-For';
+
+/**
+ * How long ago the activity behind this request happened, in seconds, or null
+ * when the request carries none. A request with neither header is a person
+ * acting now. An internal refresh, a background request or a malformed age is
+ * no activity, so a bad value can only end a session sooner.
+ */
+export function activityAge(c?: AppContext): number | null {
+  if (!c || c.req.header(BACKGROUND_HEADER) === '1') return null;
+  const idleFor = c.req.header(IDLE_FOR_HEADER);
+  if (idleFor === undefined) return 0;
+  return /^\d{1,7}$/.test(idleFor) ? Number(idleFor) : null;
+}
 
 export interface AuthDbUser {
   id: number;
@@ -84,7 +113,7 @@ export async function issueAuthTokens(user: AuthDbUser, jwtSecret: string, sessi
 function refreshCondition(session: RefreshSession, hash: string, idleTtl: number, tokenExpires: number, previousOnly = false) {
   return { sql: `id = ? AND user_id = ? AND ? > CAST(strftime('%s', 'now') AS INTEGER)
     AND expires_at > CURRENT_TIMESTAMP AND created_at > datetime('now', '-30 days')
-    AND COALESCE(rotated_at, created_at) > datetime('now', ?)
+    AND COALESCE(last_activity_at, created_at) > datetime('now', ?)
     AND (${previousOnly ? '0' : 'refresh_token_hash = ?'} OR (previous_refresh_token_hash = ?
       AND rotated_at >= datetime('now', '-${REFRESH_ROTATION_GRACE_SECONDS} seconds')))`,
   bindings: [session.id, session.user_id, tokenExpires, idleCutoff(idleTtl), ...(previousOnly ? [] : [hash]), hash] };
@@ -103,10 +132,13 @@ export async function rotateAuthSession(env: Env, refreshToken: string,
     if (!safeRoleAuditValue(user.role)) throw new Error('Session role evidence unavailable');
     const policy = await sessionPolicy(env);
     const source = c ? (c.req.path === '/auth/refresh' ? 'explicit-refresh' : 'silent-refresh') : 'internal-refresh';
+    const age = activityAge(c);
+    const activity = age === null ? 'background' : 'user';
+    const activityAt = age === null ? null : `-${age} seconds`;
     const graceAccess = async () => {
       const access = await issueAccessToken(user, env.JWT_SECRET, String(session.id));
       const condition = refreshCondition(session, hash, idleTtl, payload.exp, true);
-      const envelope = sessionAuditEnvelope(c, 'auth.session.grace', user.id, user.role, session.id, policy.dataClass, { source });
+      const envelope = sessionAuditEnvelope(c, 'auth.session.grace', user.id, user.role, session.id, policy.dataClass, { source, activity });
       const evidence = sessionAuditEvidence(env, envelope, { policy: policy.policy });
       const guard = () => abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE ${condition.sql})`, condition.bindings);
       await env.DB.batch([sessionUserGuard(env, user), guard(), evidence.write, evidence.guard, sessionUserGuard(env, user), guard()]);
@@ -117,15 +149,20 @@ export async function rotateAuthSession(env: Env, refreshToken: string,
     const newHash = await hashToken(issued.refreshJti);
     const condition = refreshCondition(session, hash, idleTtl, payload.exp);
     const snapshot = sessionSnapshotCondition(session);
-    const envelope = sessionAuditEnvelope(c, 'auth.session.rotate', user.id, user.role, session.id, policy.dataClass, { source });
+    const envelope = sessionAuditEnvelope(c, 'auth.session.rotate', user.id, user.role, session.id, policy.dataClass, { source, activity });
     const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true, policy: policy.policy });
     try {
       await env.DB.batch([
         sessionUserGuard(env, user),
+        // The idle predicate in `condition` is evaluated in this same statement,
+        // so concurrent activity cannot revive a session that has already lapsed.
+        // MAX keeps an older report from moving the deadline backwards.
         env.DB.prepare(`UPDATE sessions SET previous_refresh_token_hash = refresh_token_hash, refresh_token_hash = ?,
-          rotated_at = CURRENT_TIMESTAMP, expires_at = MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days'))
+          rotated_at = CURRENT_TIMESTAMP, expires_at = MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days')),
+          last_activity_at = CASE WHEN ? IS NULL THEN last_activity_at
+            ELSE MAX(COALESCE(last_activity_at, created_at), datetime('now', ?)) END
           WHERE ${snapshot.sql} AND (${condition.sql}) AND refresh_token_hash = ?`)
-          .bind(newHash, ...snapshot.bindings, ...condition.bindings, hash),
+          .bind(newHash, activityAt, activityAt, ...snapshot.bindings, ...condition.bindings, hash),
         evidence.write, evidence.guard, sessionUserGuard(env, user),
         abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE id = ? AND user_id = ? AND refresh_token_hash = ?
           AND previous_refresh_token_hash = ? AND created_at IS ? AND rotated_at IS NOT NULL AND rotated_at <= CURRENT_TIMESTAMP
@@ -200,9 +237,9 @@ export async function capUserSessions(env: Env, userId: number): Promise<number>
 export async function purgeExpiredSessions(env: Env, idleTtl: number = sessionIdleTtl(env)): Promise<number> {
   return sessionOperation(env, async () => {
     const predicate = `expires_at <= CURRENT_TIMESTAMP OR created_at <= datetime('now', '-30 days')
-      OR COALESCE(rotated_at, created_at) <= datetime('now', ?)`;
+      OR COALESCE(last_activity_at, created_at) <= datetime('now', ?)`;
     const rows = await env.DB.prepare(`SELECT ${SESSION_SNAPSHOT_COLUMNS} FROM sessions s LEFT JOIN users u ON u.id = s.user_id
-      WHERE ${predicate.replace(/\b(expires_at|created_at|rotated_at)\b/g, 's.$1')} ORDER BY s.id LIMIT 50`).bind(idleCutoff(idleTtl)).all<SessionSnapshot>();
+      WHERE ${predicate.replace(/\b(expires_at|created_at|last_activity_at)\b/g, 's.$1')} ORDER BY s.id LIMIT 50`).bind(idleCutoff(idleTtl)).all<SessionSnapshot>();
     return removeSessionSnapshots(env, rows.results, 'expired', predicate, [idleCutoff(idleTtl)]);
   });
 }
@@ -255,7 +292,7 @@ async function findRefreshSession(
             CASE WHEN refresh_token_hash = ?1 THEN 0 ELSE 1 END AS is_previous
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
-        AND COALESCE(s.rotated_at, s.created_at) > datetime('now', ?2)
+        AND COALESCE(s.last_activity_at, s.created_at) > datetime('now', ?2)
         AND (
           refresh_token_hash = ?1
           OR (
@@ -311,13 +348,16 @@ export async function createAuthSession(env: Env, user: AuthDbUser, c?: AppConte
   });
 }
 
-/** Authorization always uses the current account, never a cached JWT role. */
-export async function validateAccessSession(db: D1DatabaseClient, payload: JWTPayload): Promise<JWTPayload | null> {
+/** Authorization always uses the current account, never a cached JWT role.
+ *  The idle deadline applies here too: a keepalive keeps reissuing access
+ *  tokens, so without it an idle session would outlive its window. */
+export async function validateAccessSession(db: D1DatabaseClient, payload: JWTPayload, idleTtl: number): Promise<JWTPayload | null> {
   if (payload.type !== 'access' || !payload.sid || !/^\d+$/.test(payload.sid)
       || payload.exp <= Math.floor(Date.now() / 1000)) return null;
   const user = await db.prepare(
     `SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.id = ? AND s.user_id = ? AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')`,
-  ).bind(payload.sid, payload.sub).first<AuthDbUser>();
+     WHERE s.id = ? AND s.user_id = ? AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
+       AND COALESCE(s.last_activity_at, s.created_at) > datetime('now', ?)`,
+  ).bind(payload.sid, payload.sub, idleCutoff(idleTtl)).first<AuthDbUser>();
   return user ? { ...payload, email: user.email, name: user.name, role: user.role } : null;
 }

@@ -112,18 +112,37 @@
       if (window.__cmsSessionKeepaliveBound) return;
       window.__cmsSessionKeepaliveBound = true;
       var INTERVAL = 10 * 60 * 1000;
+      // Interaction after this long without a report is sent at once, so the
+      // server's view of activity lags the person by at most this much.
+      var REPORT_AFTER = 5 * 60 * 1000;
+      var RETRY_AFTER = 30 * 1000;
       var inFlight = false;
+      // Loading the page was itself a request the server counted.
+      var lastInteraction = Date.now();
+      var lastReported = lastInteraction;
+      var lastAttempt = 0;
 
+      // An open tab is not activity. The server records when the person last
+      // interacted, never when this timer fired, so an untouched tab goes idle.
       async function refresh() {
         if (inFlight) return;
         inFlight = true;
+        lastAttempt = Date.now();
+        var interaction = lastInteraction;
+        var headers = { Accept: 'application/json' };
+        if (interaction > lastReported) {
+          headers['X-CMS-Idle-For'] = String(Math.max(0, Math.floor((Date.now() - interaction) / 1000)));
+        } else {
+          headers['X-CMS-Background'] = '1';
+        }
         try {
           var res = await fetch('/auth/refresh', {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { Accept: 'application/json' }
+            headers: headers
           });
           if (res.status === 401) window.location.href = '/auth/login';
+          else if (res.ok) lastReported = Math.max(lastReported, interaction);
         } catch (error) {
           /* retry on the next tick */
         } finally {
@@ -131,6 +150,14 @@
         }
       }
 
+      function noteInteraction() {
+        lastInteraction = Date.now();
+        if (lastInteraction - lastReported > REPORT_AFTER && lastInteraction - lastAttempt > RETRY_AFTER) refresh();
+      }
+
+      ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function(type) {
+        window.addEventListener(type, noteInteraction, { capture: true, passive: true });
+      });
       window.setInterval(refresh, INTERVAL);
       document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'visible') refresh();

@@ -125,7 +125,7 @@ it('records a classified rotation with request attribution and no token material
   const audit = await events(); expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ action: 'auth.session.rotate', target_id: String(sid), actor_user_id: String(user.id), actor_roles: 'editor',
     session_sid: String(sid), data_class: 'phi', request_id: 'session-lifecycle-test', retention_class: 'auth' });
-  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'explicit-refresh', classification_policy_version: expect.any(Number) }); await privateEvidence();
+  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'explicit-refresh', activity: 'user', classification_policy_version: expect.any(Number) }); await privateEvidence();
 });
 
 it('uses durable rotation evidence for silent middleware refresh', async () => {
@@ -137,7 +137,7 @@ it('uses durable rotation evidence for silent middleware refresh', async () => {
   await waitOnExecutionContext(ctx); expect(response.status).toBe(200);
   const audit = await events(); expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ action: 'auth.session.rotate', request_id: 'silent-refresh-test' });
-  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'silent-refresh', classification_policy_version: expect.any(Number) });
+  expect(JSON.parse(String(audit[0].detail))).toEqual({ source: 'silent-refresh', activity: 'user', classification_policy_version: expect.any(Number) });
 });
 
 it.each([

@@ -1,6 +1,7 @@
 // Regression tests for the independently reproduced security findings.
 // Synthetic data and local Cloudflare bindings only; no fixture auto-approvals.
 import { env, exports } from 'cloudflare:workers';
+import { runDurableObjectAlarm } from 'cloudflare:test';
 import { beforeEach, afterEach, expect, it } from 'vitest';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } from '../src/features/plugins/registry';
 import { approveFilePrefix } from '../src/features/plugins/file-prefixes';
@@ -147,6 +148,26 @@ it('upgrades a same-origin socket and rejects messages after revocation', async 
     ws.addEventListener('close', (event) => { clearTimeout(timer); resolve(event.code); }, { once: true });
   });
   ws.send(JSON.stringify({ type: 'sync' }));
+  expect(await closed).toBe(1008);
+});
+
+// W6: a socket carries no requests that refresh, so the idle deadline must
+// close it on the Durable Object's own sweep, with no message from the client.
+it('closes an open socket on the next sweep once its session goes idle', async () => {
+  const issued = await credentials();
+  const response = await worker.fetch(`https://cms.example.com/admin/api/sync/${pageId}`, {
+    headers: { Cookie: `__Host-access_token=${issued.accessToken}`, Upgrade: 'websocket', Origin: 'https://cms.example.com' },
+  });
+  expect(response.status).toBe(101);
+  const ws = response.webSocket!;
+  ws.accept();
+  await env.DB.prepare("UPDATE sessions SET created_at = datetime('now', '-9 hours'), last_activity_at = datetime('now', '-9 hours') WHERE user_id = ?")
+    .bind(userId).run();
+  const closed = new Promise<number>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Socket did not close')), 3000);
+    ws.addEventListener('close', (event) => { clearTimeout(timer); resolve(event.code); }, { once: true });
+  });
+  expect(await runDurableObjectAlarm(env.PAGE_SYNC.get(env.PAGE_SYNC.idFromName(`page-${pageId}`)))).toBe(true);
   expect(await closed).toBe(1008);
 });
 

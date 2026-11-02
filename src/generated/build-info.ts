@@ -1,3 +1,3 @@
 // GENERATED FILE — do not edit.
 // Written by tools/build-version.mjs from the deployment commit.
-export const BUILD_VERSION = "506ac54";
+export const BUILD_VERSION = "0302052";

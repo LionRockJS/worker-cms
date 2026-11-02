@@ -61,7 +61,7 @@ export const authMiddleware = createMiddleware<{
     if (!token) return null;
     const payload = await verifyJWT(token, secret);
     if (!payload || payload.type !== 'access') return null;
-    return validateAccessSession(c.env.DB, payload);
+    return validateAccessSession(c.env.DB, payload, sessionIdleTtl(c.env));
   };
 
   // Helper: perform refresh flow

@@ -82,13 +82,13 @@
     function sendHeartbeat() {
       fetch('/admin/api/presence/' + pageId, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CMS-Background': '1' },
         body: JSON.stringify({ lastActive: lastActive, userAvatar: userAvatar }),
       }).catch(function () {});
     }
 
     function refreshPresence() {
-      fetch('/admin/api/presence/' + pageId)
+      fetch('/admin/api/presence/' + pageId, { headers: { 'X-CMS-Background': '1' } })
         .then(function (r) { return r.json(); })
         .then(renderAvatars)
         .catch(function () {});
