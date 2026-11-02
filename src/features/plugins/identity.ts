@@ -51,6 +51,8 @@ export async function getIdentityForRow(db: D1DatabaseClient, rowId: number): Pr
 }
 
 /**
+ * DB-only compatibility/fixture primitive. Production resolution must use
+ * automatic-identity-evidence.ts for atomic authority and receipt checks.
  * Claims a manifest id for a registry row. Returns false when the id already
  * belongs to another row (or the row already holds a different id) — the
  * caller must then refuse to resolve the plugin rather than let it borrow an

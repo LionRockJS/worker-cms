@@ -1,3 +1,4 @@
+import { auditRequestFrom,ServiceMutationUnavailableError } from './core/db/audit';
 import { SettingsMutationUnavailableError } from './core/db/settings-mutation-evidence';
 import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
 import { PageLifecycleUnavailableError } from './core/pages/lifecycle-mutation-evidence';
@@ -86,7 +87,7 @@ app.use('*', async (c, next) => {
   }
 
   const cspNonce = generateCspNonce();
-  await requestContext.run({ cspNonce }, () => next());
+  await requestContext.run({ cspNonce, auditRequest:auditRequestFrom(c) }, () => next());
   c.res = withSensitiveCacheHeaders(withSecurityHeaders(c.res, cspNonce), c.req.raw);
   return undefined;
 });
@@ -191,6 +192,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if(err instanceof ServiceMutationUnavailableError)return c.json({error:'service_mutation_unavailable'},503,{'Cache-Control':'no-store'});
   if (err instanceof SettingsMutationUnavailableError) return c.json({ error: 'settings_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof PageTagEvidenceUnavailableError) return c.json({ error: 'page_tag_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof PageLifecycleUnavailableError) return c.json({ error: 'page_lifecycle_unavailable' }, 503, { 'Cache-Control': 'no-store' });

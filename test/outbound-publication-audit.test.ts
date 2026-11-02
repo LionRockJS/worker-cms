@@ -56,6 +56,8 @@ beforeEach(async () => {
   await policy('taxonomy', 'category', 'pii');
   await env.DB.prepare("INSERT INTO plugins (label, url, enabled, secret, config) VALUES ('Target', ?, 1, 'test-secret', ?)")
     .bind(pluginUrl, JSON.stringify({ cmsTrustedUi: true })).run();
+  // This fixture tests delivery/containment for an already approved destination.
+  await env.DB.prepare('INSERT INTO plugin_identity_approvals(plugin_row_id,manifest_id) SELECT id,? FROM plugins WHERE url=?').bind(pluginId,pluginUrl).run();
   await approvePageTypeAccess(env.DB, pluginId, 'story', 'write', 'test');
   __injectPluginFetcher(pluginUrl, { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).pathname;

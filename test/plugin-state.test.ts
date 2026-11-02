@@ -187,7 +187,7 @@ describe('classified plugin state reads', () => {
     await stateApi('PUT', '/__cms/state/private.record', { value: 'private patient content' });
     expect((await stateApi('GET', '/__cms/state/private.record')).status).toBe(200);
     expect((await stateApi('GET', '/__cms/state')).status).toBe(200);
-    const rows = (await env.DB.prepare("SELECT action, acting_via, actor_user_id, data_class, detail FROM audit_events WHERE event_class = 'read' ORDER BY seq").all()).results;
+    const rows = (await env.DB.prepare("SELECT action, acting_via, actor_user_id, data_class, detail FROM audit_events WHERE event_class = 'read' AND action IN ('state.read','state.list') ORDER BY seq").all()).results;
     expect(rows).toEqual(['state.read', 'state.list'].map(action => ({ action, acting_via: PLUGIN_ID, actor_user_id: null, data_class: 'phi', detail: null })));
     expect(JSON.stringify(rows)).not.toContain('private patient content');
   });

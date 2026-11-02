@@ -1,3 +1,4 @@
+import { capturePluginStateAuthority,mutatePluginState } from '../state-evidence';
 // GET/PUT/DELETE /state — host-owned key/value storage for the calling plugin.
 //
 // The plugin names only the key: the plugin id comes from the authenticated
@@ -14,12 +15,9 @@ import { authenticatePlugin } from './auth';
 import {
   MAX_STATE_KEYS_PER_PLUGIN,
   MAX_STATE_VALUE_BYTES,
-  countPluginStateKeys,
-  deletePluginState,
   getPluginState,
   isValidStateKey,
   listPluginState,
-  putPluginState,
   stateValueBytes,
 } from '../state';
 
@@ -69,6 +67,7 @@ stateApiRoutes.put('/state/:key', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
 
+  const authority=await capturePluginStateAuthority(c,auth);
   const key = c.req.param('key');
   if (!isValidStateKey(key)) return c.json({ error: 'invalid_key' }, 400);
 
@@ -89,14 +88,7 @@ stateApiRoutes.put('/state/:key', async (c) => {
     return c.json({ error: 'value_too_large', max_bytes: MAX_STATE_VALUE_BYTES }, 413);
   }
 
-  // The cap counts distinct keys, so overwriting an existing one is always
-  // allowed even at the limit — only a NEW key can be refused.
-  const existing = await getPluginState(c.env.DB, auth.plugin.manifest.id, key);
-  if (!existing && await countPluginStateKeys(c.env.DB, auth.plugin.manifest.id) >= MAX_STATE_KEYS_PER_PLUGIN) {
-    return c.json({ error: 'too_many_keys', max_keys: MAX_STATE_KEYS_PER_PLUGIN }, 409);
-  }
-
-  await putPluginState(c.env.DB, auth.plugin.manifest.id, key, serialized);
+  if(await mutatePluginState(c,authority,key,serialized)==='too_many_keys')return c.json({error:'too_many_keys',max_keys:MAX_STATE_KEYS_PER_PLUGIN},409);
   return c.json({ ok: true, key });
 });
 
@@ -106,9 +98,10 @@ stateApiRoutes.delete('/state/:key', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
 
+  const authority=await capturePluginStateAuthority(c,auth);
   const key = c.req.param('key');
   if (!isValidStateKey(key)) return c.json({ error: 'invalid_key' }, 400);
 
-  await deletePluginState(c.env.DB, auth.plugin.manifest.id, key);
+  await mutatePluginState(c,authority,key);
   return c.json({ ok: true, key });
 });

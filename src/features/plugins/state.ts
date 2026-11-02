@@ -14,6 +14,9 @@
 // This is deliberately NOT a secret store — D1 is plaintext at rest, so
 // credentials belong in the plugin's Worker secrets, not here.
 //
+// Production PUT/DELETE uses state-evidence.ts; these DB-only primitives do
+// not establish caller authority or a durable mutation receipt.
+//
 // Every read tolerates a missing `plugin_state` table (a database that has
 // not run the migration yet) by returning empty, so an un-migrated CMS
 // degrades to "no state" instead of failing every plugin call at once.

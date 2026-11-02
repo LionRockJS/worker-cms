@@ -342,6 +342,8 @@ export interface PluginFilePrefixApproval {
 
 /** A resolved, active plugin: its declared binding name, Fetcher, and manifest. */
 export interface ResolvedPlugin {
+  /** Host registry identity captured by production resolution. */
+  registration?: {id:number;uuid:string};
   binding: string;
   fetcher: Fetcher;
   manifest: PluginManifest;

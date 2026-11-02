@@ -27,13 +27,14 @@ import type { AppContext } from '../http/context';
 import { recordAuditOutage } from './audit-outages';
 import { USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../auth/role-mutation-sql';
 import { abortIf } from './transaction-guard';
+import { requestContext } from '../http/request-context';
 
 /** Entity types whose changes are configuration rather than content. They get
  *  the longer `admin_config` retention: low volume, high forensic value. */
 const ADMIN_ENTITY_TYPES = new Set([
   'user', 'user_oauth_identity', 'role', 'plugin', 'settings', 'locale', 'shared_credits', 'page_type', 'block_type',
   // Reading the audit log is itself an administrative act and is kept as long.
-  'audit',
+  'audit', 'plugin_state',
 ]);
 
 /** Longest user-agent we keep; the full string is unbounded and adds nothing. */
@@ -124,6 +125,10 @@ function auditValues(row: AuditRow, actor: AuditActor, request: AuditRequest) {
     row.detail ? JSON.stringify(row.detail) : null,
   ];
 }
+
+/** Neutral failure for authenticated services/background mutation producers. */
+export class ServiceMutationUnavailableError extends Error {constructor(){super('Service mutation evidence unavailable');}}
+export { requestFrom as auditRequestFrom };
 
 // Registration resolves the generated internal ID inside the business batch.
 // The provider identifier is only a query parameter, never retained in audit.
@@ -275,6 +280,14 @@ export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClas
   const row = mutationRow(entry);
   row.dataClass = dataClass;
   return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange, undefined, options.policy);
+}
+
+/** A credential-authenticated service is its own actor. An asserted user is
+ * detail, never a fabricated CMS session or authenticated user principal. */
+export function serviceMutationAuditEvidence(env: Env, entry: AuditEntry, actor: AuditActor,
+  dataClass: AuditRow['dataClass'], policy: DataClassMap, context?: AppContext): MutationAuditEvidence {
+  return preparedAuditEvidence(env,{...mutationRow(entry),dataClass},actor,
+    context?requestFrom(context):requestContext.getStore()?.auditRequest??NO_REQUEST,false,undefined,policy);
 }
 
 /** Classified local mutations shared by HTTP and trusted job execution.

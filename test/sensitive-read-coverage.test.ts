@@ -31,6 +31,8 @@ beforeEach(async () => {
   await env.DB.prepare("INSERT INTO plugins (label, url, enabled, secret, config) VALUES ('Coverage', 'https://coverage.local', 1, 'coverage-secret', ?)")
     .bind(JSON.stringify({ token: 'private-config-value' })).run();
   pluginRowId = (await env.DB.prepare("SELECT id FROM plugins WHERE url = 'https://coverage.local'").first<{ id: number }>())!.id;
+  // Response-audit faults must occur after this fixture's identity is established.
+  await env.DB.prepare("INSERT INTO plugin_identity_approvals(plugin_row_id,manifest_id) VALUES (?,'coverage')").bind(pluginRowId).run();
   __injectPluginFetcher('https://coverage.local', { fetch: async (input: RequestInfo | URL) => {
     const path = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).pathname;
     if (path === '/__plugin/manifest') return Response.json({ id: 'coverage', name: 'Coverage', version: '1',
@@ -185,7 +187,7 @@ it.each([
 });
 
 it('protects a pinned identity even when its plugin is disabled', async () => {
-  await env.DB.prepare("INSERT INTO plugin_identity_approvals (plugin_row_id, manifest_id) VALUES (?, 'coverage')").bind(pluginRowId).run();
+  // The common fixture already establishes this pin before injecting failures.
   await env.DB.prepare('UPDATE plugins SET enabled = 0').run(); clearManifestCache();
   await classify('table', 'plugin_identity_approvals');
   expect((await admin(`/plugins-manage/${pluginRowId}/edit`)).status).toBe(200);

@@ -173,7 +173,7 @@ describe('classified private file audit', () => {
       headers: { 'x-plugin-id': PLUGIN_ID, 'x-plugin-secret': PLUGIN_SECRET, 'x-acting-user-id': '42' },
     }));
     expect(response.status).toBe(200);
-    expect((await env.DB.prepare("SELECT actor_user_id, acting_via, data_class, container_key FROM audit_events WHERE event_class = 'read'").all()).results)
+    expect((await env.DB.prepare("SELECT actor_user_id, acting_via, data_class, container_key FROM audit_events WHERE event_class = 'read' AND action = 'media.read'").all()).results)
       .toEqual([{ actor_user_id: '42', acting_via: PLUGIN_ID, data_class: 'phi', container_key: PLUGIN_ID }]);
   });
 

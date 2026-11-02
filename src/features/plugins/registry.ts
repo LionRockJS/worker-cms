@@ -20,7 +20,8 @@ import {
   type PluginRecord,
 } from './types';
 import { listEnabledPlugins, getPlugin } from './store';
-import { claimIdentity, listIdentityApprovals } from './identity';
+import { listIdentityApprovals } from './identity';
+import { claimAutomaticPluginIdentity } from './automatic-identity-evidence';
 import { regulatedWritesBlocked } from '../../core/http/regulated-writes';
 
 /** Reserved prefix every plugin Worker serves its CMS-facing endpoints under. */
@@ -301,7 +302,7 @@ async function enforceIdentities(
       continue;
     }
 
-    if (!regulatedWritesBlocked(env) && (!env.DB || await claimIdentity(env.DB, record.id, manifest.id))) {
+    if (!regulatedWritesBlocked(env) && (!env.DB || await claimAutomaticPluginIdentity(env, record, manifest))) {
       pinnedByRow.set(record.id, manifest.id);
       ownerByManifest.set(manifest.id, record.id);
       allowed.add(record.id);
@@ -366,6 +367,7 @@ export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
       } : undefined,
     };
     return {
+      registration: {id:record.id,uuid:record.uuid},
       binding: record.url, fetcher: fetcherForUrl(record.url), manifest: effective,
       requestedManifest: manifest, secret: record.secret || env.PLUGIN_SECRET || '',
       apiSecret: record.secret || '', label: record.label || '',

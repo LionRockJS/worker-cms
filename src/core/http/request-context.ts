@@ -8,11 +8,13 @@
 import type { Permission } from '../../types';
 import type { DataClassMap } from '../db/data-classes';
 import type { PendingRead } from './access-log';
-import type { AuditActor } from '../db/audit';
+import type { AuditActor, AuditRequest } from '../db/audit';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 interface RequestContext {
   cspNonce: string;
+  /** Correlation only; never an authority or actor assertion. */
+  auditRequest?: AuditRequest;
   rolePermissions?: Map<string, Set<Permission>>;
   /** Container classifications, resolved once per request. */
   dataClasses?: DataClassMap;
