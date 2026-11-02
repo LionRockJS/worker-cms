@@ -65,5 +65,6 @@ export async function assertRegulatedReady(env: Env, auditInstalled: boolean): P
   }
   // Verify the schema columns actually used by recording and archiving.
   await env.DB.prepare('SELECT event_id, occurred_at, data_class, actor_user_id, acting_via, target_ids, retention_class FROM audit_events LIMIT 0').all();
+  await env.DB.prepare('SELECT event_id, envelope, attempts, next_attempt_at, created_at FROM audit_mutation_outbox LIMIT 0').all();
   await env.DB.prepare('SELECT last_seq, rolling_hash, r2_key FROM audit_seals LIMIT 0').all();
 }

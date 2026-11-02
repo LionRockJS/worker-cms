@@ -1,5 +1,12 @@
 import type { Env, JWTPayload } from '../../types';
 import { generateTokenId, hashToken, signJWT, verifyJWT } from './jwt';
+import type { AppContext } from '../http/context';
+import { sessionAuditEnvelope, sessionAuditEvidence } from '../db/audit';
+import { abortIf } from '../db/transaction-guard';
+import { safeRoleAuditValue } from './role-mutation-sql';
+import { identityGuard } from './oauth-identity-guard';
+import { sessionOperation, sessionPolicy, sessionUserGuard, sessionSnapshotCondition,
+  SESSION_SNAPSHOT_COLUMNS, removeSessionSnapshots, type SessionSnapshot } from './session-evidence';
 
 export const ACCESS_TOKEN_TTL = 15 * 60;        // 15 minutes
 export const REFRESH_TOKEN_TTL = 7 * 24 * 3600; // 7 days
@@ -72,98 +79,100 @@ export async function issueAuthTokens(user: AuthDbUser, jwtSecret: string, sessi
   return { accessPayload, accessToken, refreshToken, refreshJti };
 }
 
-export async function storeRefreshSession(db: D1DatabaseClient, userId: number, refreshJti: string): Promise<number> {
-  const row = await db.prepare(
-    `INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
-     VALUES (?, ?, datetime('now', '+7 days')) RETURNING id`,
-  )
-    .bind(userId, await hashToken(refreshJti))
-    .first<{ id: number }>();
-  if (!row) throw new Error("Session creation failed");
-  return row.id;
+/** Current and previous refresh tokens must still satisfy expiry, idle and
+ * ownership checks at the transaction boundary, after every signing await. */
+function refreshCondition(session: RefreshSession, hash: string, idleTtl: number, tokenExpires: number, previousOnly = false) {
+  return { sql: `id = ? AND user_id = ? AND ? > CAST(strftime('%s', 'now') AS INTEGER)
+    AND expires_at > CURRENT_TIMESTAMP AND created_at > datetime('now', '-30 days')
+    AND COALESCE(rotated_at, created_at) > datetime('now', ?)
+    AND (${previousOnly ? '0' : 'refresh_token_hash = ?'} OR (previous_refresh_token_hash = ?
+      AND rotated_at >= datetime('now', '-${REFRESH_ROTATION_GRACE_SECONDS} seconds')))`,
+  bindings: [session.id, session.user_id, tokenExpires, idleCutoff(idleTtl), ...(previousOnly ? [] : [hash]), hash] };
 }
 
-export async function rotateAuthSession(
-  db: D1DatabaseClient,
-  jwtSecret: string,
-  refreshToken: string,
-  idleTtl: number = SESSION_IDLE_TTL_DEFAULT,
-): Promise<RotateAuthSessionResult> {
-  const refreshPayload = await verifyJWT(refreshToken, jwtSecret);
-  if (!refreshPayload || refreshPayload.type !== 'refresh' || !refreshPayload.jti) {
-    return { ok: false, error: 'invalid_refresh_token' };
-  }
-
-  const refreshHash = await hashToken(refreshPayload.jti);
-  const session = await findRefreshSession(db, refreshHash, idleTtl);
-
-  if (!session) {
-    return { ok: false, error: 'session_revoked' };
-  }
-
-  const user = await db.prepare(
-    'SELECT id, email, name, role FROM users WHERE id = ?',
-  )
-    .bind(session.user_id)
-    .first<AuthDbUser>();
-
-  if (!user) {
-    return { ok: false, error: 'user_not_found' };
-  }
-
-  // A request that carries the immediately previous token is a concurrent
-  // refresh, not a revoked session. Give it a fresh access token but do not
-  // rotate or set a refresh cookie: the winning response owns the new token.
-  if (session.is_previous) {
-    const access = await issueAccessToken(user, jwtSecret, String(session.id));
-    return { ok: true, ...access };
-  }
-
-  const issued = await issueAuthTokens(user, jwtSecret, String(session.id));
-  const update = await db.prepare(
-    `UPDATE sessions
-        SET previous_refresh_token_hash = refresh_token_hash,
-            refresh_token_hash = ?,
-            rotated_at = CURRENT_TIMESTAMP,
-            expires_at = MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days'))
-      WHERE id = ? AND refresh_token_hash = ?`,
-  )
-    .bind(await hashToken(issued.refreshJti), session.id, refreshHash)
-    .run();
-
-  // Another request may have won between SELECT and UPDATE. Confirm that this
-  // token is now the grace token before returning access-only success.
-  if ((update.meta.changes ?? 0) === 0) {
-    const racedSession = await findRefreshSession(db, refreshHash, idleTtl);
-    if (!racedSession || !racedSession.is_previous || racedSession.id !== session.id) {
-      return { ok: false, error: 'session_revoked' };
+export async function rotateAuthSession(env: Env, refreshToken: string,
+  idleTtl: number = sessionIdleTtl(env), c?: AppContext): Promise<RotateAuthSessionResult> {
+  return sessionOperation(env, async () => {
+    const payload = await verifyJWT(refreshToken, env.JWT_SECRET);
+    if (!payload || payload.type !== 'refresh' || typeof payload.jti !== 'string') return { ok: false, error: 'invalid_refresh_token' };
+    const hash = await hashToken(payload.jti);
+    const session = await findRefreshSession(env.DB, hash, idleTtl);
+    if (!session || String(session.user_id) !== payload.sub) return { ok: false, error: 'session_revoked' };
+    const user = await env.DB.prepare('SELECT id, email, name, role FROM users WHERE id = ?').bind(session.user_id).first<AuthDbUser>();
+    if (!user) return { ok: false, error: 'user_not_found' };
+    if (!safeRoleAuditValue(user.role)) throw new Error('Session role evidence unavailable');
+    const policy = await sessionPolicy(env);
+    const source = c ? (c.req.path === '/auth/refresh' ? 'explicit-refresh' : 'silent-refresh') : 'internal-refresh';
+    const graceAccess = async () => {
+      const access = await issueAccessToken(user, env.JWT_SECRET, String(session.id));
+      const condition = refreshCondition(session, hash, idleTtl, payload.exp, true);
+      const envelope = sessionAuditEnvelope(c, 'auth.session.grace', user.id, user.role, session.id, policy.dataClass, { source });
+      const evidence = sessionAuditEvidence(env, envelope);
+      const guard = () => abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE ${condition.sql})`, condition.bindings);
+      await env.DB.batch([sessionUserGuard(env, user), guard(), evidence.write, evidence.guard, sessionUserGuard(env, user), guard()]);
+      return { ok: true as const, ...access };
+    };
+    if (session.is_previous) return graceAccess();
+    const issued = await issueAuthTokens(user, env.JWT_SECRET, String(session.id));
+    const newHash = await hashToken(issued.refreshJti);
+    const condition = refreshCondition(session, hash, idleTtl, payload.exp);
+    const snapshot = sessionSnapshotCondition(session);
+    const envelope = sessionAuditEnvelope(c, 'auth.session.rotate', user.id, user.role, session.id, policy.dataClass, { source });
+    const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true });
+    try {
+      await env.DB.batch([
+        sessionUserGuard(env, user),
+        env.DB.prepare(`UPDATE sessions SET previous_refresh_token_hash = refresh_token_hash, refresh_token_hash = ?,
+          rotated_at = CURRENT_TIMESTAMP, expires_at = MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days'))
+          WHERE ${snapshot.sql} AND (${condition.sql}) AND refresh_token_hash = ?`)
+          .bind(newHash, ...snapshot.bindings, ...condition.bindings, hash),
+        evidence.write, evidence.guard, sessionUserGuard(env, user),
+        abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE id = ? AND user_id = ? AND refresh_token_hash = ?
+          AND previous_refresh_token_hash = ? AND created_at IS ? AND rotated_at IS NOT NULL AND rotated_at <= CURRENT_TIMESTAMP
+          AND expires_at > CURRENT_TIMESTAMP AND expires_at <= MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days')))`,
+          [session.id, user.id, newHash, hash, session.created_at]),
+      ]);
+    } catch (error) {
+      // A different request may have won. Only take grace after verifying this
+      // operation did NOT commit; a lost acknowledgment of our own commit is
+      // unavailable, never automatic token reissuance or rotation replay.
+      const ownReceipt = await env.DB.prepare('SELECT 1 FROM audit_events WHERE event_id = ?').bind(envelope.row.eventId!).first();
+      const raced = await findRefreshSession(env.DB, hash, idleTtl);
+      if (!ownReceipt && raced?.is_previous && raced.id === session.id) return graceAccess();
+      throw error;
     }
-    const access = await issueAccessToken(user, jwtSecret, String(session.id));
-    return { ok: true, ...access };
-  }
-
-  return {
-    ok: true,
-    accessPayload: issued.accessPayload,
-    accessToken: issued.accessToken,
-    refreshToken: issued.refreshToken,
-  };
+    return { ok: true, accessPayload: issued.accessPayload, accessToken: issued.accessToken, refreshToken: issued.refreshToken };
+  });
 }
 
-export async function revokeRefreshSession(
-  db: D1DatabaseClient,
-  jwtSecret: string,
-  refreshToken: string,
-): Promise<void> {
-  const payload = await verifyJWT(refreshToken, jwtSecret);
-  if (!payload?.jti) return;
+/** Logout can resolve two different sessions from its cookies. Each actual
+ * removal has its own atomic outbox receipt; repeated logout is a no-op. */
+export async function revokeAuthSessions(env: Env, tokens: { accessToken?: string; refreshToken?: string }, c?: AppContext): Promise<number> {
+  return sessionOperation(env, async () => {
+    const selected = new Map<number, SessionSnapshot>();
+    for (const [type, token] of [['access', tokens.accessToken], ['refresh', tokens.refreshToken]] as const) {
+      const payload = token && await verifyJWT(token, env.JWT_SECRET);
+      if (!payload || payload.type !== type) continue;
+      let where: string;
+      let parameters: Array<string>;
+      if (type === 'access') {
+        if (!/^\d+$/.test(payload.sid ?? '')) continue;
+        where = 's.id = ? AND s.user_id = ?'; parameters = [payload.sid!, payload.sub];
+      } else {
+        if (typeof payload.jti !== 'string') continue;
+        const hash = await hashToken(payload.jti);
+        where = 's.user_id = ? AND (s.refresh_token_hash = ? OR s.previous_refresh_token_hash = ?)'; parameters = [payload.sub, hash, hash];
+      }
+      const rows = await env.DB.prepare(`SELECT ${SESSION_SNAPSHOT_COLUMNS} FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE ${where}`)
+        .bind(...parameters).all<SessionSnapshot>();
+      for (const row of rows.results) selected.set(row.id, row);
+    }
+    return removeSessionSnapshots(env, [...selected.values()], c ? 'logout' : 'explicit-revocation', '1', [], c);
+  });
+}
 
-  const refreshHash = await hashToken(payload.jti);
-  await db.prepare(
-    'DELETE FROM sessions WHERE refresh_token_hash = ? OR previous_refresh_token_hash = ?',
-  )
-    .bind(refreshHash, refreshHash)
-    .run();
+export async function revokeRefreshSession(env: Env, refreshToken: string): Promise<void> {
+  await revokeAuthSessions(env, { refreshToken });
 }
 
 export async function findRefreshSessionUserId(
@@ -175,25 +184,44 @@ export async function findRefreshSessionUserId(
   return session?.user_id ?? null;
 }
 
-export function capUserSessions(db: D1DatabaseClient, userId: number): Promise<D1Result> {
-  return db.prepare(
-    `DELETE FROM sessions WHERE user_id = ?1 AND id NOT IN (
-       SELECT id FROM sessions WHERE user_id = ?1 ORDER BY id DESC LIMIT ?2
-     )`,
-  ).bind(userId, MAX_SESSIONS_PER_USER).run();
+export async function capUserSessions(env: Env, userId: number): Promise<number> {
+  return sessionOperation(env, async () => {
+    const predicate = 'user_id = ? AND id NOT IN (SELECT id FROM sessions WHERE user_id = ? ORDER BY id DESC LIMIT ?)';
+    const parameters = [userId, userId, MAX_SESSIONS_PER_USER];
+    const rows = await env.DB.prepare(`SELECT ${SESSION_SNAPSHOT_COLUMNS} FROM sessions s LEFT JOIN users u ON u.id = s.user_id
+      WHERE s.user_id = ? AND s.id NOT IN (SELECT id FROM sessions WHERE user_id = ? ORDER BY id DESC LIMIT ?) ORDER BY s.id LIMIT 50`)
+      .bind(...parameters).all<SessionSnapshot>();
+    return removeSessionSnapshots(env, rows.results, 'session-cap', predicate, parameters);
+  });
 }
 
-/** An idle session is refused by findRefreshSession as soon as its window
- *  passes; removing the row terminates it rather than leaving it listed. */
-export function purgeExpiredSessions(
-  db: D1DatabaseClient,
-  idleTtl: number = SESSION_IDLE_TTL_DEFAULT,
-): Promise<D1Result> {
-  return db.prepare(
-    `DELETE FROM sessions
-      WHERE expires_at <= CURRENT_TIMESTAMP
-         OR COALESCE(rotated_at, created_at) <= datetime('now', ?1)`,
-  ).bind(idleCutoff(idleTtl)).run();
+/** Bounded, per-session receipts for expired/idle/absolute-lifetime cleanup.
+ * Remaining rows are still denied by authorization and handled on later ticks. */
+export async function purgeExpiredSessions(env: Env, idleTtl: number = sessionIdleTtl(env)): Promise<number> {
+  return sessionOperation(env, async () => {
+    const predicate = `expires_at <= CURRENT_TIMESTAMP OR created_at <= datetime('now', '-30 days')
+      OR COALESCE(rotated_at, created_at) <= datetime('now', ?)`;
+    const rows = await env.DB.prepare(`SELECT ${SESSION_SNAPSHOT_COLUMNS} FROM sessions s LEFT JOIN users u ON u.id = s.user_id
+      WHERE ${predicate.replace(/\b(expires_at|created_at|rotated_at)\b/g, 's.$1')} ORDER BY s.id LIMIT 50`).bind(idleCutoff(idleTtl)).all<SessionSnapshot>();
+    return removeSessionSnapshots(env, rows.results, 'expired', predicate, [idleCutoff(idleTtl)]);
+  });
+}
+
+/** Failures are already reported through the lifecycle health path; keep
+ * background hygiene from becoming an unhandled request-lifetime rejection. */
+export async function maintainSessionHygiene(env: Env, userId?: number): Promise<void> {
+  try {
+    if (userId === undefined) {
+      // One over-limit account per tick/request keeps legacy or burst backlog
+      // recoverable without an unbounded sweep across all accounts.
+      const excess = await env.DB.prepare(`SELECT user_id FROM sessions GROUP BY user_id HAVING COUNT(*) > ? ORDER BY MIN(id) LIMIT 1`)
+        .bind(MAX_SESSIONS_PER_USER).first<{ user_id: number }>();
+      userId = excess?.user_id;
+    }
+    if (userId !== undefined) await capUserSessions(env, userId);
+    await purgeExpiredSessions(env);
+  }
+  catch { /* Retain unprocessed sessions/evidence for recovery. */ }
 }
 
 function authPayload(
@@ -215,11 +243,7 @@ function authPayload(
   };
 }
 
-interface RefreshSession {
-  id: number;
-  user_id: number;
-  is_previous: number;
-}
+interface RefreshSession extends SessionSnapshot { is_previous: number }
 
 async function findRefreshSession(
   db: D1DatabaseClient,
@@ -227,12 +251,11 @@ async function findRefreshSession(
   idleTtl: number,
 ): Promise<RefreshSession | null> {
   return db.prepare(
-    `SELECT id,
-            user_id,
+    `SELECT s.*, u.role,
             CASE WHEN refresh_token_hash = ?1 THEN 0 ELSE 1 END AS is_previous
-       FROM sessions
-      WHERE expires_at > CURRENT_TIMESTAMP AND created_at > datetime('now', '-30 days')
-        AND COALESCE(rotated_at, created_at) > datetime('now', ?2)
+       FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
+        AND COALESCE(s.rotated_at, s.created_at) > datetime('now', ?2)
         AND (
           refresh_token_hash = ?1
           OR (
@@ -258,13 +281,34 @@ async function issueAccessToken(
   };
 }
 
-/** Create the revocable session before issuing its access token. */
-export async function createAuthSession(db: D1DatabaseClient, user: AuthDbUser, secret: string): Promise<IssuedAuthTokens> {
-  const issued = await issueAuthTokens(user, secret);
-  const id = await storeRefreshSession(db, user.id, issued.refreshJti);
-  issued.accessPayload.sid = String(id);
-  issued.accessToken = await signJWT(issued.accessPayload, secret);
-  return issued;
+/** Create the session and durable sign-in evidence before returning tokens. */
+export async function createAuthSession(env: Env, user: AuthDbUser, c?: AppContext,
+  identity?: { provider: string; providerUserId: string; oauthId: string }): Promise<IssuedAuthTokens> {
+  return sessionOperation(env, async () => {
+    if (!safeRoleAuditValue(user.role)) throw new Error('Session role evidence unavailable');
+    if (identity && (!['eventuai', 'github', 'google', 'microsoft', 'apple'].includes(identity.provider)
+      || !identity.providerUserId || identity.oauthId !== `${identity.provider}:${identity.providerUserId}`)) throw new Error('Invalid session identity');
+    const policy = await sessionPolicy(env);
+    const issued = await issueAuthTokens(user, env.JWT_SECRET);
+    const hash = await hashToken(issued.refreshJti);
+    const envelope = sessionAuditEnvelope(c, 'auth.login', user.id, user.role, null, policy.dataClass,
+      identity ? { provider: identity.provider } : { source: 'internal' });
+    const evidence = sessionAuditEvidence(env, envelope, { requirePreviousChange: true, refreshHash: hash });
+    const guard = () => abortIf(env, `NOT EXISTS (SELECT 1 FROM sessions WHERE user_id = ? AND refresh_token_hash = ?
+      AND previous_refresh_token_hash IS NULL AND rotated_at IS NULL AND created_at <= CURRENT_TIMESTAMP
+      AND expires_at > CURRENT_TIMESTAMP AND expires_at <= MIN(datetime('now', '+7 days'), datetime(created_at, '+30 days')))`, [user.id, hash]);
+    const statements = [sessionUserGuard(env, user)];
+    if (identity) statements.push(identityGuard(env, identity, user.id, true));
+    statements.push(env.DB.prepare("INSERT INTO sessions (user_id, refresh_token_hash, expires_at) VALUES (?, ?, datetime('now', '+7 days'))").bind(user.id, hash),
+      evidence.write, evidence.guard, sessionUserGuard(env, user), guard());
+    if (identity) statements.push(identityGuard(env, identity, user.id, true));
+    statements.push(env.DB.prepare('SELECT id FROM sessions WHERE refresh_token_hash = ?').bind(hash));
+    const results = await env.DB.batch(statements);
+    const row = results[results.length - 1].results[0] as { id: number };
+    issued.accessPayload.sid = String(row.id);
+    issued.accessToken = await signJWT(issued.accessPayload, env.JWT_SECRET);
+    return issued;
+  });
 }
 
 /** Authorization always uses the current account, never a cached JWT role. */

@@ -30,7 +30,7 @@ import { abortIf } from './transaction-guard';
 /** Entity types whose changes are configuration rather than content. They get
  *  the longer `admin_config` retention: low volume, high forensic value. */
 const ADMIN_ENTITY_TYPES = new Set([
-  'user', 'role', 'plugin', 'settings', 'locale', 'shared_credits', 'page_type', 'block_type',
+  'user', 'user_oauth_identity', 'role', 'plugin', 'settings', 'locale', 'shared_credits', 'page_type', 'block_type',
   // Reading the audit log is itself an administrative act and is kept as long.
   'audit',
 ]);
@@ -125,13 +125,40 @@ function auditValues(row: AuditRow, actor: AuditActor, request: AuditRequest) {
   ];
 }
 
-function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest, requirePreviousChange = false) {
-  const placeholders = Array.from({ length: 21 }, () => '?');
+// Registration resolves the generated internal ID inside the business batch.
+// The provider identifier is only a query parameter, never retained in audit.
+interface AuditLookup { newUserOAuthId?: string; identityOAuthId?: string; sessionRefreshHash?: string }
+
+function auditParameters(row: AuditRow, actor: AuditActor, request: AuditRequest, lookup?: AuditLookup) {
+  const values = auditValues(row, actor, request);
+  const expressions = values.map(() => '?');
+  if (lookup?.newUserOAuthId !== undefined) {
+    for (const index of [7, 15]) {
+      expressions[index] = '(SELECT CAST(id AS TEXT) FROM users WHERE oauth_id = ?)';
+      values[index] = lookup.newUserOAuthId;
+    }
+  }
+  if (lookup?.identityOAuthId !== undefined) {
+    expressions[15] = '(SELECT CAST(id AS TEXT) FROM user_oauth_identities WHERE oauth_id = ?)';
+    values[15] = lookup.identityOAuthId;
+  }
+  if (lookup?.sessionRefreshHash !== undefined) {
+    for (const index of [10, 15]) {
+      expressions[index] = '(SELECT CAST(id AS TEXT) FROM sessions WHERE refresh_token_hash = ?)';
+      values[index] = lookup.sessionRefreshHash;
+    }
+  }
+  return { values, expressions };
+}
+
+function statement(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest, requirePreviousChange = false,
+  lookup?: AuditLookup) {
+  const { expressions: placeholders, values } = auditParameters(row, actor, request, lookup);
   // A missing/stale target or an ignored mutation must roll back the entire
   // batch, not commit success evidence. Invalid JSON throws only on failure.
   if (requirePreviousChange) placeholders[5] = "CASE WHEN changes() = 1 THEN ? ELSE json('{') END";
   const sql = `${INSERT_COLUMNS} VALUES (${placeholders.join(', ')})` + (row.eventId ? ' ON CONFLICT(event_id) DO NOTHING' : '');
-  return env.DB.prepare(sql).bind(...auditValues(row, actor, request));
+  return env.DB.prepare(sql).bind(...values);
 }
 
 /** Shared statement builder for health probes and reconciliation receipts. */
@@ -203,14 +230,37 @@ export interface MutationAuditEvidence {
 }
 
 function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest,
-  requirePreviousChange = false): MutationAuditEvidence {
+  requirePreviousChange = false, lookup?: AuditLookup): MutationAuditEvidence {
   const prepared = { ...row, eventId: row.eventId ?? crypto.randomUUID(), occurredAt: row.occurredAt ?? new Date().toISOString() };
-  const expected = auditValues(prepared, actor, request);
-  const matches = AUDIT_COLUMNS.map(column => `${column} IS ?`).join(' AND ');
+  const { values: expected, expressions } = auditParameters(prepared, actor, request, lookup);
+  const matches = AUDIT_COLUMNS.map((column, index) => `${column} IS ${expressions[index]}`).join(' AND ');
   // A zero-row insert, or a trigger that removes/rewrites the new row, must
   // roll back the business mutation without depending on a table constraint.
   const guard = abortIf(env, `changes() <> 1 OR NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})`, expected);
-  return { write: statement(env, prepared, actor, request, requirePreviousChange), guard };
+  return { write: statement(env, prepared, actor, request, requirePreviousChange, lookup), guard };
+}
+
+/** Batch with a newly created viewer and its provider identity, before issuing
+ * any session. The validated provider authenticates the new account; there is
+ * no CMS session yet. Do not use this for existing-account identity linking. */
+export function registrationAuditEvidence(c: AppContext, oauthId: string, provider: string,
+  dataClass: AuditRow['dataClass']): MutationAuditEvidence {
+  const row = mutationRow({ action: 'user.create', entityType: 'user', detail: { provider, role_after: 'viewer' } });
+  row.dataClass = dataClass;
+  row.targetCount = 1;
+  return preparedAuditEvidence(c.env, row,
+    { userId: null, roles: 'viewer', sessionSid: null, via: `oauth:${provider}` }, requestFrom(c), true, { newUserOAuthId: oauthId });
+}
+
+/** A verified provider authenticates an existing account. Identity linking
+ * additionally carries the CMS session that authorized the link. Values in
+ * detail must be field names/internal IDs, never provider subjects or profiles. */
+export function oauthAccountAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
+  actor: AuditActor, identityOAuthId?: string): MutationAuditEvidence {
+  const row = mutationRow(entry);
+  row.dataClass = dataClass;
+  if (identityOAuthId !== undefined) row.targetCount = 1;
+  return preparedAuditEvidence(c.env, row, actor, requestFrom(c), true, { identityOAuthId });
 }
 
 /** Prepare off-request mutation evidence; caller must batch it with the write. */
@@ -224,6 +274,40 @@ export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClas
   const row = mutationRow(entry);
   row.dataClass = dataClass;
   return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange);
+}
+
+export interface AuditEnvelope { row: AuditRow; actor: AuditActor; request: AuditRequest }
+
+/** Session evidence contains internal IDs and bounded lifecycle metadata,
+ * never JWTs, token IDs/hashes or user profile values. */
+export function sessionAuditEnvelope(c: AppContext | undefined, action: string, userId: number, roles: string | null,
+  sessionId: number | null, dataClass: AuditRow['dataClass'], detail: Record<string, unknown>, via: string | null = null): AuditEnvelope {
+  return { row: { eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), action, eventClass: 'auth', retentionClass: 'auth',
+    outcome: 'success', dataClass, targetType: 'session', targetId: sessionId === null ? null : String(sessionId), targetCount: 1,
+    targetIds: null, containerKey: null, queryFingerprint: null, detail },
+    actor: { userId: String(userId), roles, sessionSid: sessionId === null ? null : String(sessionId), via },
+    request: c ? requestFrom(c) : NO_REQUEST };
+}
+
+export function sessionAuditEvidence(env: Env, envelope: AuditEnvelope, options: { requirePreviousChange?: boolean; refreshHash?: string } = {}): MutationAuditEvidence {
+  return preparedAuditEvidence(env, envelope.row, envelope.actor, envelope.request, options.requirePreviousChange,
+    { sessionRefreshHash: options.refreshHash });
+}
+
+/** Outbox evidence uses the same envelope as the primary audit stream. */
+export function mutationAuditEnvelope(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'], actor: AuditActor): AuditEnvelope {
+  return { row: { ...mutationRow(entry), dataClass, eventId: crypto.randomUUID(), occurredAt: new Date().toISOString() },
+    actor, request: requestFrom(c) };
+}
+
+/** Retry delivery only when the primary stream contains this exact envelope.
+ * A conflicting event ID must never cause an outbox receipt to be discarded. */
+export function auditDeliveryEvidence(env: Env, envelope: AuditEnvelope): MutationAuditEvidence {
+  const { row, actor, request } = envelope;
+  if (!row.eventId || !row.occurredAt) throw new Error('Stable audit delivery identity required');
+  const matches = AUDIT_COLUMNS.map(column => `${column} IS ?`).join(' AND ');
+  return { write: statement(env, row, actor, request),
+    guard: abortIf(env, `NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})`, auditValues(row, actor, request)) };
 }
 
 /**

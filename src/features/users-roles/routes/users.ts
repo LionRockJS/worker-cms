@@ -217,9 +217,13 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   try {
+    const sessions = (await c.env.DB.prepare('SELECT id FROM sessions WHERE user_id = ? ORDER BY id').bind(id).all<{ id: number }>()).results.map(row => row.id);
     const evidence = mutationAuditEvidence(c, { action: 'user.delete', entityType: 'user', entityId: id,
-      detail: { role_before: user.role } }, dataClass, { requirePreviousChange: true });
+      detail: { role_before: user.role, ...(sessions.length ? { revoked_session_ids: sessions } : {}) } }, dataClass, { requirePreviousChange: true });
     await c.env.DB.batch([
+      abortIf(c.env, `(SELECT COUNT(*) FROM sessions WHERE user_id = ?) <> ?
+        OR EXISTS (SELECT 1 FROM sessions WHERE user_id = ? AND id NOT IN (SELECT value FROM json_each(?)))`,
+        [id, sessions.length, id, JSON.stringify(sessions)]),
       c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id),
       c.env.DB.prepare('DELETE FROM user_oauth_identities WHERE user_id = ?').bind(id),
       // If authorization's observed role or last-admin state changed, a zero

@@ -28,7 +28,7 @@ import type { Env, Variables, JWTPayload } from '../../types';
 import {
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL,
-  purgeExpiredSessions,
+  maintainSessionHygiene,
   rotateAuthSession,
   sessionIdleTtl,
   validateAccessSession,
@@ -68,11 +68,11 @@ export const authMiddleware = createMiddleware<{
     const refreshToken = readAuthCookie(c, refreshCookieName);
     if (!refreshToken) return null;
 
-    const rotated = await rotateAuthSession(c.env.DB, secret, refreshToken, sessionIdleTtl(c.env));
+    const rotated = await rotateAuthSession(c.env, refreshToken, sessionIdleTtl(c.env), c);
     if (!rotated.ok) return null;
 
     // Opportunistic hygiene: purge expired sessions without blocking the response.
-    c.executionCtx.waitUntil(purgeExpiredSessions(c.env.DB, sessionIdleTtl(c.env)));
+    c.executionCtx.waitUntil(maintainSessionHygiene(c.env, Number(rotated.accessPayload.sub)));
 
     // Set cookies
     setAuthCookie(c, accessCookieName, rotated.accessToken, ACCESS_TOKEN_TTL);

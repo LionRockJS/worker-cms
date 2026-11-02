@@ -4,7 +4,7 @@ import { env, exports } from 'cloudflare:workers';
 import { beforeEach, afterEach, expect, it } from 'vitest';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } from '../src/features/plugins/registry';
 import { approveFilePrefix } from '../src/features/plugins/file-prefixes';
-import { createAuthSession, revokeRefreshSession } from '../src/core/auth/sessions';
+import { createAuthSession, revokeRefreshSession, type AuthDbUser } from '../src/core/auth/sessions';
 import { approvePageTypeAccess, revokePageTypeAccess } from '../src/features/plugins/page-types';
 import { projectLect } from '../src/core/publish/projection';
 import { limitedBytes } from '../src/core/http/body-limit';
@@ -53,7 +53,9 @@ afterEach(async () => {
 });
 
 async function credentials() {
-  return createAuthSession(env.DB, { id: userId, email: 'assessment@example.invalid', name: 'Assessment', role: 'admin' }, env.JWT_SECRET);
+  const user = await env.DB.prepare('SELECT id, email, name, role FROM users WHERE id = ?').bind(userId).first<AuthDbUser>();
+  if (!user) throw new Error('Fixture user missing');
+  return createAuthSession(env, user);
 }
 async function cookie(): Promise<string> {
   return `__Host-access_token=${(await credentials()).accessToken}`;
@@ -125,7 +127,7 @@ it('allows a host-approved type and immediately honors revocation', async () => 
 
 it('denies a replayed access token after its refresh session is revoked', async () => {
   const issued = await credentials();
-  await revokeRefreshSession(env.DB, env.JWT_SECRET, issued.refreshToken);
+  await revokeRefreshSession(env, issued.refreshToken);
   expect((await worker.fetch('https://cms.example.com/admin/users', {
     headers: { Cookie: `__Host-access_token=${issued.accessToken}`, Accept: 'application/json' },
   })).status).toBe(401);
@@ -139,7 +141,7 @@ it('upgrades a same-origin socket and rejects messages after revocation', async 
   expect(response.status).toBe(101);
   const ws = response.webSocket!;
   ws.accept();
-  await revokeRefreshSession(env.DB, env.JWT_SECRET, issued.refreshToken);
+  await revokeRefreshSession(env, issued.refreshToken);
   const closed = new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Socket did not close')), 3000);
     ws.addEventListener('close', (event) => { clearTimeout(timer); resolve(event.code); }, { once: true });

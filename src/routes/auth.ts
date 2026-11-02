@@ -22,6 +22,10 @@ import {
   setAuthCookie,
 } from '../core/auth/cookies';
 import { logAuthEvent } from '../core/db/audit';
+import { registerOAuthUser } from '../core/auth/registration';
+import { linkOAuthIdentity, OAuthIdentityConflictError, updateOAuthProfile } from '../core/auth/oauth-account';
+import { currentOAuthLinkSession } from '../core/auth/oauth-link-session';
+import { recordAuditOutage } from '../core/db/audit-outages';
 import { loadAppBrandingSettings } from '../core/db/settings';
 import { viewRevision } from '../core/http/view-revision';
 import { buildTranslationCatalog, resolveUiLocale } from '../core/i18n';
@@ -31,13 +35,10 @@ import type { AppContext } from '../core/http/context';
 import {
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL,
-  capUserSessions,
-  findRefreshSessionUserId,
   sessionIdleTtl,
   createAuthSession,
-  validateAccessSession,
-  purgeExpiredSessions,
-  revokeRefreshSession,
+  revokeAuthSessions,
+  maintainSessionHygiene,
   rotateAuthSession,
 } from '../core/auth/sessions';
 
@@ -325,24 +326,6 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
   };
 }
 
-async function currentAuthenticatedUserId(c: AppContext): Promise<number | null> {
-  const secret = c.env.JWT_SECRET;
-  const accessToken = readAuthCookie(c, accessCookieName);
-  if (accessToken) {
-    const payload = await verifyJWT(accessToken, secret);
-    const current = payload && await validateAccessSession(c.env.DB, payload);
-    const id = Number(current ? current.sub : NaN);
-    if (Number.isInteger(id) && id > 0) return id;
-  }
-
-  const refreshToken = readAuthCookie(c, refreshCookieName);
-  if (!refreshToken) return null;
-  const refreshPayload = await verifyJWT(refreshToken, secret);
-  if (!refreshPayload || refreshPayload.type !== 'refresh' || !refreshPayload.jti) return null;
-
-  return findRefreshSessionUserId(c.env.DB, refreshPayload.jti, sessionIdleTtl(c.env));
-}
-
 async function findUserByOAuthIdentity(db: D1DatabaseClient, oauthId: string): Promise<AuthDbUser | null> {
   const linked = await db.prepare(
     `SELECT u.id, u.email, u.name, u.role
@@ -357,50 +340,6 @@ async function findUserByOAuthIdentity(db: D1DatabaseClient, oauthId: string): P
   // Legacy fallback for databases that have not backfilled identities yet.
   return db.prepare('SELECT id, email, name, role FROM users WHERE oauth_id = ?')
     .bind(oauthId)
-    .first<AuthDbUser>();
-}
-
-async function insertOAuthIdentity(
-  db: D1DatabaseClient,
-  userId: number,
-  identity: NormalizedUser,
-): Promise<boolean> {
-  await db.prepare(
-    `INSERT OR IGNORE INTO user_oauth_identities
-       (user_id, provider, provider_user_id, oauth_id)
-     VALUES (?, ?, ?, ?)`,
-  )
-    .bind(userId, identity.provider, identity.providerUserId, identity.oauthId)
-    .run();
-
-  const owner = await db.prepare('SELECT user_id FROM user_oauth_identities WHERE oauth_id = ?')
-    .bind(identity.oauthId)
-    .first<{ user_id: number }>();
-  return owner?.user_id === userId;
-}
-
-async function updateUserProfileFromOAuth(
-  db: D1DatabaseClient,
-  userId: number,
-  user: NormalizedUser,
-): Promise<AuthDbUser | null> {
-  // The linked provider identity authenticates this user. An email owned by
-  // another account must not block sign-in or change either account's owner.
-  // Keep the collision check in the UPDATE so concurrent logins cannot race it.
-  // The provider seeds missing names; existing names belong to the CMS profile
-  // so later sign-ins never overwrite a user's chosen display name.
-  await db.prepare(
-    `UPDATE users
-        SET email = CASE
-              WHEN EXISTS (SELECT 1 FROM users WHERE email = ? AND id <> ?)
-              THEN email ELSE ? END,
-            name = CASE WHEN trim(name) = '' THEN ? ELSE name END, avatar_url = ?
-      WHERE id = ?`,
-  )
-    .bind(user.email, userId, user.email, user.name, user.avatarUrl, userId)
-    .run();
-  return db.prepare('SELECT id, email, name, role FROM users WHERE id = ?')
-    .bind(userId)
     .first<AuthDbUser>();
 }
 
@@ -473,7 +412,7 @@ authRoutes.get('/start', async (c) => {
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const state = generateState();
   const linkRequested = c.req.query('link') === '1';
-  const linkUserId = linkRequested ? await currentAuthenticatedUserId(c) : null;
+  const linkUserId = linkRequested ? (await currentOAuthLinkSession(c))?.userId : null;
   if (linkRequested && !linkUserId) {
     return c.redirect('/auth/login?error=link_session_expired');
   }
@@ -649,25 +588,27 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
   let dbUser: AuthDbUser | null = null;
 
   if (Number.isInteger(linkUserId) && linkUserId > 0) {
-    const currentUserId = await currentAuthenticatedUserId(c);
-    if (currentUserId !== linkUserId) {
+    const linkSession = await currentOAuthLinkSession(c);
+    if (linkSession?.userId !== linkUserId) {
       return c.redirect('/auth/login?error=link_session_mismatch');
     }
     if (linkedUser && linkedUser.id !== linkUserId) {
       return c.redirect('/auth/login?error=identity_already_linked');
     }
-    dbUser = await c.env.DB.prepare('SELECT id, email, name, role FROM users WHERE id = ?')
-      .bind(linkUserId)
-      .first<AuthDbUser>();
-    if (!dbUser) {
-      return c.redirect('/auth/login?error=db_error');
-    }
-    const linked = await insertOAuthIdentity(c.env.DB, dbUser.id, normalized);
-    if (!linked) {
-      return c.redirect('/auth/login?error=identity_already_linked');
+    try {
+      dbUser = await linkOAuthIdentity(c, normalized, linkSession);
+    } catch (error) {
+      if (error instanceof OAuthIdentityConflictError) return c.redirect('/auth/login?error=identity_already_linked');
+      await recordAuditOutage(c.env, 'health', [], undefined, undefined, { captureIncomplete: true });
+      return c.json({ error: 'OAuth account change unavailable' }, 503, { 'Cache-Control': 'no-store' });
     }
   } else if (linkedUser) {
-    dbUser = await updateUserProfileFromOAuth(c.env.DB, linkedUser.id, normalized);
+    try {
+      dbUser = await updateOAuthProfile(c, linkedUser.id, normalized);
+    } catch {
+      await recordAuditOutage(c.env, 'health', [], undefined, undefined, { captureIncomplete: true });
+      return c.json({ error: 'OAuth account change unavailable' }, 503, { 'Cache-Control': 'no-store' });
+    }
   } else {
     // Optional registration allowlist: when ALLOWED_EMAIL_DOMAINS is set, only
     // matching emails may create a new account. Existing linked users always
@@ -685,23 +626,13 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
 
     // New accounts always start as least-privilege viewers. Later logins only
     // refresh profile fields, so role changes made in the Users admin stick.
-    await c.env.DB.prepare(
-      `INSERT INTO users (oauth_id, email, name, avatar_url, role)
-       VALUES (?, ?, ?, ?, 'viewer')`,
-    )
-      .bind(normalized.oauthId, normalized.email, normalized.name, normalized.avatarUrl)
-      .run();
-
-    dbUser = await c.env.DB.prepare(
-      'SELECT id, email, name, role FROM users WHERE oauth_id = ?',
-    )
-      .bind(normalized.oauthId)
-      .first<AuthDbUser>();
-    if (dbUser) {
-      const linked = await insertOAuthIdentity(c.env.DB, dbUser.id, normalized);
-      if (!linked) {
-        return c.redirect('/auth/login?error=identity_already_linked');
-      }
+    try {
+      dbUser = await registerOAuthUser(c, normalized);
+    } catch {
+      // A transport error can obscure a successful commit. Preserve only a
+      // coarse incomplete incident; issue no session and do not replay here.
+      await recordAuditOutage(c.env, 'health', [], undefined, undefined, { captureIncomplete: true });
+      return c.json({ error: 'Account registration unavailable' }, 503, { 'Cache-Control': 'no-store' });
     }
   }
 
@@ -709,23 +640,11 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
     return c.redirect('/auth/login?error=db_error');
   }
 
-  const issued = await createAuthSession(c.env.DB, dbUser, c.env.JWT_SECRET);
+  const issued = await createAuthSession(c.env, dbUser, c, normalized);
 
-  // Session hygiene: cap concurrent sessions per user and purge expired rows.
-  c.executionCtx.waitUntil(Promise.all([
-    capUserSessions(c.env.DB, dbUser.id),
-    purgeExpiredSessions(c.env.DB, sessionIdleTtl(c.env)),
-  ]));
-
+  c.executionCtx.waitUntil(maintainSessionHygiene(c.env, dbUser.id));
   setAuthCookie(c, accessCookieName, issued.accessToken, ACCESS_TOKEN_TTL);
   setAuthCookie(c, refreshCookieName, issued.refreshToken, REFRESH_TOKEN_TTL);
-
-  logAuthEvent(c, 'auth.login', {
-    userId: dbUser.id,
-    roles: dbUser.role,
-    sessionSid: issued.accessPayload.sid ?? null,
-    detail: { provider: providerName },
-  });
   return c.redirect('/admin');
 }
 
@@ -764,23 +683,12 @@ authRoutes.post('/callback', async (c) => {
 // cross-site mutation check in index.ts.
 authRoutes.post('/logout', async (c) => {
   const accessToken = readAuthCookie(c, accessCookieName);
-  const access = accessToken ? await verifyJWT(accessToken, c.env.JWT_SECRET) : null;
-  if (access?.type === 'access' && access.sid) {
-    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?').bind(access.sid, access.sub).run();
-  }
   const refreshToken = readAuthCookie(c, refreshCookieName);
-  if (refreshToken) {
-    await revokeRefreshSession(c.env.DB, c.env.JWT_SECRET, refreshToken);
-  }
-
+  // Clear this browser even if database/outbox availability prevents a safe
+  // server-side revocation. The unavailable response must not claim success.
   clearAuthCookie(c, accessCookieName);
   clearAuthCookie(c, refreshCookieName);
-
-  // Only a sign-out that resolved a session is worth a row; an unauthenticated
-  // POST here is noise, not an event.
-  if (access?.type === 'access') {
-    logAuthEvent(c, 'auth.logout', { userId: access.sub, roles: access.role, sessionSid: access.sid ?? null });
-  }
+  await revokeAuthSessions(c.env, { accessToken, refreshToken }, c);
   return c.redirect('/auth/login');
 });
 
@@ -793,17 +701,16 @@ authRoutes.post('/refresh', async (c) => {
     return c.json({ error: 'no_refresh_token' }, 401);
   }
 
-  const rotated = await rotateAuthSession(c.env.DB, c.env.JWT_SECRET, refreshToken, sessionIdleTtl(c.env));
+  const rotated = await rotateAuthSession(c.env, refreshToken, sessionIdleTtl(c.env), c);
   if (!rotated.ok) {
-    // Only failures are recorded. A successful 15-minute rotation is not a new
-    // sign-on, and one row per user per quarter-hour would bury the rejections
-    // that matter — a replayed or revoked refresh token.
+    // Denials remain supplementary authentication events. Successful rotation
+    // and grace access already have durable evidence in the session service.
     logAuthEvent(c, 'auth.refresh', { outcome: 'denied', detail: { reason: rotated.error } });
     return c.json({ error: rotated.error }, 401);
   }
 
   // Opportunistic hygiene: purge expired sessions without blocking the response.
-  c.executionCtx.waitUntil(purgeExpiredSessions(c.env.DB, sessionIdleTtl(c.env)));
+  c.executionCtx.waitUntil(maintainSessionHygiene(c.env, Number(rotated.accessPayload.sub)));
 
   setAuthCookie(c, accessCookieName, rotated.accessToken, ACCESS_TOKEN_TTL);
   if (rotated.refreshToken) {

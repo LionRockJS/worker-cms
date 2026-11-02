@@ -55,6 +55,7 @@ export default defineConfig({
           TEST_MIGRATIONS: await readD1Migrations(path.join(rootDir, 'migrations')),
           TEST_PUBLISHED_MIGRATIONS: await readD1Migrations(path.join(rootDir, 'migrations/published')),
           TEST_SENSITIVITY_UPGRADE: (await readD1Migrations(path.join(rootDir, 'migrations/manual'))).filter(migration => migration.name.includes('sensitivity_')),
+          TEST_AUDIT_OUTBOX_UPGRADE: (await readD1Migrations(path.join(rootDir, 'migrations/manual'))).filter(migration => migration.name.includes('audit_mutation_outbox')),
           TEST_COMMITTED_BASELINE: readFileSync(baselinePaths.cms, 'utf8'),
           TEST_ASSEMBLED_BASELINE: buildCms(readManifest()),
           TEST_ASSEMBLED_LEAN_BASELINE: buildCms(leanProfile),

@@ -28,6 +28,9 @@ import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
 import { ingestSubmissions } from './core/db/submission-ingest';
+import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
+import { SessionEvidenceUnavailableError } from './core/auth/session-evidence';
+import { maintainSessionHygiene } from './core/auth/sessions';
 import { coreExtensions } from './core/extensions';
 import { withD1Sessions } from './core/http/d1-sessions';
 
@@ -84,8 +87,11 @@ app.use('*', async (c, next) => {
 });
 
 app.use('*', async (c, next) => {
+  // Logout releases no tenant data or new credentials. Keep authenticated
+  // revocation available while inventory/primary-audit readiness is repaired.
+  const logout = c.req.method === 'POST' && c.req.path === '/auth/logout';
   // Assets contain no tenant records and remain available during repair.
-  if (!c.req.path.startsWith('/assets/') && !c.req.path.startsWith('/views/')) {
+  if (!logout && !c.req.path.startsWith('/assets/') && !c.req.path.startsWith('/views/')) {
     try { await assertRegulatedReady(c.env, featureInstalled('audit')); }
     catch (error) {
       console.error('Regulated profile not ready', error);
@@ -180,6 +186,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof SessionEvidenceUnavailableError) return c.json({ error: 'session_lifecycle_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof RegulatedWritesUnavailableError) return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (String(err).includes('sensitivity_reduction_requires_review')) {
     return c.json({ error: 'Changing this record to a lower classification requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
@@ -228,6 +235,8 @@ export default {
   // POST /__cms/ingest/submissions.
   async scheduled(_controller: ScheduledController, env: WorkerEnv, _ctx: ExecutionContext): Promise<void> {
     const sessionEnv = withD1Sessions(env);
+    await maintainSessionHygiene(sessionEnv);
+    await drainAuditMutationOutbox(sessionEnv, undefined, 10);
     await runFeatureMonitoringWork(sessionEnv);
     await assertRegulatedReady(sessionEnv, featureInstalled('audit'));
     if (!regulatedWritesBlocked(sessionEnv)) {

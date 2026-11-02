@@ -76,6 +76,7 @@ describe('migration assembly', () => {
       expect(env.TEST_ASSEMBLED_LEAN_BASELINE).toContain(`CREATE TABLE IF NOT EXISTS ${table}(`);
     }
     expect(env.TEST_ASSEMBLED_LEAN_BASELINE).toContain('CREATE TABLE IF NOT EXISTS audit_log (');
+    expect(env.TEST_ASSEMBLED_LEAN_BASELINE).toContain('CREATE TABLE IF NOT EXISTS audit_mutation_outbox (');
     expect(env.TEST_ASSEMBLED_LEAN_BASELINE).toContain('CREATE TABLE IF NOT EXISTS role_permissions(');
   });
 

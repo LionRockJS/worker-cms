@@ -73,19 +73,19 @@ describe('inactivity terminates a session', () => {
     await seedSession(narrow, { createdAgo: 3 * HOUR, rotatedAgo: 2 * HOUR });
     await seedSession(wide, { createdAgo: 3 * HOUR, rotatedAgo: 2 * HOUR });
 
-    const result = await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(narrow), HOUR);
+    const result = await rotateAuthSession(env, await refreshToken(narrow), HOUR);
 
     expect(result).toEqual({ ok: false, error: 'session_revoked' });
     // The same session under the old seven-day window still refreshes, so the
     // refusal above is the idle policy and not an unrelated predicate.
-    expect((await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(wide), REFRESH_TOKEN_TTL)).ok).toBe(true);
+    expect((await rotateAuthSession(env, await refreshToken(wide), REFRESH_TOKEN_TTL)).ok).toBe(true);
   });
 
   it('refreshes a session used inside its window', async () => {
     const jti = 'idle-within';
     await seedSession(jti, { createdAgo: 3 * HOUR, rotatedAgo: 30 * 60 });
 
-    const result = await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(jti), HOUR);
+    const result = await rotateAuthSession(env, await refreshToken(jti), HOUR);
 
     expect(result.ok).toBe(true);
   });
@@ -96,9 +96,9 @@ describe('inactivity terminates a session', () => {
     await seedSession(stale, { createdAgo: 2 * HOUR });
     await seedSession(fresh, { createdAgo: 10 * 60 });
 
-    expect(await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(stale), HOUR))
+    expect(await rotateAuthSession(env, await refreshToken(stale), HOUR))
       .toEqual({ ok: false, error: 'session_revoked' });
-    expect((await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(fresh), HOUR)).ok).toBe(true);
+    expect((await rotateAuthSession(env, await refreshToken(fresh), HOUR)).ok).toBe(true);
   });
 
   it('applies the 8-hour default when no policy is configured', async () => {
@@ -106,9 +106,9 @@ describe('inactivity terminates a session', () => {
     await seedSession(abandoned, { createdAgo: 10 * HOUR, rotatedAgo: 9 * HOUR });
     await seedSession(recent, { createdAgo: 10 * HOUR, rotatedAgo: 7 * HOUR });
 
-    expect(await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(abandoned), sessionIdleTtl(env)))
+    expect(await rotateAuthSession(env, await refreshToken(abandoned), sessionIdleTtl(env)))
       .toEqual({ ok: false, error: 'session_revoked' });
-    expect((await rotateAuthSession(env.DB, env.JWT_SECRET, await refreshToken(recent), sessionIdleTtl(env))).ok).toBe(true);
+    expect((await rotateAuthSession(env, await refreshToken(recent), sessionIdleTtl(env))).ok).toBe(true);
   });
 
   // Refusing the token ends access; removing the row ends the session.
@@ -116,7 +116,7 @@ describe('inactivity terminates a session', () => {
     await seedSession('purge-idle', { createdAgo: 3 * HOUR, rotatedAgo: 2 * HOUR });
     await seedSession('purge-active', { createdAgo: 3 * HOUR, rotatedAgo: 5 * 60 });
 
-    await purgeExpiredSessions(env.DB, HOUR);
+    await purgeExpiredSessions(env, HOUR);
 
     const rows = await env.DB.prepare('SELECT refresh_token_hash FROM sessions').all<{ refresh_token_hash: string }>();
     expect(rows.results.map(row => row.refresh_token_hash)).toEqual([await hashToken('purge-active')]);

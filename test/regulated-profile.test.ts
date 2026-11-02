@@ -45,6 +45,12 @@ describe('regulated deployment readiness', () => {
     expect(inventoried(profile(), 'media_prefix', 'other/scan.pdf')).toBe(false);
   });
 
+  it('requires the durable revocation outbox upgrade before regulated admission', async () => {
+    await env.DB.prepare('ALTER TABLE audit_mutation_outbox RENAME TO unavailable_revocation_outbox').run();
+    try { await expect(assertRegulatedReady(profile(), true)).rejects.toThrow(); }
+    finally { await env.DB.prepare('ALTER TABLE unavailable_revocation_outbox RENAME TO audit_mutation_outbox').run(); }
+  });
+
   it('preserves ordinary deployments without requiring regulated capabilities', async () => {
     await expect(assertRegulatedReady(profile({ REGULATED_MODE: undefined, AUDIT_BUCKET: undefined }), false)).resolves.toBeUndefined();
   });

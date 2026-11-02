@@ -7,7 +7,9 @@ import { allRoleOptions } from '../../core/auth/role-store';
 import { featureAdminScreenProps } from '../../features/services';
 import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i18n';
 import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';
-import { logAudit } from '../../core/db/audit';
+import { contextActor } from '../../core/db/audit';
+import { recordAuditOutage } from '../../core/db/audit-outages';
+import { disconnectOwnIdentity, updateOwnProfileName } from '../../core/auth/self-profile';
 import { recordTableReads } from '../../core/http/access-log';
 
 
@@ -134,17 +136,18 @@ profileRoutes.get('/profile', async (c) => {
 });
 
 profileRoutes.post('/profile', async (c) => {
-  const userId = Number(c.get('user').sub);
   const form = await c.req.formData();
   const name = str(form.get('name'));
   if (!name || name.length > 100) {
     return c.redirect('/admin/profile?error=profile.invalid_name', 303);
   }
 
-  await c.env.DB.prepare('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .bind(name, userId)
-    .run();
-  logAudit(c, 'profile.update', 'user', userId);
+  try {
+    await updateOwnProfileName(c, name);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
   return c.redirect('/admin/profile?flash=profile.name_saved', 303);
 });
 
@@ -161,54 +164,29 @@ profileRoutes.post('/profile/locale', async (c) => {
 });
 
 profileRoutes.post('/profile/identities/:id/disconnect', async (c) => {
-  const userId = Number(c.get('user').sub);
   const identityId = Number(c.req.param('id'));
   if (!Number.isInteger(identityId) || identityId <= 0) {
     return c.redirect('/admin/profile?error=Invalid+identity');
   }
 
-  const identity = await c.env.DB.prepare(
-    'SELECT id, user_id, oauth_id FROM user_oauth_identities WHERE id = ? AND user_id = ?',
-  )
-    .bind(identityId, userId)
-    .first<{ id: number; user_id: number; oauth_id: string }>();
-  if (!identity) {
+  let result;
+  try {
+    result = await disconnectOwnIdentity(c, identityId);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Identity disconnection unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  if (result === 'missing') {
     return c.redirect('/admin/profile?error=Identity+not+found');
   }
 
-  const count = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS n FROM user_oauth_identities WHERE user_id = ?',
-  )
-    .bind(userId)
-    .first<{ n: number }>();
-  if ((count?.n ?? 0) <= 1) {
+  if (result === 'last-method') {
     return c.redirect('/admin/profile?error=At+least+one+sign-in+method+is+required');
   }
 
-  const user = await c.env.DB.prepare('SELECT oauth_id FROM users WHERE id = ?')
-    .bind(userId)
-    .first<{ oauth_id: string }>();
-  if (user?.oauth_id === identity.oauth_id) {
-    const replacement = await c.env.DB.prepare(
-      `SELECT oauth_id
-         FROM user_oauth_identities
-        WHERE user_id = ? AND id != ?
-        ORDER BY created_at ASC, id ASC
-        LIMIT 1`,
-    )
-      .bind(userId, identityId)
-      .first<{ oauth_id: string }>();
-    if (!replacement) {
-      return c.redirect('/admin/profile?error=At+least+one+sign-in+method+is+required');
-    }
-    await c.env.DB.prepare('UPDATE users SET oauth_id = ? WHERE id = ?')
-      .bind(replacement.oauth_id, userId)
-      .run();
+  if (result === 'review') {
+    return c.json({ error: 'Sign-in identity metadata requires review' }, 409, { 'Cache-Control': 'no-store' });
   }
-
-  await c.env.DB.prepare('DELETE FROM user_oauth_identities WHERE id = ? AND user_id = ?')
-    .bind(identityId, userId)
-    .run();
 
   return c.redirect('/admin/profile?flash=Sign-in+method+disconnected');
 });
