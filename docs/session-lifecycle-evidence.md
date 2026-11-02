@@ -45,7 +45,7 @@ Production schedules, alert receipt/escalation, backlog capacity, account-specif
 ## Scope limits
 
 - Supported creation, rotation, grace and removal APIs now require the environment/evidence contract; the former unaudited `storeRefreshSession` application helper was removed. Privileged test fixtures seed sessions explicitly. Pure JWT signing helpers do not authorize an unbacked session: access still requires a current database session/account.
-- Authentication denials and other supplementary `logAuthEvent` callers retain their existing best-effort recording. Their durable failure-handling contract remains separate work; this continuation does not claim every authentication attempt has durable evidence.
+- Named host authentication denials now have awaited primary/outbox persistence; see the [denial record](authentication-denial-evidence.md). Other route-specific/plugin/service authorization boundaries and platform/transport failures remain separately scoped. This is not every authentication attempt or complete capture under simultaneous store failure.
 - Direct/migration SQL and out-of-band user/session deletion require their own controlled evidence. The normal user-deletion route records its complete session set.
 - Classification and broader authorization-policy versions are still resolved before transactions. General operation IDs, cross-service/plugin/R2 outboxes and remaining regulated content mutations remain W4b work.
 - The existing refresh-observed inactivity semantics and approved timeout values are retained. This does not resolve W6's separate meaningful-activity/background-refresh policy questions.

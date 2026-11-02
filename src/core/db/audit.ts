@@ -90,7 +90,6 @@ export interface AuditRequest {
 }
 
 const NO_REQUEST: AuditRequest = { requestId: null, sourceIp: null, userAgent: null };
-const NO_ACTOR: AuditActor = { userId: null, roles: null, sessionSid: null, via: null };
 
 const AUDIT_COLUMNS = [
   'event_id', 'occurred_at', 'event_class', 'data_class', 'retention_class', 'action', 'outcome',
@@ -278,6 +277,14 @@ export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClas
 
 export interface AuditEnvelope { row: AuditRow; actor: AuditActor; request: AuditRequest }
 
+/** Refusals have no business mutation/target. Actor identity must come from an
+ * already authenticated context, never rejected credentials or provider input. */
+export function authDenialEnvelope(c: AppContext, action: string, dataClass: AuditRow['dataClass'], detail: Record<string, unknown>, actor: AuditActor): AuditEnvelope {
+  return { row: { eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), action, eventClass: 'auth', retentionClass: 'auth',
+    outcome: 'denied', dataClass, targetType: null, targetId: null, targetCount: null, targetIds: null,
+    containerKey: null, queryFingerprint: null, detail }, actor, request: requestFrom(c) };
+}
+
 /** Session evidence contains internal IDs and bounded lifecycle metadata,
  * never JWTs, token IDs/hashes or user profile values. */
 export function sessionAuditEnvelope(c: AppContext | undefined, action: string, userId: number, roles: string | null,
@@ -397,52 +404,6 @@ export function logAuditBatchVia(c: AppContext, via: string, entries: AuditEntry
   return c.env.DB.batch(rows.map((row) => statement(c.env, row, actor, request)))
     .then(() => undefined)
     .catch(async (error) => { await recordAuditOutage(c.env, 'audit-write', rows, actor); console.error('audit log failed', error); });
-}
-
-/** What an authentication event knows about its actor. A failed sign-in that
- *  never resolved an account leaves all three unset, which is honest: there is
- *  no internal id to attribute it to, and the attempted address must not be
- *  written here. */
-export interface AuthActorInput {
-  userId?: string | number | null;
-  roles?: string | null;
-  sessionSid?: string | null;
-}
-
-/**
- * Records an authentication or access-control event: sign-in, sign-out, a
- * rejected token rotation, a permission denial. These sit outside the admin
- * routes, so the actor is passed explicitly rather than read from the context —
- * during a sign-in there is no signed-in user yet.
- */
-export function logAuthEvent(
-  c: AppContext,
-  action: string,
-  opts: AuthActorInput & { outcome?: Outcome; detail?: Record<string, unknown> } = {},
-): void {
-  const actor: AuditActor = opts.userId === undefined || opts.userId === null
-    ? NO_ACTOR
-    : {
-      userId: String(opts.userId),
-      roles: opts.roles ?? null,
-      sessionSid: opts.sessionSid ?? null,
-      via: null,
-    };
-  const row: AuditRow = {
-    action,
-    eventClass: 'auth',
-    retentionClass: 'auth',
-    outcome: opts.outcome ?? 'success',
-    dataClass: 'none',
-    targetType: null,
-    targetId: null,
-    targetIds: null,
-    targetCount: null,
-    containerKey: null,
-    queryFingerprint: null,
-    detail: opts.detail ?? null,
-  };
-  afterResponse(c, statement(c.env, row, actor, requestFrom(c)).run(), [row], actor);
 }
 
 /** The signed-in user as an audit actor, or an actor-less one off an

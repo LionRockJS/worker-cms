@@ -12,7 +12,8 @@
 // ============================================================
 
 import { createMiddleware } from 'hono/factory';
-import { logAuthEvent } from '../db/audit';
+import { recordAuthDenial } from './denials';
+import { routePath } from 'hono/route';
 import type { AppContext } from '../http/context';
 import { verifyJWT } from './jwt';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from './roles';
@@ -91,6 +92,8 @@ export const authMiddleware = createMiddleware<{
   if (!user) {
     clearAuthCookie(c, accessCookieName);
     clearAuthCookie(c, refreshCookieName);
+    const supplied = readAuthCookie(c, accessCookieName) || readAuthCookie(c, refreshCookieName);
+    await recordAuthDenial(c, 'auth.access', { reason: supplied ? 'invalid_credentials' : 'missing_credentials' });
     if (wantsJsonResponse(c.req.raw)) {
       return jsonError({ success: false, error: 'Authentication required' }, 401, 'authentication-required');
     }
@@ -126,6 +129,7 @@ export const editorGuard = createMiddleware<{
   const map = await resolveRolePermissions(c.env);
   if (effectivePermissions(map, user.role).size === 0) {
     if (isViewerSafeAdminRoute(c.req.path)) return next();
+    await logDenial(c, { reason: 'editor_required' });
     if (wantsJsonResponse(c.req.raw)) {
       return jsonError({ success: false, error: 'Editor role required' }, 403, 'editor-role-required');
     }
@@ -134,18 +138,10 @@ export const editorGuard = createMiddleware<{
   return next();
 });
 
-/** Records a refused capability check. The path is what makes the row useful —
- *  which screen was reached for — and is capped because it comes from the
- *  request. editorGuard denials are deliberately not recorded: a viewer
- *  bouncing off every editor route would drown the log in expected noise. */
-function logDenial(c: AppContext, user: JWTPayload, detail: Record<string, string>): void {
-  logAuthEvent(c, 'permission.denied', {
-    outcome: 'denied',
-    userId: user.sub,
-    roles: user.role,
-    sessionSid: user.sid ?? null,
-    detail: { ...detail, path: c.req.path.slice(0, 256) },
-  });
+/** Keep the registered route pattern, never user-supplied path parameters,
+ * query terms or private object keys. Persist before the refusal is returned. */
+function logDenial(c: AppContext, detail: Record<string, string>): Promise<void> {
+  return recordAuthDenial(c, 'permission.denied', { ...detail, path: routePath(c, -1) });
 }
 
 /**
@@ -162,7 +158,7 @@ export function requirePermission(permission: Permission | string) {
     if (splitRoles(user.role).includes('admin')) return next();
     const map = await resolveRolePermissions(c.env);
     if (!effectivePermissions(map, user.role).has(permission as Permission)) {
-      logDenial(c, user, { permission });
+      await logDenial(c, { permission });
       if (wantsJsonResponse(c.req.raw)) {
         return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
       }
@@ -182,7 +178,7 @@ export function requireAnyPermission(...permissions: Array<Permission | string>)
     const map = await resolveRolePermissions(c.env);
     const effective = effectivePermissions(map, user.role);
     if (!permissions.some((permission) => effective.has(permission as Permission))) {
-      logDenial(c, user, { permissions: permissions.join(',') });
+      await logDenial(c, { permissions: permissions.join(',') });
       if (wantsJsonResponse(c.req.raw)) {
         return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
       }

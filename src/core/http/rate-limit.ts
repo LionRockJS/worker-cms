@@ -10,8 +10,9 @@
 
 import { createMiddleware } from 'hono/factory';
 import type { Env, RateLimiter, Variables } from '../../types';
+import type { AppContext } from './context';
 
-export function rateLimitByIP(getLimiter: (env: Env) => RateLimiter | undefined) {
+export function rateLimitByIP(getLimiter: (env: Env) => RateLimiter | undefined, onDenied?: (c: AppContext) => Promise<void>) {
   return createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
     const limiter = getLimiter(c.env);
     if (!limiter) return next();
@@ -19,6 +20,7 @@ export function rateLimitByIP(getLimiter: (env: Env) => RateLimiter | undefined)
     const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
     const { success } = await limiter.limit({ key: ip });
     if (!success) {
+      if (onDenied) await onDenied(c);
       return c.json({ success: false, error: 'rate_limited' }, 429, { 'Retry-After': '60' });
     }
     return next();

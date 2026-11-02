@@ -1,6 +1,6 @@
-# Durable revocation evidence
+# Durable revocation and denial evidence
 
-W4b records identity disconnection, session logout/direct revocation and bounded session cap/expiry cleanup in the core `audit_mutation_outbox` table. Removal, any replacement of the legacy primary OAuth key, and the complete evidence envelope share one D1 transaction. This keeps an eligible disconnection available during a primary `audit_events` outage. Database/outbox failure still refuses the mutation; a failed transport can obscure a committed result, so reconcile state before retrying.
+W4b records identity disconnection, session logout/direct revocation, bounded session cap/expiry cleanup and fallback host authentication-denial evidence in the core `audit_mutation_outbox` table. Removal, any replacement of the legacy primary OAuth key, and the complete evidence envelope share one D1 transaction. This keeps an eligible disconnection available during a primary `audit_events` outage. Database/outbox failure still refuses the mutation; a failed transport can obscure a committed result, so reconcile state before retrying.
 
 This removes the identity's access to the existing account. Existing CMS sessions retain their current lifecycle; this operation does not revoke every session or prohibit registration of a different account. Authentication/session lifecycle evidence remains separate W4b work.
 
@@ -39,6 +39,8 @@ The next scheduled tick attempts delivery. Do not clear the outbox to resolve a 
 
 ## Scope and validation
 
-Approved producers are identity disconnection and session logout/revocation/cap/expiry. The reader validates each event-specific envelope; unknown producers remain pending for review. See the [session lifecycle record](session-lifecycle-evidence.md) for attribution and concurrency semantics. Profile-name edits use the existing atomic primary-audit contract, refusing the edit if evidence cannot commit. Unknown classification during disconnection retains conservatively PHI-classified evidence with an explicit unavailable marker; unsafe legacy role strings are omitted with a marker rather than copied. User profiles, provider subjects, names, emails and avatars are excluded from these events.
+Approved producers are identity disconnection, session logout/revocation/cap/expiry and bounded host authentication denials. Denials are standalone refused decisions: primary persistence is attempted first, with a complete verified fallback envelope on failure or uncertainty. Their insert omits the previous-business-change check while keeping strict receipt checks; revocation producers retain that check. The reader validates each event-specific envelope; unknown producers remain pending for review. See the [session lifecycle record](session-lifecycle-evidence.md) for attribution and concurrency semantics. Profile-name edits use the existing atomic primary-audit contract, refusing the edit if evidence cannot commit. Unknown classification during disconnection retains conservatively PHI-classified evidence with an explicit unavailable marker; unsafe legacy role strings are omitted with a marker rather than copied. User profiles, provider subjects, names, emails and avatars are excluded from these events.
 
-General operation identifiers, external/plugin/R2 outboxes, supplementary authentication-event durability, policy-version revalidation and deployed operating acceptance remain open W4b work. See the [mutation evidence record](w4b-durable-mutation-evidence.md).
+General operation identifiers, external/plugin/R2 outboxes, other route-specific/plugin/service denial coverage, policy-version revalidation and deployed operating acceptance remain open W4b work. See the [mutation evidence record](w4b-durable-mutation-evidence.md).
+
+See the [host authentication-denial record](authentication-denial-evidence.md) for approved action/reason contracts, anonymous attribution, privacy and failure limits.

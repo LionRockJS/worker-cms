@@ -237,19 +237,24 @@ it('repairs a failed review marker write without changing or duplicating the pri
   expect((await outagePage(cfg)).items[0].review).not.toBeNull();
 });
 
-function reviewApp(role: string) {
+async function reviewApp(role: string) {
+  await env.DB.prepare(`INSERT INTO users (id, oauth_id, email, name, role) VALUES (?, 'fixture:audit-review', 'operator@example.invalid', 'Operator', ?)
+    ON CONFLICT(id) DO UPDATE SET role = excluded.role`).bind(actor.userId, role).run();
+  const session = await env.DB.prepare("INSERT INTO sessions (user_id, refresh_token_hash, expires_at) VALUES (?, ?, datetime('now', '+1 day')) RETURNING id")
+    .bind(actor.userId, `synthetic-review-${crypto.randomUUID()}`).first<{ id: number }>();
+  if (!session) throw new Error('Review fixture session missing');
   const app = new Hono<{ Bindings: Env; Variables: Variables }>();
-  app.use('*', async (c, next) => { c.set('user', { sub: actor.userId, role, email: 'operator@example.invalid', name: 'Operator', type: 'access', iat: 1, exp: 9999999999 }); await next(); });
+  app.use('*', async (c, next) => { c.set('user', { sub: actor.userId, sid: String(session.id), role, email: 'operator@example.invalid', name: 'Operator', type: 'access', iat: 1, exp: 9999999999 }); await next(); });
   app.route('/admin', auditRoutes);
   return app;
 }
 
 it('gates review actions and journals detail reads before returning private diagnostics', async () => {
   const id = (await recordAuditOutage(cfg, 'audit-write', [row], actor))!;
-  const app = reviewApp('viewer');
+  const app = await reviewApp('viewer');
   const denied = await app.fetch(new Request(`http://localhost/admin/audit/outages/${id}/reconcile`, { method: 'POST', body: new URLSearchParams() }), cfg);
   expect(denied.status).toBe(403); await denied.text();
-  const admin = reviewApp('admin');
+  const admin = await reviewApp('admin');
   const response = await admin.fetch(new Request(`http://localhost/admin/audit/outages/${id}`), cfg);
   expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('no-store');
   expect((await response.json() as { id: string }).id).toBe(id);
@@ -265,7 +270,7 @@ it('allows audit readers to inspect an incident but reserves review decisions fo
   await env.DB.prepare("INSERT INTO roles (name, label) VALUES ('auditor', 'Auditor')").run();
   await env.DB.prepare("INSERT INTO role_permissions (role, permission) VALUES ('auditor', 'audit:read')").run();
   const id = (await recordAuditOutage(cfg, 'audit-write', [row], actor))!;
-  const app = reviewApp('auditor');
+  const app = await reviewApp('auditor');
   const read = await app.fetch(new Request(`http://localhost/admin/audit/outages/${id}`), cfg);
   expect(read.status).toBe(200); await read.text();
   const write = await app.fetch(new Request(`http://localhost/admin/audit/outages/${id}/reconcile`, { method: 'POST',
@@ -280,7 +285,7 @@ it('does not render a stale all-green heartbeat as healthy', async () => {
   const health = await (await cfg.AUDIT_OUTAGE_BUCKET!.get(key))!.json<Record<string, unknown>>();
   health.checkedAt = new Date(Date.now() - 16 * 60_000).toISOString();
   await cfg.AUDIT_OUTAGE_BUCKET!.put(key, JSON.stringify(health));
-  const response = await reviewApp('admin').fetch(new Request('http://localhost/admin/audit/review'), cfg);
+  const response = await (await reviewApp('admin')).fetch(new Request('http://localhost/admin/audit/review'), cfg);
   expect(response.status).toBe(200);
   const html = await response.text();
   const payload = JSON.parse(html.match(/<script id="cms-render-payload"[^>]*>(.*?)<\/script>/s)![1]);

@@ -30,6 +30,7 @@ import type { Env, Variables, WorkerEnv } from './types';
 import { ingestSubmissions } from './core/db/submission-ingest';
 import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
 import { SessionEvidenceUnavailableError } from './core/auth/session-evidence';
+import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
 import { maintainSessionHygiene } from './core/auth/sessions';
 import { coreExtensions } from './core/extensions';
 import { withD1Sessions } from './core/http/d1-sessions';
@@ -186,6 +187,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof AuthDenialEvidenceUnavailableError) return c.json({ error: 'authentication_denial_evidence_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof SessionEvidenceUnavailableError) return c.json({ error: 'session_lifecycle_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof RegulatedWritesUnavailableError) return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (String(err).includes('sensitivity_reduction_requires_review')) {

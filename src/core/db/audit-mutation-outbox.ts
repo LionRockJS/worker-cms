@@ -4,22 +4,24 @@ import { auditDeliveryEvidence } from './audit';
 import { abortIf } from './transaction-guard';
 import { recordAuditOutage } from './audit-outages';
 import { safeRoleAuditValue } from '../auth/role-mutation-sql';
+import { validDenialDetail } from '../auth/denial-contract';
 
 export const AUDIT_OUTBOX_MAX_ATTEMPTS = 8;
 
-/** Batch immediately after a single D1 revocation; never execute separately. */
-export function auditOutboxEvidence(env: Env, envelope: AuditEnvelope): MutationAuditEvidence {
+/** Batch immediately after a single D1 revocation. Audit-only denials explicitly
+ * omit the previous-business-change assertion; receipt verification stays strict. */
+export function auditOutboxEvidence(env: Env, envelope: AuditEnvelope, options: { requirePreviousChange?: boolean } = {}): MutationAuditEvidence {
   const payload = JSON.stringify(envelope);
   const id = envelope.row.eventId;
   if (!id || !envelope.row.occurredAt || new TextEncoder().encode(payload).length > 16384) throw new Error('Invalid outbox evidence');
   return {
     write: env.DB.prepare(`INSERT INTO audit_mutation_outbox (event_id, envelope)
-      VALUES (?, CASE WHEN changes() = 1 THEN ? ELSE json('{') END)`).bind(id, payload),
+      VALUES (?, ${options.requirePreviousChange === false ? '?' : "CASE WHEN changes() = 1 THEN ? ELSE json('{') END"})`).bind(id, payload),
     guard: abortIf(env, 'changes() <> 1 OR NOT EXISTS (SELECT 1 FROM audit_mutation_outbox WHERE event_id = ? AND envelope = ? AND attempts = 0 AND next_attempt_at = 0)', [id, payload]),
   };
 }
 
-// Identity disconnection and session revocation/cleanup are approved producers. Unknown or
+// Identity/session revocations and bounded authentication denials are approved producers. Unknown or
 // malformed envelopes stay pending for review; never silently drop evidence.
 function readEnvelope(id: string, payload: string): AuditEnvelope {
   const envelope = JSON.parse(payload) as AuditEnvelope;
@@ -30,13 +32,22 @@ function readEnvelope(id: string, payload: string): AuditEnvelope {
     || !keysMatch(row, ['eventId', 'occurredAt', 'action', 'eventClass', 'retentionClass', 'outcome', 'dataClass',
       'targetType', 'targetId', 'targetIds', 'targetCount', 'containerKey', 'queryFingerprint', 'detail'])
     || !keysMatch(actor, ['userId', 'roles', 'sessionSid', 'via']) || !keysMatch(request, ['requestId', 'sourceIp', 'userAgent'])
-    || row.outcome !== 'success' || !['none', 'pii', 'phi'].includes(row.dataClass)
-    || !/^\d+$/.test(row.targetId ?? '') || row.targetCount !== 1
+    || !['none', 'pii', 'phi'].includes(row.dataClass)
     || row.targetIds !== null || row.containerKey !== null || row.queryFingerprint !== null
-    || (actor.userId !== null && !/^\d+$/.test(actor.userId)) || (actor.roles !== null && !safeRoleAuditValue(actor.roles))
-    || (actor.sessionSid !== null && !/^\d+$/.test(actor.sessionSid))
-    || !row.detail || typeof row.detail.classification_unavailable !== 'boolean' || typeof row.detail.roles_unavailable !== 'boolean'
+    || (actor.userId !== null && (typeof actor.userId !== 'string' || !/^\d+$/.test(actor.userId))) || (actor.roles !== null && !safeRoleAuditValue(actor.roles))
+    || (actor.sessionSid !== null && (typeof actor.sessionSid !== 'string' || !/^\d+$/.test(actor.sessionSid)))
+    || !row.detail
     || Object.values(request).some(value => value !== null && typeof value !== 'string')) throw new Error('Outbox evidence requires review');
+  if (row.outcome === 'denied') {
+    const permission = row.action === 'permission.denied';
+    if (row.eventClass !== 'auth' || row.retentionClass !== 'auth' || row.targetType !== null || row.targetId !== null || row.targetCount !== null
+      || actor.via !== null || !validDenialDetail(row.action, row.detail)
+      || (permission ? actor.userId === null || actor.sessionSid === null
+        : actor.userId !== null || actor.roles !== null || actor.sessionSid !== null)) throw new Error('Outbox denial evidence requires review');
+    return envelope;
+  }
+  if (row.outcome !== 'success' || !/^\d+$/.test(row.targetId ?? '') || row.targetCount !== 1
+    || typeof row.detail.classification_unavailable !== 'boolean' || typeof row.detail.roles_unavailable !== 'boolean') throw new Error('Outbox evidence requires review');
   if (row.action === 'user.oauth-disconnect') {
     if (row.eventClass !== 'admin' || row.retentionClass !== 'admin_config' || row.targetType !== 'user_oauth_identity' || actor.via !== null
       || actor.userId === null || actor.sessionSid === null

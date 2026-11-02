@@ -21,7 +21,7 @@ import {
   refreshCookieName,
   setAuthCookie,
 } from '../core/auth/cookies';
-import { logAuthEvent } from '../core/db/audit';
+import { recordAuthDenial } from '../core/auth/denials';
 import { registerOAuthUser } from '../core/auth/registration';
 import { linkOAuthIdentity, OAuthIdentityConflictError, updateOAuthProfile } from '../core/auth/oauth-account';
 import { currentOAuthLinkSession } from '../core/auth/oauth-link-session';
@@ -348,7 +348,8 @@ async function findUserByOAuthIdentity(db: D1DatabaseClient, oauthId: string): P
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Throttle the endpoints involved in credential issuance.
-const authRateLimit = rateLimitByIP((env) => env.AUTH_RATE_LIMITER);
+const authRateLimit = rateLimitByIP((env) => env.AUTH_RATE_LIMITER, (c) =>
+  recordAuthDenial(c, c.req.path === '/auth/start' ? 'auth.start' : c.req.path === '/auth/refresh' ? 'auth.refresh' : 'auth.login', { reason: 'rate_limited' }));
 authRoutes.use('/start', authRateLimit);
 authRoutes.use('/callback', authRateLimit);
 authRoutes.use('/refresh', authRateLimit);
@@ -414,6 +415,7 @@ authRoutes.get('/start', async (c) => {
   const linkRequested = c.req.query('link') === '1';
   const linkUserId = linkRequested ? (await currentOAuthLinkSession(c))?.userId : null;
   if (linkRequested && !linkUserId) {
+    await recordAuthDenial(c, 'auth.start', { reason: 'link_session_expired' });
     return c.redirect('/auth/login?error=link_session_expired');
   }
 
@@ -470,7 +472,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
   const { code, state, error } = params;
 
   if (error) {
-    return c.redirect(`/auth/login?error=${encodeURIComponent(error)}`);
+    return c.redirect('/auth/login?error=provider_error');
   }
   if (!code || !state) {
     return c.redirect('/auth/login?error=missing_params');
@@ -660,7 +662,7 @@ async function auditedOAuthCallback(c: AppContext, params: OAuthCallbackParams):
   const location = response.headers.get('Location') ?? '';
   if (location.startsWith('/auth/login?error=')) {
     const reason = new URLSearchParams(location.slice(location.indexOf('?') + 1)).get('error');
-    logAuthEvent(c, 'auth.login', { outcome: 'denied', detail: { reason: reason ?? 'unknown' } });
+    await recordAuthDenial(c, 'auth.login', { reason: reason ?? 'unknown' });
   }
   return response;
 }
@@ -698,6 +700,7 @@ authRoutes.get('/logout', (c) => c.text('Method Not Allowed', 405));
 authRoutes.post('/refresh', async (c) => {
   const refreshToken = readAuthCookie(c, refreshCookieName);
   if (!refreshToken) {
+    await recordAuthDenial(c, 'auth.refresh', { reason: 'no_refresh_token' });
     return c.json({ error: 'no_refresh_token' }, 401);
   }
 
@@ -705,7 +708,7 @@ authRoutes.post('/refresh', async (c) => {
   if (!rotated.ok) {
     // Denials remain supplementary authentication events. Successful rotation
     // and grace access already have durable evidence in the session service.
-    logAuthEvent(c, 'auth.refresh', { outcome: 'denied', detail: { reason: rotated.error } });
+    await recordAuthDenial(c, 'auth.refresh', { reason: rotated.error });
     return c.json({ error: rotated.error }, 401);
   }
 
