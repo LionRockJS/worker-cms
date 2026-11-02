@@ -1,3 +1,4 @@
+import { mutateHostPageTag } from '../../core/pages/tag-association-evidence';
 import { rejectCrossSiteRequest } from '../../core/http/headers';
 // Admin JSON API endpoints.
 
@@ -185,42 +186,28 @@ apiRoutes.get('/api/tags/:type', requirePermission('content:read'), async (c) =>
   })));
 });
 
+function associationId(value:string|undefined):number|null {
+  if(!value||!/^\d+$/.test(value))return null;
+  const id=Number(value);
+  return Number.isSafeInteger(id)&&id>0?id:null;
+}
+
 apiRoutes.post('/api/page/:pageId/tag/:tagId', requirePermission('content:write'), async (c) => {
-  const pageId = parseInt(c.req.param('pageId'), 10);
-  const tagId = parseInt(c.req.param('tagId'), 10);
-  const existing = await c.env.DB.prepare(
-    'SELECT id FROM page_tags WHERE page_id = ? AND tag_id = ?',
-  )
-    .bind(pageId, tagId)
-    .first<{ id: number }>();
-  if (existing) {
-    return c.json({ type: 'ADD_PAGE_TAG', payload: { success: false, message: 'tag exist', id: existing.id } });
-  }
-  const result = await c.env.DB.prepare('INSERT INTO page_tags (page_id, tag_id) VALUES (?, ?)')
-    .bind(pageId, tagId)
-    .run();
-  const pageTag = await c.env.DB.prepare('SELECT id FROM page_tags WHERE rowid = ?')
-    .bind(result.meta.last_row_id)
-    .first<{ id: number }>();
-  await c.env.DB.prepare('UPDATE pages SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(pageId).run();
-  return c.json({ type: 'ADD_PAGE_TAG', payload: { success: true, id: pageTag?.id } });
+  const pageId=associationId(c.req.param('pageId')),tagId=associationId(c.req.param('tagId'));
+  if(pageId===null||tagId===null)return c.json({error:'invalid_association_id'},400);
+  const result=await mutateHostPageTag(c,{action:'add',pageId,tagId});
+  if(!result)return c.json({error:'association_target_not_found'},404);
+  return c.json({type:'ADD_PAGE_TAG',payload:result.created?{success:true,id:result.id}:{success:false,message:'tag exist',id:result.id}});
 });
 
 apiRoutes.delete('/api/page/remove/page_tag/:id', requirePermission('content:write'), async (c) => deletePageTagApi(c));
 apiRoutes.delete('/api/page_tag/:id', requirePermission('content:write'), async (c) => deletePageTagApi(c));
 
 async function deletePageTagApi(c: AppContext) {
-  const id = parseInt(c.req.param('id') ?? '', 10);
-  const pageTag = await c.env.DB.prepare('SELECT page_id FROM page_tags WHERE id = ?')
-    .bind(id)
-    .first<{ page_id: number }>();
-  await c.env.DB.prepare('DELETE FROM page_tags WHERE id = ?').bind(id).run();
-  if (pageTag) {
-    await c.env.DB.prepare('UPDATE pages SET updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .bind(pageTag.page_id)
-      .run();
-  }
-  return c.json({ type: 'DELETE_PAGE_TAG', payload: { success: true, id } });
+  const id=associationId(c.req.param('id'));
+  if(id===null)return c.json({error:'invalid_association_id'},400);
+  await mutateHostPageTag(c,{action:'remove',id});
+  return c.json({type:'DELETE_PAGE_TAG',payload:{success:true,id}});
 }
 
 // ── Lect live sync: LWW fields + Y.Text richtext (WebSocket) ─────────────────

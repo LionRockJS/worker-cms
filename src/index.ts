@@ -1,3 +1,4 @@
+import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
 import { PageLifecycleUnavailableError } from './core/pages/lifecycle-mutation-evidence';
 import { ContentBatchEvidenceUnavailableError } from './core/pages/batch-mutation-evidence';
 import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
@@ -189,6 +190,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof PageTagEvidenceUnavailableError) return c.json({ error: 'page_tag_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof PageLifecycleUnavailableError) return c.json({ error: 'page_lifecycle_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof ContentBatchEvidenceUnavailableError) return c.json({ error: 'content_batch_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof AuthDenialEvidenceUnavailableError) return c.json({ error: 'authentication_denial_evidence_unavailable' }, 503, { 'Cache-Control': 'no-store' });

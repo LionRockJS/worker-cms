@@ -34,7 +34,7 @@ HTTP/direct execution requires the owning session and current capability: `conte
 
 Local page/version/link state and the exact success receipt share one private-D1 batch. External publication/withdrawal and hooks happen after that commit; their failure does not roll it back. The covered callers suppress duplicate legacy best-effort page mutation logs. A lost acknowledgment returns unavailable even if the transaction committed, emits incomplete coarse health evidence when available and does not claim rollback. Reconcile retained state and receipts before retrying.
 
-Operation IDs are generated for correlation; they do not make new requests idempotent. Job cursor/result persistence, cross-slice recovery, external delivery/reconciliation and shared uncertain-result lookup remain R4/R5. Legacy DB-only trash helpers used by plugin APIs remain outside this guarded host slice under R3. Host API page-tag association writers remain R1. See the [six-package scope register](w4b-remaining-scope-2026-11-02.md).
+Operation IDs are generated for correlation; they do not make new requests idempotent. Job cursor/result persistence, cross-slice recovery, external delivery/reconciliation and shared uncertain-result lookup remain R4/R5. Legacy DB-only trash helpers used by plugin APIs remain outside this guarded host slice under R3. Host API page-tag association writers are covered by the subsequent [association record](page-tag-association-evidence.md); the quick-create alias and final writer reconciliation remain R1. See the [six-package scope register](w4b-remaining-scope-2026-11-02.md).
 
 No production migration, deployment, push or compliance sign-off occurred. Regulated business writes remain blocked; this is local repository evidence.
 
