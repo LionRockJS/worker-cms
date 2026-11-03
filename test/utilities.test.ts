@@ -132,6 +132,17 @@ describe('lect utilities', () => {
     }]);
   });
 
+  it('keeps a flat lect that only shares a key name with legacy original JSON', () => {
+    const lect = safeParseLect(JSON.stringify({
+      form: 'e_procurement',
+      status: 'draft',
+      values: '{"company":"CPD"}',
+      tags: 'urgent',
+    }));
+
+    expect(lect).toMatchObject({ form: 'e_procurement', status: 'draft', values: '{"company":"CPD"}', tags: 'urgent' });
+  });
+
   it('deep-merges objects while replacing repeatable arrays by index', () => {
     const merged = mergeLects(
       {

@@ -634,9 +634,15 @@ function scalarToString(value: unknown): string {
   return String(value);
 }
 
+const LEGACY_STRUCTURED_KEYS = new Set(['attributes', 'pointers', 'values', 'items', 'blocks', 'tags']);
+
+// Legacy original JSON has only these keys; a flat lect may merely share one
+// (a plugin's `values` field) and must not be converted, which drops the rest.
 function isLegacyStructuredLike(value: unknown): value is LegacyStructuredLike {
-  return isPlainObject(value)
-    && ('attributes' in value || 'pointers' in value || 'values' in value || 'blocks' in value || 'tags' in value);
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  return keys.some((key) => key !== 'items' && LEGACY_STRUCTURED_KEYS.has(key))
+    && keys.every((key) => LEGACY_STRUCTURED_KEYS.has(key));
 }
 
 function isScalar(value: unknown): value is LectScalar {
