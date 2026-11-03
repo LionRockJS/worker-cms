@@ -35,7 +35,8 @@ export async function countPluginSequences(db: D1DatabaseClient, pluginId: strin
   return row?.total ?? 0;
 }
 
-/** Advances a counter by one and returns the new value (the first is 1). */
+/** DB-only compatibility/fixture helper. Production advances use sequence-evidence.
+ * Advances a counter by one and returns the new value (the first is 1). */
 export async function nextPluginSequence(db: D1DatabaseClient, pluginId: string, key: string): Promise<number> {
   const row = await db
     .prepare(

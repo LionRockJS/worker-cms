@@ -34,7 +34,7 @@ import { requestContext } from '../http/request-context';
 const ADMIN_ENTITY_TYPES = new Set([
   'user', 'user_oauth_identity', 'role', 'plugin', 'settings', 'locale', 'shared_credits', 'page_type', 'block_type',
   // Reading the audit log is itself an administrative act and is kept as long.
-  'audit', 'plugin_state',
+  'audit', 'plugin_state', 'plugin_sequence',
 ]);
 
 /** Longest user-agent we keep; the full string is unbounded and adds nothing. */
@@ -288,6 +288,36 @@ export function serviceMutationAuditEvidence(env: Env, entry: AuditEntry, actor:
   dataClass: AuditRow['dataClass'], policy: DataClassMap, context?: AppContext): MutationAuditEvidence {
   return preparedAuditEvidence(env,{...mutationRow(entry),dataClass},actor,
     context?requestFrom(context):requestContext.getStore()?.auditRequest??NO_REQUEST,false,undefined,policy);
+}
+
+/** Trusted SQL projections for a transaction-time plan. Values remain bound;
+ * feature SQL stays in its owner. Batch write/guard BEFORE the business write,
+ * then finalGuard AFTER it. Both guards verify the complete audit envelope.
+ * This permits serialized counters without a stale Worker-side CAS snapshot. */
+export function servicePlannedMutationAuditEvidence(env: Env, entry: AuditEntry, actor: AuditActor,
+  dataClass: AuditRow['dataClass'], policy: DataClassMap, context: AppContext,
+  projection: (eventId: string) => {
+    write: { sql: string; bindings: (string | number | null)[] };
+    before: { sql: string; bindings: (string | number | null)[] };
+    after: { sql: string; bindings: (string | number | null)[] };
+  }): MutationAuditEvidence & { finalGuard: D1PreparedStatement; eventId: string } {
+  const row = { ...mutationRow(entry), dataClass, eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(),
+    detail: { ...entry.detail, classification_policy_version: policy.version } };
+  const request = requestFrom(context), projected = projection(row.eventId);
+  function parameters(part: typeof projected.write) {
+    const { values, expressions } = auditParameters(row, actor, request);
+    expressions[20] = `json_patch(?, (${part.sql}))`;
+    return { expressions, values: [...values, ...part.bindings] };
+  }
+  function verify(part: typeof projected.write, changed: boolean) {
+    const { expressions, values } = parameters(part);
+    const matches = AUDIT_COLUMNS.map((column, index) => `${column} IS ${expressions[index]}`).join(' AND ');
+    // A missing projection/result must never match a receipt rewritten to NULL.
+    return abortIf(env, `${changed ? 'changes()<>1 OR ' : ''}NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches} AND detail IS NOT NULL) OR (${classificationPolicyFailureSql(policy)})`, values);
+  }
+  const { expressions, values } = parameters(projected.write);
+  return { eventId: row.eventId, write: env.DB.prepare(`${INSERT_COLUMNS} VALUES (${expressions.join(', ')})`).bind(...values),
+    guard: verify(projected.before, true), finalGuard: verify(projected.after, false) };
 }
 
 /** Classified local mutations shared by HTTP and trusted job execution.

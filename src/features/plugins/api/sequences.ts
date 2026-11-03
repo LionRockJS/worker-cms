@@ -10,11 +10,11 @@ import { pluginReadActor } from './read-audit';
 import type { AppContext } from '../../../core/http/context';
 import {
   MAX_SEQUENCES_PER_PLUGIN,
-  countPluginSequences,
   getPluginSequence,
   isValidSequenceKey,
-  nextPluginSequence,
 } from '../sequences';
+
+import { capturePluginSequenceAuthority, advancePluginSequence } from '../sequence-evidence';
 
 export const sequencesApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -45,13 +45,10 @@ sequencesApiRoutes.post('/sequences/:key/next', async (c) => {
   const key = c.req.param('key');
   if (!isValidSequenceKey(key)) return c.json({ error: 'invalid_key' }, 400);
 
-  const pluginId = auth.plugin.manifest.id;
-  if (await getPluginSequence(c.env.DB, pluginId, key) === 0
-    && await countPluginSequences(c.env.DB, pluginId) >= MAX_SEQUENCES_PER_PLUGIN) {
+  const authority = await capturePluginSequenceAuthority(c, auth);
+  const value = await advancePluginSequence(c, authority, key);
+  if (value === 'too_many_sequences') {
     return c.json({ error: 'too_many_sequences', max_sequences: MAX_SEQUENCES_PER_PLUGIN }, 409);
   }
-
-  const value = await nextPluginSequence(c.env.DB, pluginId, key);
-  announceSequence(c, pluginId, key);
   return c.json({ key, value });
 });
