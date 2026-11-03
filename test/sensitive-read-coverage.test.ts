@@ -84,7 +84,8 @@ it.each([
   const response = await api(method, path, body);
   expect(response.status).toBeLessThan(300);
   const row = await env.DB.prepare('SELECT actor_user_id, acting_via, data_class, target_count, detail FROM audit_events WHERE action = ?').bind(action).first();
-  expect(row).toMatchObject({ actor_user_id: '9701', acting_via: 'coverage', data_class: 'phi', target_count: 1, detail: null });
+  const registration = await env.DB.prepare('SELECT uuid FROM plugins WHERE id=?').bind(pluginRowId).first<{ uuid: string }>();
+  expect(row).toMatchObject({ actor_user_id: method === 'POST' ? '9701' : null, acting_via: method === 'POST' ? 'coverage' : `plugin:${registration!.uuid}`, data_class: 'phi', target_count: 1, detail: null });
   if (method !== 'POST') expect(await response.text()).toContain('stored-private-value');
 });
 
@@ -93,8 +94,9 @@ it('withholds an update response containing previously stored fields when its au
   const response = await api('PATCH', '/pages/9703', { lect: { name: 'Updated' } });
   expect(response.status).toBe(503);
   expect(await response.text()).not.toContain('stored-private-value');
-  // This is response protection, not an atomic mutation receipt (W4b).
-  expect((await env.DB.prepare('SELECT lect FROM pages WHERE id = 9703').first<{ lect: string }>())?.lect).toContain('Updated');
+  // Covered updates now require durable source/mutation evidence before commit.
+  expect((await env.DB.prepare('SELECT lect FROM pages WHERE id = 9703').first<{ lect: string }>())?.lect).toBe(JSON.stringify({ secret: 'stored-private-value' }));
+  expect(await env.DB.prepare("SELECT 1 FROM audit_events WHERE action='page.update'").first()).toBeNull();
 });
 
 it('covers ensured existing tag values without duplicating a publication transfer', async () => {

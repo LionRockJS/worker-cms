@@ -446,18 +446,3 @@ export function bulkPageInsertStatements(db: D1DatabaseClient, row: BulkPageRow)
     ).bind(row.versionId, crypto.randomUUID(), row.createdAt, row.createdAt, row.id, row.lect, 'create'),
   ];
 }
-
-export function bulkPageUpdateStatements(
-  db: D1DatabaseClient,
-  row: { id: number; versionId: number; updatedAt: string; lect: string; action: string },
-): D1PreparedStatement[] {
-  return [
-    db.prepare(
-      'UPDATE pages SET lect = ?, updated_at = ? WHERE id = ?',
-    ).bind(row.lect, row.updatedAt, row.id),
-    db.prepare(
-      `INSERT INTO page_versions (id, uuid, created_at, updated_at, page_id, lect, action)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(row.versionId, crypto.randomUUID(), row.updatedAt, row.updatedAt, row.id, row.lect, row.action),
-  ];
-}

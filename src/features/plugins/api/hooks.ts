@@ -2,7 +2,7 @@
 // is the calling plugin, not a signed-in user, so these never read c.get('user').
 
 import type { AppContext } from '../../../core/http/context';
-import { logAuditBatchVia } from '../../../core/db/audit';
+import { logAuditBatchVia, type AuditActor } from '../../../core/db/audit';
 import { actingUserId } from './create';
 import { deliverHooks, type HookEvent, type HookPage } from '../hooks';
 
@@ -11,17 +11,18 @@ import { deliverHooks, type HookEvent, type HookPage } from '../hooks';
 /**
  * Fires the lifecycle hook to subscribed plugins and records an audit row, both
  * best-effort via waitUntil. Mirrors dispatchHook but attributes the action to
- * the calling plugin instead of a CMS user, which the audit envelope carries as
- * a null actor plus the plugin id in acting_via.
+ * the calling plugin instead of a CMS user. Writers that already committed
+ * durable evidence suppress the legacy event and supply their verified service
+ * actor for the separate hook delivery.
  */
 export function emitPluginHook(c: AppContext, event: HookEvent, page: HookPage, pluginId: string): void {
   emitPluginHooks(c, event, [page], pluginId);
 }
 
-export function emitPluginHooks(c: AppContext, event: HookEvent, pages: HookPage[], pluginId: string): void {
+export function emitPluginHooks(c: AppContext, event: HookEvent, pages: HookPage[], pluginId: string, options: { evidenceCommitted?: boolean; actor?: AuditActor } = {}): void {
   if (!pages.length) return;
 
-  const auditPromise = logAuditBatchVia(c, pluginId, pages.map((page) => ({
+  const auditPromise = options.evidenceCommitted ? Promise.resolve() : logAuditBatchVia(c, pluginId, pages.map((page) => ({
     action: `page.${event}`,
     entityType: 'page',
     entityId: page.id,
@@ -31,7 +32,7 @@ export function emitPluginHooks(c: AppContext, event: HookEvent, pages: HookPage
   // deliverHooks tolerates a null user (passes user: null in the payload) and
   // chunks the pages so a bulk delete costs a fetch per hundred, not per page.
   const userId = actingUserId(c);
-  const hookPromise = deliverHooks(c.env, undefined, event, pages, { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: pluginId });
+  const hookPromise = deliverHooks(c.env, undefined, event, pages, options.actor ?? { userId: userId === null ? null : String(userId), roles: null, sessionSid: null, via: pluginId });
 
   const combined = Promise.allSettled([auditPromise, hookPromise]);
   try {

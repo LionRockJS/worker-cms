@@ -21,7 +21,7 @@ import type {
 import type { LivePageSnapshot } from '../../../core/publish/adapter';
 import { copySensitivityStatement } from '../../../core/db/sensitivity';
 import type { AppContext } from '../../../core/http/context';
-import { authenticatePlugin, forbiddenPageType } from './auth';
+import { authenticatePlugin, forbiddenPageType, forbiddenPageTypeBody } from './auth';
 import { auditReads, ReadAuditUnavailableError, recordPageReads, recordRead, recordTagReads } from '../../../core/http/access-log';
 import { countPageMetadata } from '../../../core/db/count-metadata';
 import { pluginReadActor as apiActor } from './read-audit';
@@ -43,12 +43,10 @@ import {
   actingUserId,
   allocateSlug,
   bulkPageInsertStatements,
-  bulkPageUpdateStatements,
   cmsId,
   cmsTimestamp,
   createPages,
   existingSlugSet,
-  generatedPageVersionIds,
 } from './create';
 import type { HookPage } from '../hooks';
 import { checkCreateLimits, createCandidate } from '../limits';
@@ -59,11 +57,12 @@ import { advancedSearchOperator, advancedSearchOrder, advancedSearchSort, perfor
 import { blueprintToLect, mergeLects, safeParseLect, stringifyLect } from '../../../core/db/lect';
 import { resolveCmsConfig } from '../../../core/db/content-config';
 import { withDraftMetadata } from '../../../core/db/page-logic';
-import { ensureUniqueDraftSlug, savePageVersion, trashDraftPage, trashDraftPages } from '../../../core/db/admin-queries';
+import { ensureUniqueDraftSlug, trashDraftPage, trashDraftPages } from '../../../core/db/admin-queries';
 import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
 import { liveMapForDraftPages, publishPagesToTargets, unpublishPageFromTargets, unpublishPagesFromTargets } from '../../../core/publish';
-import { notifyPageSaved, setDraftPageTags } from '../../../core/db/page-store';
+import { notifyPageSaved } from '../../../core/db/page-store';
+import { capturePluginPageUpdateAuthority, readPluginPageUpdateSources, commitPluginPageUpdates, type PluginPageUpdate, type PluginPageUpdateDenial } from '../page-update-evidence';
 
 const DUPLICATE_BATCH = 100;
 const DUPLICATE_MAX_PER_CALL = 1000;
@@ -920,101 +919,42 @@ pagesApiRoutes.post('/pages/duplicate', async (c) => {
 pagesApiRoutes.patch('/pages/batch', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
-
+  const authority = await capturePluginPageUpdateAuthority(c, auth);
   const body = await c.req.json().catch(() => null) as { pages?: unknown } | null;
   const items = body && Array.isArray(body.pages) ? body.pages : null;
   if (!items) return c.json({ error: 'invalid_body' }, 400);
   if (items.length > MAX_BATCH) return c.json({ error: 'batch_too_large', max: MAX_BATCH }, 413);
-
   const candidates: Array<{ index: number; id: number; input: PageInput }> = [];
   const errors: Array<{ index: number; error: string }> = [];
   const seenIds = new Set<number>();
   for (let index = 0; index < items.length; index++) {
     const raw = items[index];
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      errors.push({ index, error: 'invalid_item' });
-      continue;
-    }
-    const input = raw as PageInput;
-    const id = asPositiveSafeInteger(input.id);
-    if (id === null) {
-      errors.push({ index, error: 'invalid_id' });
-      continue;
-    }
-    if (seenIds.has(id)) {
-      errors.push({ index, error: 'duplicate_id' });
-      continue;
-    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { errors.push({ index, error: 'invalid_item' }); continue; }
+    const input = raw as PageInput, id = asPositiveSafeInteger(input.id);
+    if (id === null) { errors.push({ index, error: 'invalid_id' }); continue; }
+    if (seenIds.has(id)) { errors.push({ index, error: 'duplicate_id' }); continue; }
     seenIds.add(id);
-    if (!Object.hasOwn(input, 'lect') || !input.lect || typeof input.lect !== 'object' || Array.isArray(input.lect)) {
-      errors.push({ index, error: 'invalid_lect' });
-      continue;
-    }
+    if (!Object.hasOwn(input, 'lect') || !input.lect || typeof input.lect !== 'object' || Array.isArray(input.lect)) { errors.push({ index, error: 'invalid_lect' }); continue; }
     candidates.push({ index, id, input });
   }
-
   if (!candidates.length) return c.json({ updated: [], errors, count: 0 });
-
-  const ids = candidates.map((candidate) => candidate.id);
-  const rows = await c.env.DB.prepare(
-    `SELECT * FROM pages WHERE id IN (${ids.map(() => '?').join(',')})`,
-  ).bind(...ids).all<Page>();
-  const pageById = new Map(rows.results.map((page) => [page.id, page]));
-  const writable: Array<{ index: number; input: PageInput; page: Page }> = [];
-  for (const candidate of candidates) {
-    const page = pageById.get(candidate.id);
-    if (!page) {
-      errors.push({ index: candidate.index, error: 'not_found' });
-      continue;
-    }
-    if (!pageTypeScopeAllows(auth.allowedTypes, page.page_type ?? '')) {
-      errors.push({ index: candidate.index, error: 'forbidden_page_type' });
-      continue;
-    }
-    writable.push({ index: candidate.index, input: candidate.input, page });
-  }
-
-  if (!writable.length) {
-    errors.sort((a, b) => a.index - b.index);
-    return c.json({ updated: [], errors, count: 0 });
-  }
-
+  const source = await readPluginPageUpdateSources(c, authority, candidates.map(row => row.id));
   const config = await resolveCmsConfig(c.env);
-  const versionIds = await generatedPageVersionIds(c.env.DB, writable.length);
-  const updatedAt = cmsTimestamp();
-  const statements: D1PreparedStatement[] = [];
-  const updated: ApiPage[] = [];
-  const hookPages: HookPage[] = [];
-
-  for (let index = 0; index < writable.length; index++) {
-    const { input, page } = writable[index];
-    const pageType = page.page_type ?? 'default';
-    const mergedLect = mergeLects(
-      mergeLects(blueprintToLect(pageType, config.blueprint, config.defaultLanguage), safeParseLect(page.lect)),
-      coerceLect(input.lect),
-    );
-    const lect = stringifyLect(withDraftMetadata(mergedLect, 0));
-    statements.push(...bulkPageUpdateStatements(c.env.DB, {
-      id: page.id,
-      versionId: versionIds[index],
-      updatedAt,
-      lect,
-      action: versionAction(input.version_action, 'update'),
-    }));
-    updated.push(serializePage({ ...page, lect, updated_at: updatedAt }));
-    hookPages.push({ id: page.id, uuid: page.uuid, page_type: page.page_type, name: page.name, slug: page.slug });
+  const changes: PluginPageUpdate[] = [], denied: PluginPageUpdateDenial[] = [];
+  for (const candidate of candidates) {
+    const page = source.pages.find(row => row.id === candidate.id);
+    if (!page) { errors.push({ index: candidate.index, error: 'not_found' }); continue; }
+    if (!pageTypeScopeAllows(authority.allowed, page.page_type ?? '')) {
+      errors.push({ index: candidate.index, error: 'forbidden_page_type' }); denied.push({ page, reason: 'forbidden_page_type' }); continue;
+    }
+    const merged = mergeLects(mergeLects(blueprintToLect(page.page_type ?? 'default', config.blueprint, config.defaultLanguage), safeParseLect(page.lect)), coerceLect(candidate.input.lect));
+    changes.push({ before: page, next: { ...page, lect: stringifyLect(withDraftMetadata(merged, 0)) }, action: versionAction(candidate.input.version_action, 'update') });
   }
-
-  try {
-    await c.env.DB.batch(statements);
-  } catch (error) {
-    console.error('Plugin API batch update failed', error);
-    return c.json({ error: 'update_failed' }, 500);
-  }
-  emitPluginHooks(c, 'update', hookPages, auth.pluginId);
-  recordPageReads('page.update-result', updated, { actor: apiActor(c, auth.pluginId) });
-  errors.sort((a, b) => a.index - b.index);
-  return c.json({ updated, errors, count: updated.length });
+  const saved = await commitPluginPageUpdates(c, authority, source, changes, denied);
+  emitPluginHooks(c, 'update', saved.map(page => ({ id: page.id, uuid: page.uuid, page_type: page.page_type, name: page.name, slug: page.slug })), auth.pluginId, { evidenceCommitted: true, actor: authority.actor });
+  recordPageReads('page.update-result', saved, { actor: authority.actor });
+  errors.sort((a,b) => a.index-b.index);
+  return c.json({ updated: saved.map(serializePage), errors, count: saved.length });
 });
 
 // Update a page (PUT/PATCH are equivalent here — both partial-merge).
@@ -1024,78 +964,49 @@ pagesApiRoutes.patch('/pages/:id', (c) => updatePage(c));
 async function updatePage(c: AppContext): Promise<Response> {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
-
-  const id = asFiniteNumber(c.req.param('id'));
+  const authority = await capturePluginPageUpdateAuthority(c, auth);
+  const id = asPositiveSafeInteger(c.req.param('id'));
   if (id === null) return c.json({ error: 'invalid_id' }, 400);
-
-  const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(id).first<Page>();
-  if (!page) return c.json({ error: 'not_found' }, 404);
-  if (!pageTypeScopeAllows(auth.allowedTypes, page.page_type ?? '')) return forbiddenPageType(c, auth, page.page_type ?? '');
-
-  const body = await c.req.json().catch(() => null) as PageInput | null;
-  if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
-
-  let expectedLect: string | null = null;
-  if (Object.hasOwn(body, 'if_lect')) {
-    if (!body.if_lect || typeof body.if_lect !== 'object' || Array.isArray(body.if_lect)) {
-      return c.json({ error: 'invalid_if_lect' }, 400);
-    }
-    expectedLect = stringifyLect(coerceLect(body.if_lect));
+  const source = await readPluginPageUpdateSources(c, authority, [id]);
+  const page = source.pages[0];
+  if (!page) {
+    await commitPluginPageUpdates(c, authority, source, []);
+    return c.json({ error: 'not_found' }, 404);
   }
-
+  if (!pageTypeScopeAllows(authority.allowed, page.page_type ?? '')) {
+    await commitPluginPageUpdates(c, authority, source, [], [{ page, reason: 'forbidden_page_type' }]);
+    return c.json(forbiddenPageTypeBody(auth, page.page_type ?? ''), 403);
+  }
+  const body = await c.req.json().catch(() => null) as PageInput | null;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'invalid_body' }, 400);
+  if (Object.hasOwn(body, 'if_lect')) {
+    if (!body.if_lect || typeof body.if_lect !== 'object' || Array.isArray(body.if_lect)) return c.json({ error: 'invalid_if_lect' }, 400);
+    if (page.lect !== stringifyLect(coerceLect(body.if_lect))) {
+      await commitPluginPageUpdates(c, authority, source, [], [{ page, reason: 'version_precondition' }]);
+      return c.json({ error: 'version_conflict' }, 409);
+    }
+  }
+  let tags: number[] | undefined;
+  if (Array.isArray(body.tags)) {
+    tags = [...new Set(body.tags.map(Number).filter(Number.isFinite))];
+    if (tags.length > 5000 || tags.some(tag => !Number.isSafeInteger(tag) || tag <= 0)) return c.json({ error: 'invalid_tags' }, 400);
+  }
+  const parentId = 'page_id' in body ? asFiniteNumber(body.page_id) : page.page_id;
+  if (parentId !== null && (!Number.isSafeInteger(parentId) || parentId <= 0)) return c.json({ error: 'invalid_page_id' }, 400);
   const config = await resolveCmsConfig(c.env);
   const pageType = page.page_type ?? 'default';
-
   const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : page.name;
-  const slug = typeof body.slug === 'string' && body.slug.trim()
-    ? await ensureUniqueDraftSlug(c.env.DB, slugify(body.slug), id)
-    : page.slug;
-
-  // Merge: blueprint defaults ← stored lect ← incoming partial lect, so callers
-  // can send just the fields they changed.
-  const mergedLect = 'lect' in body
-    ? mergeLects(
-        mergeLects(blueprintToLect(pageType, config.blueprint, config.defaultLanguage), safeParseLect(page.lect)),
-        coerceLect(body.lect),
-      )
-    : safeParseLect(page.lect);
-  const lectVal = stringifyLect(withDraftMetadata(mergedLect, 0));
-
-  const weight = asFiniteNumber(body.weight) ?? page.weight;
-  const start = 'start' in body ? (typeof body.start === 'string' ? body.start : null) : page.start;
-  const end = 'end' in body ? (typeof body.end === 'string' ? body.end : null) : page.end;
-  const timezone = 'timezone' in body ? (typeof body.timezone === 'string' ? body.timezone : null) : page.timezone;
-  const parentId = 'page_id' in body ? asFiniteNumber(body.page_id) : page.page_id;
-
-  const update = expectedLect === null
-    ? c.env.DB.prepare(
-        'UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, lect=?, page_id=? WHERE id=?',
-      ).bind(name, slug, weight, start, end, timezone, lectVal, parentId, id)
-    : c.env.DB.prepare(
-        'UPDATE pages SET name=?, slug=?, weight=?, start=?, end=?, timezone=?, lect=?, page_id=? WHERE id=? AND lect=?',
-      ).bind(name, slug, weight, start, end, timezone, lectVal, parentId, id, expectedLect);
-  const updateResult = await update.run();
-  // Zero rows written is the conflict; more than one is not. `changes` counts
-  // more than the row this statement names: the `pages_updated_at` trigger
-  // performs its own UPDATE on the same row, and production D1 additionally
-  // counts internal index writes (the same reason chargeCredits detects
-  // success via RETURNING). Asserting exactly 1 therefore reported a spurious
-  // conflict for an update that had already been written — and, because the
-  // trigger only fires `WHEN old.updated_at < CURRENT_TIMESTAMP`, it did so
-  // for every update except a second one landing inside the same second.
-  if ((updateResult.meta?.changes ?? 0) < 1) {
-    return c.json({ error: 'version_conflict' }, 409);
-  }
-
-  await savePageVersion(c.env.DB, id, lectVal, versionAction(body.version_action, 'update'));
-  if ('tags' in body) await setDraftPageTags(c.env.DB, id, body.tags, true);
-
+  const slug = typeof body.slug === 'string' && body.slug.trim() ? await ensureUniqueDraftSlug(c.env.DB, slugify(body.slug), id) : page.slug;
+  const merged = 'lect' in body ? mergeLects(mergeLects(blueprintToLect(pageType, config.blueprint, config.defaultLanguage), safeParseLect(page.lect)), coerceLect(body.lect)) : safeParseLect(page.lect);
+  const next: Page = { ...page, name, slug, lect: stringifyLect(withDraftMetadata(merged, 0)), weight: asFiniteNumber(body.weight) ?? page.weight,
+    start: 'start' in body ? (typeof body.start === 'string' ? body.start : null) : page.start,
+    end: 'end' in body ? (typeof body.end === 'string' ? body.end : null) : page.end,
+    timezone: 'timezone' in body ? (typeof body.timezone === 'string' ? body.timezone : null) : page.timezone, page_id: parentId };
+  const [saved] = await commitPluginPageUpdates(c, authority, source, [{ before: page, next, tags, action: versionAction(body.version_action, 'update') }]);
   await notifyPageSaved(c.env, id);
-
-  const updated = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(id).first<Page>();
-  emitPluginHook(c, 'update', { id, uuid: page.uuid, page_type: pageType, name, slug }, auth.pluginId);
-  recordPageReads('page.update-result', [updated!], { actor: apiActor(c, auth.pluginId) });
-  return c.json({ page: serializePage(updated!) });
+  emitPluginHooks(c, 'update', [{ id, uuid: page.uuid, page_type: pageType, name, slug }], auth.pluginId, { evidenceCommitted: true, actor: authority.actor });
+  recordPageReads('page.update-result', [saved], { actor: authority.actor });
+  return c.json({ page: serializePage(saved) });
 }
 
 // Batch soft-delete pages to trash. Accepts { ids: number[] } (up to MAX_BATCH).
