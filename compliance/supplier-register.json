@@ -1,0 +1,126 @@
+{
+  "description": "Supplier register for 0xCMS (W10; A.5.19, A.5.20, A.5.21, A.5.23). One entry per supplier relationship, each tied to a supplier entry in asset-inventory.json. Services and data shared come from source. Agreement, risk assessment and review fields record evidence the organisation holds; they stay not-evidenced until someone records where that evidence is. Contract text and account details belong in the restricted evidence system, not here.",
+  "statuses": {
+    "agreement": { "not-evidenced": "No agreement recorded", "in-place": "Agreement executed; reference recorded", "not-required": "Assessed as not needing a specific agreement; reason recorded" },
+    "assessment": { "not-evidenced": "No risk assessment recorded", "done": "Risk assessment recorded with a date", "not-required": "Assessed as out of scope; reason recorded" }
+  },
+  "suppliers": [
+    {
+      "id": "cloudflare",
+      "inventoryId": "external:cloudflare",
+      "name": "Cloudflare",
+      "services": ["Workers", "Workers static assets", "Cron Triggers", "D1", "R2", "Durable Objects", "Queues", "Images", "Workers Rate Limiting", "Version metadata"],
+      "dataShared": ["personal", "content", "credential", "evidence", "financial"],
+      "phi": "If a deployment holds PHI, a BAA covering every service in this list is a release prerequisite. Confirm with Cloudflare which services the BAA covers; do not assume all of them are.",
+      "agreement": { "status": "not-evidenced", "reference": null },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "D1: wrangler d1 export, checked with tools/check-export.mjs. R2: copy objects through the S3-compatible API, including the audit archive. Durable Objects: PageSync holds only unsaved edits and FormOnce single-use tokens, both disposable. Queues: drain before cut-over; durable state is in DB.admin_jobs. Secrets: re-created by their owners, never exported.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "oauth-github",
+      "inventoryId": "external:oauth-providers",
+      "name": "GitHub (sign-in)",
+      "services": ["OAuth sign-in"],
+      "dataShared": ["personal"],
+      "phi": "Receives no PHI. Learns that a user signs in to this CMS.",
+      "agreement": { "status": "not-evidenced", "reference": null },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Remove from ENABLED_PROVIDERS. Users keep access only through another linked provider.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "oauth-google",
+      "inventoryId": "external:oauth-providers",
+      "name": "Google (sign-in)",
+      "services": ["OAuth sign-in"],
+      "dataShared": ["personal"],
+      "phi": "Receives no PHI. Learns that a user signs in to this CMS.",
+      "agreement": { "status": "not-evidenced", "reference": null },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Remove from ENABLED_PROVIDERS. Users keep access only through another linked provider.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "oauth-microsoft",
+      "inventoryId": "external:oauth-providers",
+      "name": "Microsoft (sign-in)",
+      "services": ["OAuth sign-in"],
+      "dataShared": ["personal"],
+      "phi": "Receives no PHI. Learns that a user signs in to this CMS.",
+      "agreement": { "status": "not-evidenced", "reference": null },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Remove from ENABLED_PROVIDERS. Users keep access only through another linked provider.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "oauth-apple",
+      "inventoryId": "external:oauth-providers",
+      "name": "Apple (sign-in)",
+      "services": ["Sign in with Apple"],
+      "dataShared": ["personal"],
+      "phi": "Receives no PHI. Learns that a user signs in to this CMS.",
+      "agreement": { "status": "not-evidenced", "reference": null },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Remove from ENABLED_PROVIDERS. Users keep access only through another linked provider.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "oauth-eventuai",
+      "inventoryId": "external:oauth-providers",
+      "name": "Eventuai identity provider (in-house oauth Worker)",
+      "services": ["OAuth sign-in", "role claims"],
+      "dataShared": ["personal", "credential"],
+      "phi": "Receives no PHI. Holds its own users' password hashes.",
+      "agreement": { "status": "not-required", "reference": "Operated by the same organisation; govern it as an internal system, not a supplier" },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Remove from ENABLED_PROVIDERS once users have another linked provider.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "github",
+      "inventoryId": "external:github",
+      "name": "GitHub (source and CI)",
+      "services": ["Repository hosting", "Actions", "CodeQL", "Dependabot"],
+      "dataShared": ["internal"],
+      "phi": "Receives no PHI as long as tests use synthetic data and no export is committed.",
+      "agreement": { "status": "not-evidenced", "reference": null },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Clone with full history; CI is a single workflow file.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "npm-registry",
+      "inventoryId": "external:npm-registry",
+      "name": "npm registry",
+      "services": ["Package distribution"],
+      "dataShared": [],
+      "phi": "Receives no data from deployments.",
+      "agreement": { "status": "not-required", "reference": "Public registry; managed as a supply-chain risk (A.5.21) through package-lock.json, Dependabot and npm audit" },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "package-lock.json pins every version; a mirror or vendored copy can replace the registry.",
+      "owner": null,
+      "nextReview": null
+    },
+    {
+      "id": "plugin-workers",
+      "inventoryId": "external:plugin-workers",
+      "name": "Registered plugin Workers",
+      "services": ["Plugin admin pages", "hooks", "publish targets", "host API calls"],
+      "dataShared": ["content", "personal"],
+      "phi": "A plugin receives what its approvals allow, plus the signed-in user's name, email and role on proxied requests. Each plugin operator handling PHI needs its own agreement.",
+      "agreement": { "status": "not-evidenced", "reference": "Per plugin; list each deployment's plugins from DB.plugins" },
+      "assessment": { "status": "not-evidenced", "date": null },
+      "exit": "Disable the plugin. Its host-side records stay in DB.plugin_state.",
+      "owner": null,
+      "nextReview": null
+    }
+  ]
+}

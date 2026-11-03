@@ -24,7 +24,8 @@
     "build:features": "node tools/build-features.mjs",
     "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check",
     "check:upgrade": "node --no-warnings tools/check-upgrade-path.mjs",
-    "check:inventory": "node tools/check-inventory.mjs --quiet"
+    "check:inventory": "node tools/check-inventory.mjs --quiet",
+    "check:export": "node --no-warnings tools/check-export.mjs"
   },
   "dependencies": {
     "hono": "^4.13.14",

@@ -118,21 +118,21 @@ function snapshot(db) {
 }
 
 /** Differences that make the upgraded database something a fresh install is not. */
-function compare(upgraded, fresh) {
+function compare(upgraded, fresh, where = 'after upgrade') {
   const errors = [];
   const warnings = [];
   for (const [name, table] of fresh.tables) {
     const actual = upgraded.tables.get(name);
-    if (!actual) { errors.push(`table ${name} is missing after upgrade`); continue; }
+    if (!actual) { errors.push(`table ${name} is missing ${where}`); continue; }
     for (const [column, spec] of table.columns) {
       const got = actual.columns.get(column);
-      if (!got) errors.push(`column ${name}.${column} is missing after upgrade`);
+      if (!got) errors.push(`column ${name}.${column} is missing ${where}`);
       else if (JSON.stringify(got) !== JSON.stringify(spec)) {
         errors.push(`column ${name}.${column} differs: upgraded ${JSON.stringify(got)}, fresh ${JSON.stringify(spec)}`);
       }
     }
     for (const column of actual.columns.keys()) {
-      if (!table.columns.has(column)) errors.push(`column ${name}.${column} exists only after upgrade`);
+      if (!table.columns.has(column)) errors.push(`column ${name}.${column} exists only ${where}`);
     }
     if (JSON.stringify(actual.foreignKeys) !== JSON.stringify(table.foreignKeys)) {
       errors.push(`foreign keys on ${name} differ: upgraded ${JSON.stringify(actual.foreignKeys)}, fresh ${JSON.stringify(table.foreignKeys)}`);
@@ -145,17 +145,17 @@ function compare(upgraded, fresh) {
     }
   }
   for (const name of upgraded.tables.keys()) {
-    if (!fresh.tables.has(name)) errors.push(`table ${name} exists only after upgrade`);
+    if (!fresh.tables.has(name)) errors.push(`table ${name} exists only ${where}`);
   }
   for (const kind of ['indexes', 'triggers', 'views']) {
     const label = kind === 'indexes' ? 'index' : kind.slice(0, -1);
     for (const [name, spec] of fresh[kind]) {
       const got = upgraded[kind].get(name);
-      if (!got) errors.push(`${label} ${name} is missing after upgrade`);
+      if (!got) errors.push(`${label} ${name} is missing ${where}`);
       else if (got.sql !== spec.sql) errors.push(`${label} ${name} differs from a fresh install`);
     }
     for (const name of upgraded[kind].keys()) {
-      if (!fresh[kind].has(name)) errors.push(`${label} ${name} exists only after upgrade`);
+      if (!fresh[kind].has(name)) errors.push(`${label} ${name} exists only ${where}`);
     }
   }
   return { errors, warnings };
@@ -243,9 +243,15 @@ function main() {
   process.exitCode = failed ? 1 : 0;
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error.message);
-  process.exitCode = 1;
+// Shared with tools/check-export.mjs, which compares an exported database
+// against the same fresh install.
+export { DATABASES, applyFile, compare, filesNow, freshDatabase, isNumbered, snapshot };
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }
