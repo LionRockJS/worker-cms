@@ -15,7 +15,7 @@ beforeEach(async()=>{
   await env.DB.prepare(`INSERT INTO tags(id,uuid,name,slug,taxonomy_slug,parent_tag,lect) VALUES (10020,'tag-uuid-target','Private Target','private-target','old',NULL,'{"secret":"private body"}'),(10021,'tag-uuid-child','Private Child','private-child','old',10020,'{"secret":"private body"}'),(10022,'tag-uuid-next','Private Next','private-next','next',NULL,'{"secret":"private body"}')`).run();
   await env.DB.prepare(`INSERT INTO pages(id,uuid,name,slug,page_type,lect) VALUES (10030,'page-uuid-live','Private Page','private-page','article','{"secret":"private body"}')`).run();
   await env.DB.prepare(`INSERT INTO trash_pages(id,uuid,name,slug,page_type,lect) VALUES (10031,'page-uuid-trash','Private Trash','private-trash','article','{"secret":"private body"}')`).run();
-  await env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) VALUES (10030,10020),(10030,10021)').run();
+  await env.DB.prepare('INSERT INTO page_tags(id,page_id,tag_id) VALUES (1,10030,10020),(2,10030,10021)').run();
   await env.DB.prepare('INSERT INTO trash_page_tags(page_id,tag_id) VALUES (10031,10020)').run();
 });
 afterEach(async()=>{await env.DB.prepare(`DROP TRIGGER IF EXISTS ${fault}`).run();});
@@ -54,7 +54,7 @@ for(const operation of Object.keys(operations) as Operation[]){
     await env.DB.prepare(`CREATE TRIGGER ${fault} ${sql}`).run();expect((await call(operation)).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);
   });
   it.each(['policy','session','role','target','membership'])(`refuses ${operation} after a concurrent %s change`,async change=>{
-    const DB=race(async()=>{if(change==='policy')return classify();if(change==='session')return env.DB.prepare('DELETE FROM sessions').run();if(change==='role')return env.DB.prepare("UPDATE users SET role='viewer' WHERE id=10000").run();if(change==='target')return env.DB.prepare("UPDATE tags SET name='Concurrent' WHERE id=10020").run();return env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) VALUES (10030,10020)').run();});
+    const DB=race(async()=>{if(change==='policy')return classify();if(change==='session')return env.DB.prepare('DELETE FROM sessions').run();if(change==='role')return env.DB.prepare("UPDATE users SET role='viewer' WHERE id=10000").run();if(change==='target')return env.DB.prepare("UPDATE tags SET name='Concurrent' WHERE id=10020").run();return env.DB.prepare('INSERT INTO page_tags(id,page_id,tag_id) VALUES (3,10030,10020)').run();});
     const unrelated=operation==='taxCreate'&&(change==='target'||change==='membership');
     expect((await call(operation,{DB})).status).toBe(unrelated?302:503);expect(await events()).toHaveLength(unrelated?1:0);
   });
@@ -86,7 +86,7 @@ it.each(['tag-write','tag-delete','orphan','child','floor','link'])('rolls back 
     :failure==='orphan'?"BEFORE UPDATE ON tags WHEN OLD.taxonomy_slug='old' AND NEW.taxonomy_slug IS NULL BEGIN SELECT RAISE(IGNORE); END"
     :failure==='child'?"BEFORE UPDATE ON tags WHEN OLD.parent_tag=10020 AND NEW.parent_tag IS NULL BEGIN SELECT RAISE(IGNORE); END"
     :failure==='floor'?"AFTER INSERT ON audit_events WHEN NEW.action='tag.delete' BEGIN UPDATE page_sensitivity_floors SET level=1 WHERE uuid='page-uuid-live'; END"
-    :"AFTER INSERT ON audit_events WHEN NEW.action='tag.update' BEGIN INSERT INTO page_tags(page_id,tag_id) VALUES (10030,10020); END";
+    :"AFTER INSERT ON audit_events WHEN NEW.action='tag.update' BEGIN INSERT INTO page_tags(id,page_id,tag_id) VALUES (3,10030,10020); END";
   await env.DB.prepare(`CREATE TRIGGER ${fault} ${sql}`).run();const operation=failure==='orphan'?'taxDelete':failure==='tag-write'||failure==='link'?'tagUpdate':'tagDelete';
   expect((await call(operation)).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);
 });

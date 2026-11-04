@@ -60,8 +60,8 @@ async function seedPages(count: number, tagId?: number): Promise<Page[]> {
       .bind(ID_BASE + index, `Bulk ${index}`, `${SLUG_PREFIX}${index}`, JSON.stringify({ name: { en: `Bulk ${index}` } }))
       .first<Page>();
     if (tagId !== undefined) {
-      await env.DB.prepare('INSERT INTO page_tags (page_id, tag_id, weight) VALUES (?, ?, 1)')
-        .bind(page!.id, tagId)
+      await env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id, weight) VALUES (?, ?, ?, 1)')
+        .bind(page!.id, page!.id, tagId)
         .run();
     }
     pages.push(page!);

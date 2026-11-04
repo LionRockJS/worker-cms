@@ -59,7 +59,7 @@ function admin(path: string) {
 async function sourceTag(orphan = false) {
   await env.PUBLISHED_DB.prepare("UPDATE pages SET page_type = 'article'").run();
   if (!orphan) await env.PUBLISHED_DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (9803, 'Private diagnosis', 'private-diagnosis', 'diagnosis')").run();
-  await env.PUBLISHED_DB.prepare('INSERT INTO page_tags (page_id, tag_id) VALUES (9801, 9803)').run();
+  await env.PUBLISHED_DB.prepare('INSERT INTO page_tags (id, page_id, tag_id) VALUES (9803, 9801, 9803)').run();
 }
 
 function r2Env(): Env { return { ...env, PUBLISH_TARGETS: 'r2', PUBLISH_BUCKET: env.MEDIA_BUCKET }; }
@@ -116,7 +116,7 @@ it('inherits the actual published catalogue independently of host tag IDs', asyn
 it('counts a published record once when multiple source tags share a classified taxonomy', async () => {
   await sourceTag(); await classify('taxonomy', 'diagnosis');
   await env.PUBLISHED_DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (9805, 'Another private diagnosis', 'another-diagnosis', 'diagnosis')").run();
-  await env.PUBLISHED_DB.prepare('INSERT INTO page_tags (page_id, tag_id) VALUES (9801, 9805)').run();
+  await env.PUBLISHED_DB.prepare('INSERT INTO page_tags (id, page_id, tag_id) VALUES (9805, 9801, 9805)').run();
   expect((await admin('/?status=live')).status).toBe(200);
   const rows = (await env.DB.prepare("SELECT target_id, target_count FROM audit_events WHERE action = 'page.live-status' AND container_key = 'diagnosis'").all()).results;
   expect(rows).toEqual([{ target_id: 'live-source-page', target_count: 1 }]);
