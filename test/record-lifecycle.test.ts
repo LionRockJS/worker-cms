@@ -181,7 +181,12 @@ describe('retention', () => {
   it('offers no expiry purge until TRASH_RETENTION_DAYS is set, then purges only older pages', async () => {
     const oldId = await trashPage('old-page');
     await trashPage('new-page');
-    await env.DB.prepare("UPDATE trash_pages SET updated_at = datetime('now', '-40 days') WHERE id = ?").bind(oldId).run();
+    // Seed historical age without the refresh trigger undoing it at a clock
+    // boundary. Restore the real trigger before exercising retention routes.
+    const trigger = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='trash_pages_updated_at'").first<{ sql: string }>();
+    await env.DB.prepare('DROP TRIGGER trash_pages_updated_at').run();
+    try { await env.DB.prepare("UPDATE trash_pages SET updated_at = datetime('now', '-40 days') WHERE id = ?").bind(oldId).run(); }
+    finally { await env.DB.prepare(trigger!.sql).run(); }
 
     expect(flash(await request('/trash/empty', { action: 'expired' }))).toBe('No trash retention period is set');
     expect(await draftId('old-page', 'trash_pages')).toBe(oldId);

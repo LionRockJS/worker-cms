@@ -180,13 +180,14 @@ function clone() { return worker.fetch(new Request('http://localhost/__cms/pages
 it.each(['success', 'floor-write-failure'])('propagates a new UUID floor atomically with a clone: %s', async failure => {
   await registerCopyPlugin(); await associate(); await classify('taxonomy', 'clinical');
   await env.DB.prepare('UPDATE pages SET page_id = 7090 WHERE id = 7000').run();
+  await env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect) VALUES (7091,'floor-clone-parent','Clone parent','floor-clone-parent','default','{}')").run();
   if (failure !== 'success') await env.DB.prepare(`CREATE TRIGGER floor_copy_fail BEFORE INSERT ON page_sensitivity_floors WHEN NEW.uuid <> 'floor-source' BEGIN SELECT RAISE(ABORT, 'floor storage unavailable'); END`).run();
   const response = await clone();
   const copied = await env.DB.prepare('SELECT id, uuid FROM pages WHERE page_id = 7091').first<{ id: number; uuid: string }>();
   if (failure === 'success') {
     expect(response.status).toBe(200); expect(copied).not.toBeNull(); expect(await floor(copied!.uuid)).toBe('phi');
     expect((await publishPageToTargets(env, copied!.id, actor))?.refused).toBe(true);
-  } else { expect(response.status).toBe(500); expect(copied).toBeNull(); }
+  } else { expect(response.status).toBe(503); expect(copied).toBeNull(); }
 });
 
 it('keeps a deleted draft metadata hook protected through its original UUID', async () => {

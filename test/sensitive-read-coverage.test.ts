@@ -23,6 +23,7 @@ beforeEach(async () => {
   await env.PUBLISHED_DB.prepare('DELETE FROM tags').run();
   await env.DB.prepare("INSERT INTO users (id, oauth_id, name, email, role) VALUES (9701, 'test:9701', 'Private Operator', 'private@example.invalid', 'admin')").run();
   await env.DB.prepare("INSERT INTO user_oauth_identities (id, user_id, provider, provider_user_id, oauth_id) VALUES (9702, 9701, 'test', 'private-provider-id', 'test:9701')").run();
+  await env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect) VALUES (9798,'clone-target','Clone target','clone-target','default','{}')").run();
   await env.DB.prepare("INSERT INTO pages (id, uuid, name, slug, page_type, lect) VALUES (9703, 'coverage-page', 'Private chart', 'coverage-page', 'chart', ?)")
     .bind(JSON.stringify({ secret: 'stored-private-value' })).run();
   await env.DB.prepare("INSERT INTO credit_ledger (id, user_id, currency, delta, balance_after, action, note) VALUES (9704, 9701, 'credit', 1, 1, 'adjust', 'Private ledger note')").run();
@@ -129,7 +130,8 @@ it('audits the clone estimate with captured sensitivity and a private selector f
   await classify('page_type', 'chart');
   expect((await api('POST', '/pages/duplicate', { source_page_type: 'chart', source_pointer_key: 'source', source_pointer_value: 'private-source-selector' })).status).toBe(200);
   const row = await env.DB.prepare("SELECT target_count, actor_user_id, acting_via, query_fingerprint, detail FROM audit_events WHERE action = 'page.duplicate-count'").first();
-  expect(row).toMatchObject({ target_count: 1, actor_user_id: '9701', acting_via: 'coverage', detail: null });
+  const registration=await env.DB.prepare('SELECT uuid FROM plugins WHERE id=?').bind(pluginRowId).first<{uuid:string}>();
+  expect(row).toMatchObject({ target_count: 1, actor_user_id: null, acting_via: `plugin:${registration!.uuid}`, detail: null });
   expect(row?.query_fingerprint).toMatch(/^[a-f0-9]{24}$/);
   expect(JSON.stringify(row)).not.toContain('private-source-selector');
 });
@@ -278,7 +280,8 @@ it('preserves attributable source-read intent before an inline clone', async () 
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ count: 1, done: true });
   const row = await env.DB.prepare("SELECT target_id, actor_user_id, acting_via, detail FROM audit_events WHERE action = 'page.duplicate-read'").first();
-  expect(row).toMatchObject({ target_id: '9703', actor_user_id: '9701', acting_via: 'coverage' });
+  const registration=await env.DB.prepare('SELECT uuid FROM plugins WHERE id=?').bind(pluginRowId).first<{uuid:string}>();
+  expect(row).toMatchObject({ target_id: '9703', actor_user_id: null, acting_via: `plugin:${registration!.uuid}` });
   expect(JSON.parse(String(row?.detail))).toMatchObject({ operation: 'duplicate', phase: 'intent' });
   expect(String(row?.detail)).not.toContain('stored-private-value');
 });

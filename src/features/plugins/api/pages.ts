@@ -19,10 +19,9 @@ import type {
   PluginAuth,
 } from './types';
 import type { LivePageSnapshot } from '../../../core/publish/adapter';
-import { copySensitivityStatement } from '../../../core/db/sensitivity';
 import type { AppContext } from '../../../core/http/context';
 import { authenticatePlugin, forbiddenPageType, forbiddenPageTypeBody } from './auth';
-import { auditReads, ReadAuditUnavailableError, recordPageReads, recordRead, recordTagReads } from '../../../core/http/access-log';
+import { recordPageReads, recordRead, recordTagReads } from '../../../core/http/access-log';
 import { countPageMetadata } from '../../../core/db/count-metadata';
 import { pluginReadActor as apiActor } from './read-audit';
 import {
@@ -39,18 +38,8 @@ import {
   stringList,
   versionAction,
 } from './serialize';
-import {
-  actingUserId,
-  allocateSlug,
-  bulkPageInsertStatements,
-  cmsId,
-  cmsTimestamp,
-  createPages,
-  existingSlugSet,
-} from './create';
+import { createPages } from './create';
 import type { HookPage } from '../hooks';
-import { checkCreateLimits, createCandidate } from '../limits';
-import { freeReservation, reservePageCreates } from '../../services';
 import { emitPluginHook, emitPluginHooks } from './hooks';
 import { chineseSearchVariants } from '../../../core/db/chinese';
 import { advancedSearchOperator, advancedSearchOrder, advancedSearchSort, performAdvancedSearch } from '../../../core/db/search';
@@ -61,11 +50,10 @@ import { ensureUniqueDraftSlug, trashDraftPage, trashDraftPages } from '../../..
 import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
 import { liveMapForDraftPages, publishPagesToTargets, unpublishPageFromTargets, unpublishPagesFromTargets } from '../../../core/publish';
+import { duplicatePluginPages } from '../page-duplicate-evidence';
 import { notifyPageSaved } from '../../../core/db/page-store';
 import { capturePluginPageMutationAuthority, readPluginPageUpdateSources, commitPluginPageUpdates, type PluginPageUpdate, type PluginPageUpdateDenial } from '../page-update-evidence';
 
-const DUPLICATE_BATCH = 100;
-const DUPLICATE_MAX_PER_CALL = 1000;
 const DELETE_CHILDREN_BATCH = 100;
 const DELETE_CHILDREN_MAX_PER_CALL = 1000;
 
@@ -759,154 +747,18 @@ pagesApiRoutes.post('/pages/batch', async (c) => {
 // one uniform lect transform — drop occurrence-specific blocks, then merge
 // overrides (e.g. reset `status`, repoint `_pointers` at the new event/list).
 //
-// To bound work per request (and stay within the plugin's free-plan subrequest
-// cap) it processes at most DUPLICATE_MAX_PER_CALL children, in DB.batch chunks,
+// Each request freezes at most 1,000 original sources and commits copies in
+// guarded chunks of 100,
 // and returns `next_cursor` (the last source id copied) when more remain. The
 // caller re-POSTs with that cursor until `done` — so an arbitrarily large list
 // duplicates across several bounded requests instead of one that times out.
 pagesApiRoutes.post('/pages/duplicate', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
-
+  const authority = await capturePluginPageMutationAuthority(c, auth, 'duplicate');
   const body = await c.req.json().catch(() => null) as DuplicateInput | null;
   if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
-
-  const pageType = typeof body.source_page_type === 'string' ? body.source_page_type.trim() : '';
-  if (!pageType) return c.json({ error: 'source_page_type_required' }, 400);
-  // Cloning creates pages of this type, so it needs write scope, not just read.
-  if (!pageTypeScopeAllows(auth.allowedTypes, pageType)) return forbiddenPageType(c, auth, pageType);
-
-  // Select the source pages by lect pointer (how guests etc. group) or parent id.
-  const selector = collectionWhere(
-    asFiniteNumber(body.source_page_id),
-    typeof body.source_pointer_key === 'string' ? body.source_pointer_key.trim() : '',
-    typeof body.source_pointer_value === 'string' ? body.source_pointer_value : '',
-  );
-  if (!selector.ok) return c.json({ error: selector.error }, 400);
-
-  const targetParentId = asFiniteNumber(body.target_page_id);
-  const overrideLect = coerceLect(body.lect);
-  const dropKeys = Array.isArray(body.drop_lect)
-    ? body.drop_lect.filter((key): key is string => typeof key === 'string')
-    : [];
-
-  const config = await resolveCmsConfig(c.env);
-  const seed = blueprintToLect(pageType, config.blueprint, config.defaultLanguage);
-  const usedIds = new Set<number>();
-
-  let cursor = Math.max(asFiniteNumber(body.cursor) ?? 0, 0);
-
-  // Quota pre-check for everything this request could still clone. All clones
-  // share the target parent and any pointer overrides, so one candidate shape
-  // covers the set. Per-pointer limits are only checkable when the override
-  // lect repoints the pointer (the normal "duplicate into a new list" flow);
-  // clones that inherit per-row source pointers are not gated here.
-  const remainingCount = await countPageMetadata(c.env.DB, `${selector.sql} AND page_type = ? AND id > ?`,
-    [...selector.params, pageType, cursor], { types: [pageType], action: 'page.duplicate-count' });
-  const remaining = Math.min(remainingCount, DUPLICATE_MAX_PER_CALL);
-  if (remaining > 0) {
-    const candidate = createCandidate(pageType, targetParentId, overrideLect);
-    const violation = await checkCreateLimits(c.env, Array.from({ length: remaining }, () => candidate));
-    if (violation) return c.json({ error: 'limit_exceeded', violation }, 409);
-  }
-
-  // Charge for every clone this call will make; if the loop clones fewer
-  // (failure mid-way, or sources trashed concurrently) the difference is
-  // refunded below.
-  const payer = actingUserId(c);
-  const cloneCharge = remaining > 0
-    ? await reservePageCreates(c.env, {
-      pageTypes: [{ pageType, count: remaining }],
-      payerUserId: payer,
-      contributorId: auth.pluginId,
-    })
-    : freeReservation();
-  if (!cloneCharge.ok) {
-    return c.json(
-      {
-        error: cloneCharge.code,
-        ...(cloneCharge.details ?? {}),
-      },
-      cloneCharge.status as 400 | 402,
-    );
-  }
-  // Charged up front for `remaining` clones; whatever is not written is
-  // refunded below as that fraction of the charge, in every currency it took.
-  const chargedClones = cloneCharge.charged > 0 ? remaining : 0;
-  const operationId = crypto.randomUUID();
-  let copied = 0;
-  let done = false;
-  try {
-  // Loop internally in DB.batch chunks up to the per-request cap. Each chunk
-  // commits on its own, so a copied row is never lost if a later chunk fails.
-  while (copied < DUPLICATE_MAX_PER_CALL) {
-    const take = Math.min(DUPLICATE_BATCH, DUPLICATE_MAX_PER_CALL - copied);
-    // Fetch one row past the chunk to detect whether more sources remain.
-    const sources = await c.env.DB.prepare(
-      `SELECT * FROM pages WHERE ${selector.sql} AND page_type = ? AND id > ? ORDER BY id ASC LIMIT ?`,
-    ).bind(...selector.params, pageType, cursor, take + 1).all<Page>();
-
-    const rows = sources.results;
-    if (!rows.length) { done = true; break; }
-    const hasMore = rows.length > take;
-    const chunk = hasMore ? rows.slice(0, take) : rows;
-
-    // Persist the actual selected sources (including the look-ahead row)
-    // before processing/copying a chunk. Never replay committed chunks here.
-    try {
-      await auditReads(c, [{ action: 'page.duplicate-read', kind: 'page_type', key: pageType, targetType: 'page',
-        ids: rows.map(row => String(row.id)), count: rows.length, actor: apiActor(c, auth.pluginId),
-        detail: { operation: 'duplicate', operation_id: operationId, phase: 'intent' },
-      }], true);
-    } catch { throw new ReadAuditUnavailableError(); }
-
-    // Clones keep the SOURCE slug family, not a name-derived one: some types
-    // (events-plugin guests) deliberately carry pseudonymous slugs so the
-    // person's name never becomes a public identifier — re-deriving from the
-    // name here would undo that.
-    const usedSlugs = await existingSlugSet(c.env.DB, chunk.map((row) => slugify(row.slug) || slugify(row.name) || pageType));
-    const statements: D1PreparedStatement[] = [];
-    const hookPages: HookPage[] = [];
-    const createdAt = cmsTimestamp();
-
-    for (const row of chunk) {
-      // Mirror createPage's lect pipeline, sourced from the existing page:
-      // blueprint seed ← (source lect minus dropped keys) ← overrides.
-      const source = safeParseLect(row.lect);
-      for (const key of dropKeys) delete (source as Record<string, unknown>)[key];
-      const merged = withDraftMetadata(mergeLects(seed, mergeLects(source, overrideLect)), 0);
-      const lect = stringifyLect(merged);
-
-      const id = cmsId(usedIds);
-      const uuid = crypto.randomUUID();
-      const slug = allocateSlug(slugify(row.slug) || slugify(row.name) || pageType, usedSlugs);
-
-      statements.push(...bulkPageInsertStatements(c.env.DB, {
-        id, uuid, createdAt, name: row.name, slug, weight: row.weight ?? 5, start: row.start,
-        end: row.end, timezone: row.timezone, pageType, versionId: cmsId(usedIds),
-        lect, parentId: targetParentId,
-      }));
-      statements.push(copySensitivityStatement(c.env.DB, row.uuid, uuid));
-
-      hookPages.push({ id, uuid, page_type: pageType, name: row.name, slug });
-    }
-
-    await c.env.DB.batch(statements);
-    emitPluginHooks(c, 'create', hookPages, auth.pluginId);
-
-    copied += chunk.length;
-    cursor = chunk[chunk.length - 1].id;
-    if (!hasMore) { done = true; break; }
-  }
-  } catch (error) {
-    if (chargedClones > copied) await cloneCharge.refund((chargedClones - copied) / chargedClones);
-    throw error;
-  }
-
-  // Sources trashed concurrently → fewer clones than were charged for.
-  if (chargedClones > copied) await cloneCharge.refund((chargedClones - copied) / chargedClones);
-
-  return c.json({ count: copied, next_cursor: done ? null : cursor, done });
+  return duplicatePluginPages(c, auth, authority, body);
 });
 
 // Batch-update page lect (up to MAX_BATCH). This is the generic bulk mutation

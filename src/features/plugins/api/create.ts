@@ -131,21 +131,13 @@ export async function draftPageIds(db: D1DatabaseClient, ids: number[]): Promise
 export async function reservedPageIds(db: D1DatabaseClient, ids: number[]): Promise<Set<number>> {
   const unique = [...new Set(ids)];
   const out = new Set<number>();
-  // Each id is bound twice (draft + trash). Keep each statement at no more
-  // than 100 SQL variables for local D1/SQLite compatibility.
-  for (let index = 0; index < unique.length; index += 50) {
-    const chunk = unique.slice(index, index + 50);
-    if (!chunk.length) continue;
-    const placeholders = chunk.map(() => '?').join(',');
-    const rows = await db.prepare(
-      `SELECT id FROM pages WHERE id IN (${placeholders})
-       UNION
-       SELECT id FROM trash_pages WHERE id IN (${placeholders})`,
-    )
-      .bind(...chunk, ...chunk)
-      .all<{ id: number }>();
-    for (const row of rows.results) out.add(row.id);
-  }
+  if (!unique.length) return out;
+  const hasTrash = !!await db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trash_pages'").first();
+  const values = JSON.stringify(unique);
+  const rows = await db.prepare(`SELECT id FROM pages WHERE id IN (SELECT value FROM json_each(?))
+    ${hasTrash ? 'UNION SELECT id FROM trash_pages WHERE id IN (SELECT value FROM json_each(?))' : ''}`)
+    .bind(...(hasTrash ? [values, values] : [values])).all<{ id: number }>();
+  for (const row of rows.results) out.add(row.id);
   return out;
 }
 
@@ -325,10 +317,6 @@ export function allocateSlug(baseSlug: string, used: Set<string>): string {
   return candidate;
 }
 
-export function cmsTimestamp(): string {
-  return new Date().toISOString().replace('T', ' ').slice(0, 19);
-}
-
 export function cmsId(used: Set<number>): number {
   const random = new Uint32Array(1);
   let id = 0;
@@ -338,41 +326,4 @@ export function cmsId(used: Set<number>): number {
   } while (used.has(id));
   used.add(id);
   return id;
-}
-
-export interface BulkPageRow {
-  id: number;
-  uuid: string;
-  createdAt: string;
-  name: string;
-  slug: string;
-  weight: number;
-  start: string | null;
-  end: string | null;
-  timezone: string | null;
-  pageType: string;
-  versionId: number;
-  lect: string;
-  parentId: number | null;
-}
-
-/**
- * The pages + page_versions INSERT pair for one bulk-created page.
- * Ids, uuids, and timestamps are assigned by the caller so a whole batch
- * commits in a single DB.batch without per-row SELECT-backs.
- */
-export function bulkPageInsertStatements(db: D1DatabaseClient, row: BulkPageRow): D1PreparedStatement[] {
-  return [
-    db.prepare(
-      `INSERT INTO pages (id, uuid, created_at, updated_at, name, slug, weight, start, end, timezone, page_type, lect, page_id, creator)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      row.id, row.uuid, row.createdAt, row.createdAt, row.name, row.slug, row.weight, row.start,
-      row.end, row.timezone, row.pageType, row.lect, row.parentId, null,
-    ),
-    db.prepare(
-      `INSERT INTO page_versions (id, uuid, created_at, updated_at, page_id, lect, action)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(row.versionId, crypto.randomUUID(), row.createdAt, row.createdAt, row.id, row.lect, 'create'),
-  ];
 }
