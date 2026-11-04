@@ -94,6 +94,7 @@ interface PageListBatchQuery {
   sort: keyof typeof LIST_BATCH_SORTS;
   order: 'ASC' | 'DESC';
   groupBy: PageListBatchGroupBy | null;
+  field: { key: string; values: string[] } | null;
 }
 
 interface PageResourceRow extends Page {
@@ -377,11 +378,23 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
     if (!PAGE_TYPE_TOKEN.test(key) || !PAGE_TYPE_TOKEN.test(pageType) || limit < 1 || limit > 500 || !sort || !order) {
       return c.json({ error: 'invalid_query' }, 400);
     }
+    // Optional top-level scalar filter, same semantics as GET /pages
+    // field_key/field_values: values compare as text.
+    let field: PageListBatchQuery['field'] = null;
+    if (input.field_key !== undefined || input.field_values !== undefined) {
+      const fieldKey = typeof input.field_key === 'string' ? input.field_key.trim() : '';
+      const fieldValues = Array.isArray(input.field_values) ? input.field_values : null;
+      if (!LECT_FIELD_KEY.test(fieldKey) || !fieldValues || fieldValues.length === 0
+        || fieldValues.length > 50 || fieldValues.some((value) => typeof value !== 'string')) {
+        return c.json({ error: 'invalid_query' }, 400);
+      }
+      field = { key: fieldKey, values: [...new Set(fieldValues as string[])] };
+    }
     if (keys.has(key)) return c.json({ error: 'duplicate_key', key }, 400);
     if (!pageTypeScopeAllows(auth.readableTypes, pageType)) return forbiddenPageType(c, auth, pageType);
     keys.add(key);
     requestedPages += limit;
-    queries.push({ key, pageType, limit, sort, order, groupBy });
+    queries.push({ key, pageType, limit, sort, order, groupBy, field });
   }
   if (requestedPages > MAX_LIST_BATCH_PAGES) {
     return c.json({ error: 'batch_too_large', max: MAX_LIST_BATCH_PAGES }, 413);
@@ -390,16 +403,22 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
 
   const results = await c.env.DB.batch<PageResourceRow>(queries.map((query) => {
     const sort = LIST_BATCH_SORTS[query.sort];
+    // The field path is inlined (key validated by LECT_FIELD_KEY) so an
+    // expression index on it can be used, as in GET /pages.
+    const where = query.field
+      ? `page_type = ? AND json_extract(lect, '$.${query.field.key}') IN (SELECT value FROM json_each(?))`
+      : 'page_type = ?';
+    const whereParams = query.field ? [query.pageType, JSON.stringify(query.field.values)] : [query.pageType];
     if (!query.groupBy) {
       return c.env.DB.prepare(
-        `SELECT * FROM pages WHERE page_type = ? ORDER BY ${sort} ${query.order}, id ${query.order} LIMIT ?`,
-      ).bind(query.pageType, query.limit);
+        `SELECT * FROM pages WHERE ${where} ORDER BY ${sort} ${query.order}, id ${query.order} LIMIT ?`,
+      ).bind(...whereParams, query.limit);
     }
     const outerSort = LIST_BATCH_OUTER_SORTS[query.sort];
     return c.env.DB.prepare(
       `WITH selected AS (
          SELECT * FROM pages
-         WHERE page_type = ?
+         WHERE ${where}
          ORDER BY ${sort} ${query.order}, id ${query.order}
          LIMIT ?
        )
@@ -423,7 +442,7 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
        ) resource_tag ON resource_tag.page_id = p.id
        ORDER BY ${outerSort} ${query.order}, p.id ${query.order},
                 resource_tag.weight ASC, resource_tag.name COLLATE NOCASE ASC`,
-    ).bind(query.pageType, query.limit, query.groupBy.tagTaxonomy);
+    ).bind(...whereParams, query.limit, query.groupBy.tagTaxonomy);
   }));
 
   queries.forEach((query, index) => {

@@ -667,6 +667,40 @@ describe('Plugin API create / read / list / update / delete', () => {
     expect(body.pages_by_type.guest.groups).toEqual([]);
   });
 
+  it('filters a batched list by a top-level field, alongside an unfiltered list of the same type', async () => {
+    await env.DB.prepare(
+      `INSERT INTO pages (uuid, page_type, name, slug, weight, lect, created_at, updated_at)
+       VALUES (?, 'guest', 'Open', 'open', 0, '{"status":"in_progress"}', '2026-01-01', '2026-01-01'),
+              (?, 'guest', 'Held', 'held', 0, '{"status":"on_hold"}', '2026-01-02', '2026-01-02'),
+              (?, 'guest', 'Done', 'done', 0, '{"status":"complete"}', '2026-01-03', '2026-01-03')`,
+    ).bind(crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()).run();
+
+    const response = await cmsApi('POST', '/__cms/pages/list-batch', {
+      queries: [
+        { key: 'active', page_type: 'guest', limit: 10, sort: 'updated_at', order: 'desc', field_key: 'status', field_values: ['in_progress', 'on_hold'] },
+        { key: 'all', page_type: 'guest', limit: 10, sort: 'updated_at', order: 'desc' },
+      ],
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as { pages_by_type: Record<string, { pages: Array<{ name: string }> }> };
+    expect(body.pages_by_type.active.pages.map((page) => page.name)).toEqual(['Held', 'Open']);
+    expect(body.pages_by_type.all.pages.map((page) => page.name)).toEqual(['Done', 'Held', 'Open']);
+
+    for (const bad of [
+      { field_key: 'status' },
+      { field_values: ['x'] },
+      { field_key: 'status', field_values: [] },
+      { field_key: "status') OR 1=1 --", field_values: ['x'] },
+      { field_key: 'status', field_values: [1] },
+    ]) {
+      const rejected = await cmsApi('POST', '/__cms/pages/list-batch', {
+        queries: [{ key: 'guest', page_type: 'guest', limit: 1, sort: 'weight', order: 'asc', ...bad }],
+      });
+      expect(rejected.status).toBe(400);
+      expect(await rejected.json()).toEqual({ error: 'invalid_query' });
+    }
+  });
+
   it('groups a page resource by one tag taxonomy without extra API calls', async () => {
     const taxonomy = `resource-${crypto.randomUUID().slice(0, 8)}`;
     await env.DB.prepare('INSERT INTO taxonomies (name, slug) VALUES (?, ?)')
