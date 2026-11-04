@@ -1,0 +1,166 @@
+# ============================================================
+# cms.eventuai.com deployment config, used by Cloudflare Workers Builds.
+#
+# wrangler.toml is gitignored (each clone keeps its own), so the Git-connected
+# build has no config of its own. Workers Builds deploys with:
+#   npx wrangler deploy -c wrangler.eventuai.toml
+# Keep it in step with this clone's wrangler.toml when either changes.
+# ============================================================
+
+name = "worker-cms"
+main = "src/index.ts"
+compatibility_date = "2026-07-14"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+
+# Minify the bundle before upload. Wrangler ships unminified by default, which
+# was ~732 kB of source here; minified it is ~400 kB (138 kB gzipped, and gzip
+# is what counts against the size limit). Purely a build setting.
+# Export names survive minification, so the Durable Object class_name bindings
+# below still resolve.
+minify = true
+
+# Assets and the bundle are both build outputs, so wrangler builds them itself.
+# Without this, a bare `wrangler deploy` (a CI job, a Workers Builds pipeline,
+# or just running the binary directly) fails on a missing dist/views: the
+# directory is generated, not committed.
+[build]
+command = "npm run build"
+
+[assets]
+directory = "./dist/views"
+binding = "VIEWS"
+run_worker_first = true
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cms"
+database_id = "036882b7-c7d1-4163-9a40-cba28bc87233"
+migrations_dir = "migrations"
+
+[[d1_databases]]
+binding = "PUBLISHED_DB"
+database_name = "cms-published"
+# Replace with the id from `wrangler d1 create cms-published`.
+database_id = "94cc01db-8028-48eb-923f-e440423aeb3f"
+migrations_dir = "migrations/published"
+
+# The audit feature's sealed archive: gzipped NDJSON segments of
+# audit_events, written by the cron sweep before it prunes anything. Without
+# this binding the sweep does nothing at all — it never prunes rows it could
+# not archive first, so leaving it unset is safe, not silently lossy.
+# Create the bucket per deployment, then uncomment:
+#   wrangler r2 bucket create worker-cms-audit
+# Enable Object Lock on it for retention that an operator cannot shorten.
+# [[r2_buckets]]
+# binding = "AUDIT_BUCKET"
+# bucket_name = "worker-cms-audit"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "worker-cms-media"
+
+# Powers the /media-preview/* thumbnails. Works on workers.dev - no zone or
+# custom domain needed. Remove the binding to serve full-size originals instead.
+[images]
+binding = "IMAGES"
+
+# ── Publish targets (optional) ────────────────────────────────────────────────
+# Publishing fans out to the targets in the PUBLISH_TARGETS var (see [vars]).
+# The "r2" target writes static JSON snapshots (pages/<uuid>.json + index.json)
+# to this bucket. Create it with `wrangler r2 bucket create worker-cms-published`.
+# [[r2_buckets]]
+# binding = "PUBLISH_BUCKET"
+# bucket_name = "worker-cms-published"
+
+# Submission ingest: pulls every published page without a draft counterpart
+# into the draft DB as a submission mirror, firing submission hooks. Bounded
+# batch per tick; subscribed plugins can also trigger it on demand via
+# POST /__cms/ingest/submissions.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[durable_objects.bindings]]
+name = "PAGE_SYNC"
+class_name = "PageSyncDO"
+
+[[durable_objects.bindings]]
+name = "FORM_ONCE"
+class_name = "FormOnceDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PageSyncDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["FormOnceDO"]
+
+# CMS-owned admin background jobs. Used for long plugin admin actions such as
+# event duplicate/delete, and for chunked advanced-search bulk actions; job rows
+# live in DB.admin_jobs. Without this binding the job runner falls back to
+# running every batch synchronously in a single invocation, which blows the
+# 1000-subrequest per-invocation limit on large bulk operations.
+# Create the queue once before deploying: wrangler queues create cms-admin-jobs
+[[queues.producers]]
+binding = "ADMIN_JOBS_QUEUE"
+queue = "cms-admin-jobs"
+[[queues.consumers]]
+queue = "cms-admin-jobs"
+# One job-batch (<=100 pages) per invocation so each gets a fresh subrequest
+# budget; batching several messages together would reintroduce the cap blowout.
+max_batch_size = 1
+max_retries = 3
+
+# ── Rate limiting (per-colo, IP-keyed) ────────────────────────────────────────
+[[unsafe.bindings]]
+name = "AUTH_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
+[[unsafe.bindings]]
+name = "UPLOAD_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# ── Plugins (optional) ────────────────────────────────────────────────────────
+# Register plugin Workers by HTTPS URL under Admin → Plugins. Each row receives
+# a dedicated secret that must also be stored on that plugin Worker. No service
+# binding or CMS redeploy is required. See examples/plugin-events.
+
+[vars]
+# PLUGINS is a deprecated service-binding-era setting and is intentionally unset.
+# Comma-separated built-in publish targets: "d1" (published D1 database) and/or
+# "r2" (static JSON in PUBLISH_BUCKET). Defaults to "d1" when unset. Plugin
+# publish targets are discovered from plugin manifests (publishTarget: true)
+# and do not need to be listed here.
+# PUBLISH_TARGETS = "d1,r2"
+# Comma-separated list of enabled OAuth providers: "github", "google", "microsoft", "apple", "eventuai"
+ENABLED_PROVIDERS = "eventuai,github,google,microsoft,apple"
+# Per-provider OAuth client IDs – add the ones you use
+EVENTUAI_CLIENT_ID = "RnFAoAkXz1JLwaKx"
+GITHUB_CLIENT_ID = "Ov23lis6jG7x2nBmbFM1"
+GOOGLE_CLIENT_ID = "314543822201-i1n5al6ddo2afmuait7d2hormpgv3pue.apps.googleusercontent.com"
+MICROSOFT_CLIENT_ID = "768c819f-4981-420d-a0d6-529fd0b8642f"
+MICROSOFT_TENANT = "common"
+APPLE_CLIENT_ID = "com.eventuai.cms"
+# Shared redirect URI – registered with every enabled provider
+OAUTH_REDIRECT_URI = "https://cms.eventuai.com/auth/callback"
+CANONICAL_ORIGIN = "https://cms.eventuai.com"
+SITE_TITLE = "0xCMS.service"
+# Default timezone applied to a page's start/end window when none is set.
+# UTC offset (e.g. "+0800") or an IANA name (e.g. "Asia/Hong_Kong").
+DEFAULT_TIMEZONE = "+0800"
+# Optional: restrict new sign-ups to these email domains (comma-separated).
+# Existing users always keep access. Unset = open registration (viewer role).
+# ALLOWED_EMAIL_DOMAINS = "cowise.co"
+
+# Secrets – set via: wrangler secret put JWT_SECRET
+# wrangler secret put EVENTUAI_CLIENT_SECRET
+# wrangler secret put GITHUB_CLIENT_SECRET
+# wrangler secret put GOOGLE_CLIENT_SECRET
+# wrangler secret put PLUGIN_SECRET   # optional outbound-only fallback for legacy plugin rows
