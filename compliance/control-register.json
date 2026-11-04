@@ -60,7 +60,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/w8-inventory-and-register.md",
-        "docs/w10-supplier-cloud-governance.md"
+        "docs/w10-supplier-cloud-governance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -288,7 +289,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w10-supplier-cloud-governance.md"
+        "docs/w10-supplier-cloud-governance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -455,7 +457,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w10-supplier-cloud-governance.md"
+        "docs/w10-supplier-cloud-governance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -522,7 +525,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -650,7 +654,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -740,7 +745,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w10-supplier-cloud-governance.md"
+        "docs/w10-supplier-cloud-governance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -761,7 +767,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -956,7 +963,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -977,7 +985,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1042,7 +1051,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/w9-identity-access-crypto.md",
-        "docs/w10-supplier-cloud-governance.md"
+        "docs/w10-supplier-cloud-governance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1079,7 +1089,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1100,7 +1111,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1121,7 +1133,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1142,7 +1155,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1162,7 +1176,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1183,7 +1198,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w10-supplier-cloud-governance.md"
+        "docs/w10-supplier-cloud-governance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1206,7 +1222,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/w7-release-acceptance.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1226,7 +1243,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1249,7 +1267,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/w7-release-acceptance.md",
-        "docs/w12-privacy-retention-deletion.md"
+        "docs/w12-privacy-retention-deletion.md",
+        "docs/w14-secure-development.md"
       ]
     },
     {
@@ -1270,7 +1289,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w7-release-acceptance.md"
+        "docs/w7-release-acceptance.md",
+        "docs/w14-secure-development.md"
       ]
     }
   ]

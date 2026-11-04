@@ -29,9 +29,12 @@
 # /migrations/                     OWNER
 # /src/core/schema.sql             OWNER
 
-# Deployment configuration and the CI gates themselves.
+# Deployment configuration and the CI and release gates themselves (W14).
 # /.github/                        OWNER
 # /wrangler.example.toml           OWNER
+# /tools/deploy.mjs                OWNER
+# /tools/check-requirements.mjs    OWNER
+# /package.json                    OWNER
 
 # The compliance record.
 # /docs/iso-27001-*                OWNER

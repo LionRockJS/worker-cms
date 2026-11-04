@@ -1,7 +1,11 @@
 # The gate for every change. `npm test` is deliberately the whole verification
-# surface: it builds (pretest), then runs the profile, boundary and generated
-# checks before vitest, so a stale generated registry or a broken feature
-# boundary fails here rather than at deploy.
+# surface: it builds (pretest), then runs the profile, boundary, generated,
+# inventory and security-requirements checks before vitest, so a stale
+# generated registry, a broken feature boundary or a deleted security test
+# fails here rather than at deploy.
+#
+# Actions are pinned to full commit SHAs (W14); Dependabot's github-actions
+# updates move the pin and its version comment together.
 name: CI
 
 on:
@@ -21,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -41,27 +45,28 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
       - run: npm run check:upgrade -- --from f9719a3
 
-  # Reports known advisories without blocking a merge. Make this blocking once
-  # the existing backlog is triaged, so it fails on new findings only.
+  # Blocking since W14: the backlog was empty (npm audit: 0 vulnerabilities on
+  # 4 November 2026), so any high or critical advisory is a new finding. A
+  # finding that cannot be fixed at once is triaged and recorded as a dated,
+  # owned exception in the W14 record, never by turning this back off.
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
       - run: npm audit --audit-level=high
-        continue-on-error: true

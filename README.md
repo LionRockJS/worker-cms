@@ -315,6 +315,8 @@ Visit **http://localhost:8787** → redirects to the login page.
 npm run deploy
 ```
 
+This deploys only a committed revision that has been pushed to its upstream branch. It runs the type check and the full test suite first, and tags the Worker version with the commit. Pass Wrangler options after `--`, for example `npm run deploy -- -c wrangler.production.toml`. See [docs/w14-secure-development.md](docs/w14-secure-development.md) for rollback.
+
 ---
 
 ## Plugins

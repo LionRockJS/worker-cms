@@ -1,0 +1,172 @@
+{
+  "description": "Security requirements register for 0xCMS (W14; A.8.25, A.8.26, A.8.29). Each requirement states behaviour the CMS must keep, the Annex A controls it serves, and the regression tests that prove it. tools/check-requirements.mjs fails CI when a named test no longer exists, so a test cannot be renamed or deleted without the register changing in the same review. Owners and acceptance are organisational and stay null until assigned.",
+  "requirements": [
+    {
+      "id": "SR-01",
+      "requirement": "Only a correctly signed HS256 access token with the expected issuer, audience and type is accepted; refresh tokens and alg:none or other algorithms are refused.",
+      "controls": ["A.8.5", "A.8.24"],
+      "source": "W9",
+      "tests": [
+        { "file": "test/identity-assurance.test.ts", "title": "refuses a refresh token presented as the access token" },
+        { "file": "test/identity-assurance.test.ts", "title": "refuses %s" },
+        { "file": "test/csp-jwt.test.ts", "title": "rejects tokens without iss/aud even when correctly signed" }
+      ]
+    },
+    {
+      "id": "SR-02",
+      "requirement": "A role change or account removal takes effect on existing tokens at their next request.",
+      "controls": ["A.5.18", "A.8.2"],
+      "source": "W9",
+      "tests": [
+        { "file": "test/identity-assurance.test.ts", "title": "applies a role change to an existing access token on its next request" },
+        { "file": "test/identity-assurance.test.ts", "title": "refuses every outstanding token once the account is removed" },
+        { "file": "test/security-hardening.test.ts", "title": "denies a demoted account using its old administrator token" }
+      ]
+    },
+    {
+      "id": "SR-03",
+      "requirement": "Rotating JWT_SECRET invalidates every outstanding token, and a secret too short to sign with is refused.",
+      "controls": ["A.8.24"],
+      "source": "W9",
+      "tests": [
+        { "file": "test/identity-assurance.test.ts", "title": "refuses tokens signed with the previous secret" },
+        { "file": "test/identity-assurance.test.ts", "title": "refuses a secret too short to sign with" }
+      ]
+    },
+    {
+      "id": "SR-04",
+      "requirement": "A session idle beyond SESSION_IDLE_TTL is refused and purged; background requests do not extend it.",
+      "controls": ["A.8.5", "A.7.7"],
+      "source": "W6",
+      "tests": [
+        { "file": "test/session-idle.test.ts", "title": "refuses to refresh a session idle beyond its window" },
+        { "file": "test/session-idle.test.ts", "title": "rotates on a background refresh without moving the idle deadline" },
+        { "file": "test/security-hardening.test.ts", "title": "closes an open socket on the next sweep once its session goes idle" }
+      ]
+    },
+    {
+      "id": "SR-05",
+      "requirement": "Admin pages run only nonce-bearing scripts, with a fresh nonce per request.",
+      "controls": ["A.8.26", "A.8.28"],
+      "source": "W2",
+      "tests": [
+        { "file": "test/csp-jwt.test.ts", "title": "serves admin pages with a per-request nonce and no unsafe sources" },
+        { "file": "test/csp-jwt.test.ts", "title": "uses a fresh nonce per request" }
+      ]
+    },
+    {
+      "id": "SR-06",
+      "requirement": "A page classified phi, by type, taxonomy or sensitivity floor, is never published, and publication fails closed when classification cannot be read.",
+      "controls": ["A.5.12", "A.8.12"],
+      "source": "W1, W3",
+      "tests": [
+        { "file": "test/publish-regulated.test.ts", "title": "refuses a page whose type is classified phi" },
+        { "file": "test/publish-regulated.test.ts", "title": "refuses an ordinary page tagged from a classified taxonomy" },
+        { "file": "test/publish-regulated.test.ts", "title": "refuses everything when the classification cannot be read" }
+      ]
+    },
+    {
+      "id": "SR-07",
+      "requirement": "Media under a phi prefix is never served on public routes, cannot be told apart from a missing object, and only media:regulated holders read it.",
+      "controls": ["A.8.12", "A.8.3"],
+      "source": "W2",
+      "tests": [
+        { "file": "test/media-regulated.test.ts", "title": "withholds an object under a phi prefix" },
+        { "file": "test/media-regulated.test.ts", "title": "cannot be told apart from a missing object" },
+        { "file": "test/media-regulated.test.ts", "title": "answers 503, not 404, when the classification cannot be read" },
+        { "file": "test/media-regulated.test.ts", "title": "refuses an editor, who may upload media but not read regulated media" }
+      ]
+    },
+    {
+      "id": "SR-08",
+      "requirement": "Personal data is masked for viewers without pii:reveal, and a cleartext disclosure is recorded.",
+      "controls": ["A.8.11", "A.8.15"],
+      "source": "W1",
+      "tests": [
+        { "file": "test/pii-reveal.test.ts", "title": "never sends the cleartext to a viewer without pii:reveal" },
+        { "file": "test/pii-reveal.test.ts", "title": "records cleartext disclosure separately from the list read" }
+      ]
+    },
+    {
+      "id": "SR-09",
+      "requirement": "A regulated deployment refuses service until its inventory, schema and bindings are complete.",
+      "controls": ["A.5.12", "A.8.9"],
+      "source": "W1",
+      "tests": [
+        { "file": "test/regulated-profile.test.ts", "title": "guards real HTTP requests before route work and recovers after inventory repair" },
+        { "file": "test/regulated-profile.test.ts", "title": "rejects a build without the audit feature" }
+      ]
+    },
+    {
+      "id": "SR-10",
+      "requirement": "Authentication refusals are recorded durably without copying codes, state or attempted credentials.",
+      "controls": ["A.8.15", "A.8.5"],
+      "source": "W4",
+      "tests": [
+        { "file": "test/auth-denial-evidence.test.ts", "title": "persists an attributable bounded OAuth refusal before returning its redirect" },
+        { "file": "test/auth-denial-evidence.test.ts", "title": "does not record OAuth codes, state, query terms or attempted addresses" }
+      ]
+    },
+    {
+      "id": "SR-11",
+      "requirement": "The audit archive seals each range once, never forks the chain and never prunes what it has not read back.",
+      "controls": ["A.8.15", "A.5.28", "A.5.33"],
+      "source": "W5",
+      "tests": [
+        { "file": "test/audit-archive-protection.test.ts", "title": "cannot fork the chain from a runner whose lease lapsed mid-write" },
+        { "file": "test/audit-archive-protection.test.ts", "title": "does not prune a segment that cannot be read back" },
+        { "file": "test/audit-archive-protection.test.ts", "title": "seals each range once when ticks overlap" }
+      ]
+    },
+    {
+      "id": "SR-12",
+      "requirement": "A plugin cannot inherit another plugin's identity or approvals, and cannot expand its access without host approval.",
+      "controls": ["A.5.21", "A.8.2"],
+      "source": "W4b",
+      "tests": [
+        { "file": "test/plugin-identity.test.ts", "title": "does not let an impostor inherit the approvals granted to the id" },
+        { "file": "test/security-hardening.test.ts", "title": "rejects manifest access expansion without host approval" }
+      ]
+    },
+    {
+      "id": "SR-13",
+      "requirement": "A one-time form token is accepted exactly once and only with this deployment's signature.",
+      "controls": ["A.8.26"],
+      "source": "W2",
+      "tests": [
+        { "file": "test/form-once.test.ts", "title": "serializes concurrent claims so exactly one request wins" },
+        { "file": "test/form-once.test.ts", "title": "rejects tokens signed with a different secret without storing them" }
+      ]
+    },
+    {
+      "id": "SR-14",
+      "requirement": "With the private database unreachable, nothing is served, changed or re-issued on the token's word.",
+      "controls": ["A.5.29"],
+      "source": "W11",
+      "tests": [
+        { "file": "test/disruption.test.ts", "title": "refuses an admin read with a valid access token" },
+        { "file": "test/disruption.test.ts", "title": "issues no new tokens from a refresh token" }
+      ]
+    },
+    {
+      "id": "SR-15",
+      "requirement": "A purged submission is erased from the published database and never re-mirrored; a held page is never purged.",
+      "controls": ["A.8.10", "A.5.33"],
+      "source": "W12",
+      "tests": [
+        { "file": "test/record-lifecycle.test.ts", "title": "is mirrored, trashed without coming back, then purged and erased from the published database" },
+        { "file": "test/record-lifecycle.test.ts", "title": "refuses to purge a held page by hand, by empty trash and by retention, until released" }
+      ]
+    },
+    {
+      "id": "SR-16",
+      "requirement": "Flagged signals reach the receiver without personal data, and a review is recorded with its decision.",
+      "controls": ["A.8.16", "A.5.25"],
+      "source": "W13",
+      "tests": [
+        { "file": "test/incident-exercise.test.ts", "title": "sends a flagged signal once a day, with counts and no personal data" },
+        { "file": "test/incident-exercise.test.ts", "title": "records the decision, clears the overdue flag and reports both in the heartbeat" }
+      ]
+    }
+  ]
+}
