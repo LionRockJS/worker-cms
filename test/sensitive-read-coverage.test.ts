@@ -85,7 +85,7 @@ it.each([
   expect(response.status).toBeLessThan(300);
   const row = await env.DB.prepare('SELECT actor_user_id, acting_via, data_class, target_count, detail FROM audit_events WHERE action = ?').bind(action).first();
   const registration = await env.DB.prepare('SELECT uuid FROM plugins WHERE id=?').bind(pluginRowId).first<{ uuid: string }>();
-  expect(row).toMatchObject({ actor_user_id: method === 'POST' ? '9701' : null, acting_via: method === 'POST' ? 'coverage' : `plugin:${registration!.uuid}`, data_class: 'phi', target_count: 1, detail: null });
+  expect(row).toMatchObject({ actor_user_id: null, acting_via: `plugin:${registration!.uuid}`, data_class: 'phi', target_count: 1, detail: null });
   if (method !== 'POST') expect(await response.text()).toContain('stored-private-value');
 });
 

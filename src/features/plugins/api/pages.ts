@@ -62,7 +62,7 @@ import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
 import { liveMapForDraftPages, publishPagesToTargets, unpublishPageFromTargets, unpublishPagesFromTargets } from '../../../core/publish';
 import { notifyPageSaved } from '../../../core/db/page-store';
-import { capturePluginPageUpdateAuthority, readPluginPageUpdateSources, commitPluginPageUpdates, type PluginPageUpdate, type PluginPageUpdateDenial } from '../page-update-evidence';
+import { capturePluginPageMutationAuthority, readPluginPageUpdateSources, commitPluginPageUpdates, type PluginPageUpdate, type PluginPageUpdateDenial } from '../page-update-evidence';
 
 const DUPLICATE_BATCH = 100;
 const DUPLICATE_MAX_PER_CALL = 1000;
@@ -713,12 +713,13 @@ pagesApiRoutes.post('/pages', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
 
+  const authority = await capturePluginPageMutationAuthority(c, auth, 'create');
   const body = await c.req.json().catch(() => null) as PageInput | null;
   if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
 
-  const result = await createPages(c, auth, [body]);
+  const result = await createPages(c, auth, authority, [body]);
   if (!result.ok) return c.json(result.body, result.status);
-  recordPageReads('page.create-result', result.created, { actor: apiActor(c, auth.pluginId) });
+  recordPageReads('page.create-result', result.created, { actor: authority.actor });
   if (result.created.length) return c.json({ page: result.created[0] }, 201);
   const failure = result.errors[0];
   return c.json(
@@ -733,14 +734,15 @@ pagesApiRoutes.post('/pages/batch', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
 
+  const authority = await capturePluginPageMutationAuthority(c, auth, 'create');
   const body = await c.req.json().catch(() => null) as { pages?: unknown } | null;
   const items = body && Array.isArray(body.pages) ? body.pages : null;
   if (!items) return c.json({ error: 'invalid_body' }, 400);
   if (items.length > MAX_BATCH) return c.json({ error: 'batch_too_large', max: MAX_BATCH }, 413);
 
-  const result = await createPages(c, auth, items.map((item) => (item ?? {}) as PageInput));
+  const result = await createPages(c, auth, authority, items.map((item) => (item ?? {}) as PageInput));
   if (!result.ok) return c.json(result.body, result.status);
-  recordPageReads('page.create-result', result.created, { actor: apiActor(c, auth.pluginId) });
+  recordPageReads('page.create-result', result.created, { actor: authority.actor });
   return c.json({
     created: result.created,
     // Per-item errors keep the wire shape bulk callers already parse.
@@ -919,7 +921,7 @@ pagesApiRoutes.post('/pages/duplicate', async (c) => {
 pagesApiRoutes.patch('/pages/batch', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
-  const authority = await capturePluginPageUpdateAuthority(c, auth);
+  const authority = await capturePluginPageMutationAuthority(c, auth);
   const body = await c.req.json().catch(() => null) as { pages?: unknown } | null;
   const items = body && Array.isArray(body.pages) ? body.pages : null;
   if (!items) return c.json({ error: 'invalid_body' }, 400);
@@ -964,7 +966,7 @@ pagesApiRoutes.patch('/pages/:id', (c) => updatePage(c));
 async function updatePage(c: AppContext): Promise<Response> {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
-  const authority = await capturePluginPageUpdateAuthority(c, auth);
+  const authority = await capturePluginPageMutationAuthority(c, auth);
   const id = asPositiveSafeInteger(c.req.param('id'));
   if (id === null) return c.json({ error: 'invalid_id' }, 400);
   const source = await readPluginPageUpdateSources(c, authority, [id]);

@@ -1,21 +1,25 @@
 // Page creation for /__cms, shared by POST /pages and POST /pages/batch.
 //
-// Ids and slugs are allocated up front for the whole batch so a bulk insert
-// stays a single D1 round trip and cannot collide with itself mid-flight.
+// Ids/slugs are planned up front. Durable intent precedes the optional credit
+// reservation; pages, history, tags and final receipts share one guarded batch.
 
 import type { AppContext } from '../../../core/http/context';
 import type { ApiPage, PageInput, PluginAuth, PreparedCreate } from './types';
 import { forbiddenPageTypeBody } from './auth';
 import { asFiniteNumber, asPositiveSafeInteger, coerceLect, hasSubmittedValue } from './serialize';
 import { emitPluginHooks } from './hooks';
-import type { HookPage } from '../hooks';
-import { blueprintToLect, mergeLects, safeParseLect, stringifyLect } from '../../../core/db/lect';
+import { blueprintToLect, mergeLects, stringifyLect } from '../../../core/db/lect';
 import { resolveCmsConfig } from '../../../core/db/content-config';
 import { withDraftMetadata } from '../../../core/db/page-logic';
 import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
-import { checkCreateLimits, createCandidate } from '../limits';
-import { reservePageCreates } from '../../services';
+import { reservePageCreates, type FeatureReservation } from '../../services';
+import type { PluginPageMutationAuthority } from '../page-update-evidence';
+import { preparePluginPageCreates, commitPluginPageCreates, recordPluginCreateReservationRefusal, recordPluginCreateFailure, PluginPageCreateUnavailableError } from '../page-create-evidence';
+import { serializePage } from './serialize';
+import type { Page } from '../../../types';
+import { assertRegulatedWritesAllowed } from '../../../core/http/regulated-writes';
+import { recordAuditOutage } from '../../../core/db/audit-outages';
 
 /** Largest batch accepted by POST /pages/batch — bounds D1 write volume per call. */
 
@@ -42,12 +46,11 @@ export interface CreateItemError {
 
 export type BatchCreateResult =
   | { ok: true; created: ApiPage[]; errors: CreateItemError[] }
-  | { ok: false; status: 400 | 402 | 409 | 500; body: Record<string, unknown> };
+  | { ok: false; status: 400 | 402 | 409; body: Record<string, unknown> };
 
 /**
- * The user a plugin acts on behalf of, echoed back from the `x-cms-user`
- * summary the admin proxy forwards. Absent on flows with no signed-in user
- * (public RSVP submit, kiosk check-in) — those are uncharged in v1.
+ * Legacy caller-asserted payer/attribution selector; it is not CMS-user or
+ * session proof. Public flows without this selector remain uncharged in v1.
  */
 export function actingUserId(c: AppContext): number | null {
   return asFiniteNumber((c.req.header('x-acting-user-id') ?? '').trim() || null);
@@ -83,6 +86,8 @@ export function prepareCreateInput(
 
   const id = asPositiveSafeInteger(input.id);
   if (hasSubmittedValue(input.id) && id === null) return { ok: false, status: 400, error: 'invalid_id' };
+  const tags = [...new Set(tagIds(input.tags))];
+  if (tags.length > 5000 || tags.some(id => !Number.isSafeInteger(id) || id <= 0)) return { ok: false, status: 400, error: 'invalid_tags' };
   const parentId = asPositiveSafeInteger(input.page_id);
   if (hasSubmittedValue(input.page_id) && parentId === null) return { ok: false, status: 400, error: 'invalid_page_id' };
 
@@ -99,7 +104,7 @@ export function prepareCreateInput(
       end: typeof input.end === 'string' ? input.end : null,
       timezone: typeof input.timezone === 'string' ? input.timezone : (c.env.DEFAULT_TIMEZONE ?? '+0800'),
       parentId,
-      tags: tagIds(input.tags),
+      tags,
     },
   };
 }
@@ -156,35 +161,6 @@ export async function generatedPageIds(db: D1DatabaseClient, count: number, used
   return ids;
 }
 
-export async function reservedPageVersionIds(db: D1DatabaseClient, ids: number[]): Promise<Set<number>> {
-  const unique = [...new Set(ids)];
-  const out = new Set<number>();
-  for (let index = 0; index < unique.length; index += 100) {
-    const chunk = unique.slice(index, index + 100);
-    if (!chunk.length) continue;
-    const rows = await db.prepare(`SELECT id FROM page_versions WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .bind(...chunk)
-      .all<{ id: number }>();
-    for (const row of rows.results) out.add(row.id);
-  }
-  return out;
-}
-
-/** Explicit version ids keep a whole batch of page_versions INSERTs collision-
- * free: the column's default draws from a 16-bit random within the same 10ms
- * window, so a large batch can pick the same id twice and fail the commit.
- * Collision-check all candidates against existing rows at once. */
-export async function generatedPageVersionIds(db: D1DatabaseClient, count: number): Promise<number[]> {
-  const ids: number[] = [];
-  const usedIds = new Set<number>();
-  while (ids.length < count) {
-    const candidates = Array.from({ length: count - ids.length }, () => cmsId(usedIds));
-    const reserved = await reservedPageVersionIds(db, candidates);
-    ids.push(...candidates.filter((id) => !reserved.has(id)));
-  }
-  return ids;
-}
-
 /**
  * Shared create executor behind POST /pages and POST /pages/batch: per-item
  * validation and id/parent finalization, an all-or-nothing quota check and
@@ -195,22 +171,32 @@ export async function generatedPageVersionIds(db: D1DatabaseClient, count: numbe
  * ledger row plugins and admins expect from a single create); larger batches
  * charge one aggregate `page_create:batch` row with a per-type note.
  */
-export async function createPages(c: AppContext, auth: PluginAuth, items: PageInput[]): Promise<BatchCreateResult> {
+export async function createPages(c: AppContext, auth: PluginAuth, authority: PluginPageMutationAuthority, items: PageInput[]): Promise<BatchCreateResult> {
+  assertRegulatedWritesAllowed(c.env);
+  try { return await create(c, auth, authority, items); }
+  catch (error) {
+    if (error instanceof PluginPageCreateUnavailableError) throw error;
+    await recordAuditOutage(c.env, 'health', [], authority.actor, undefined, { captureIncomplete: true });
+    throw new PluginPageCreateUnavailableError(false);
+  }
+}
+async function create(c: AppContext, auth: PluginAuth, authority: PluginPageMutationAuthority, items: PageInput[]): Promise<BatchCreateResult> {
   const config = await resolveCmsConfig(c.env);
+  const forbiddenTypes: string[] = [];
   const prepared: PreparedCreate[] = [];
   const preparedIndexes: number[] = [];
   const created: ApiPage[] = [];
   const errors: CreateItemError[] = [];
   for (let i = 0; i < items.length; i++) {
-    const result = prepareCreateInput(c, auth, config, items[i]);
+    const result = prepareCreateInput(c, { ...auth, allowedTypes: authority.allowed }, config, items[i]);
     if (result.ok) {
       prepared.push(result.input);
       preparedIndexes.push(i);
     }
-    else errors.push({ index: i, error: result.error, status: result.status, page_type: result.page_type, message: result.message });
+    else { errors.push({ index: i, error: result.error, status: result.status, page_type: result.page_type, message: result.message }); if (result.error === 'forbidden_page_type' && result.page_type) forbiddenTypes.push(result.page_type); }
   }
 
-  if (!prepared.length) return { ok: true, created, errors };
+  if (!prepared.length) { await preparePluginPageCreates(c, authority, [], forbiddenTypes); return { ok: true, created, errors }; }
 
   const requestedIds = prepared.map((item) => item.id).filter((id): id is number => id !== null);
   const reservedIds = await reservedPageIds(c.env.DB, requestedIds);
@@ -276,93 +262,37 @@ export async function createPages(c: AppContext, auth: PluginAuth, items: PageIn
       }
     }
   }
-  if (!finalized.length) return { ok: true, created, errors };
+  if (!finalized.length) { await preparePluginPageCreates(c, authority, [], forbiddenTypes); return { ok: true, created, errors }; }
 
-  // Reject the whole set on any quota violation, so a bulk import never
-  // half-applies against a limit.
-  const violation = await checkCreateLimits(
-    c.env,
-    finalized.map((item) => createCandidate(item.pageType, item.parentId, item.lect)),
-  );
-  if (violation) return { ok: false, status: 409, body: { error: 'limit_exceeded', violation } };
-
-  // Total page-create cost, charged once up front — all-or-nothing like the
-  // limit check, so a create either fully fits the payer's balance or writes
-  // nothing. A downstream commit failure refunds via the catch below.
-  const typeCounts = new Map<string, number>();
-  for (const item of finalized) typeCounts.set(item.pageType, (typeCounts.get(item.pageType) ?? 0) + 1);
-  const payer = actingUserId(c);
-  // Charged by whichever feature meters page creates; free when none is
-  // installed. Refunded below if the batch write then fails.
-  const charge = await reservePageCreates(c.env, {
-    pageTypes: [...typeCounts].map(([pageType, count]) => ({ pageType, count })),
-    payerUserId: payer,
-    contributorId: auth.pluginId,
-  });
-  if (!charge.ok) {
-    return {
-      ok: false,
-      status: charge.status,
-      body: {
-        error: charge.code,
-        ...(charge.details ?? {}),
-      },
-    };
-  }
-  const charged = charge.charged;
-
-  const usedSlugs = await existingSlugSet(c.env.DB, finalized.map((item) => item.baseSlug));
-  const statements: D1PreparedStatement[] = [];
-  const hookPages: HookPage[] = [];
-  const createdAt = cmsTimestamp();
-  const versionIds = await generatedPageVersionIds(c.env.DB, finalized.length);
-
-  for (let i = 0; i < finalized.length; i++) {
-    const item = finalized[i];
-    const id = allocatedIds[i];
-    const uuid = crypto.randomUUID();
-    const versionId = versionIds[i];
-    const slug = allocateSlug(item.baseSlug, usedSlugs);
-
-    statements.push(...bulkPageInsertStatements(c.env.DB, {
-      id, uuid, createdAt, name: item.name, slug, weight: item.weight, start: item.start,
-      end: item.end, timezone: item.timezone, pageType: item.pageType, versionId,
-      lect: item.lect, parentId: item.parentId,
-    }));
-    for (const tagId of item.tags) {
-      statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO page_tags (page_id, tag_id) VALUES (?, ?)')
-        .bind(id, tagId));
-    }
-
-    const page = {
-      id,
-      uuid,
-      page_type: item.pageType,
-      name: item.name,
-      slug,
-      weight: item.weight,
-      start: item.start,
-      end: item.end,
-      timezone: item.timezone,
-      page_id: item.parentId,
-      created_at: createdAt,
-      updated_at: createdAt,
-      lect: safeParseLect(item.lect),
-    };
-    created.push(page);
-    hookPages.push({ id, uuid, page_type: item.pageType, name: item.name, slug });
-  }
-
+  const usedSlugs = await existingSlugSet(c.env.DB, finalized.map(item => item.baseSlug));
+  const plans = finalized.map((item,index) => ({ ...item, id: allocatedIds[index], uuid: crypto.randomUUID(), slug: allocateSlug(item.baseSlug, usedSlugs) }));
+  const source = await preparePluginPageCreates(c, authority, plans, forbiddenTypes);
+  if (source.violation) return { ok: false, status: 409, body: { error: 'limit_exceeded', violation: source.violation } };
+  const typeCounts = new Map<string,number>();
+  for (const item of finalized) typeCounts.set(item.pageType,(typeCounts.get(item.pageType) ?? 0)+1);
+  let reservation: FeatureReservation | undefined;
+  let saved: Page[];
   try {
-    await c.env.DB.batch(statements);
+    reservation = await reservePageCreates(c.env, { pageTypes: [...typeCounts].map(([pageType,count]) => ({ pageType,count })), payerUserId: actingUserId(c), contributorId: auth.pluginId, operationId: source.operationId });
+    if (!reservation.ok) {
+      await recordPluginCreateReservationRefusal(c, source, reservation.code);
+      return { ok: false, status: reservation.status, body: { error: reservation.code, ...(reservation.details ?? {}) } };
+    }
+    saved = await commitPluginPageCreates(c, source, reservation.charged);
   } catch (error) {
-    if (charged) await charge.refund();
-    console.error('Plugin API batch create failed', error);
-    return { ok: false, status: 500, body: { error: 'create_failed' } };
+    // Refund only a known non-commit. A lost D1 acknowledgment can follow a
+    // complete page/receipt commit and must never give those pages away free.
+    const known = error instanceof PluginPageCreateUnavailableError ? error.rollbackKnown : true;
+    let refundState = reservation?.ok ? 'not_required' : reservation ? 'refused' : 'reservation_unconfirmed';
+    if (reservation?.ok && reservation.charged > 0) {
+      refundState = 'withheld_commit_unknown';
+      if (known) { try { await reservation.refund(); refundState = 'attempted'; } catch { refundState = 'unconfirmed'; } }
+    }
+    await recordPluginCreateFailure(c, source, known, refundState);
+    throw error instanceof PluginPageCreateUnavailableError ? error : new PluginPageCreateUnavailableError(known);
   }
-  emitPluginHooks(c, 'create', hookPages, auth.pluginId);
-
-  return { ok: true, created, errors };
+  emitPluginHooks(c, 'create', saved.map(page => ({ id: page.id, uuid: page.uuid, page_type: page.page_type, name: page.name, slug: page.slug })), auth.pluginId, { evidenceCommitted: true, actor: authority.actor });
+  return { ok: true, created: saved.map(serializePage), errors };
 }
 
 export async function existingSlugSet(db: D1DatabaseClient, baseSlugs: string[]): Promise<Set<string>> {

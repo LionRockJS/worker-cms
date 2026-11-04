@@ -140,7 +140,7 @@ export const creditsServices: FeatureServiceEntry = {
       action,
       entityType: singleType,
       pluginId: input.contributorId,
-      note: singleType ? undefined : JSON.stringify(breakdown),
+      note: input.operationId ? JSON.stringify({ record_type: 'cms.page-create-reservation.v1', operation_id: input.operationId, ...(singleType ? {} : { breakdown }) }) : singleType ? undefined : JSON.stringify(breakdown),
       createdBy,
     });
     if (!charge.ok) {
@@ -175,6 +175,7 @@ export const creditsServices: FeatureServiceEntry = {
         userId: payer,
         action,
         pluginId: input.contributorId,
+        note: input.operationId ? JSON.stringify({ record_type: 'cms.page-create-reservation.v1', operation_id: input.operationId }) : undefined,
         createdBy,
         spent,
         portion,

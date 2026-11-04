@@ -23,7 +23,7 @@ const LINK = ['id','uuid','created_at','updated_at','page_id','tag_id','weight']
 const HISTORY = ['id','uuid','created_at','updated_at','page_id','action'];
 const TAG = ['id','uuid','taxonomy_slug'];
 const FLOOR = ['uuid','level'];
-const brand = Symbol('plugin-page-update-authority');
+const brand = Symbol('plugin-page-mutation-authority');
 type Class = 'none'|'pii'|'phi';
 function maximum(classes: Array<Class | undefined | null>): Class { return classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none'; }
 async function unavailable(c: AppContext, actor?: AuditActor): Promise<never> {
@@ -32,7 +32,7 @@ async function unavailable(c: AppContext, actor?: AuditActor): Promise<never> {
 }
 /** Capture before reading the body. Blueprint declarations and wildcard
  * delegation remain requests: current exact write approvals are required. */
-export async function capturePluginPageUpdateAuthority(c: AppContext, auth: PluginAuth) {
+export async function capturePluginPageMutationAuthority(c: AppContext, auth: PluginAuth, purpose: 'create'|'update' = 'update') {
   try {
     const registration = auth.plugin.registration;
     if (!registration || !Number.isSafeInteger(registration.id) || registration.id <= 0) throw new Error('Missing registration identity');
@@ -58,18 +58,22 @@ export async function capturePluginPageUpdateAuthority(c: AppContext, auth: Plug
     const actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: `plugin:${registration.uuid}` };
     const context = requestContext.getStore(); if (context) context.readActor = actor;
     const dataClass = maximum(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events'].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
-    await auditBackgroundReads(c.env, ['plugins','plugin_identity_approvals','plugin_page_type_approvals','audit_events'].map(table => ({ action: 'plugin.page-update-authority-read', kind: 'table' as const, key: table, targetType: table === 'audit_events' ? 'plugin_registry_journal' : table, ids: table === 'plugin_page_type_approvals' ? approvals.map(row => String(row.id)) : [table === 'audit_events' ? registration.uuid : String(registration.id)], count: table === 'plugin_page_type_approvals' ? approvals.length : 1, minimumClass: dataClass === 'none' ? undefined : dataClass })), actor);
+    await auditBackgroundReads(c.env, ['plugins','plugin_identity_approvals','plugin_page_type_approvals','audit_events'].map(table => ({ action: `plugin.page-${purpose}-authority-read`, kind: 'table' as const, key: table, targetType: table === 'audit_events' ? 'plugin_registry_journal' : table, ids: table === 'plugin_page_type_approvals' ? approvals.map(row => String(row.id)) : [table === 'audit_events' ? registration.uuid : String(registration.id)], count: table === 'plugin_page_type_approvals' ? approvals.length : 1, minimumClass: dataClass === 'none' ? undefined : dataClass })), actor);
     const check = () => [guard(c, 'plugins', REGISTRY, rows, 'id=?', [registration.id]), guard(c, 'plugin_identity_approvals', IDENTITY, pins, 'plugin_row_id=?', [registration.id]), guard(c, 'plugin_page_type_approvals', APPROVAL, approvals, 'plugin_id=?', [auth.pluginId]), classificationPolicyGuard(c.env, policy), abortIf(c.env, "(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin' AND target_id=?)<>?", [registration.uuid, journal.generation])];
-    return { [brand]: true as const, actor, policy, dataClass, check, allowed, registryId: registration.id, identityFingerprint: await fingerprint(auth.pluginId) };
+    return { [brand]: true as const, purpose, actor, policy, dataClass, check, allowed, registryId: registration.id, identityFingerprint: await fingerprint(auth.pluginId) };
   } catch { return unavailable(c); }
 }
-type Authority = Awaited<ReturnType<typeof capturePluginPageUpdateAuthority>>;
+export type PluginPageMutationAuthority = Awaited<ReturnType<typeof capturePluginPageMutationAuthority>>;
+type Authority = PluginPageMutationAuthority;
+export function assertPluginPageAuthority(authority: Authority, purpose: 'create'|'update'): void {
+  if (!authority?.[brand] || authority.purpose !== purpose) throw new Error('Invalid page authority');
+}
 
 /** Bounded selected rows; all result decisions, including mixed-batch denials,
  * are tied to this exact source through the final transaction. */
 export async function readPluginPageUpdateSources(c: AppContext, authority: Authority, ids: number[]) {
   try {
-    if (!authority?.[brand] || ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) throw new Error('Invalid page source manifest');
+    if (!authority?.[brand] || authority.purpose !== 'update' || ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) throw new Error('Invalid page source manifest');
     const args = [json(ids)], where = 'id IN (SELECT value FROM json_each(?))';
     const pages = await snapshot<Page>(c, 'pages', PAGE, where, args);
     const selected = 'page_id IN (SELECT value FROM json_each(?))';
@@ -96,7 +100,7 @@ export interface PluginPageUpdateDenial { page: Page; reason: 'forbidden_page_ty
 export async function commitPluginPageUpdates(c: AppContext, authority: Authority, source: Sources, changes: PluginPageUpdate[], denied: PluginPageUpdateDenial[] = []): Promise<Page[]> {
   assertRegulatedWritesAllowed(c.env);
   try {
-    if (!authority?.[brand] || changes.length > 100 || new Set([...changes.map(change => change.before.id), ...denied.map(row => row.page.id)]).size !== changes.length + denied.length) throw new Error('Invalid page update manifest');
+    if (!authority?.[brand] || authority.purpose !== 'update' || changes.length > 100 || new Set([...changes.map(change => change.before.id), ...denied.map(row => row.page.id)]).size !== changes.length + denied.length) throw new Error('Invalid page update manifest');
     const extraIds = [...new Set(changes.flatMap(change => change.tags ?? []))];
     if (extraIds.length > 5000 || extraIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid association manifest');
     const extraArgs = [json(extraIds)], extraWhere = 'id IN (SELECT value FROM json_each(?))';

@@ -16,9 +16,9 @@
 //   - a limit binds its page type globally, regardless of which plugin or
 //     admin user creates the page
 //
-// The check is count-then-insert (no locking), so concurrent creates can
-// overshoot by a few rows: these are business quotas, not hard invariants.
-// Trash restore is likewise not gated.
+// Legacy callers use a count-then-insert check and can overshoot concurrently.
+// Audited contributor creation additionally guards these predicates inside its
+// local D1 transaction. Trash restore remains outside quota admission.
 // ============================================================
 
 import type { Env } from '../../types';
@@ -215,7 +215,7 @@ export async function countLimitUsage(
     sql += ' AND p.page_id = ?';
     params.push(scopeValue);
   } else if (def.scope === 'per_pointer') {
-    sql += ' AND json_extract(p.lect, ?) = ?';
+    sql += ' AND CAST(json_extract(p.lect, ?) AS TEXT) = ?';
     params.push(`$._pointers.${def.pointerKey}`, String(scopeValue ?? ''));
   }
   return countPageMetadata(db, sql, params, { types: def.pageType ? [def.pageType] : undefined, action: 'page.limit-usage' });
@@ -223,7 +223,7 @@ export async function countLimitUsage(
 
 /** Groups candidates by the scope value a limit counts over. Candidates a
  *  scoped limit can't see (no parent / no pointer) are exempt from it. */
-function scopeGroups(def: NormalizedLimitDef, candidates: CreateCandidate[]): Map<string | number | null, number> {
+export function scopeGroups(def: NormalizedLimitDef, candidates: CreateCandidate[]): Map<string | number | null, number> {
   const groups = new Map<string | number | null, number>();
   for (const candidate of candidates) {
     let scopeValue: string | number | null = null;

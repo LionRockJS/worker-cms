@@ -40,7 +40,7 @@ Selected snapshots retain the shared 5,000-row and 1,000,000-byte UTF-8 JSON bou
 
 No mutation replay, compensation or credit reservation is added to this update family. A lost acknowledgment may follow a complete page/history/tag/receipt commit; no hooks are started on that uncertain return. An identical later request is not a durable operation-ID retry. `if_lect` preserves its narrow optimistic-precondition contract; general lookup, retry and reconciliation remain R5.
 
-No schema migration, production mutation, push, deployment or compliance sign-off occurs. Regulated business writes remain blocked. Four packages R3–R6 remain open, provisionally **18–32 engineering person-days** plus external acceptance; see the [scope register](w4b-remaining-scope-2026-11-02.md). Next R3 slices are single/batch creation with its existing credit/reservation boundary, then duplication, deletion/children and tag provisioning. Ingestion, other services/billing/jobs, external effects and global/deployed acceptance remain.
+No schema migration, production mutation, push, deployment or compliance sign-off occurs. Regulated business writes remain blocked. Four packages R3–R6 remain open, provisionally **18–32 engineering person-days** plus external acceptance; see the [scope register](w4b-remaining-scope-2026-11-02.md). The subsequent [creation slice](plugin-page-create-mutation-evidence.md) covers single/batch POST creation and its guarded reservation boundary. Next R3 slices are duplication, deletion/children and tag provisioning. Ingestion, other services/billing/jobs, external effects and global/deployed acceptance remain.
 
 ## Validation
 

@@ -19,6 +19,8 @@ export interface PageCreateReservationInput {
   pageTypes: ReadonlyArray<{ pageType: string; count: number }>;
   payerUserId: number | null;
   contributorId?: string;
+  /** Correlates a guarded creation intent; not a client retry token. */
+  operationId?: string;
 }
 
 export type FeatureReservation =

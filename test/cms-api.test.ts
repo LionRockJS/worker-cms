@@ -825,6 +825,7 @@ describe('Plugin API create / read / list / update / delete', () => {
   });
 
   it('advanced-searches plugin pages by criteria that combine tags and lect paths', async () => {
+    await env.DB.prepare("INSERT OR IGNORE INTO tags(id,name,slug,taxonomy_slug) VALUES (777,'Search fixture','search-fixture-777','default')").run();
     await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest',
       name: 'Tagged Confirmed',
