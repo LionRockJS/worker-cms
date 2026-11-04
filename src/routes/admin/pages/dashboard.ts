@@ -180,13 +180,25 @@ async function liveDashboardPagesForRequest(
   const { pageType, requestedPage, pageSize, statusFilter, now } = options;
   const whereSql = pageType ? 'p.page_type = ?' : '1';
   const baseParams = pageType ? [pageType] : [];
-  const source = await readD1PageSource<Page>(c.env.PUBLISHED_DB, 'full', whereSql, baseParams, 'ORDER BY p.weight ASC, p.name ASC, p.id ASC');
+  // Filter on schedule columns only; lect and the rest are loaded below for
+  // just the rows on this page, not for every published page.
+  const source = await readD1PageSource<{ uuid: string; page_type: string | null; start: string | null; end: string | null; timezone: string | null }>(
+    c.env.PUBLISHED_DB, 'schedule', whereSql, baseParams, 'ORDER BY p.weight ASC, p.name ASC, p.id ASC',
+  );
   await auditLiveReads(c.env, { id: 'd1' }, source.provenance, undefined, 'page.live-status');
   const matchingRows = source.rows.filter((page) => (
     publicationStatusForPage(page, true, now) === statusFilter
   ));
-  const paginated = dashboardPaginationResult(matchingRows, requestedPage, pageSize);
-  const liveMap = new Map(paginated.results.map((page) => [page.uuid, page]));
+  const paginatedUuids = dashboardPaginationResult(matchingRows.map((page) => page.uuid), requestedPage, pageSize);
+  const pageUuids = paginatedUuids.results;
+  const liveRows = pageUuids.length
+    ? (await readD1PageSource<Page>(c.env.PUBLISHED_DB, 'full', 'p.uuid IN (SELECT value FROM json_each(?))', [JSON.stringify(pageUuids)])).rows
+    : [];
+  const liveMap = new Map(liveRows.map((page) => [page.uuid, page]));
+  const paginated = {
+    results: pageUuids.map((uuid) => liveMap.get(uuid)).filter((page): page is Page => !!page),
+    pagination: paginatedUuids.pagination,
+  };
   const draftRows = await listDashboardDraftPagesByUuids(
     c.env.DB,
     paginated.results.map((page) => page.uuid),

@@ -4,8 +4,8 @@ import { countTrashMetadataByType } from './queries';
 // Trash listing, restore-to-draft, and permanent delete.
 
 import { Hono } from 'hono';
-import { holdsPage, trashPage, type HoldRow } from './template';
-import type { Env, Variables, Page } from '../../types';
+import { holdsPage, trashPage, type HoldRow, type TrashListPage } from './template';
+import type { Env, Variables } from '../../types';
 import type { AppContext } from '../../core/http/context';
 import { mutatePageLifecycle, RecordHeldError } from '../../core/pages/lifecycle-mutation-evidence';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
@@ -44,8 +44,8 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
   const offset = (currentPage - 1) * pageSize;
 
   const trashedPages = await c.env.DB.prepare(
-    `SELECT * FROM trash_pages ${typeWhere} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
-  ).bind(...typeParams, pageSize, offset).all<Page>();
+    `SELECT id, uuid, name, slug, page_type, updated_at FROM trash_pages ${typeWhere} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+  ).bind(...typeParams, pageSize, offset).all<TrashListPage>();
 
   recordPageReads('page.trash-list', trashedPages.results);
   const held = new Set((await c.env.DB.prepare(
