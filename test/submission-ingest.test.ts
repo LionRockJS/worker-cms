@@ -52,6 +52,17 @@ async function seedDraftPage(id: number, pageType: string, uuid?: string): Promi
     .run();
 }
 
+async function cursor(): Promise<{ created_at: string; uuid: string; passed_at?: string }> {
+  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(CURSOR_KEY).first<{ value: string }>();
+  return JSON.parse(row!.value);
+}
+
+/** Moves the completed pass back past the daily re-scan interval. */
+async function agePass(): Promise<void> {
+  const value = { ...await cursor(), passed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() };
+  await env.DB.prepare('UPDATE settings SET value = ? WHERE key = ?').bind(JSON.stringify(value), CURSOR_KEY).run();
+}
+
 const hookCalls: { url: string; body: { event: string; page: { uuid?: string; page_type?: string } } }[] = [];
 let savedSecret: unknown;
 const testEnv = env as unknown as Record<string, unknown>;
@@ -194,11 +205,57 @@ describe('ingestSubmissions', () => {
     expect((await ingestSubmissions(env)).created).toBe(0);
     await env.DB.prepare('DELETE FROM pages WHERE uuid = ?').bind(uuid).run();
 
-    expect((await ingestSubmissions(env)).more).toBe(true); // completed pass resets cursor
+    // The completed pass stands for a day before the scan restarts.
+    expect(await ingestSubmissions(env)).toEqual({ scanned: 0, created: 0, more: false });
+    await agePass();
+    expect((await ingestSubmissions(env)).more).toBe(true); // stale pass resets cursor
     expect((await ingestSubmissions(env)).created).toBe(1);
     const mirrored = await env.DB.prepare('SELECT id FROM pages WHERE uuid = ?')
       .bind(uuid).first<{ id: number }>();
     expect(await isSubmissionMirror(env.DB, mirrored!.id)).toBe(true);
+  });
+
+  it('writes nothing on idle ticks after a completed pass', async () => {
+    await seedLiveSubmission({
+      id: -100005,
+      uuid: 'facade01-0005-4005-8005-000000000005',
+      created_at: '2026-07-07 10:04:00',
+      page_type: 'rsvp_response',
+      page_id: null,
+    });
+    expect((await ingestSubmissions(env)).created).toBe(1);
+
+    // saveSetting stamps updated_at, so an old stamp that survives proves no write.
+    await env.DB.prepare("UPDATE settings SET updated_at = '2000-01-01 00:00:00' WHERE key = ?").bind(CURSOR_KEY).run();
+    for (let tick = 0; tick < 3; tick += 1) {
+      expect(await ingestSubmissions(env)).toEqual({ scanned: 0, created: 0, more: false });
+    }
+    const row = await env.DB.prepare('SELECT updated_at FROM settings WHERE key = ?').bind(CURSOR_KEY).first<{ updated_at: string }>();
+    expect(row?.updated_at).toBe('2000-01-01 00:00:00');
+  });
+
+  it('keeps the pass time when a new row arrives, so the daily re-scan still comes', async () => {
+    await seedLiveSubmission({
+      id: -100006,
+      uuid: 'facade01-0006-4006-8006-000000000006',
+      created_at: '2026-07-07 10:05:00',
+      page_type: 'rsvp_response',
+      page_id: null,
+    });
+    await ingestSubmissions(env);
+    await agePass();
+    const aged = await cursor();
+
+    await seedLiveSubmission({
+      id: -100007,
+      uuid: 'facade01-0007-4007-8007-000000000007',
+      created_at: '2026-07-07 10:06:00',
+      page_type: 'rsvp_response',
+      page_id: null,
+    });
+    expect((await ingestSubmissions(env)).created).toBe(1);
+    expect((await cursor()).passed_at).toBe(aged.passed_at);
+    expect((await ingestSubmissions(env)).more).toBe(true); // re-scan restarts on schedule
   });
 
   it('caps creates per run and resumes from the cursor', async () => {
