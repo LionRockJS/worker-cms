@@ -7,6 +7,9 @@ dist/
 .env
 .dev.vars
 wrangler.production.toml
+# Each clone's own deployment config, created by `npm run setup` from
+# wrangler.example.toml. Never commit deployment ids or client IDs.
+/wrangler.toml
 /.claude
 src/core/views/locales/en.default.json
 *.p8

@@ -11,8 +11,8 @@
 //
 // There is no flag to skip a gate. A deployment that has to bypass it runs
 // `npx wrangler deploy` directly, and is recorded as an exception (W14 record).
-// Files marked skip-worktree, such as a site's real wrangler.toml, are not seen
-// by `git status`: the configuration deployed is whatever is on disk.
+// wrangler.toml is gitignored (each clone's own config, created by setup), so
+// `git status` never sees it: the configuration deployed is whatever is on disk.
 // ============================================================
 
 import { execFileSync, spawnSync } from 'node:child_process';
