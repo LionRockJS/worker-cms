@@ -178,4 +178,26 @@
       {% endif %}
     </div>
   {% endfor %}
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mt-4">
+    <h2 class="text-lg font-bold text-gray-900">{{ "audit.signal_review.title" | t }}</h2>
+    {% if hasFlash %}<p class="mt-2 text-sm text-green-700">{{ flash | t }}</p>{% endif %}
+    {% if hasLastReview %}
+      <p class="mt-2 text-sm text-gray-500">{{ "audit.signal_review.last" | t }}: {{ lastReview.at | l10n_date }} · #{{ lastReview.by }} · {{ lastReview.outcome }}{% if lastReview.reference %} · {{ lastReview.reference }}{% endif %}</p>
+    {% else %}
+      <p class="mt-2 text-sm text-gray-500">{{ "audit.signal_review.never" | t }}</p>
+    {% endif %}
+    {% if reviewOverdue %}<p class="mt-1 text-sm text-red-700">{{ "audit.signal_review.overdue" | t }} ({{ reviewIntervalDays }}d)</p>{% endif %}
+    <form action="{{ recordReviewAction }}" method="post" class="mt-3 flex flex-wrap items-center gap-3" data-single-submit>
+      <label class="text-sm text-gray-700">{{ "audit.signal_review.outcome" | t }}
+        <select name="outcome" required class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          <option value="no-action">{{ "audit.signal_review.no_action" | t }}</option>
+          <option value="false-positive">{{ "audit.signal_review.false_positive" | t }}</option>
+          <option value="incident-opened">{{ "audit.signal_review.incident_opened" | t }}</option>
+        </select>
+      </label>
+      <label class="text-sm text-gray-700">{{ "audit.signal_review.reference" | t }}<input name="reference" maxlength="120" pattern="[A-Za-z0-9._:/#-]+" class="border border-gray-300 rounded-lg px-3 py-2 text-sm"></label>
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">{{ "audit.signal_review.save" | t }}</button>
+    </form>
+  </div>
 </div>

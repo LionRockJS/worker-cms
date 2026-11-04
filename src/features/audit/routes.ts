@@ -17,6 +17,8 @@ import { auditUnavailable, recordRead, recordTableReads } from '../../core/http/
 import { abortIf } from '../../core/db/transaction-guard';
 import { outageEnabled, recordAuditOutage } from '../../core/db/audit-outages';
 import { outagePage, readOutage, reconcileOutage, type OutageReview } from './outages';
+import { lastSignalReview, REFERENCE_PATTERN, REVIEW_OUTCOMES, reviewIntervalDays, reviewOverdue, SIGNAL_REVIEW_ACTION,
+  SIGNAL_REVIEW_TARGET, type ReviewOutcome } from './signal-review';
 import {
   classificationPolicyGuard,
   CONTAINER_KINDS,
@@ -256,8 +258,34 @@ auditRoutes.get('/audit/review', requirePermission('audit:read'), async (c) => {
     flagged: signals.reduce((sum, signal) => sum + signal.rows.length, 0),
   });
 
+  const lastReview = await lastSignalReview(c.env);
   return renderPage(c, auditReviewPage, { signals, health, outages,
-    canReconcile: await userCan(c, 'menu:manage') });
+    canReconcile: await userCan(c, 'menu:manage'),
+    lastReview, reviewOverdue: reviewOverdue(c.env, lastReview), reviewIntervalDays: reviewIntervalDays(c.env),
+    flash: c.req.query('flash') || undefined });
+});
+
+// Records that a person examined the signals and what they decided (W13). The
+// receipt names the counts reviewed, the outcome and, for anything opened, a
+// case reference. It is the evidence of review cadence; opening the screen
+// (audit.review above) is not.
+auditRoutes.post('/audit/review/record', requirePermission('audit:read'), async (c) => {
+  const form = await c.req.formData();
+  const outcome = String(form.get('outcome') ?? '') as ReviewOutcome;
+  const reference = String(form.get('reference') ?? '').trim();
+  if (!REVIEW_OUTCOMES.includes(outcome) || (reference && !REFERENCE_PATTERN.test(reference))
+      || (outcome === 'incident-opened' && !reference)) {
+    return c.redirect('/admin/audit/review?flash=Choose+an+outcome%3B+an+opened+incident+needs+a+case+reference');
+  }
+  const signals = await reviewSignals(c.env);
+  try {
+    await writeAuditRows(c, [{ action: SIGNAL_REVIEW_ACTION, eventClass: 'admin', dataClass: 'none', retentionClass: 'admin_config',
+      outcome: 'success', targetType: SIGNAL_REVIEW_TARGET, targetId: null, targetIds: null, targetCount: 0, containerKey: null,
+      queryFingerprint: null, detail: { outcome, reference: reference || null,
+        flagged: Object.fromEntries(signals.map(signal => [signal.id, signal.rows.length])) },
+    }], contextActor(c), true);
+  } catch { return auditUnavailable(c); }
+  return c.redirect('/admin/audit/review?flash=Review+recorded');
 });
 
 auditRoutes.get('/audit/outages/:id', requirePermission('audit:read'), async (c) => {

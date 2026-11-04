@@ -3,7 +3,8 @@ import { auditStatement, type AuditActor, type AuditRow } from '../../core/db/au
 import { resolveDataClasses } from '../../core/db/data-classes';
 import { deliverOutageAlert, incidentKey, monitorSource, outageEnabled, OUTAGE_PREFIX, recordAuditOutage, reviewKey,
   type AuditOutage, type AlertState } from '../../core/db/audit-outages';
-import { archiveHealth, type ArchiveHealth } from './signals';
+import { archiveHealth, reviewSignals, type ArchiveHealth } from './signals';
+import { deliverSignalAlerts, lastSignalReview, reviewOverdue } from './signal-review';
 import { hotDaysFor } from './sweep';
 import { assertRegulatedReady } from '../../core/http/regulated-profile';
 
@@ -15,6 +16,8 @@ export interface OutageHealth {
   archiveHealthy: boolean; scanCursor?: string;
   admissionReady: boolean;
   alertDeliveryHealthy: boolean;
+  /** No recorded signal review within AUDIT_REVIEW_INTERVAL_DAYS (W13). Not a health failure. */
+  signalReviewOverdue?: boolean;
 }
 export interface OutageReview {
   incidentId: string; reviewedAt: string; reviewerId: string;
@@ -119,6 +122,13 @@ export async function monitorAuditOutages(env: Env): Promise<void> {
       if (page.truncated) health.scanCursor = page.cursor;
     } catch { health.journalWritable = false; }
   }
+  if (health.primaryWritable) {
+    // Signals are 24-hour and 7-day aggregates, so checking them hourly is
+    // enough; each flagged signal is delivered at most once a day.
+    try { if (new Date(health.checkedAt).getUTCMinutes() < 5) await deliverSignalAlerts(env, await reviewSignals(env)); }
+    catch { console.error(JSON.stringify({ event: 'audit.signal-check-failed' })); }
+    try { health.signalReviewOverdue = reviewOverdue(env, await lastSignalReview(env)); } catch { /* Left unset. */ }
+  }
   try {
     if (env.AUDIT_MONITOR && monitorSource(env)) {
       const response = await env.AUDIT_MONITOR.fetch('https://audit-monitor.internal/heartbeat', {
@@ -127,6 +137,8 @@ export async function monitorAuditOutages(env: Env): Promise<void> {
           primaryWritable: health.primaryWritable, classificationAvailable: health.classificationAvailable,
           journalWritable: health.journalWritable, archiveHealthy: health.archiveHealthy, admissionReady: health.admissionReady,
           alertDeliveryHealthy: health.alertDeliveryHealthy,
+          // Absent when it could not be read; the receiver escalates true.
+          signalReviewOverdue: health.signalReviewOverdue ?? null,
           // The chain head as this database sees it. The receiver compares it
           // with the checkpoint it holds for that seq; only the fault's kind
           // leaves the CMS, never the segment key.

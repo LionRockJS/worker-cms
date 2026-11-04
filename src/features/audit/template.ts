@@ -2,6 +2,7 @@ import { adminLayout, type BaseTemplateProps } from '../../core/render/layout';
 import { renderView } from '../../core/render/liquid';
 import type { ArchiveHealth, ReviewSignal } from './signals';
 import type { outagePage } from './outages';
+import type { SignalReview } from './signal-review';
 
 interface AuditPagination {
   total: number;
@@ -150,6 +151,10 @@ export async function auditReviewPage(views: Fetcher, opts: BaseTemplateProps & 
   health: ArchiveHealth;
   outages?: Awaited<ReturnType<typeof outagePage>>;
   canReconcile?: boolean;
+  lastReview?: SignalReview | null;
+  reviewOverdue?: boolean;
+  reviewIntervalDays?: number;
+  flash?: string;
 }): Promise<string> {
   const { signals, health } = opts;
   const flagged = signals.reduce((sum, signal) => sum + signal.rows.length, 0);
@@ -205,6 +210,15 @@ export async function auditReviewPage(views: Fetcher, opts: BaseTemplateProps & 
     archiveFault: health.fault ? health.fault.split(':')[0] : null,
     archiveFaultKey: health.fault ? health.fault.split(':').slice(1).join(':') : null,
     archiveFaultAt: health.faultAt,
+
+    // Signal review (W13)
+    lastReview: opts.lastReview ?? null,
+    hasLastReview: !!opts.lastReview,
+    reviewOverdue: opts.reviewOverdue ?? true,
+    reviewIntervalDays: opts.reviewIntervalDays ?? 7,
+    recordReviewAction: '/admin/audit/review/record',
+    flash: opts.flash,
+    hasFlash: !!opts.flash,
 
     // Signals
     signals: signals.map((signal) => ({
