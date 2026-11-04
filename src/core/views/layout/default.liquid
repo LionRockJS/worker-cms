@@ -261,6 +261,124 @@
       });
     })();
 
+    // Navigation feedback: a slow worker or connection leaves the old page
+    // sitting there after a click, so show a top progress bar at once and turn
+    // the clicked link/button's icon into a spinner until the next page loads.
+    // Checked one tick later so clicks/submits that scripts preventDefault
+    // (fetch forms, menus, kiosk) never show it. Opt out with data-no-loading.
+    (function() {
+      function spinner(className) {
+        return '<svg class="' + className + ' shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true" data-nav-spinner><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" opacity="0.25"></circle><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>';
+      }
+      var bar = null;
+      var safetyTimer = null;
+
+      function startBar() {
+        if (!document.body) return;
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.setAttribute('role', 'progressbar');
+          bar.setAttribute('aria-label', 'Loading');
+          bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:3px;z-index:9999;pointer-events:none;overflow:hidden';
+          var fill = document.createElement('div');
+          fill.style.cssText = 'height:100%;width:40%;background:var(--color-indigo-600,#4f46e5);box-shadow:0 0 8px var(--color-indigo-600,#4f46e5)';
+          bar.appendChild(fill);
+          if (fill.animate) {
+            fill.animate([{ transform: 'translateX(-100%)' }, { transform: 'translateX(250%)' }], { duration: 1100, iterations: Infinity, easing: 'ease-in-out' });
+          }
+        }
+        if (!bar.isConnected) document.body.appendChild(bar);
+        document.documentElement.style.cursor = 'progress';
+        // GET links that turn out to be downloads never unload the page.
+        clearTimeout(safetyTimer);
+        safetyTimer = setTimeout(stopAll, 20000);
+      }
+
+      function markBusy(el) {
+        if (!el || el.hasAttribute('data-nav-busy')) return;
+        el.setAttribute('data-nav-busy', '1');
+        el.setAttribute('aria-busy', 'true');
+        var icon = el.querySelector('svg:not([data-nav-spinner])');
+        if (icon) {
+          // Keep the icon's own size classes so the button doesn't shift.
+          var size = (icon.getAttribute('class') || '').split(/\s+/).filter(function(name) {
+            return /^(?:h|w)-/.test(name);
+          }).join(' ') || 'h-4 w-4';
+          icon.style.display = 'none';
+          icon.setAttribute('data-nav-hidden-icon', '1');
+          icon.insertAdjacentHTML('beforebegin', spinner(size));
+        } else if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement && /\binline-flex\b/.test(el.className)) {
+          el.insertAdjacentHTML('afterbegin', spinner('h-4 w-4'));
+        }
+        el.style.cursor = 'progress';
+      }
+
+      function stopAll() {
+        clearTimeout(safetyTimer);
+        if (bar) bar.remove();
+        document.documentElement.style.cursor = '';
+        document.querySelectorAll('[data-nav-spinner]').forEach(function(spinner) { spinner.remove(); });
+        document.querySelectorAll('[data-nav-hidden-icon]').forEach(function(icon) {
+          icon.style.display = '';
+          icon.removeAttribute('data-nav-hidden-icon');
+        });
+        document.querySelectorAll('[data-nav-busy]').forEach(function(el) {
+          el.removeAttribute('data-nav-busy');
+          el.removeAttribute('aria-busy');
+          el.style.cursor = '';
+        });
+      }
+
+      function navigatingLink(event) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
+        var link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+        if (!link || link.hasAttribute('download') || link.closest('[data-no-loading]')) return null;
+        // Export links answer with a file, so the page never unloads.
+        if (link.querySelector('use[href$="#download"]')) return null;
+        var target = link.getAttribute('target');
+        if (target && target !== '_self') return null;
+        var url;
+        try { url = new URL(link.href, window.location.href); } catch (error) { return null; }
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+        // In-page anchors don't load anything.
+        if (url.hash && url.pathname === window.location.pathname && url.search === window.location.search) return null;
+        return link;
+      }
+
+      document.addEventListener('click', function(event) {
+        var link = navigatingLink(event);
+        if (!link) return;
+        setTimeout(function() {
+          if (event.defaultPrevented) return;
+          startBar();
+          markBusy(link);
+        }, 0);
+      });
+
+      document.addEventListener('submit', function(event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if (form.hasAttribute('data-allow-resubmit') || form.hasAttribute('data-no-loading')) return;
+        var submitter = event.submitter;
+        setTimeout(function() {
+          if (event.defaultPrevented) return;
+          startBar();
+          if (submitter && !submitter.hasAttribute('data-no-loading')) markBusy(submitter);
+        }, 0);
+      });
+
+      // [data-autosubmit] controls call form.submit(), which fires no submit event.
+      document.addEventListener('change', function(event) {
+        var el = event.target;
+        if (el instanceof Element && el.hasAttribute('data-autosubmit') && !el.closest('[data-no-loading]')) startBar();
+      });
+
+      // Back/forward cache restores the page as it was when we left it.
+      window.addEventListener('pageshow', function(event) {
+        if (event.persisted) stopAll();
+      });
+    })();
+
     // Avatar fallback (CSP-safe replacement for the inline onerror handler).
     document.addEventListener('DOMContentLoaded', function() {
       document.querySelectorAll('[data-avatar-img]').forEach(function(avatar) {
