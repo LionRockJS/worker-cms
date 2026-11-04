@@ -131,7 +131,8 @@ function resourceName(value) {
 function origin(value) {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'https:'
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    return (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && local))
       && Boolean(parsed.hostname)
       && parsed.pathname === '/'
       && !parsed.search
@@ -456,7 +457,7 @@ async function main() {
     ? await name('Audit archive R2 bucket name', derived.auditBucketName)
     : null;
   const canonicalOrigin = (await ask(
-    'Public HTTPS origin (custom domain or workers.dev URL)',
+    'Public HTTPS origin (custom domain or workers.dev URL; http://localhost:port for local dev)',
     undefined,
     origin,
   )).replace(/\/$/, '');
