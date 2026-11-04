@@ -118,6 +118,20 @@ What the walk shows: requirements, tests and rollback safety are now traceable i
    - no force-push or deletion, and no admin bypass, or bypass recorded as an exception.
 
    Then confirm all this, and that CodeQL and Dependabot alerts are being triaged, from the GitHub settings. That couldn't be checked from here.
+
+   **Done 4 November 2026:** the repository ruleset `main protection` is active on the default branch. Its export is committed at [.github/rulesets/main.json](../.github/rulesets/main.json). That file is the intended configuration, not proof that it's enforced; GitHub enforces only what's in Settings. At each quarterly review, export the ruleset again and diff it against this file. A difference is a finding: either the settings changed without review or the file is stale. Keep the dated export, and who set it up, in the restricted evidence system.
+
+   The export shows:
+   - deletion and force-push blocked;
+   - pull request required with 1 approval, stale approvals dismissed, the last push approved, and conversations resolved;
+   - `verify`, `upgrade-path`, `audit` and `analyze` required, with the branch up to date;
+   - an empty bypass list.
+
+   Two gaps remain:
+   - **Code-owner review** is switched on, but has no effect until the CODEOWNERS rules name real owners.
+   - **A second person is needed:** with 1 required approval and no bypass, nothing merges until someone other than the author approves.
+
+   The optional code-scanning merge rule isn't set.
 2. **The security owner names the triage owner,** and approves the fix windows and exception format.
 3. **The platform owner creates a staging environment** and limits deploy-capable Cloudflare tokens to release approvers.
 4. **The engineering lead approves the procedure above.** Then walk the next real change through a pull request, CI, a staged deploy and a staging rollback, recording each step.
