@@ -58,7 +58,8 @@ The wizard asks for one namespace and derives every resource name from it
 (<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit); each can
 still be overridden. It creates or reuses D1, R2, and Queue resources, updates
 wrangler.toml and the audit switch in cms.features.json, applies migrations,
-configures OAuth secrets, and deploys.`);
+configures OAuth secrets, and does a first bootstrap deploy that bypasses the
+release gate. Later releases go through "npm run deploy".`);
   process.exit(0);
 }
 
@@ -517,14 +518,26 @@ ${databaseName} already existed. Apply any of these upgrades it does not have ye
 in this order (read each file's header first; *_sensitivity_trash.sql needs the
 trash tables), before using the deployed code:
 ${manual.map((file) => `  npx wrangler d1 execute ${databaseName} --remote --file migrations/manual/${file}`).join('\n')}
+
+A "duplicate column" error means that upgrade is already applied. The deployed
+code fails closed without them (sign-in included), so apply them before deploying.
 `);
   }
 
-  const deployed = await confirm('Deploy 0xCMS now?');
+  // Default off for a reused database: deploying before its upgrades locks
+  // everyone out, and they are applied by hand outside this wizard.
+  const deployed = await confirm('Deploy 0xCMS now?', !databaseReused);
   if (deployed) {
     // Create the Worker before uploading secrets. Wrangler otherwise prompts
     // to create a missing Worker, which is incompatible with piped secrets.
-    runNpm(['run', 'deploy']);
+    // This is a bootstrap that bypasses the release gate in tools/deploy.mjs:
+    // setup has just edited wrangler.toml, so the tree is never clean here.
+    runNpm(['run', 'build']);
+    run(['deploy', '--message', 'setup bootstrap (release gate bypassed)']);
+    console.log(
+      'Bootstrap deploy bypassed the release gate; record it as a W14 exception.\n'
+      + 'Release later changes with "npm run deploy" from a committed, pushed revision.',
+    );
   } else {
     console.log('Skipping secret uploads because the Worker was not deployed.');
   }
