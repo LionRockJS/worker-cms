@@ -5,6 +5,7 @@ import type { Page, PageVersion, PageTag, Tag, Taxonomy } from '../../types';
 import { recordPageReads, recordTableReads } from '../http/access-log';
 import { num } from '../http/forms';
 import { countPageMetadata } from './count-metadata';
+import { nextIdSql } from '../pages/snapshot-id';
 
 export interface DashboardListResult {
   results: Page[];
@@ -368,8 +369,8 @@ export async function restoreTrashedPages(
     ).bind(...params),
     // 3. Tags.
     db.prepare(
-      `INSERT OR IGNORE INTO page_tags (uuid, page_id, tag_id, weight)
-       SELECT uuid, page_id, tag_id, weight FROM trash_page_tags
+      `INSERT OR IGNORE INTO page_tags (id, uuid, page_id, tag_id, weight)
+       SELECT ${nextIdSql('page_tags')} + ROW_NUMBER() OVER (ORDER BY id) - 1, uuid, page_id, tag_id, weight FROM trash_page_tags
        WHERE page_id IN (${idSubquery})`,
     ).bind(...params),
     // 4. Remove the restored rows from trash (children first; trash_pages cascades too).

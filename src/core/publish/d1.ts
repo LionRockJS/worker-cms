@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { LivePageSnapshot, PublishAdapter, PublishSnapshot, PublishedTag } from './adapter';
+import { nextIdSql } from '../pages/snapshot-id';
 
 /** Internal projections only: capture taxonomy provenance with the source row,
  * keeping audit-only metadata separate from the caller's returned columns. */
@@ -119,7 +120,7 @@ export function d1Adapter(publishedDb: D1DatabaseClient): PublishAdapter {
   );
 
   const linkStatement = (pageId: number, tag: PublishSnapshot['tags'][number]): D1PreparedStatement => (
-    publishedDb.prepare('INSERT INTO page_tags (uuid, page_id, tag_id, weight) VALUES (?, ?, ?, ?)')
+    publishedDb.prepare(`INSERT INTO page_tags (id, uuid, page_id, tag_id, weight) VALUES (${nextIdSql('page_tags')}, ?, ?, ?, ?)`)
       .bind(tag.uuid, pageId, tag.tag_id, tag.weight)
   );
 

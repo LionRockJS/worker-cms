@@ -1,4 +1,4 @@
-import { NEXT_SNAPSHOT_ID_SQL } from './snapshot-id';
+import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
 import { ContentBatchEvidenceUnavailableError } from './batch-mutation-evidence';
 import type { Page, PageVersion } from '../../types';
 import type { AppContext } from '../http/context';
@@ -87,7 +87,7 @@ export async function saveDraftContent(c: AppContext, next: DraftContent, tags: 
   }
   statements.push(abortIf(c.env,'changes() <> 1'),
     c.env.DB.prepare('DELETE FROM page_tags WHERE page_id = (SELECT id FROM pages WHERE uuid = ?)').bind(uuid));
-  for (const tag of prepared.targetTags) statements.push(c.env.DB.prepare('INSERT INTO page_tags (page_id,tag_id) SELECT id, ? FROM pages WHERE uuid = ?').bind(tag,uuid));
+  for (const tag of prepared.targetTags) statements.push(c.env.DB.prepare(`INSERT INTO page_tags (id,page_id,tag_id) SELECT ${nextIdSql('page_tags')}, id, ? FROM pages WHERE uuid = ?`).bind(tag,uuid));
   const action = source ? 'restore' : before ? 'update' : 'create';
   const storedAction = versionAction ?? action;
   statements.push(c.env.DB.prepare(`INSERT INTO page_versions (id,uuid,page_id,lect,action) SELECT ${NEXT_SNAPSHOT_ID_SQL},?,id,?,? FROM pages WHERE uuid = ?`)

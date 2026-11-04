@@ -1,4 +1,4 @@
-import { NEXT_SNAPSHOT_ID_SQL } from './snapshot-id';
+import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization, captureContentJobAuthorization } from '../auth/access-authorization';
@@ -140,7 +140,7 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
     statements.push(env.DB.prepare('UPDATE pages SET name=?,lect=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(page.name,page.lect,page.id),abortIf(env,'changes() <> 1'));
     if (change.tags) {
       statements.push(env.DB.prepare('DELETE FROM page_tags WHERE page_id=?').bind(page.id));
-      statements.push(env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) SELECT ?, value FROM json_each(?)').bind(page.id,bounded([...new Set(change.tags)])));
+      statements.push(env.DB.prepare(`INSERT INTO page_tags(id,page_id,tag_id) SELECT ${nextIdSql('page_tags')} + j.key, ?, j.value FROM json_each(?) j`).bind(page.id,bounded([...new Set(change.tags)])));
     } else {
       const uuid=crypto.randomUUID();expectedVersions.push({uuid,page_id:page.id,lect:page.lect});
       statements.push(env.DB.prepare(`INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,'bulk-replace')`).bind(uuid,page.id,page.lect),
