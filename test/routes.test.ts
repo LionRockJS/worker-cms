@@ -2935,6 +2935,26 @@ describe('capability enforcement', () => {
     expect(await response.text()).toBe('Forbidden: admin role required');
   });
 
+  it('redirects /admin to a plugin home for a role with plugin:access but no content:read', async () => {
+    await env.DB.prepare('INSERT INTO roles (name, label, builtin) VALUES (?, ?, 0)').bind('formstaff', 'Form Staff').run();
+    await env.DB.prepare('INSERT INTO role_permissions (role, permission) VALUES (?, ?)').bind('formstaff', 'plugin:access').run();
+    clearRolePermissionsCache();
+    await env.DB.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES ('admin.home', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).bind(JSON.stringify({ href: '/admin/plugins/enterprise-form/dashboard' })).run();
+
+    // Sequential: authCookie() rewrites the shared test user's role.
+    const staff = await fetchWorker('/admin', { headers: { Cookie: await authCookie('formstaff') } });
+    expect(staff.status).toBe(302);
+    expect(staff.headers.get('Location')).toBe('/admin/plugins/enterprise-form/dashboard');
+
+    // A role with no plugin:access keeps the permission message instead.
+    const viewer = await fetchWorker('/admin', { headers: { Cookie: await authCookie('viewer') } });
+    expect(viewer.status).toBe(200);
+    expect(renderPayload(await viewer.text()).bodyView?.viewPath).toBe('/templates/viewer-home.json');
+  });
+
   it('lets a custom role reach a plugin only with both plugin:access and the plugin\'s own permission', async () => {
     const pluginUrl = `https://plugin-${crypto.randomUUID()}.local`;
     const manifest = {

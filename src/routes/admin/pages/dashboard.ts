@@ -330,13 +330,17 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
 }
 
 pageDashboardRoutes.get('/', async (c) => {
-  if (!(await userCan(c, 'content:read'))) {
-    return renderPage(c, viewerHomePage, {});
+  const canReadContent = await userCan(c, 'content:read');
+  const adminHome = await loadAdminHomeSettings(c.env);
+  // A plugin-dashboard home is reachable without content:read (the plugin
+  // proxy enforces its own plugin:access + declared-permission gate).
+  const homeReachable = canReadContent
+    || (adminHome.href.startsWith('/admin/plugins/') && await userCan(c, 'plugin:access'));  if (homeReachable && !new URL(c.req.url).search && adminHome.href !== '/admin') {
+    return c.redirect(adminHome.href);
   }
 
-  const adminHome = await loadAdminHomeSettings(c.env);
-  if (!new URL(c.req.url).search && adminHome.href !== '/admin') {
-    return c.redirect(adminHome.href);
+  if (!canReadContent) {
+    return renderPage(c, viewerHomePage, {});
   }
 
   return renderAllPagesList(c, '/admin');
