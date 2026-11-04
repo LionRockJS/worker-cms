@@ -28,6 +28,14 @@ Content management system on Workers
 npm install
 ```
 
+`npm run setup` runs every step below interactively. To do them by hand, start
+this clone's config from the template. `wrangler.toml` is gitignored, so each
+clone keeps its own and a pull never overwrites it:
+
+```bash
+cp wrangler.example.toml wrangler.toml
+```
+
 ### 2. Create the D1 databases
 
 ```bash
@@ -110,7 +118,7 @@ binding = "MEDIA_BUCKET"
 bucket_name = "worker-cms-media"
 ```
 
-The checked-in `wrangler.toml` already contains this binding. If you choose another bucket name, update both the create command and `bucket_name`.
+`wrangler.example.toml` already contains this binding. If you choose another bucket name, update both the create command and `bucket_name`.
 
 This `/admin/upload` endpoint is the signed-in editor workflow: it validates
 browser image uploads and records `media_files` metadata. Plugin Workers use
@@ -1285,7 +1293,8 @@ features on and off.
 ├── dictionary/            # Generated OpenCC tables for Chinese search
 ├── package.json
 ├── tsconfig.json
-└── wrangler.toml
+├── wrangler.example.toml  # config template; tests run against it
+└── wrangler.toml          # gitignored: this clone's config, made by setup
 ```
 
 ### A feature directory

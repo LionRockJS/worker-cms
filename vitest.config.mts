@@ -28,7 +28,7 @@ export default defineConfig({
     cloudflareTest(async () => ({
       // Allow an isolated local-only fixture when deployment configuration or
       // developer secrets should not be loaded into the test runtime.
-      wrangler: { configPath: process.env.CMS_TEST_WRANGLER_CONFIG || './wrangler.toml' },
+      wrangler: { configPath: process.env.CMS_TEST_WRANGLER_CONFIG || './wrangler.example.toml' },
       miniflare: {
         // Provide isolated buckets for audit archives and outage journals.
         // Tests cover missing bindings separately by passing them as undefined.

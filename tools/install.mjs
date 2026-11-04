@@ -16,6 +16,7 @@ import {
 } from './apple-client-secret.mjs';
 
 const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
+const EXAMPLE_CONFIG_PATH = new URL('../wrangler.example.toml', import.meta.url);
 const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
 const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -278,7 +279,13 @@ function setVar(lines, key, value) {
 }
 
 async function updateConfig(settings) {
-  const original = await readFile(CONFIG_PATH, 'utf8');
+  // wrangler.toml is gitignored: it is this clone's own deployment config. A
+  // fresh clone has none yet, so it starts from the checked-in example.
+  const existing = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  const original = existing ?? await readFile(EXAMPLE_CONFIG_PATH, 'utf8');
   const lines = original.split('\n');
 
   setRootValue(lines, 'name', settings.workerName);
@@ -315,7 +322,7 @@ async function updateConfig(settings) {
   }
 
   await writeFile(CONFIG_PATH, lines.join('\n'));
-  console.log('Updated wrangler.toml.');
+  console.log(existing === null ? 'Created wrangler.toml from wrangler.example.toml.' : 'Updated wrangler.toml.');
 }
 
 async function featureEnabled(id) {
@@ -531,7 +538,8 @@ code fails closed without them (sign-in included), so apply them before deployin
     // Create the Worker before uploading secrets. Wrangler otherwise prompts
     // to create a missing Worker, which is incompatible with piped secrets.
     // This is a bootstrap that bypasses the release gate in tools/deploy.mjs:
-    // setup has just edited wrangler.toml, so the tree is never clean here.
+    // setup may have just flipped cms.features.json and regenerated files, and
+    // a first install should not wait on the full test suite.
     runNpm(['run', 'build']);
     run(['deploy', '--message', 'setup bootstrap (release gate bypassed)']);
     console.log(
