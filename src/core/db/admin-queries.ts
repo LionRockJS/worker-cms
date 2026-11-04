@@ -3,7 +3,7 @@
 
 import type { Page, PageVersion, PageTag, Tag, Taxonomy } from '../../types';
 import { recordPageReads, recordTableReads } from '../http/access-log';
-import { num, slugify } from '../http/forms';
+import { num } from '../http/forms';
 import { countPageMetadata } from './count-metadata';
 
 export interface DashboardListResult {
@@ -115,33 +115,6 @@ export async function resolveParentPageId(
     .bind(id)
     .first<{ id: number }>();
   return parent?.id ?? null;
-}
-
-async function uniqueTagSlug(db: D1DatabaseClient, baseSlug: string): Promise<string> {
-  let slug = baseSlug || 'tag';
-  let suffix = 1;
-  while (await db.prepare('SELECT id FROM tags WHERE slug = ?').bind(slug).first<{ id: number }>()) {
-    suffix++;
-    slug = `${baseSlug}-${suffix}`;
-  }
-  return slug;
-}
-
-/** Finds or creates a tag by (taxonomy, name) — used by the /__cms tag-ensure endpoint. */
-export async function ensureTagByName(db: D1DatabaseClient, taxonomy: Taxonomy, name: string): Promise<number> {
-  const existing = await db.prepare('SELECT id FROM tags WHERE taxonomy_slug = ? AND name = ?')
-    .bind(taxonomy.slug, name)
-    .first<{ id: number }>();
-  if (existing) return existing.id;
-
-  const slug = await uniqueTagSlug(db, slugify(`${taxonomy.slug || taxonomy.name}-${name}`));
-  const insert = await db.prepare('INSERT INTO tags (name, slug, taxonomy_slug) VALUES (?, ?, ?)')
-    .bind(name, slug, taxonomy.slug)
-    .run();
-  const tag = await db.prepare('SELECT id FROM tags WHERE rowid = ?')
-    .bind(insert.meta.last_row_id)
-    .first<{ id: number }>();
-  return tag!.id;
 }
 
 export async function editorTaxonomy(db: D1DatabaseClient): Promise<{ tags: Tag[]; taxonomies: Taxonomy[] }> {

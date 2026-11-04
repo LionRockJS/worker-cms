@@ -104,8 +104,11 @@ it('covers ensured existing tag values without duplicating a publication transfe
   await classify('taxonomy', 'diagnosis');
   const response = await api('POST', '/tags/ensure', { tags: [{ taxonomy: 'diagnosis', name: 'Private diagnosis' }] });
   expect(response.status).toBe(200);
+  const registration=await env.DB.prepare('SELECT uuid FROM plugins WHERE id=?').bind(pluginRowId).first<{uuid:string}>();
   expect(await env.DB.prepare("SELECT target_id, actor_user_id, acting_via FROM audit_events WHERE action = 'tag.ensure-result'").first())
-    .toEqual({ target_id: '9706', actor_user_id: '9701', acting_via: 'coverage' });
+    .toEqual({ target_id: '9706', actor_user_id: null, acting_via: `plugin:${registration!.uuid}` });
+  const reuse=await env.DB.prepare("SELECT detail FROM audit_events WHERE action='tag.ensure'").first<{detail:string}>();
+  expect(JSON.parse(reuse!.detail)).toMatchObject({acting_user_verified:false,asserted_user_id:9701,created:false});
 });
 
 it.each(['GET', 'POST'])('withholds contributor-scoped sequence values on %s audit failure', async method => {
