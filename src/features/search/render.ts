@@ -26,7 +26,7 @@ import {
 } from '../../core/db/search';
 import { resolveCmsConfig } from '../../core/db/content-config';
 import { editorTaxonomy } from '../../core/db/admin-queries';
-import { listLiveByTypes } from '../../core/publish';
+import { liveMapForDraftPages } from '../../core/publish';
 import { draftLectProjector } from '../../core/publish/projection';
 import { withLiveStatus } from '../../core/db/page-logic';
 import { renderPage } from '../../core/render/chrome';
@@ -105,11 +105,12 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
     }
   }
 
-  const [livePages, projectDraft] = await Promise.all([
-    listLiveByTypes(c.env, pageTypes),
+  // Only the rows on this results page need a live status, so look those up
+  // by uuid rather than reading every live page of the searched types.
+  const [liveMap, projectDraft] = await Promise.all([
+    liveMapForDraftPages(c.env, result.results),
     draftLectProjector(c.env),
   ]);
-  const liveMap = new Map(livePages.map((page) => [page.uuid, page]));
   const routeBase = selectedPageType === 'all'
     ? '/admin/advanced-search'
     : `/admin/advanced-search/${encodeURIComponent(selectedPageType)}`;

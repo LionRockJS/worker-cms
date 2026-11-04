@@ -2452,6 +2452,31 @@ describe('admin routes', () => {
     });
   });
 
+  it('GET /admin?status=live filters on schedule and paginates in weight order', async () => {
+    const insertLive = env.PUBLISHED_DB.prepare(
+      `INSERT INTO pages (id, uuid, name, slug, weight, end, page_type, lect, creator, editors)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    await env.PUBLISHED_DB.batch([
+      insertLive.bind(940, 'live-first-uuid', 'Live First', 'live-first', 1, null, 'default', basePageLect, 1, '1'),
+      insertLive.bind(941, 'live-ended-uuid', 'Live Ended', 'live-ended', 2, '2000-01-01 00:00:00', 'default', basePageLect, 1, '1'),
+      insertLive.bind(942, 'live-last-uuid', 'Live Last', 'live-last', 9, null, 'default', basePageLect, 1, '1'),
+    ]);
+
+    const [secondLive, ended] = await Promise.all([
+      fetchWorker('/admin?status=live&pagesize=1&page=2', { headers: { Cookie: await authCookie() } }),
+      fetchWorker('/admin?status=ended', { headers: { Cookie: await authCookie() } }),
+    ]);
+    const secondLiveData = bodyData(await secondLive.text());
+    const endedData = bodyData(await ended.text());
+
+    expect(secondLive.status).toBe(200);
+    expect(secondLiveData.pageCountLabel).toBe('Showing 2-2 of 3 live pages');
+    expect((secondLiveData.pages as Array<Record<string, unknown>>).map((page) => page.name)).toEqual(['About']);
+    expect(ended.status).toBe(200);
+    expect((endedData.pages as Array<Record<string, unknown>>).map((page) => page.name)).toEqual(['Live Ended']);
+  });
+
   it('keeps the page list available when /admin is configured for another home', async () => {
     await env.PUBLISHED_DB.prepare(
       `INSERT INTO pages (id, uuid, name, slug, weight, page_type, lect, creator, editors)

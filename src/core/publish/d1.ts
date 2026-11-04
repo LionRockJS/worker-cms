@@ -10,10 +10,11 @@ import { nextIdSql } from '../pages/snapshot-id';
 /** Internal projections only: capture taxonomy provenance with the source row,
  * keeping audit-only metadata separate from the caller's returned columns. */
 export async function readD1PageSource<T extends { uuid: string; page_type?: string | null }>(
-  db: D1DatabaseClient, projection: 'identity' | 'live' | 'submission' | 'full', where: string, params: unknown[], order = '',
+  db: D1DatabaseClient, projection: 'identity' | 'schedule' | 'live' | 'submission' | 'full', where: string, params: unknown[], order = '',
 ): Promise<{ rows: T[]; provenance: Pick<LivePageSnapshot, 'uuid' | 'page_type' | 'taxonomy_slugs'>[] }> {
   const columns = {
     identity: 'p.uuid, p.page_type',
+    schedule: 'p.uuid, p.page_type, p.start, p.end, p.timezone',
     live: 'p.uuid, p.page_type, p.lect, p.weight, p.start, p.end, p.timezone',
     submission: 'p.uuid, p.created_at, p.name, p.slug, p.weight, p.start, p.end, p.timezone, p.page_type, p.lect, p.page_id',
     full: 'p.*',

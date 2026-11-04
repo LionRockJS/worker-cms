@@ -245,7 +245,7 @@ export async function renderPage<P extends BaseTemplateProps>(
 
 export function dashboardPagination(
   routeBase: string,
-  result: DashboardListResult,
+  result: { results: unknown[]; pagination: DashboardListResult['pagination'] },
   params: Record<string, string | number | null | undefined> = {},
 ) {
   const { currentPage, totalPages, limit } = result.pagination;

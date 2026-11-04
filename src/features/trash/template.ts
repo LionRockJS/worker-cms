@@ -2,6 +2,8 @@ import { adminLayout, type BaseTemplateProps } from '../../core/render/layout';
 import { renderView } from '../../core/render/liquid';
 import type { Page } from '../../types';
 
+export type TrashListPage = Pick<Page, 'id' | 'uuid' | 'name' | 'slug' | 'page_type' | 'updated_at'>;
+
 interface TrashPagination {
   total: number;
   totalPages: number;
@@ -18,7 +20,7 @@ interface TypeCount {
 }
 
 export async function trashPage(views: Fetcher, opts: BaseTemplateProps & {
-  pages: Page[];
+  pages: TrashListPage[];
   flash?: string;
   pagination?: TrashPagination;
   total?: number;

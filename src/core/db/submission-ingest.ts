@@ -15,7 +15,10 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 //
 // Idempotency: the draft copy keeps the source row's uuid, so the draft
 // `uuid` unique constraint makes re-ingest a no-op. Progress is tracked by a
-// (created_at, uuid) cursor in the settings table. Ingest never mutates or
+// (created_at, uuid) cursor in the settings table. A pass that reaches the
+// end leaves the cursor there, so idle cron ticks read nothing and write
+// nothing; the full re-scan restarts once REPASS_MS after that pass ended.
+// Ingest never mutates or
 // deletes a published row; purging a mirror erases its source separately
 // (core/pages/submission-erasure.ts).
 //
@@ -34,6 +37,8 @@ const CURSOR_SETTING_KEY = 'submissions.ingest.cursor';
 const SCAN_LIMIT = 40;
 /** Draft pages created per run (each costs ~4 D1 ops + 1 hook fetch). */
 const MAX_CREATES_PER_RUN = 8;
+/** How long a completed pass stands before the scan restarts from the top. */
+const REPASS_MS = 24 * 60 * 60 * 1000;
 
 interface LiveSubmissionRow {
   uuid: string;
@@ -54,7 +59,7 @@ export interface IngestResult {
   scanned: number;
   /** Draft pages created (rows already in draft are skipped silently). */
   created: number;
-  /** True when the caller should run another batch (cap reached or scan wrapped). */
+  /** True when the caller should run another batch (cap reached or scan restarted). */
   more: boolean;
 }
 
@@ -99,6 +104,8 @@ export async function submissionMirrorIds(
 interface Cursor {
   created_at: string;
   uuid: string;
+  /** When the pass that left this cursor reached the end of the published DB. */
+  passed_at?: string;
 }
 
 function parseCursor(raw: string | null): Cursor {
@@ -108,6 +115,7 @@ function parseCursor(raw: string | null): Cursor {
     return {
       created_at: typeof parsed.created_at === 'string' ? parsed.created_at : '',
       uuid: typeof parsed.uuid === 'string' ? parsed.uuid : '',
+      ...(typeof parsed.passed_at === 'string' ? { passed_at: parsed.passed_at } : {}),
     };
   } catch {
     return { created_at: '', uuid: '' };
@@ -117,7 +125,7 @@ function parseCursor(raw: string | null): Cursor {
 /**
  * Finds live-only rows and mirrors them into the draft DB. Safe to call
  * concurrently or repeatedly: creation is idempotent by uuid, and the bounded
- * cursor wraps after a complete pass so older rows are reconsidered.
+ * cursor restarts a day after a complete pass so older rows are reconsidered.
  */
 export async function ingestSubmissions(env: Env, actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: 'system:submission-ingest' }): Promise<IngestResult> {
   assertRegulatedWritesAllowed(env);
@@ -131,14 +139,20 @@ export async function ingestSubmissions(env: Env, actor: AuditActor = { userId: 
   const rows = { results: source.rows };
 
   if (!rows.results.length) {
-    // A completed pass resets the cursor so later runs can detect a formerly
-    // mirrored/live page whose draft counterpart has since disappeared other
-    // than through trash or purge.
-    if (cursor.created_at || cursor.uuid) {
-      await saveSetting(env, CURSOR_SETTING_KEY, JSON.stringify({ created_at: '', uuid: '' }));
-      return { scanned: 0, created: 0, more: true };
+    if (!cursor.created_at && !cursor.uuid) return { scanned: 0, created: 0, more: false };
+    // The cursor is at the end. Idle ticks stop here without writing. Once a
+    // day the scan restarts from the top, so a formerly mirrored/live page
+    // whose draft counterpart has since disappeared other than through trash
+    // or purge is found again.
+    const passedAt = Date.parse(cursor.passed_at ?? '');
+    if (!Number.isFinite(passedAt)) {
+      // The pass ended on a full batch, so only this run saw the end.
+      await saveSetting(env, CURSOR_SETTING_KEY, JSON.stringify({ ...cursor, passed_at: new Date().toISOString() }));
+      return { scanned: 0, created: 0, more: false };
     }
-    return { scanned: 0, created: 0, more: false };
+    if (Date.now() - passedAt < REPASS_MS) return { scanned: 0, created: 0, more: false };
+    await saveSetting(env, CURSOR_SETTING_KEY, JSON.stringify({ created_at: '', uuid: '' }));
+    return { scanned: 0, created: 0, more: true };
   }
 
   const evidence = await auditBackgroundReads(env,
@@ -213,13 +227,13 @@ export async function ingestSubmissions(env: Env, actor: AuditActor = { userId: 
     }], actor);
   }
 
+  const more = handled < rows.results.length || rows.results.length === SCAN_LIMIT;
   if (last.created_at !== cursor.created_at || last.uuid !== cursor.uuid) {
-    await saveSetting(env, CURSOR_SETTING_KEY, JSON.stringify(last));
+    // Rows arriving after a completed pass keep that pass's time, so a steady
+    // trickle of submissions does not postpone the daily re-scan forever.
+    const passed_at = cursor.passed_at ?? (more ? undefined : new Date().toISOString());
+    await saveSetting(env, CURSOR_SETTING_KEY, JSON.stringify({ ...last, ...(passed_at ? { passed_at } : {}) }));
   }
 
-  return {
-    scanned: handled,
-    created,
-    more: handled < rows.results.length || rows.results.length === SCAN_LIMIT,
-  };
+  return { scanned: handled, created, more };
 }
