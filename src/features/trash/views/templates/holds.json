@@ -1,0 +1,18 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "title": "{{ 'trash.holds' | t }}",
+        "description": "{{ 'trash.holds_description' | t }}"
+      }
+    },
+    "content": {
+      "type": "holds"
+    }
+  },
+  "order": [
+    "header",
+    "content"
+  ]
+}

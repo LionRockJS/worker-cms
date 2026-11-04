@@ -25,11 +25,15 @@
               {% if hasRecent %}
                 <button type="submit" name="action" value="1h" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "trash.last_hour" | t }} ({{ recentCount }})</button>
               {% endif %}
+              {% if hasRetention %}
+                <button type="submit" name="action" value="expired" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "trash.purge_expired" | t }} ({{ retentionDays }}d)</button>
+              {% endif %}
             </form>
           {% endif %}
         {% endif %}
       {% endif %}
       <a href="/admin" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_trash.back_to_pages" | t }}</a>
+      {% if canHold %}<a href="/admin/holds" class="text-sm text-indigo-600 hover:underline">{{ "trash.holds" | t }}</a>{% endif %}
     </div>
   </div>
 
@@ -51,7 +55,7 @@
           {% for page in pages %}
             <tr class="hover:bg-gray-50 transition-colors">
               <td class="px-6 py-4">
-                <div class="font-medium text-gray-900">{{ page.name }}</div>
+                <div class="font-medium text-gray-900">{{ page.name }}{% if page.held %} <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">{{ "trash.held" | t }}</span>{% endif %}</div>
                 <div class="text-xs text-gray-500 font-mono">/{{ page.slug }}</div>
                 {% if showTypeBadge and page.hasPageType %}
                   <div class="mt-1.5">
@@ -70,7 +74,15 @@
                     <button type="submit"
                             class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">{{ "view_strings.sections_trash.restore" | t }}</button>
                   </form>
-                  {% if canPurgeTrash %}
+                  {% if canHold and page.held == false %}
+                    <form method="POST" action="{{ holdAction }}" class="inline-flex items-center gap-2">
+                      <input type="hidden" name="uuid" value="{{ page.uuid }}">
+                      <input type="hidden" name="back" value="trash">
+                      <input type="text" name="reason" required maxlength="500" aria-label="{{ "trash.hold_reason" | t }}" placeholder="{{ "trash.hold_reason" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
+                      <button type="submit" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">{{ "trash.hold" | t }}</button>
+                    </form>
+                  {% endif %}
+                  {% if canPurgeTrash and page.held == false %}
                     <form method="POST" action="{{ page.deleteAction }}" class="inline"
                           data-confirm="{{ "view_strings.sections_trash.permanently_delete_this_page_this_cannot_be_undone" | t }}">
                       <button type="submit"
@@ -144,6 +156,12 @@
   if (emptyTrashForm) {
     emptyTrashForm.addEventListener('submit', (e) => {
       const submitter = e.submitter;
+      if (submitter && submitter.value === 'expired') {
+        if (!confirm('Permanently delete every ' + scope + 'page in trash longer than {{ retentionDays }} days, except held pages?\n\nThis cannot be undone.')) {
+          e.preventDefault();
+        }
+        return;
+      }
       if (submitter && submitter.value === '1h') {
         const n = recentCount(submitter);
         if (!confirm('Permanently delete ' + n + ' ' + scope + 'page' + (n === '1' ? '' : 's') + ' trashed in the last hour?\n\nThis cannot be undone.')) {

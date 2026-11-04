@@ -38,6 +38,7 @@ export const PERMISSIONS = [
   'credits:share',    // transfer a shared wallet balance to a user
   'audit:read',       // read the audit log (the reading is itself audited)
   'pii:reveal',       // see personal data in clear rather than masked
+  'records:hold',     // place and release holds that block permanent deletion
 ] as const;
 
 export type Permission = typeof PERMISSIONS[number];
@@ -65,6 +66,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'credits:share': 'Transfer a shared wallet balance to a user',
   'audit:read': 'Read the audit log',
   'pii:reveal': 'See personal data in clear (names, email, phone) rather than masked',
+  'records:hold': 'Place and release holds that block permanent deletion',
 };
 
 export interface User {
@@ -262,6 +264,12 @@ export interface Env {
   /** Seconds a session survives without a refresh. Between ACCESS_TOKEN_TTL
    *  and REFRESH_TOKEN_TTL; defaults to 8 hours. Required in regulated mode. */
   SESSION_IDLE_TTL?: string;
+  /** Days a page stays in trash before "Purge expired" may remove it. Unset
+   *  (the default) offers no retention purge; nothing is ever purged by cron. */
+  TRASH_RETENTION_DAYS?: string;
+  /** Days a finished admin job keeps its request body and user snapshot. Unset
+   *  (the default) keeps them; cron clears them once set. */
+  JOB_RETENTION_DAYS?: string;
   SITE_TITLE: string;
   /** Default timezone for a page's start/end window when none is set.
    *  UTC offset (e.g. "+0800") or IANA name. Falls back to "+0800". */

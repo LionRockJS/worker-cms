@@ -42,8 +42,8 @@ describe('flattened migration contract', () => {
       'data_class_floors', 'data_classes', 'locale_messages', 'locales', 'media_files', 'page_sensitivity_floors', 'page_tags', 'page_types',
       'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_file_prefix_approvals',
       'plugin_identity_approvals', 'plugin_page_type_approvals',
-      'plugin_sequences', 'plugin_state', 'plugins', 'role_permissions', 'roles', 'sessions', 'settings',
-      'shared_credit_ledger', 'shared_credits', 'tags', 'taxonomies',
+      'plugin_sequences', 'plugin_state', 'plugins', 'record_holds', 'role_permissions', 'roles', 'sessions', 'settings',
+      'shared_credit_ledger', 'shared_credits', 'submission_erasures', 'tags', 'taxonomies',
       'trash_page_tags', 'trash_page_versions', 'trash_pages',
       'user_oauth_identities', 'users',
     ]);

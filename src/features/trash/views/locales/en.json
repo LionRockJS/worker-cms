@@ -1,9 +1,22 @@
 {
   "trash": {
     "all_types": "All types",
+    "held": "Held",
+    "hold": "Hold",
+    "hold_reason": "Reason",
+    "holds": "Holds",
+    "holds_description": "Held pages cannot be permanently deleted until the hold is released.",
     "last_hour": "Last Hour",
+    "no_holds": "No holds.",
     "page_in_trash": "page in trash",
+    "page_uuid": "Page UUID",
     "pages_in_trash": "pages in trash",
+    "place_hold": "Place hold",
+    "placed": "Placed",
+    "purge_expired": "Purge expired",
+    "release": "Release",
+    "release_confirm": "Release this hold? The page can then be permanently deleted.",
+    "released": "Released",
     "restore_last_hour": "Restore Last Hour"
   },
   "view_strings": {

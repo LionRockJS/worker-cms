@@ -4,9 +4,13 @@ import { countTrashMetadataByType } from './queries';
 // Trash listing, restore-to-draft, and permanent delete.
 
 import { Hono } from 'hono';
-import { trashPage } from './template';
+import { holdsPage, trashPage, type HoldRow } from './template';
 import type { Env, Variables, Page } from '../../types';
-import { mutatePageLifecycle } from '../../core/pages/lifecycle-mutation-evidence';
+import type { AppContext } from '../../core/http/context';
+import { mutatePageLifecycle, RecordHeldError } from '../../core/pages/lifecycle-mutation-evidence';
+import { captureAccessAuthorization } from '../../core/auth/access-authorization';
+import { classFor, resolveDataClasses } from '../../core/db/data-classes';
+import { mutationAuditEvidence } from '../../core/db/audit';
 import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { userCan } from '../../core/auth/permissions';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
@@ -44,6 +48,9 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
   ).bind(...typeParams, pageSize, offset).all<Page>();
 
   recordPageReads('page.trash-list', trashedPages.results);
+  const held = new Set((await c.env.DB.prepare(
+    'SELECT page_uuid FROM record_holds WHERE released_at IS NULL AND page_uuid IN (SELECT value FROM json_each(?))',
+  ).bind(JSON.stringify(trashedPages.results.map((page) => page.uuid))).all<{ page_uuid: string }>()).results.map((row) => row.page_uuid));
 
   const paginationResult = {
     results: trashedPages.results,
@@ -71,6 +78,9 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
     typeCounts,
     recentCount,
     canPurgeTrash: await userCan(c, 'trash:purge'),
+    canHold: await userCan(c, 'records:hold'),
+    held,
+    retentionDays: trashRetentionDays(c.env),
   });
 });
 
@@ -109,23 +119,92 @@ trashRoutes.post('/trash/restore', requirePermission('trash:restore'), async (c)
 
 trashRoutes.post('/trash/:id/delete', requirePermission('trash:purge'), async (c) => {
   const trashId = parseInt(c.req.param('id'), 10);
-  await mutatePageLifecycle(c.env,c.get('user'),'purge',{ids:[trashId]},{request:c});
+  try {
+    await mutatePageLifecycle(c.env,c.get('user'),'purge',{ids:[trashId]},{request:c});
+  } catch (error) {
+    if (error instanceof RecordHeldError) return c.redirect('/admin/trash?flash=Page+is+under+hold+and+was+not+deleted');
+    throw error;
+  }
   return c.redirect('/admin/trash?flash=Page+permanently+deleted');
 });
 
-// ── Empty trash (all, by type, or last-hour only) ────────────────────────────
+// ── Empty trash (all, by type, last-hour only, or past retention) ────────────
 // Accepts optional form fields:
 //   type   — page type to purge (empty = all types)
-//   action — "now" (default) purge all matching; "1h" purge only those trashed within the last hour
+//   action — "now" (default) purge all matching; "1h" purge only those trashed
+//            within the last hour; "expired" purge only those in trash longer
+//            than TRASH_RETENTION_DAYS
+// Held pages, and any parent whose purge would cascade to one, are left alone.
 
 trashRoutes.post('/trash/empty', requirePermission('trash:purge'), async (c) => {
   const form = await c.req.formData();
   const pageType = (form.get('type') as string | null)?.trim() || null;
-  const withinLastHour = (form.get('action') as string | null)?.trim() === '1h';
+  const action = (form.get('action') as string | null)?.trim();
+  const withinLastHour = action === '1h';
+  const olderThanDays = action === 'expired' ? trashRetentionDays(c.env) : undefined;
+  if (olderThanDays === null) return c.redirect('/admin/trash?flash=No+trash+retention+period+is+set');
 
-  await mutatePageLifecycle(c.env,c.get('user'),'purge',{pageType,withinLastHour},{request:c});
+  const {count}=await mutatePageLifecycle(c.env,c.get('user'),'purge',{pageType,withinLastHour,olderThanDays},{request:c});
 
+  if (olderThanDays !== undefined) return c.redirect(`/admin/trash?flash=${encodeURIComponent(`Purged ${count} expired ${count === 1 ? 'page' : 'pages'}`)}`);
   const label = pageType ? `${pageType}+pages` : 'Trash';
   const flash = withinLastHour ? `${label}+from+last+hour+emptied` : `${label}+emptied`;
   return c.redirect(`/admin/trash?flash=${flash}`);
 });
+
+// ── Holds ─────────────────────────────────────────────────────────────────────
+// A hold blocks permanent deletion of one page, in trash or not, until it is
+// released. Placing and releasing are separate from trash:purge so the people
+// who can purge are not the people who decide what must be kept.
+
+trashRoutes.get('/holds', requirePermission('records:hold'), async (c) => {
+  const holds = await c.env.DB.prepare(
+    `SELECT id, page_uuid, reason, placed_by, placed_at, released_by, released_at FROM record_holds
+     ORDER BY released_at IS NOT NULL, id DESC LIMIT 200`,
+  ).all<HoldRow>();
+  return renderPage(c, holdsPage, { holds: holds.results, flash: c.req.query('flash') || undefined });
+});
+
+trashRoutes.post('/holds', requirePermission('records:hold'), async (c) => {
+  const form = await c.req.formData();
+  // Page uuids are minted by the CMS or copied from a submission's source row,
+  // so accept any plain identifier rather than only the CMS's own format.
+  const uuid = String(form.get('uuid') ?? '').trim();
+  const reason = String(form.get('reason') ?? '').trim();
+  const back = form.get('back') === 'trash' ? '/admin/trash' : '/admin/holds';
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(uuid) || !reason || reason.length > 500) return c.redirect(`${back}?flash=A+page+UUID+and+a+reason+are+required`);
+  if (await c.env.DB.prepare('SELECT 1 FROM record_holds WHERE page_uuid = ? AND released_at IS NULL').bind(uuid).first()) {
+    return c.redirect(`${back}?flash=That+page+is+already+held`);
+  }
+  await changeHold(c, 'hold.place', uuid, { reason },
+    c.env.DB.prepare('INSERT INTO record_holds (page_uuid, reason, placed_by) VALUES (?, ?, ?)').bind(uuid, reason, Number(c.get('user').sub)));
+  return c.redirect(`${back}?flash=Hold+placed`);
+});
+
+trashRoutes.post('/holds/:id/release', requirePermission('records:hold'), async (c) => {
+  const id = parseInt(c.req.param('id'), 10);
+  const hold = await c.env.DB.prepare('SELECT page_uuid FROM record_holds WHERE id = ? AND released_at IS NULL').bind(id).first<{ page_uuid: string }>();
+  if (!hold) return c.notFound();
+  await changeHold(c, 'hold.release', hold.page_uuid, { hold_id: id },
+    c.env.DB.prepare('UPDATE record_holds SET released_by = ?, released_at = CURRENT_TIMESTAMP WHERE id = ? AND released_at IS NULL')
+      .bind(Number(c.get('user').sub), id));
+  return c.redirect('/admin/holds?flash=Hold+released');
+});
+
+/** Applies one hold change with its audit receipt in the same batch; a change
+ *  that matches no row (a concurrent place or release) rolls the batch back. */
+async function changeHold(c: AppContext, action: string, uuid: string, detail: Record<string, unknown>, change: D1PreparedStatement): Promise<void> {
+  const authority = await captureAccessAuthorization(c.env, c.get('user'), 'records:hold');
+  if (!authority.allowed) throw new Error('Hold authority unavailable');
+  const policy = await resolveDataClasses(c.env, true);
+  if (!policy.ok) throw new Error('Hold classification unavailable');
+  const receipt = mutationAuditEvidence(c, { action, entityType: 'page', entityId: uuid, detail },
+    classFor(policy, 'table', 'record_holds') ?? 'none', { policy, requirePreviousChange: true });
+  await c.env.DB.batch([authority.guard(), change, receipt.write, receipt.guard]);
+}
+
+/** TRASH_RETENTION_DAYS as a whole number of days, or null when unset or invalid. */
+function trashRetentionDays(env: Env): number | null {
+  const days = Number(env.TRASH_RETENTION_DAYS);
+  return Number.isSafeInteger(days) && days > 0 ? days : null;
+}

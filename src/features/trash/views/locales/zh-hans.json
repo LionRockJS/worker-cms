@@ -1,9 +1,22 @@
 {
   "trash": {
     "all_types": "所有类型",
+    "held": "保留中",
+    "hold": "保留",
+    "hold_reason": "原因",
+    "holds": "保留",
+    "holds_description": "保留中的页面在解除保留前无法永久删除。",
     "last_hour": "最近一小时",
+    "no_holds": "没有保留。",
     "page_in_trash": "个回收站页面",
+    "page_uuid": "页面 UUID",
     "pages_in_trash": "个回收站页面",
+    "place_hold": "设置保留",
+    "placed": "设置于",
+    "purge_expired": "清除过期项目",
+    "release": "解除",
+    "release_confirm": "解除此保留？之后页面便可被永久删除。",
+    "released": "已解除",
     "restore_last_hour": "恢复最近一小时"
   },
   "view_strings": {

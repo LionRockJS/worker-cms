@@ -15,8 +15,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 //
 // Idempotency: the draft copy keeps the source row's uuid, so the draft
 // `uuid` unique constraint makes re-ingest a no-op. Progress is tracked by a
-// (created_at, uuid) cursor in the settings table; the published rows are
-// never mutated or deleted.
+// (created_at, uuid) cursor in the settings table. Ingest never mutates or
+// deletes a published row; purging a mirror erases its source separately
+// (core/pages/submission-erasure.ts).
 //
 // Budget: creates per run are capped so one invocation (cron tick or
 // /__cms/ingest/submissions call) stays well inside the subrequest budget —
@@ -131,7 +132,8 @@ export async function ingestSubmissions(env: Env, actor: AuditActor = { userId: 
 
   if (!rows.results.length) {
     // A completed pass resets the cursor so later runs can detect a formerly
-    // mirrored/live page whose draft counterpart has since disappeared.
+    // mirrored/live page whose draft counterpart has since disappeared other
+    // than through trash or purge.
     if (cursor.created_at || cursor.uuid) {
       await saveSetting(env, CURSOR_SETTING_KEY, JSON.stringify({ created_at: '', uuid: '' }));
       return { scanned: 0, created: 0, more: true };
@@ -146,11 +148,17 @@ export async function ingestSubmissions(env: Env, actor: AuditActor = { userId: 
 
   // One query for both pre-checks: which rows already exist in draft, and
   // which referenced parent pages exist locally.
+  // A uuid already mirrored counts as existing, and so does one in trash or
+  // erased (W12): a deleted submission must not come back as a new draft
+  // because its source row is still, or again, in the published database.
   const uuids = rows.results.map((row) => row.uuid);
   const parentIds = [...new Set(rows.results.map((row) => row.page_id).filter((id): id is number => id !== null))];
+  const hasTrash = !!await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trash_pages'").first();
   const existingUuids = new Set(
-    (await env.DB.prepare(`SELECT uuid FROM pages WHERE uuid IN (${uuids.map(() => '?').join(', ')})`)
-      .bind(...uuids)
+    (await env.DB.prepare(`SELECT uuid FROM pages WHERE uuid IN (SELECT value FROM json_each(?1))
+      UNION SELECT uuid FROM submission_erasures WHERE uuid IN (SELECT value FROM json_each(?1))
+      ${hasTrash ? 'UNION SELECT uuid FROM trash_pages WHERE uuid IN (SELECT value FROM json_each(?1))' : ''}`)
+      .bind(JSON.stringify(uuids))
       .all<{ uuid: string }>()).results.map((row) => row.uuid),
   );
   const existingParents = new Set(

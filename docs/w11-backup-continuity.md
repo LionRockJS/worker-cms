@@ -78,9 +78,10 @@ This proves the restore check, not a production restore. Recovery time at real s
    3. Do the same for the published database if it was affected.
 3. **D1 from an independent copy:** create a new database, then `wrangler d1 execute <db> --remote --file <export.sql>`.
 4. **R2:** copy objects back with any S3-compatible client that keeps object metadata. **The copy must keep `cmsPrivate`:** media uploaded under a classified prefix carries `cmsPrivate: 1` in R2 custom metadata, which the public route honours alongside the classification table. Copying to a plain file system drops it. After a restore, `HEAD` one known private object and confirm the marker is there.
-5. **Check before reopening:** export the restored database and run the drill tool against the restored bucket copies.
-6. **Credentials:** secrets are not in any backup. Each owner re-sets them from their own record or re-generates them (W9). A new `JWT_SECRET` signs everyone out, which is the right result after an account loss.
-7. **Plugins:** registrations and approvals come back with the database. Each plugin Worker must still be reachable at its registered URL with the same `PLUGIN_SECRET`. A plugin's own data is that plugin's backup.
+5. **Re-apply erasures (W12):** a restored published database can hold submissions that were erased after the backup was taken. If the private database wasn't restored to an earlier point, run `UPDATE submission_erasures SET erased_at = NULL` on it, so cron deletes them again. Ingest never re-mirrors them meanwhile.
+6. **Check before reopening:** export the restored database and run the drill tool against the restored bucket copies.
+7. **Credentials:** secrets are not in any backup. Each owner re-sets them from their own record or re-generates them (W9). A new `JWT_SECRET` signs everyone out, which is the right result after an account loss.
+8. **Plugins:** registrations and approvals come back with the database. Each plugin Worker must still be reachable at its registered URL with the same `PLUGIN_SECRET`. A plugin's own data is that plugin's backup.
 
 ## Security during disruption
 

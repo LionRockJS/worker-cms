@@ -33,6 +33,7 @@ import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
 import { ingestSubmissions } from './core/db/submission-ingest';
+import { eraseSubmissionSources } from './core/pages/submission-erasure';
 import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
 import { SessionEvidenceUnavailableError } from './core/auth/session-evidence';
 import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
@@ -254,6 +255,9 @@ export default {
     if (!regulatedWritesBlocked(sessionEnv)) {
       const result = await ingestSubmissions(sessionEnv);
       if (result.scanned) console.log('submission ingest:', JSON.stringify(result));
+      // Retries erasures a purge recorded but could not complete.
+      const erased = await eraseSubmissionSources(sessionEnv);
+      if (erased) console.log('submission erasure:', erased);
     }
     // Cron work owned by installed features (today, the credit subscription
     // sweep) is composed through the generated feature-service registry.

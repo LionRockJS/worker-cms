@@ -513,3 +513,30 @@ CREATE TRIGGER IF NOT EXISTS classification_version_data_class_floors_delete AFT
   UPDATE classification_policy_version SET version = version + 1 WHERE id = 1;
   SELECT CASE WHEN changes() <> 1 THEN RAISE(ABORT, 'Classification version unavailable') END;
 END;
+
+-- Records under hold (W12). Purging a held page from trash is refused, by hand
+-- or by retention, until the hold is released. Keyed by page uuid, which a page
+-- keeps through trash and restore, so a hold can be placed before deletion.
+-- Released holds are kept as the record of who held what, when and why.
+CREATE TABLE IF NOT EXISTS record_holds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_uuid TEXT NOT NULL,
+    reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+    placed_by INTEGER NOT NULL,
+    placed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    released_by INTEGER,
+    released_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_record_holds_active ON record_holds (page_uuid) WHERE released_at IS NULL;
+
+-- Submission sources to erase from the published database (W12). Purging a
+-- submission mirror records its uuid here in the same batch; the source row is
+-- deleted after the purge commits and erased_at confirms it. A row with no
+-- erased_at is retried by cron. Ingest never mirrors a uuid listed here, so a
+-- restored published database cannot bring an erased submission back.
+CREATE TABLE IF NOT EXISTS submission_erasures (
+    uuid TEXT PRIMARY KEY,
+    requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    erased_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_submission_erasures_pending ON submission_erasures (requested_at) WHERE erased_at IS NULL;

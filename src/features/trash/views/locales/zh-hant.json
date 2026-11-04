@@ -1,9 +1,22 @@
 {
   "trash": {
     "all_types": "所有類型",
+    "held": "保留中",
+    "hold": "保留",
+    "hold_reason": "原因",
+    "holds": "保留",
+    "holds_description": "保留中的頁面在解除保留前無法永久刪除。",
     "last_hour": "最近一小時",
+    "no_holds": "沒有保留。",
     "page_in_trash": "個垃圾桶頁面",
+    "page_uuid": "頁面 UUID",
     "pages_in_trash": "個垃圾桶頁面",
+    "place_hold": "設定保留",
+    "placed": "設定於",
+    "purge_expired": "清除過期項目",
+    "release": "解除",
+    "release_confirm": "解除此保留？之後頁面便可被永久刪除。",
+    "released": "已解除",
     "restore_last_hour": "還原最近一小時"
   },
   "view_strings": {

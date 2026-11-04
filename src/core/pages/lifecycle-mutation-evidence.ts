@@ -8,6 +8,7 @@ import { abortIf } from '../db/transaction-guard';
 import { auditBackgroundReads } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+import { eraseSubmissionSources } from './submission-erasure';
 
 const PAGE=['id','uuid','created_at','updated_at','name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'];
 const TRASH=[...PAGE,'source_page_id'];
@@ -16,9 +17,17 @@ const LINK=['id','uuid','created_at','updated_at','page_id','tag_id','weight'];
 const CONTENT=['name','slug','weight','start','end','timezone','page_type','lect','creator','editors'];
 type Row=Record<string,string|number|null>;
 type Bind=string|number|null;
-export interface LifecycleSelection {ids?:number[];pageType?:string|null;withinLastHour?:boolean}
+/** olderThanDays selects trash rows unchanged for that long (W12 retention). */
+export interface LifecycleSelection {ids?:number[];pageType?:string|null;withinLastHour?:boolean;olderThanDays?:number}
 export type LifecycleAction='trash'|'restore'|'purge';
 export class PageLifecycleUnavailableError extends Error {constructor(){super('Page lifecycle change unavailable');}}
+/** A purge reached a page under an active hold (W12). Nothing was changed. */
+export class RecordHeldError extends Error {constructor(readonly uuids:string[]){super('Record under hold');}}
+const ACTIVE_HOLDS='SELECT page_uuid FROM record_holds WHERE released_at IS NULL';
+/** A held trash row and every trash ancestor whose purge would cascade to it. */
+const HELD_SUBTREES=`id NOT IN (WITH RECURSIVE up(id,page_id) AS (SELECT id,page_id FROM trash_pages WHERE uuid IN (${ACTIVE_HOLDS})
+  UNION SELECT t.id,t.page_id FROM trash_pages t JOIN up ON t.id=up.page_id) SELECT id FROM up)`;
+const MIRROR_ACTIONS=['ingest-submission','pull-published'];
 function json(value:unknown):string {const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Lifecycle manifest requires review');return text;}
 /** The database checks the budget before returning bodies to the Worker. */
 async function snapshot(env:Env,table:string,fields:string[],where:string,bindings:Bind[]=[]):Promise<Row[]> {
@@ -48,7 +57,7 @@ function mergeRows(existing:Row[],incoming:Row[],fields:string[]):Row[] {
 export async function mutatePageLifecycle(env:Env,user:JWTPayload,action:LifecycleAction,selection:LifecycleSelection={},context:ContentBatchContext={}):Promise<{count:number;pages:TrashedPageRef[]}> {
   assertRegulatedWritesAllowed(env);
   try{return await mutate(env,user,action,selection,context);}catch(error){
-    if(String(error).includes('sensitivity_reduction_requires_review'))throw error;
+    if(String(error).includes('sensitivity_reduction_requires_review')||error instanceof RecordHeldError)throw error;
     await recordAuditOutage(env,'health',[],undefined,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError();
   }
 }
@@ -70,6 +79,10 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
   if(selection.ids){conditions.push('id IN (SELECT value FROM json_each(?))');params.push(json(selection.ids));}
   if(selection.pageType){conditions.push('page_type=?');params.push(selection.pageType);}
   if(selection.withinLastHour){conditions.push('created_at>=?');params.push(clock.cutoff);}
+  if(selection.olderThanDays!==undefined){if(action!=='purge'||!Number.isSafeInteger(selection.olderThanDays)||selection.olderThanDays<=0)throw new Error('Invalid lifecycle selection');
+    conditions.push("updated_at<datetime('now',?)");params.push(`-${selection.olderThanDays} days`);}
+  // Bulk purges pass over held pages; an explicit purge of one is refused below.
+  if(action==='purge'&&!selection.ids)conditions.push(HELD_SUBTREES);
   const selectedWhere=conditions.join(' AND ');
   const selected=await snapshot(env,src,['id'],selectedWhere,params);const selectedIds=selected.map(p=>p.id);
   const recursive=`WITH RECURSIVE picked(id) AS (SELECT id FROM trash_pages WHERE id IN (SELECT value FROM json_each(?))
@@ -77,10 +90,17 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
   const sourceWhere=action==='purge'?`id IN (${recursive})`:'id IN (SELECT value FROM json_each(?))';
   const sourceParams=[json(selectedIds)];const sources=await snapshot(env,src,sf,sourceWhere,sourceParams);
   const ids=sources.map(p=>p.id);const uuids=sources.map(p=>p.uuid);const idJson=json(ids);const uuidJson=json(uuids);
+  const heldWhere=`page_uuid IN (SELECT value FROM json_each(?)) AND page_uuid IN (${ACTIVE_HOLDS})`;
+  if(action==='purge'){
+    const held=await env.DB.prepare(`SELECT page_uuid FROM record_holds WHERE ${heldWhere}`).bind(uuidJson).all<{page_uuid:string}>();
+    if(held.results.length)throw new RecordHeldError(held.results.map(r=>r.page_uuid));
+  }
   const base=[authority.guard(),classificationPolicyGuard(env,policy),
     abortIf(env,"(SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('trash_pages','trash_page_versions','trash_page_tags'))<>3"),
     guard(env,src,['id'],selectedWhere,params,selected),guard(env,src,sf,sourceWhere,sourceParams,sources)];
   if(job)base.push(job.delegationGuard);
+  // A hold placed after the read above still stops the batch.
+  if(action==='purge')base.push(abortIf(env,`EXISTS (SELECT 1 FROM record_holds WHERE ${heldWhere})`,[uuidJson]));
   if(!sources.length){await env.DB.batch(base);return {count:0,pages:[]};}
   for(const page of sources)for(const key of ['page_id','source_page_id'])if(page[key]!=null&&(!Number.isSafeInteger(page[key])||Number(page[key])<=0))throw new Error('Unsafe lifecycle parent');
   const parentIds=[...new Set(sources.flatMap(p=>[p.page_id,p.source_page_id]).filter((id):id is number=>typeof id==='number'))];
@@ -127,10 +147,14 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
     guard(env,dv,VERSION,destSubWhere,versionArgs,destVersions),guard(env,dl,LINK,destSubWhere,linkArgs,destLinks),
     guard(env,dst,['id','uuid','page_type'],`id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT uuid FROM ${src} WHERE id IN (SELECT value FROM json_each(?)))`,[parentJson,parentJson],destinationParents));
   const detached:Row[]=children.map(c=>({...c,page_id:null,source_page_id:action==='restore'?targetId(sources.find(p=>p.id===c.page_id)!):(c.source_page_id??c.page_id)}));
+  const mirror=(p:Row)=>versions.some(v=>v.page_id===p.id&&MIRROR_ACTIONS.includes(String(v.action)));
+  // Purging a submission mirror erases its published source too (W12).
+  const erasures=action==='purge'?sources.filter(mirror).map(p=>String(p.uuid)):[];
   const manifest=sources.map(p=>({id:p.id,uuid:p.uuid,parent_id:p.page_id,...(src==='trash_pages'?{source_parent_id:p.source_page_id}:{}),
     versions:versions.filter(v=>v.page_id===p.id).map(v=>({id:v.id,uuid:v.uuid})),links:links.filter(l=>l.page_id===p.id).map(l=>({id:l.id,uuid:l.uuid,tag_id:l.tag_id,weight:l.weight}))}));
   const detail={operation_id:crypto.randomUUID(),sources:manifest,selected_ids:selectedIds,cascade_ids:ids.filter(id=>!selectedIds.includes(id)),detached_children:children.map(c=>({id:c.id,uuid:c.uuid,parent_id:c.page_id,source_parent_id:c.source_page_id,restored_parent_id:detached.find(d=>d.id===c.id)?.source_page_id})),
-    destination_before:destinations.filter(d=>uuids.includes(d.uuid)).map(d=>({id:d.id,uuid:d.uuid})),...(context.job?{job_id:context.job.id,job_attempt:context.job.attempt}:{})};json(detail);
+    destination_before:destinations.filter(d=>uuids.includes(d.uuid)).map(d=>({id:d.id,uuid:d.uuid})),...(context.job?{job_id:context.job.id,job_attempt:context.job.attempt}:{}),
+    ...(erasures.length?{source_erasures:erasures}:{}),...(selection.olderThanDays!==undefined?{retention_days:selection.olderThanDays}:{})};json(detail);
   const receipt=attributedMutationAuditEvidence(env,user,{action:action==='trash'?'page.delete':action==='restore'?(selection.ids?'page.restore':'page.restore_all'):(selection.ids?'page.purge':'page.purge_all'),entityType:'page',...(sources.length===1?{entityId:String(sources[0].uuid)}:{}),detail},dataClass,policy,{context:context.request,via:actor.via??undefined,targetIds:uuids.map(String)});
   const statements=[...base];
   let expectedDest:Row[]=[];let expectedVersions:Row[]=[];let expectedLinks:Row[]=[];
@@ -171,6 +195,7 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
     env.DB.prepare(`DELETE FROM ${sl} WHERE ${subWhere}`).bind(idJson),abortIf(env,'changes()<>?',[links.length]),
     env.DB.prepare(`DELETE FROM ${src} WHERE id IN (SELECT value FROM json_each(?))`).bind(idJson),abortIf(env,'changes()<>?',[sources.length]),
     receipt.write,receipt.guard,
+    ...(erasures.length?[env.DB.prepare('INSERT INTO submission_erasures (uuid) SELECT value FROM json_each(?) WHERE true ON CONFLICT(uuid) DO NOTHING').bind(json(erasures))]:[]),
     guard(env,src,sf,'id IN (SELECT value FROM json_each(?))',[idJson],[]),guard(env,sv,VERSION,subWhere,[idJson],[]),guard(env,sl,LINK,subWhere,[idJson],[]));
   if(action!=='purge')statements.push(guard(env,dst,df.filter(f=>f!=='updated_at'),'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson],expectedDest),
     guard(env,dv,VERSION,destSubWhere,versionArgs,expectedVersions),guard(env,dl,LINK,destSubWhere,linkArgs,expectedLinks),subset(env,dst,['id','uuid'],parentRefs));
@@ -180,6 +205,8 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=json_extract(e.value,'$.uuid')),0)<json_extract(e.value,'$.level'))`,[json(floorUuids),dataClass==='phi'?2:dataClass==='pii'?1:0,json(floors)]));
   if(job)statements.push(job.delegationGuard);
   await env.DB.batch(statements);
+  // The purge has committed with the erasure recorded; a failure here leaves it pending for cron.
+  if(erasures.length)await eraseSubmissionSources(env).catch(()=>console.error(JSON.stringify({event:'submission.erasure-pending',count:erasures.length})));
   return {count:sources.length,pages:sources.map(p=>({id:Number(p.id),uuid:String(p.uuid),name:String(p.name),slug:String(p.slug),page_type:p.page_type as string|null,
-    submission_origin:versions.some(v=>v.page_id===p.id&&(v.action==='ingest-submission'||v.action==='pull-published'))?1:0}))};
+    submission_origin:mirror(p)?1:0}))};
 }

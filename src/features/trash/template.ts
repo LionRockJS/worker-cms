@@ -27,8 +27,14 @@ export async function trashPage(views: Fetcher, opts: BaseTemplateProps & {
   typeCounts?: TypeCount[];
   recentCount?: number;
   canPurgeTrash?: boolean;
+  canHold?: boolean;
+  /** Uuids of the listed pages under an active hold. */
+  held?: Set<string>;
+  /** TRASH_RETENTION_DAYS, or null when no retention purge is offered. */
+  retentionDays?: number | null;
 }): Promise<string> {
-  const { pages, flash, pagination, total = pages.length, typeCounts = [], recentCount = 0, filterType = '', canPurgeTrash = false } = opts;
+  const { pages, flash, pagination, total = pages.length, typeCounts = [], recentCount = 0, filterType = '', canPurgeTrash = false,
+    canHold = false, held = new Set<string>(), retentionDays = null } = opts;
   const grandTotal = opts.grandTotal ?? total;
   const showPagination = (pagination?.totalPages ?? 1) > 1;
   const typeSuffix = filterType ? `${filterType} ` : '';
@@ -52,6 +58,10 @@ export async function trashPage(views: Fetcher, opts: BaseTemplateProps & {
     hasRecent: recentCount > 0,
     total,
     canPurgeTrash,
+    canHold,
+    hasRetention: retentionDays !== null,
+    retentionDays,
+    holdAction: '/admin/holds',
     pages: pages.map((page) => ({
       id: page.id,
       name: page.name,
@@ -62,6 +72,8 @@ export async function trashPage(views: Fetcher, opts: BaseTemplateProps & {
       updatedAt: page.updated_at,
       restoreAction: `/admin/trash/${page.id}/restore`,
       deleteAction: `/admin/trash/${page.id}/delete`,
+      uuid: page.uuid,
+      held: held.has(page.uuid),
     })),
     showPagination,
     ...(showPagination && pagination ? {
@@ -79,4 +91,34 @@ export async function trashPage(views: Fetcher, opts: BaseTemplateProps & {
   });
 
   return adminLayout(views, opts, { title: 'Trash', body });
+}
+
+export interface HoldRow {
+  id: number;
+  page_uuid: string;
+  reason: string;
+  placed_by: number;
+  placed_at: string;
+  released_by: number | null;
+  released_at: string | null;
+}
+
+export async function holdsPage(views: Fetcher, opts: BaseTemplateProps & { holds: HoldRow[]; flash?: string }): Promise<string> {
+  const body = await renderView(views, '/templates/holds.json', {
+    flash: opts.flash,
+    hasFlash: !!opts.flash,
+    placeAction: '/admin/holds',
+    hasHolds: opts.holds.length > 0,
+    holds: opts.holds.map((hold) => ({
+      uuid: hold.page_uuid,
+      reason: hold.reason,
+      placedBy: hold.placed_by,
+      placedAt: hold.placed_at,
+      active: hold.released_at === null,
+      releasedBy: hold.released_by,
+      releasedAt: hold.released_at,
+      releaseAction: `/admin/holds/${hold.id}/release`,
+    })),
+  });
+  return adminLayout(views, opts, { title: 'Holds', body });
 }

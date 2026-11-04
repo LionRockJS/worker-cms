@@ -81,7 +81,10 @@ whose manifest declares `hooks: ["submission"]`.
 
 Invariants the ingest and publish paths preserve:
 
-- **Published submission rows are never mutated or deleted.**
+- **Published submission rows are never mutated, and deleted only by erasure.**
+  Purging a submission mirror from trash records its uuid in
+  `DB.submission_erasures` and deletes the source row (W12). Ingest skips any
+  uuid that is in trash or erased, so a deleted submission is not re-mirrored.
 - **Submission mirrors are never publishable or unpublished.** Their existing
   page-version history (`ingest-submission` or `pull-published`) records their
   origin, so `publishPageToTargets` and `unpublishPageFromTargets` can refuse

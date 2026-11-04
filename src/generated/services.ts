@@ -6,11 +6,13 @@
 import type { FeatureServiceEntry } from '../features/services';
 import { auditServices } from '../features/audit/services';
 import { creditsServices } from '../features/credits/services';
+import { jobsServices } from '../features/jobs/services';
 import { pluginsServices } from '../features/plugins/services';
 
 /** Runtime services contributed by installed features. */
 export const featureServiceEntries: readonly FeatureServiceEntry[] = [
   auditServices,
   creditsServices,
+  jobsServices,
   pluginsServices,
 ];

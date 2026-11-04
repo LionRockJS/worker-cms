@@ -8,7 +8,7 @@ import { requestContext } from '../http/request-context';
 /** Prepared from one D1 snapshot; the admission guard must be the first
  * statement in the same batch as the access-management mutation/evidence. */
 export interface AccessAuthorization {
-  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' | 'credits:share' | 'authenticated';
+  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' | 'credits:share' | 'records:hold' | 'authenticated';
   allowed: boolean;
   admin: boolean;
   permissions: Set<Permission>;

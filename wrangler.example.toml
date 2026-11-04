@@ -176,6 +176,14 @@ DEFAULT_TIMEZONE = "+0800"
 # deployment holding regulated data must set it explicitly (commonly 1800).
 # SESSION_IDLE_TTL = "1800"
 
+# Retention (W12). Both are off unless set, and both take whole days approved by
+# the data owner. TRASH_RETENTION_DAYS offers "Purge expired" in the trash for
+# pages trashed longer ago; an administrator runs it, cron never purges, and held
+# pages are always kept. JOB_RETENTION_DAYS has cron clear the request body and
+# user snapshot of admin jobs finished longer ago.
+# TRASH_RETENTION_DAYS = "90"
+# JOB_RETENTION_DAYS = "30"
+
 # Regulated deployment opt-in. See docs/regulated-profile.md before enabling.
 # Holds content/configuration writes, queue execution, ingestion and billing until W4b.
 # Prepare queue consumers and pinned plugin identities; no write-enable bypass flag.
