@@ -32,7 +32,7 @@ async function unavailable(c: AppContext, actor?: AuditActor): Promise<never> {
 }
 /** Capture before reading the body. Blueprint declarations and wildcard
  * delegation remain requests: current exact write approvals are required. */
-export async function capturePluginPageMutationAuthority(c: AppContext, auth: PluginAuth, purpose: 'create'|'update'|'duplicate' = 'update') {
+export async function capturePluginPageMutationAuthority(c: AppContext, auth: PluginAuth, purpose: 'create'|'update'|'duplicate'|'delete' = 'update') {
   try {
     const registration = auth.plugin.registration;
     if (!registration || !Number.isSafeInteger(registration.id) || registration.id <= 0) throw new Error('Missing registration identity');
@@ -57,7 +57,7 @@ export async function capturePluginPageMutationAuthority(c: AppContext, auth: Pl
     if (allowed.size !== auth.allowedTypes.size || [...allowed].some(type => !auth.allowedTypes.has(type))) throw new Error('Page scope changed');
     const actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: `plugin:${registration.uuid}` };
     const context = requestContext.getStore(); if (context) context.readActor = actor;
-    const dataClass = maximum(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events'].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
+    const dataClass = maximum(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events',...(purpose==='delete'?['trash_pages','trash_page_versions','trash_page_tags']:[])].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
     await auditBackgroundReads(c.env, ['plugins','plugin_identity_approvals','plugin_page_type_approvals','audit_events'].map(table => ({ action: `plugin.page-${purpose}-authority-read`, kind: 'table' as const, key: table, targetType: table === 'audit_events' ? 'plugin_registry_journal' : table, ids: table === 'plugin_page_type_approvals' ? approvals.map(row => String(row.id)) : [table === 'audit_events' ? registration.uuid : String(registration.id)], count: table === 'plugin_page_type_approvals' ? approvals.length : 1, minimumClass: dataClass === 'none' ? undefined : dataClass })), actor);
     const check = () => [guard(c, 'plugins', REGISTRY, rows, 'id=?', [registration.id]), guard(c, 'plugin_identity_approvals', IDENTITY, pins, 'plugin_row_id=?', [registration.id]), guard(c, 'plugin_page_type_approvals', APPROVAL, approvals, 'plugin_id=?', [auth.pluginId]), classificationPolicyGuard(c.env, policy), abortIf(c.env, "(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin' AND target_id=?)<>?", [registration.uuid, journal.generation])];
     return { [brand]: true as const, purpose, actor, policy, dataClass, check, allowed, registryId: registration.id, identityFingerprint: await fingerprint(auth.pluginId) };
@@ -65,7 +65,7 @@ export async function capturePluginPageMutationAuthority(c: AppContext, auth: Pl
 }
 export type PluginPageMutationAuthority = Awaited<ReturnType<typeof capturePluginPageMutationAuthority>>;
 type Authority = PluginPageMutationAuthority;
-export function assertPluginPageAuthority(authority: Authority, purpose: 'create'|'update'|'duplicate'): void {
+export function assertPluginPageAuthority(authority: Authority, purpose: 'create'|'update'|'duplicate'|'delete'): void {
   if (!authority?.[brand] || authority.purpose !== purpose) throw new Error('Invalid page authority');
 }
 

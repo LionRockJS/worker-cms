@@ -178,13 +178,16 @@ it('preserves the authenticated user and warning on an HTTP containment withdraw
   });
 });
 
-it('retains the source plugin and delegated user on delete-triggered withdrawal', async () => {
+it('attributes delete-triggered withdrawal to the credential-authenticated plugin', async () => {
   const response = await worker.fetch(new Request('http://localhost/__cms/pages/6500', { method: 'DELETE',
     headers: { 'x-plugin-id': pluginId, 'x-plugin-secret': secret, 'x-acting-user-id': '6501' }, redirect: 'manual' }));
   expect(response.status).toBe(200); await response.text();
   const rows = await exportsFor('publish.withdrawal-intent');
   expect(rows.length).toBeGreaterThan(0);
-  expect(rows.every(row => row.actor_user_id === '6501' && row.acting_via === pluginId)).toBe(true);
+  const registry = await env.DB.prepare('SELECT uuid FROM plugins WHERE id=?').bind(rowId).first<{uuid:string}>();
+  expect(rows.every(row => row.actor_user_id === null && row.acting_via === `plugin:${registry!.uuid}`)).toBe(true);
+  const local=(await exportsFor('page.delete'))[0];
+  expect(JSON.parse(String(local.detail))).toMatchObject({acting_user_verified:false,asserted_user_id:6501});
 });
 
 it.each([

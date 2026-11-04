@@ -28,7 +28,6 @@ import {
   asFiniteNumber,
   asPositiveSafeInteger,
   coerceLect,
-  collectionWhere,
   LISTABLE_PAGE_FIELDS,
   pageTagsByPageId,
   parseApiSearchCriteria,
@@ -40,22 +39,20 @@ import {
 } from './serialize';
 import { createPages } from './create';
 import type { HookPage } from '../hooks';
-import { emitPluginHook, emitPluginHooks } from './hooks';
+import { emitPluginHooks } from './hooks';
 import { chineseSearchVariants } from '../../../core/db/chinese';
 import { advancedSearchOperator, advancedSearchOrder, advancedSearchSort, performAdvancedSearch } from '../../../core/db/search';
 import { blueprintToLect, mergeLects, safeParseLect, stringifyLect } from '../../../core/db/lect';
 import { resolveCmsConfig } from '../../../core/db/content-config';
 import { withDraftMetadata } from '../../../core/db/page-logic';
-import { ensureUniqueDraftSlug, trashDraftPage, trashDraftPages } from '../../../core/db/admin-queries';
+import { ensureUniqueDraftSlug } from '../../../core/db/admin-queries';
 import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
-import { liveMapForDraftPages, publishPagesToTargets, unpublishPageFromTargets, unpublishPagesFromTargets } from '../../../core/publish';
+import { liveMapForDraftPages, publishPagesToTargets } from '../../../core/publish';
+import { deletePluginPages } from '../page-delete-evidence';
 import { duplicatePluginPages } from '../page-duplicate-evidence';
 import { notifyPageSaved } from '../../../core/db/page-store';
 import { capturePluginPageMutationAuthority, readPluginPageUpdateSources, commitPluginPageUpdates, type PluginPageUpdate, type PluginPageUpdateDenial } from '../page-update-evidence';
-
-const DELETE_CHILDREN_BATCH = 100;
-const DELETE_CHILDREN_MAX_PER_CALL = 1000;
 
 const MAX_BATCH = 100;
 const MAX_LIST_BATCH_QUERIES = 20;
@@ -863,129 +860,22 @@ async function updatePage(c: AppContext): Promise<Response> {
   return c.json({ page: serializePage(saved) });
 }
 
-// Batch soft-delete pages to trash. Accepts { ids: number[] } (up to MAX_BATCH).
-// Pages not found are silently skipped. Returns the count actually trashed.
-// Must be registered BEFORE DELETE /pages/:id so "batch" isn't matched as an id.
-pagesApiRoutes.delete('/pages/batch', async (c) => {
-  const auth = await authenticatePlugin(c);
-  if (auth instanceof Response) return auth;
-
-  const body = await c.req.json().catch(() => null) as { ids?: unknown } | null;
-  const rawIds = body && Array.isArray(body.ids) ? body.ids : null;
-  if (!rawIds) return c.json({ error: 'invalid_body' }, 400);
-
-  const ids = rawIds.filter((id): id is number => typeof id === 'number' && Number.isFinite(id));
-  if (!ids.length) return c.json({ ok: true, trashed: 0 });
-  if (ids.length > MAX_BATCH) return c.json({ error: 'batch_too_large', max: MAX_BATCH }, 413);
-
-  // Enforce scope: all requested ids must be allowed page types.
-  const ph = ids.map(() => '?').join(',');
-  const { results: types } = await c.env.DB.prepare(
-    `SELECT id, page_type FROM pages WHERE id IN (${ph})`,
-  ).bind(...ids).all<{ id: number; page_type: string | null }>();
-
-  for (const row of types) {
-    if (!pageTypeScopeAllows(auth.allowedTypes, row.page_type ?? '')) return forbiddenPageType(c, auth, row.page_type ?? '');
-  }
-
-  const pages = await trashDraftPages(c.env.DB, ids);
-
-  // Bulk unpublish: one round-trip per target per chunk, instead of a
-  // 100-wide per-page fanout that made big batch deletes hang mid-way.
-  await unpublishPagesFromTargets(c.env, pages, apiActor(c, auth.pluginId)).catch(() => {});
-  emitPluginHooks(c, 'delete', pages, auth.pluginId);
-
-  return c.json({ ok: true, trashed: pages.length });
-});
-
-// Server-side bulk soft-delete of a related collection of pages.
-//
-// Counterpart to POST /pages/duplicate, for "delete an event with all its
-// guests" without the plugin first reading every child id and then deleting it
-// in ≤MAX_BATCH chunks. The host finds the pages itself — by lect pointer (how
-// guests group: `_pointers.mail_list`) or by parent page id — and trashes them
-// in DB.batch chunks; trashDraftPages copies any number of rows to trash in a
-// single batch, so each chunk is a couple of subrequests regardless of size.
-//
-// Bounded to DELETE_CHILDREN_MAX_PER_CALL per request: since trashed rows leave
-// pages, a follow-up call simply picks up whatever remains, so the caller
-// repeats while `done` is false. Registered BEFORE DELETE /pages/:id so
-// "children" is not matched as an id.
-//
-// Unlike DELETE /pages/:id and /pages/batch this does NOT unpublish each child
-// from publish targets — that per-page work is what makes a bulk delete slow,
-// and child collections this targets (e.g. event guests) are not published.
-pagesApiRoutes.delete('/pages/children', async (c) => {
-  const auth = await authenticatePlugin(c);
-  if (auth instanceof Response) return auth;
-
-  const body = await c.req.json().catch(() => null) as {
-    parent_page_id?: unknown; pointer_key?: unknown; pointer_value?: unknown; page_type?: unknown;
-  } | null;
-  if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
-
-  const pageType = typeof body.page_type === 'string' ? body.page_type.trim() : '';
-  if (!pageType) return c.json({ error: 'page_type_required' }, 400);
-  if (!pageTypeScopeAllows(auth.allowedTypes, pageType)) return forbiddenPageType(c, auth, pageType);
-
-  // Select the pages by lect pointer (how guests group) or parent page id.
-  const selector = collectionWhere(
-    asFiniteNumber(body.parent_page_id),
-    typeof body.pointer_key === 'string' ? body.pointer_key.trim() : '',
-    typeof body.pointer_value === 'string' ? body.pointer_value : '',
-  );
-  if (!selector.ok) return c.json({ error: selector.error }, 400);
-
-  let trashed = 0;
-  let done = false;
-  const hookPages: HookPage[] = [];
-  while (trashed < DELETE_CHILDREN_MAX_PER_CALL) {
-    const { results } = await c.env.DB.prepare(
-      `SELECT id FROM pages WHERE ${selector.sql} AND page_type = ? ORDER BY id ASC LIMIT ?`,
-    ).bind(...selector.params, pageType, DELETE_CHILDREN_BATCH).all<{ id: number }>();
-
-    if (!results.length) { done = true; break; }
-    const pages = await trashDraftPages(c.env.DB, results.map((row) => row.id));
-    hookPages.push(...pages);
-    trashed += results.length;
-    if (results.length < DELETE_CHILDREN_BATCH) { done = true; break; }
-  }
-
-  // Audit + delete hooks run detached (waitUntil), so they never block the
-  // response — the same best-effort path the per-id batch delete uses.
-  emitPluginHooks(c, 'delete', hookPages, auth.pluginId);
-
-  return c.json({ trashed, done });
-});
+// Static deletion routes must precede the single-ID catch-all.
+for (const mode of ['batch','children'] as const) {
+  pagesApiRoutes.delete(`/pages/${mode}`, async c => {
+    const auth=await authenticatePlugin(c);if(auth instanceof Response)return auth;
+    const authority=await capturePluginPageMutationAuthority(c,auth,'delete');
+    const body=await c.req.json().catch(()=>null);
+    return deletePluginPages(c,auth,authority,mode,body);
+  });
+}
 
 // Pull live-only pages (published DB → draft pages) now instead of waiting
 // for the next cron tick. A caller opts into this generic contract by declaring
 // the `submission` hook in its manifest; no wildcard page-write scope is
 
-pagesApiRoutes.delete('/pages/:id', async (c) => {
-  const auth = await authenticatePlugin(c);
-  if (auth instanceof Response) return auth;
-
-  const id = asFiniteNumber(c.req.param('id'));
-  if (id === null) return c.json({ error: 'invalid_id' }, 400);
-
-  // Read first so we can enforce scope before trashing.
-  const existing = await c.env.DB.prepare('SELECT page_type FROM pages WHERE id = ?')
-    .bind(id)
-    .first<{ page_type: string | null }>();
-  if (!existing) return c.json({ error: 'not_found' }, 404);
-  if (!pageTypeScopeAllows(auth.allowedTypes, existing.page_type ?? '')) return forbiddenPageType(c, auth, existing.page_type ?? '');
-
-  const page = await trashDraftPage(c.env.DB, id);
-  if (!page) return c.json({ error: 'not_found' }, 404);
-
-  await unpublishPageFromTargets(c.env, page.uuid, !!page.submission_origin, apiActor(c, auth.pluginId));
-  emitPluginHook(
-    c,
-    'delete',
-    { id: page.id, uuid: page.uuid, page_type: page.page_type, name: page.name, slug: page.slug },
-    auth.pluginId,
-  );
-
-  return c.json({ ok: true, id: page.id });
+pagesApiRoutes.delete('/pages/:id', async c => {
+  const auth=await authenticatePlugin(c);if(auth instanceof Response)return auth;
+  const authority=await capturePluginPageMutationAuthority(c,auth,'delete');
+  return deletePluginPages(c,auth,authority,'single',c.req.param('id'));
 });

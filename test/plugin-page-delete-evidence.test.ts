@@ -1,0 +1,107 @@
+import { env } from 'cloudflare:workers';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import worker from '../src/index';
+import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, getPlugins } from '../src/features/plugins/registry';
+import { clearConfigCache } from '../src/core/db/content-config';
+import type { Env } from '../src/types';
+
+const fault='plugin_page_delete_fault',url='https://private.invalid/plugin?token=private-query',pluginId='private-plugin',secret='private-delete-secret';
+let hooks:ReturnType<typeof vi.fn>,requestNumber=0;
+async function seed(count:number){
+ await env.DB.prepare("DELETE FROM page_tags WHERE page_id IN (SELECT id FROM pages WHERE page_id=28011)").run();
+ await env.DB.prepare('DELETE FROM pages WHERE page_id=28011').run();
+ for(let offset=0;offset<count;offset+=100)await env.DB.batch(Array.from({length:Math.min(100,count-offset)},(_,i)=>{
+  const id=28101+offset+i;
+  return env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect,page_id,weight,start,end,timezone,created_at,updated_at) VALUES (?,?,?,?,'guest',?,28011,7,'2026-01-01','2026-12-31','+0800','2000-01-01','2000-01-01')").bind(id,`source-${id}`,'Private Person',`opaque-${id}`,JSON.stringify({status:'private-old',private:'source-body',privateDrop:[{secret:'drop-me'}],_pointers:{list:'source-list'}}));
+ }));
+ if(count)await env.DB.prepare("INSERT INTO page_tags(id,uuid,page_id,tag_id) VALUES (28031,'source-link',28101,28021)").run();
+}
+beforeEach(async()=>{
+ for(const name of [fault,`${fault}_second`])await env.DB.prepare(`DROP TRIGGER IF EXISTS ${name}`).run();
+ for(const table of ['audit_events','data_classes','page_tags','page_versions','pages','trash_page_tags','trash_page_versions','trash_pages','tags','page_sensitivity_floors','plugin_page_type_approvals','plugin_identity_approvals','plugins','credit_ledger','credit_wallets','shared_credit_ledger','shared_credits'])await env.DB.prepare(`DELETE FROM ${table}`).run();
+ await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'plugin.limits.%' OR key LIKE 'plugin.credits.%'").run();
+ await env.DB.prepare("INSERT INTO plugins(id,uuid,label,url,enabled,config,secret) VALUES (28010,'delete-registry-uuid','Private Label',?,1,'{\"private\":\"config\"}',?)").bind(url,secret).run();
+ await env.DB.prepare('INSERT INTO plugin_identity_approvals(plugin_row_id,manifest_id) VALUES (28010,?)').bind(pluginId).run();
+ await env.DB.prepare("INSERT INTO plugin_page_type_approvals(plugin_id,page_type,access,approved_by) VALUES (?,'guest','write','internal-admin')").bind(pluginId).run();
+ await env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect) VALUES (28011,'source-parent','Private Source','source-parent','collection','{}'),(28012,'target-parent','Private Target','target-parent','collection','{}')").run();
+ await env.DB.prepare("INSERT INTO tags(id,uuid,name,slug,taxonomy_slug) VALUES (28021,'source-tag','Private Tag','source-tag','special')").run();
+ await env.DB.prepare('DELETE FROM users WHERE id=28001').run();
+ await env.DB.prepare("INSERT INTO users(id,oauth_id,name,email,role) VALUES (28001,'test:delete-payer','Private Payer','private-payer@example.invalid','editor')").run();
+ await env.DB.prepare("INSERT INTO credit_wallets(user_id,currency,balance) VALUES (28001,'credit',10000)").run();
+ await seed(3);
+ hooks=vi.fn(async()=>new Response('ok'));clearConfigCache();clearManifestCache();__clearInjectedFetchers();
+ __injectPluginFetcher(url,{fetch:async(input:RequestInfo|URL)=>{
+  const href=typeof input==='string'?input:input instanceof URL?input.href:input.url;
+  if(new URL(href).pathname==='/__plugin/manifest')return Response.json({id:pluginId,name:'Private Manifest',version:'1',hooks:['delete'],contentTypes:{blueprint:{guest:['@status','name']},writeTypes:['article','*']},limits:[{key:'total',page_type:'guest',scope:'total',default:10000},{key:'parent',page_type:'guest',scope:'per_parent',default:10000},{key:'collection',page_type:'guest',scope:'per_pointer',pointer_key:'list',default:10000}],credits:[{key:'create_guest',charge:'page_create',page_type:'guest',default:5}]});
+  return hooks(input);
+ }} as Fetcher);
+});
+afterEach(async()=>{for(const name of [fault,`${fault}_second`])await env.DB.prepare(`DROP TRIGGER IF EXISTS ${name}`).run();clearConfigCache();clearManifestCache();__clearInjectedFetchers();vi.restoreAllMocks();});
+
+type Mode='single'|'batch'|'children';
+function input(mode:Mode){return mode==='single'?undefined:mode==='batch'?{ids:[28101,28102,28103]}:{parent_page_id:28011,page_type:'guest'};}
+async function call(mode:Mode='single',overrides:Partial<Env>={},body:unknown=input(mode),headers:Record<string,string>={}){
+ const ctx=createExecutionContext();requestNumber++;
+ const response=await worker.fetch(new Request(`https://cms.example.com/__cms/pages/${mode==='single'?'28101':mode}`,{method:'DELETE',headers:{'content-type':'application/json','x-plugin-id':pluginId,'x-plugin-secret':secret,'CF-Ray':`delete-request-${requestNumber}`,'CF-Connecting-IP':`10.110.${Math.floor(requestNumber/250)}.${requestNumber%250+1}`,...headers},...(body===undefined?{}:{body:JSON.stringify(body)})}),{...env,REGULATED_MODE:undefined,REGULATED_INVENTORY:undefined,...overrides},ctx);await waitOnExecutionContext(ctx);return response;
+}
+async function events(action='page.delete'){return(await env.DB.prepare('SELECT * FROM audit_events WHERE action=? ORDER BY seq').bind(action).all()).results;}
+async function state(){return Promise.all(['pages','page_versions','page_tags','trash_pages','trash_page_versions','trash_page_tags'].map(async table=>(await env.DB.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results));}
+async function classify(kind='page_type',key='guest',value='phi'){await env.DB.prepare('INSERT INTO data_classes(container_kind,container_key,class) VALUES (?,?,?)').bind(kind,key,value).run();}
+function race(change:()=>Promise<unknown>,uncertain=false,nth=1,phase:'commit'|'intent'='commit'):Env['DB']{
+ let seen=0,changed=false;const tracked=new WeakMap<D1PreparedStatement,{actual:D1PreparedStatement;sql:string;args:unknown[]}>();
+ function track(actual:D1PreparedStatement,sql:string,args:unknown[]=[]):D1PreparedStatement{const proxy=new Proxy(actual,{get(target,name){if(name==='bind')return(...args:unknown[])=>track(actual.bind(...args),sql,args);const value=Reflect.get(target,name,target);return typeof value==='function'?value.bind(target):value;}});tracked.set(proxy,{actual,sql,args});return proxy;}
+ const DB={withSession:()=>DB,prepare:(sql:string)=>track(env.DB.prepare(sql),sql),batch:async(statements:D1PreparedStatement[])=>{let injected=false;const match=statements.some(s=>phase==='commit'?tracked.get(s)?.sql.startsWith('INSERT INTO trash_pages '):tracked.get(s)?.args.includes('page.delete.intent'));if(match&&!changed&&++seen===nth){changed=true;injected=true;await change();}const result=await env.DB.batch(statements.map(s=>tracked.get(s)?.actual??s));if(injected&&uncertain)throw new Error('Synthetic lost acknowledgment');return result;}};return DB as Env['DB'];
+}
+for(const mode of ['single','batch','children'] as Mode[]){
+ it.each(['none','pii','phi'])(`commits ${mode} trash with private %s per-page/chunk evidence`,async dataClass=>{
+  if(dataClass!=='none')await classify('page_type','guest',dataClass);
+  await env.DB.prepare("INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (28041,'source-history',28101,'private history','create')").run();
+  expect((await call(mode,{},input(mode),{'x-acting-user-id':'28001','x-cms-user-id':'28001'})).status).toBe(200);
+  const rows=await events();expect(rows).toHaveLength(mode==='single'?1:3);
+  for(const row of rows){expect(row).toMatchObject({actor_user_id:null,actor_roles:null,session_sid:null,acting_via:'plugin:delete-registry-uuid',data_class:dataClass});expect(JSON.parse(String(row.detail))).toMatchObject({operation_id:expect.any(String),registry_id:28010,acting_user_verified:false,asserted_user_id:28001,source_id:expect.any(Number),source_uuid:expect.any(String),trash_id:expect.any(Number)});}
+  expect(await env.DB.prepare("SELECT lect FROM trash_page_versions WHERE uuid='source-history'").first()).toEqual({lect:'private history'});
+  expect(await env.DB.prepare("SELECT tag_id,weight FROM trash_page_tags WHERE uuid='source-link'").first()).toEqual({tag_id:28021,weight:5});
+  expect(await events('page.delete.intent')).toHaveLength(1);expect(await events('page.delete.chunk')).toHaveLength(1);expect(hooks).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify([...rows,...await events('page.delete.chunk')])).not.toMatch(/Private|opaque-|source-body|source-list|private history|private-delete-secret|private-query/);
+ });
+ for(const action of ['page.delete.intent','page.delete','page.delete.chunk'])it.each(['abort','ignore','rewrite','remove'])(`rolls back ${mode} when ${action} evidence is %s`,async failure=>{
+  const before=await state();const sql=failure==='abort'?"BEFORE INSERT ON audit_events WHEN NEW.action='ACTION' BEGIN SELECT RAISE(ABORT,'synthetic'); END":failure==='ignore'?"BEFORE INSERT ON audit_events WHEN NEW.action='ACTION' BEGIN SELECT RAISE(IGNORE); END":failure==='rewrite'?"AFTER INSERT ON audit_events WHEN NEW.action='ACTION' BEGIN UPDATE audit_events SET outcome='denied' WHERE event_id=NEW.event_id; END":"AFTER INSERT ON audit_events WHEN NEW.action='ACTION' BEGIN DELETE FROM audit_events WHERE event_id=NEW.event_id; END";
+  await env.DB.prepare(`CREATE TRIGGER ${fault} ${sql.replace('ACTION',action)}`).run();expect((await call(mode)).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);expect(hooks).not.toHaveBeenCalled();
+ });
+ it.each(['secret','enabled','pin','grant','policy','type','body','history','links','floor'])(`refuses ${mode} after concurrent %s change`,async change=>{
+  const DB=race(async()=>{
+   if(change==='secret')return env.DB.prepare("UPDATE plugins SET secret='rotated'").run();if(change==='enabled')return env.DB.prepare('UPDATE plugins SET enabled=0').run();if(change==='pin')return env.DB.prepare('DELETE FROM plugin_identity_approvals').run();if(change==='grant')return env.DB.prepare('DELETE FROM plugin_page_type_approvals').run();if(change==='policy')return classify();if(change==='type')return env.DB.prepare("UPDATE pages SET page_type='forbidden' WHERE id=28101").run();if(change==='body')return env.DB.prepare("UPDATE pages SET lect='{}' WHERE id=28101").run();if(change==='history')return env.DB.prepare("INSERT INTO page_versions(page_id,lect) VALUES (28101,'concurrent')").run();if(change==='links')return env.DB.prepare('DELETE FROM page_tags WHERE page_id=28101').run();return env.DB.prepare("INSERT INTO page_sensitivity_floors(uuid,level) VALUES ('source-28101',2)").run();
+  });expect((await call(mode,{DB})).status).toBe(503);expect(await events()).toEqual([]);expect(await env.DB.prepare('SELECT id FROM pages WHERE id=28101').first()).not.toBeNull();
+ });
+ it(`retains ${mode} receipts and reports unknown commit after lost acknowledgment`,async()=>{
+  expect((await call(mode,{DB:race(async()=>{},true)})).status).toBe(503);expect(await events()).toHaveLength(mode==='single'?1:3);expect(JSON.parse(String((await events('page.delete.result'))[0].detail))).toMatchObject({acknowledged_count:0,commit_state:'unknown'});expect(hooks).not.toHaveBeenCalled();
+ });
+}
+it('preserves a parent and child history when deleting only its parent',async()=>{await env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect,page_id) VALUES (29001,'unselected-child','Child','child','other','{}',28101)").run();expect((await call()).status).toBe(200);expect(await env.DB.prepare('SELECT page_id FROM pages WHERE id=29001').first()).toEqual({page_id:28101});expect(await env.DB.prepare('SELECT id FROM pages WHERE id=28011').first()).not.toBeNull();expect(await env.DB.prepare('SELECT page_id,source_page_id FROM trash_pages WHERE id=28101').first()).toEqual({page_id:null,source_page_id:28011});});
+it('refuses a mixed forbidden batch without trashing an allowed prefix',async()=>{await env.DB.prepare("UPDATE pages SET page_type='other' WHERE id=28102").run();expect((await call('batch')).status).toBe(403);expect(await events()).toHaveLength(1);expect((await events())[0].outcome).toBe('denied');expect(await env.DB.prepare('SELECT COUNT(*) n FROM trash_pages').first()).toEqual({n:0});});
+it('durably denies an empty collection outside current write scope',async()=>{expect((await call('children',{}, {parent_page_id:28011,page_type:'other'})).status).toBe(403);expect((await events())[0].outcome).toBe('denied');});
+it('protects PHI deletion denials',async()=>{await classify('page_type','other');expect((await call('children',{}, {parent_page_id:28011,page_type:'other'})).status).toBe(403);expect((await events())[0].data_class).toBe('phi');});
+it('guards no-op missing and empty batches without fabricating mutations',async()=>{expect((await call('batch',{}, {ids:[]})).status).toBe(200);expect((await call('single',{},undefined)).status).toBe(200);expect((await call('single',{},undefined)).status).toBe(404);expect(await events()).toHaveLength(1);});
+it('deduplicates requested IDs and skips missing batch IDs',async()=>{expect((await call('batch',{}, {ids:[28101,28101,999999]})).status).toBe(200);expect(await events()).toHaveLength(1);});
+it.each([{ids:[-1]},{ids:[1.2]},{ids:[Number.MAX_SAFE_INTEGER+1]},{ids:[true]},{ids:[['28101']]},{ids:['28101']}])('rejects unsafe batch selection %j',async body=>{expect((await call('batch',{},body)).status).toBe(400);expect(await events()).toEqual([]);});
+it('handles 1,001 children in bounded chunks and a follow-up request',async()=>{await seed(1001);const response=await call('children');expect(response.status).toBe(200);expect(await response.json()).toEqual({trashed:1000,done:false});expect(await events()).toHaveLength(1000);expect(await events('page.delete.chunk')).toHaveLength(10);expect(await (await call('children')).json()).toEqual({trashed:1,done:true});},30000);
+it.each(['grant','new member','reparent'] )('stops child deletion after the acknowledged prefix when %s changes',async change=>{await seed(101);const DB=race(async()=>{if(change==='grant')return env.DB.prepare('DELETE FROM plugin_page_type_approvals').run();if(change==='reparent')return env.DB.prepare('UPDATE pages SET page_id=28012 WHERE id=28201').run();return env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect,page_id) VALUES (29500,'late','Late','late','guest','{}',28011)").run();},false,2);expect((await call('children',{DB})).status).toBe(503);expect(await events()).toHaveLength(100);expect(await events('page.delete.chunk')).toHaveLength(1);expect(JSON.parse(String((await events('page.delete.result'))[0].detail))).toMatchObject({acknowledged_count:100,commit_state:'prefix_committed'});},30000);
+it('retains a second chunk with unknown acknowledgment without replay',async()=>{await seed(101);expect((await call('children',{DB:race(async()=>{},true,2)})).status).toBe(503);expect(await events()).toHaveLength(101);expect(JSON.parse(String((await events('page.delete.result'))[0].detail))).toMatchObject({acknowledged_count:100,commit_state:'unknown'});},30000);
+it('does not mutate after an uncertain intent acknowledgment',async()=>{expect((await call('batch',{DB:race(async()=>{},true,1,'intent')})).status).toBe(503);expect(await events()).toEqual([]);expect(await events('page.delete.intent')).toHaveLength(1);});
+it('refuses regulated containment before intent or trash',async()=>{expect((await call('batch',{REGULATED_MODE:'1'})).status).toBe(503);expect(await events()).toEqual([]);expect(await events('page.delete.intent')).toEqual([]);});
+it.each(['trash_pages','trash_page_versions','trash_page_tags'])('refuses ignored destination writes to %s',async table=>{
+ await env.DB.prepare("INSERT INTO page_versions(id,uuid,page_id,lect) VALUES (28041,'source-history',28101,'private')").run();const before=await state();await env.DB.prepare(`CREATE TRIGGER ${fault} BEFORE INSERT ON ${table} BEGIN SELECT RAISE(IGNORE); END`).run();expect((await call('batch')).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);
+});
+it('rechecks earlier receipts after a later page receipt trigger',async()=>{const before=await state();await env.DB.prepare(`CREATE TRIGGER ${fault} AFTER INSERT ON audit_events WHEN NEW.action='page.delete' AND NEW.target_id='source-28103' BEGIN UPDATE audit_events SET outcome='denied' WHERE action='page.delete' AND target_id='source-28101'; END`).run();expect((await call('batch')).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
+it('rejects a receipt trigger that changes exact trash content',async()=>{const before=await state();await env.DB.prepare(`CREATE TRIGGER ${fault} AFTER INSERT ON audit_events WHEN NEW.action='page.delete' BEGIN UPDATE trash_pages SET lect='{}' WHERE uuid=NEW.target_id; END`).run();expect((await call('batch')).status).toBe(503);expect(await state()).toEqual(before);});
+it('rejects a later chunk after corruption of its durable intent',async()=>{await seed(101);const DB=race(async()=>env.DB.prepare("UPDATE audit_events SET outcome='denied' WHERE action='page.delete.intent'").run(),false,2);expect((await call('children',{DB})).status).toBe(503);expect(await events()).toHaveLength(100);},30000);
+it('uses retained PHI floors without a current type classification',async()=>{await env.DB.prepare("INSERT INTO page_sensitivity_floors(uuid,level) VALUES ('source-28101',2)").run();expect((await call('batch')).status).toBe(200);for(const row of await events())expect(row.data_class).toBe('phi');expect((await events('page.delete.intent'))[0].data_class).toBe('phi');});
+it('denial evidence failure returns unavailable without deleting allowed rows',async()=>{await env.DB.prepare("UPDATE pages SET page_type='other' WHERE id=28102").run();const before=await state();await env.DB.prepare(`CREATE TRIGGER ${fault} BEFORE INSERT ON audit_events WHEN NEW.action='page.delete' BEGIN SELECT RAISE(IGNORE); END`).run();expect((await call('batch')).status).toBe(503);expect(await state()).toEqual(before);});
+it('stops before deleting a PHI page when protected source auditing fails',async()=>{await classify();const before=await state();await env.DB.prepare(`CREATE TRIGGER ${fault} BEFORE INSERT ON audit_events WHEN NEW.action='page.lifecycle-read' BEGIN SELECT RAISE(ABORT,'source audit unavailable'); END`).run();expect((await call('batch')).status).toBe(503);expect(await state()).toEqual(before);expect(JSON.parse(String((await events('page.delete.result'))[0].detail))).toMatchObject({commit_state:'not_committed'});});
+it('rejects credential rotation after authority capture',async()=>{let changed=false;const DB=new Proxy(env.DB,{get(target,key){if(key==='withSession')return()=>DB;if(key==='prepare')return(sql:string)=>{const stmt=target.prepare(sql);if(sql.includes('SELECT COUNT(*) n FROM pages WHERE')&&!changed){changed=true;return new Proxy(stmt,{get(inner,name){if(name==='bind')return(...args:unknown[])=>{const bound=inner.bind(...args);return new Proxy(bound,{get(b,n){if(n==='first')return async()=>{await env.DB.prepare("UPDATE plugins SET secret='body-time-rotation'").run();return b.first();};const value=Reflect.get(b,n,b);return typeof value==='function'?value.bind(b):value;}});};const value=Reflect.get(inner,name,inner);return typeof value==='function'?value.bind(inner):value;}});}return stmt;};const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});expect((await call('batch',{DB})).status).toBe(503);expect(await events()).toEqual([]);});
+it('refuses deletion when optional trash history storage is absent',async()=>{const before=await env.DB.prepare('SELECT COUNT(*) n FROM pages').first();await env.DB.prepare('ALTER TABLE trash_page_versions RENAME TO trash_page_versions_unavailable').run();try{expect((await call('batch')).status).toBe(503);expect(await events()).toEqual([]);expect(await env.DB.prepare('SELECT COUNT(*) n FROM pages').first()).toEqual(before);}finally{await env.DB.prepare('ALTER TABLE trash_page_versions_unavailable RENAME TO trash_page_versions').run();}});
+it('refuses oversized source snapshots before deleting any row',async()=>{await env.DB.prepare('UPDATE pages SET lect=? WHERE id=28101').bind(JSON.stringify({private:'a'.repeat(1_000_001)})).run();expect((await call('batch')).status).toBe(503);expect(await events()).toEqual([]);expect(await env.DB.prepare('SELECT id FROM pages WHERE id=28101').first()).not.toBeNull();});
+it('does not allow read-only approval to authorize deletion',async()=>{await env.DB.prepare("UPDATE plugin_page_type_approvals SET access='read'").run();expect((await call('batch')).status).toBe(403);expect((await events())[0].outcome).toBe('denied');});
+it('accepts a currently approved wildcard write scope',async()=>{await env.DB.prepare("UPDATE plugin_page_type_approvals SET page_type='*'").run();expect((await call('batch')).status).toBe(200);expect(await events()).toHaveLength(3);});
+it('keeps the 100 input-item limit before deduplication',async()=>{expect((await call('batch',{}, {ids:Array(101).fill(28101)})).status).toBe(413);expect(await events()).toEqual([]);});

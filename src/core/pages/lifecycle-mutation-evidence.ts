@@ -1,9 +1,10 @@
+import type { AppContext } from '../http/context';
 import type { Env,JWTPayload } from '../../types';
 import type { TrashedPageRef } from '../db/admin-queries';
 import type { ContentBatchContext } from './batch-mutation-evidence';
 import { captureAccessAuthorization,captureContentJobAuthorization } from '../auth/access-authorization';
 import { classFor,resolveDataClasses,classificationPolicyGuard } from '../db/data-classes';
-import { attributedMutationAuditEvidence } from '../db/audit';
+import { serviceMutationAuditEvidence, type AuditActor, attributedMutationAuditEvidence } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { auditBackgroundReads } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
@@ -19,8 +20,26 @@ type Row=Record<string,string|number|null>;
 type Bind=string|number|null;
 /** olderThanDays selects trash rows unchanged for that long (W12 retention). */
 export interface LifecycleSelection {ids?:number[];pageType?:string|null;withinLastHour?:boolean;olderThanDays?:number}
+/** Trusted service adapter, constructed by the credential-owning feature.
+ * Core never resolves contributor credentials or manufactures a CMS user. */
+export interface ServiceTrashAuthority {
+  actor: AuditActor;
+  check: () => D1PreparedStatement[];
+  allows: (pageType: string) => boolean;
+  dataClass: 'none'|'pii'|'phi';
+  detail: Record<string,unknown>;
+  before?: () => D1PreparedStatement[];
+  after?: () => D1PreparedStatement[];
+  request: AppContext;
+}
+export async function trashPagesAsService(env:Env,service:ServiceTrashAuthority,ids:number[]) {
+  assertRegulatedWritesAllowed(env);
+  let attempted=false;
+  try { return await mutate(env,null,'trash',{ids},{request:service.request},service,()=>{attempted=true;}); }
+  catch(error) { await recordAuditOutage(env,'health',[],service.actor,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError(!attempted||(error instanceof Error&&/^D1_ERROR:.*SQLITE_/s.test(error.message))); }
+}
 export type LifecycleAction='trash'|'restore'|'purge';
-export class PageLifecycleUnavailableError extends Error {constructor(){super('Page lifecycle change unavailable');}}
+export class PageLifecycleUnavailableError extends Error {constructor(readonly rollbackKnown=false){super('Page lifecycle change unavailable');}}
 /** A purge reached a page under an active hold (W12). Nothing was changed. */
 export class RecordHeldError extends Error {constructor(readonly uuids:string[]){super('Record under hold');}}
 const ACTIVE_HOLDS='SELECT page_uuid FROM record_holds WHERE released_at IS NULL';
@@ -61,12 +80,14 @@ export async function mutatePageLifecycle(env:Env,user:JWTPayload,action:Lifecyc
     await recordAuditOutage(env,'health',[],undefined,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError();
   }
 }
-async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:LifecycleSelection,context:ContentBatchContext) {
+async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,selection:LifecycleSelection,context:ContentBatchContext,service?:ServiceTrashAuthority,onAttempt?:()=>void) {
   if(selection.ids&&(selection.ids.length>5000||selection.ids.some(id=>!Number.isSafeInteger(id)||id<=0)||new Set(selection.ids).size!==selection.ids.length))throw new Error('Invalid lifecycle selection');
   const capability=action==='trash'?'content:delete':action==='restore'?'trash:restore':'trash:purge';
   if(context.job&&action!=='trash')throw new Error('Unsupported lifecycle delegation');
-  const job=context.job&&await captureContentJobAuthorization(env,user,context.job.guard,'content:delete');
-  const authority=job?.authorization??await captureAccessAuthorization(env,user,capability);if(!authority.allowed)throw new Error('Lifecycle authority unavailable');
+  const job=context.job&&user&&await captureContentJobAuthorization(env,user,context.job.guard,'content:delete');
+  const authority=service?null:job?.authorization??(user&&await captureAccessAuthorization(env,user,capability));if(!service&&!authority?.allowed)throw new Error('Lifecycle authority unavailable');
+  if(service&&(action!=='trash'||!selection.ids||selection.ids.length>100||context.job))throw new Error('Invalid service trash operation');
+  const checks=()=>service?service.check():[authority!.guard()];
   const schema=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('trash_pages','trash_page_versions','trash_page_tags')").first<{n:number}>();
   if(schema?.n!==3)throw new Error('Trash storage unavailable');
   const policy=await resolveDataClasses(env,true);if(!policy.ok)throw new Error('Lifecycle classification unavailable');
@@ -95,13 +116,14 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
     const held=await env.DB.prepare(`SELECT page_uuid FROM record_holds WHERE ${heldWhere}`).bind(uuidJson).all<{page_uuid:string}>();
     if(held.results.length)throw new RecordHeldError(held.results.map(r=>r.page_uuid));
   }
-  const base=[authority.guard(),classificationPolicyGuard(env,policy),
+  if(service&&sources.some(p=>!service.allows(String(p.page_type??''))))throw new Error('Service trash scope changed');
+  const base=[...checks(),...(service?.before?.()??[]),classificationPolicyGuard(env,policy),
     abortIf(env,"(SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('trash_pages','trash_page_versions','trash_page_tags'))<>3"),
     guard(env,src,['id'],selectedWhere,params,selected),guard(env,src,sf,sourceWhere,sourceParams,sources)];
   if(job)base.push(job.delegationGuard);
   // A hold placed after the read above still stops the batch.
   if(action==='purge')base.push(abortIf(env,`EXISTS (SELECT 1 FROM record_holds WHERE ${heldWhere})`,[uuidJson]));
-  if(!sources.length){await env.DB.batch(base);return {count:0,pages:[]};}
+  if(!sources.length){await env.DB.batch([...base,...checks(),...(service?.after?.()??[])]);return {count:0,pages:[]};}
   for(const page of sources)for(const key of ['page_id','source_page_id'])if(page[key]!=null&&(!Number.isSafeInteger(page[key])||Number(page[key])<=0))throw new Error('Unsafe lifecycle parent');
   const parentIds=[...new Set(sources.flatMap(p=>[p.page_id,p.source_page_id]).filter((id):id is number=>typeof id==='number'))];
   const parentJson=json(parentIds);const subWhere='page_id IN (SELECT value FROM json_each(?))';
@@ -132,12 +154,14 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
   for(const page of [...sources,...destinations,...children,...sourceParents,...destinationParents])classes.push(classFor(policy,'page_type',String(page.page_type??'default')));
   for(const tag of tags)classes.push(classFor(policy,'taxonomy',String(tag.taxonomy_slug??'default')));
   for(const floor of floors)classes.push(floor.level===2?'phi':'pii');
+  if(service&&service.dataClass!=='none')classes.push(service.dataClass);
   const dataClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
-  const actor={userId:user.sub,roles:user.role,sessionSid:user.sid??null,via:context.job?`job:${context.job.id}`:null};
+  const actor:AuditActor=service?.actor??{userId:user!.sub,roles:user!.role,sessionSid:user!.sid??null,via:context.job?`job:${context.job.id}`:null};
   for(const [table,rows] of [[src,sources],[dst,destinations]] as Array<[string,Row[]]>) {
     const types=[...new Set(rows.map(p=>String(p.page_type??'default')))];
-    await auditBackgroundReads(env,types.map(key=>{const group=rows.filter(p=>(p.page_type??'default')===key);return {action:table==='trash_pages'?'page.trash-lifecycle-read':'page.lifecycle-read',kind:'page_type' as const,key,targetType:'page',ids:group.map(p=>String(p.id)),count:group.length,uuidById:Object.fromEntries(group.map(p=>[String(p.id),String(p.uuid)]))};}),actor);
+    await auditBackgroundReads(env,types.map(key=>{const group=rows.filter(p=>(p.page_type??'default')===key);return {action:table==='trash_pages'?'page.trash-lifecycle-read':'page.lifecycle-read',kind:'page_type' as const,key,targetType:'page',ids:group.map(p=>String(p.id)),count:group.length,...(service&&dataClass!=='none'?{minimumClass:dataClass}:{}),uuidById:Object.fromEntries(group.map(p=>[String(p.id),String(p.uuid)]))};}),actor);
   }
+  if(service)await auditBackgroundReads(env,[sv,sl,dv,dl,'tags','page_sensitivity_floors'].map(table=>({action:'page.delete-metadata-read',kind:'table' as const,key:table,targetType:table,ids:uuids.map(String),count:sources.length,minimumClass:dataClass==='none'?undefined:dataClass})),actor);
   base.push(guard(env,sv,VERSION,subWhere,[idJson],versions),guard(env,sl,LINK,subWhere,[idJson],links),
     guard(env,'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)],tags),
     guard(env,'page_sensitivity_floors',['uuid','level'],floorWhere,[json(floorUuids)],floors),
@@ -152,10 +176,13 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
   const erasures=action==='purge'?sources.filter(mirror).map(p=>String(p.uuid)):[];
   const manifest=sources.map(p=>({id:p.id,uuid:p.uuid,parent_id:p.page_id,...(src==='trash_pages'?{source_parent_id:p.source_page_id}:{}),
     versions:versions.filter(v=>v.page_id===p.id).map(v=>({id:v.id,uuid:v.uuid})),links:links.filter(l=>l.page_id===p.id).map(l=>({id:l.id,uuid:l.uuid,tag_id:l.tag_id,weight:l.weight}))}));
-  const detail={operation_id:crypto.randomUUID(),sources:manifest,selected_ids:selectedIds,cascade_ids:ids.filter(id=>!selectedIds.includes(id)),detached_children:children.map(c=>({id:c.id,uuid:c.uuid,parent_id:c.page_id,source_parent_id:c.source_page_id,restored_parent_id:detached.find(d=>d.id===c.id)?.source_page_id})),
+  const detail={operation_id:crypto.randomUUID(),...(service?.detail??{}),sources:manifest,selected_ids:selectedIds,cascade_ids:ids.filter(id=>!selectedIds.includes(id)),detached_children:children.map(c=>({id:c.id,uuid:c.uuid,parent_id:c.page_id,source_parent_id:c.source_page_id,restored_parent_id:detached.find(d=>d.id===c.id)?.source_page_id})),
     destination_before:destinations.filter(d=>uuids.includes(d.uuid)).map(d=>({id:d.id,uuid:d.uuid})),...(context.job?{job_id:context.job.id,job_attempt:context.job.attempt}:{}),
     ...(erasures.length?{source_erasures:erasures}:{}),...(selection.olderThanDays!==undefined?{retention_days:selection.olderThanDays}:{})};json(detail);
-  const receipt=attributedMutationAuditEvidence(env,user,{action:action==='trash'?'page.delete':action==='restore'?(selection.ids?'page.restore':'page.restore_all'):(selection.ids?'page.purge':'page.purge_all'),entityType:'page',...(sources.length===1?{entityId:String(sources[0].uuid)}:{}),detail},dataClass,policy,{context:context.request,via:actor.via??undefined,targetIds:uuids.map(String)});
+  const receipt=service
+    ?serviceMutationAuditEvidence(env,{action:'page.delete.chunk',entityType:'page_delete_operation',detail},actor,dataClass,policy,service.request)
+    :attributedMutationAuditEvidence(env,user!,{action:action==='trash'?'page.delete':action==='restore'?(selection.ids?'page.restore':'page.restore_all'):(selection.ids?'page.purge':'page.purge_all'),entityType:'page',...(sources.length===1?{entityId:String(sources[0].uuid)}:{}),detail},dataClass,policy,{context:context.request,via:actor.via??undefined,targetIds:uuids.map(String)});
+  const perPage=service?sources.map(p=>serviceMutationAuditEvidence(env,{action:'page.delete',entityType:'page',entityId:String(p.uuid),detail:{...service.detail,source_id:p.id,source_uuid:p.uuid,trash_id:targetId(p),source_parent_id:p.page_id,versions:manifest.find(m=>m.uuid===p.uuid)!.versions,links:manifest.find(m=>m.uuid===p.uuid)!.links}},actor,dataClass,policy,service.request)):[];
   const statements=[...base];
   let expectedDest:Row[]=[];let expectedVersions:Row[]=[];let expectedLinks:Row[]=[];
   const parentRefs:Row[]=[];
@@ -194,16 +221,18 @@ async function mutate(env:Env,user:JWTPayload,action:LifecycleAction,selection:L
   statements.push(env.DB.prepare(`DELETE FROM ${sv} WHERE ${subWhere}`).bind(idJson),abortIf(env,'changes()<>?',[versions.length]),
     env.DB.prepare(`DELETE FROM ${sl} WHERE ${subWhere}`).bind(idJson),abortIf(env,'changes()<>?',[links.length]),
     env.DB.prepare(`DELETE FROM ${src} WHERE id IN (SELECT value FROM json_each(?))`).bind(idJson),abortIf(env,'changes()<>?',[sources.length]),
-    receipt.write,receipt.guard,
+    receipt.write,receipt.guard,...perPage.flatMap(r=>[r.write,r.guard]),
     ...(erasures.length?[env.DB.prepare('INSERT INTO submission_erasures (uuid) SELECT value FROM json_each(?) WHERE true ON CONFLICT(uuid) DO NOTHING').bind(json(erasures))]:[]),
     guard(env,src,sf,'id IN (SELECT value FROM json_each(?))',[idJson],[]),guard(env,sv,VERSION,subWhere,[idJson],[]),guard(env,sl,LINK,subWhere,[idJson],[]));
   if(action!=='purge')statements.push(guard(env,dst,df.filter(f=>f!=='updated_at'),'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson],expectedDest),
     guard(env,dv,VERSION,destSubWhere,versionArgs,expectedVersions),guard(env,dl,LINK,destSubWhere,linkArgs,expectedLinks),subset(env,dst,['id','uuid'],parentRefs));
   if(children.length)statements.push(subset(env,src,childFields.filter(f=>f!=='updated_at'),detached));
-  statements.push(classificationPolicyGuard(env,policy),authority.guard(),
+  if(service)statements.push(abortIf(env,`EXISTS(SELECT 1 FROM trash_pages WHERE uuid IN (SELECT value FROM json_each(?)) AND (updated_at<? OR updated_at>CURRENT_TIMESTAMP))`,[uuidJson,clock.now]),guard(env,'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)],tags));
+  statements.push(...(service?[receipt.guard,...perPage.map(r=>r.guard)]:[]),classificationPolicyGuard(env,policy),...checks(),...(service?.after?.()??[]),
     abortIf(env,`EXISTS (SELECT 1 FROM page_sensitivity_floors WHERE uuid IN (SELECT value FROM json_each(?)) AND level>?)
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=json_extract(e.value,'$.uuid')),0)<json_extract(e.value,'$.level'))`,[json(floorUuids),dataClass==='phi'?2:dataClass==='pii'?1:0,json(floors)]));
   if(job)statements.push(job.delegationGuard);
+  onAttempt?.();
   await env.DB.batch(statements);
   // The purge has committed with the erasure recorded; a failure here leaves it pending for cron.
   if(erasures.length)await eraseSubmissionSources(env).catch(()=>console.error(JSON.stringify({event:'submission.erasure-pending',count:erasures.length})));
