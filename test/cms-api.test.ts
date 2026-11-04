@@ -697,9 +697,9 @@ describe('Plugin API create / read / list / update / delete', () => {
     ).bind(crypto.randomUUID(), `${taxonomy}-other`).first<{ id: number }>();
     if (!colour || !styling || !first || !second || !untagged) throw new Error('fixture insert failed');
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO page_tags (page_id, tag_id, weight) VALUES (?, ?, 5)').bind(first.id, colour.id),
-      env.DB.prepare('INSERT INTO page_tags (page_id, tag_id, weight) VALUES (?, ?, 10)').bind(first.id, styling.id),
-      env.DB.prepare('INSERT INTO page_tags (page_id, tag_id, weight) VALUES (?, ?, 5)').bind(second.id, styling.id),
+      env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id, weight) VALUES (1, ?, ?, 5)').bind(first.id, colour.id),
+      env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id, weight) VALUES (2, ?, ?, 10)').bind(first.id, styling.id),
+      env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id, weight) VALUES (3, ?, ?, 5)').bind(second.id, styling.id),
     ]);
 
     const response = await cmsApi('POST', '/__cms/pages/list-batch', {

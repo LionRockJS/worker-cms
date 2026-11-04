@@ -36,7 +36,7 @@ const operations={
   remove_tag:async(overrides:Partial<Env>={})=>{await applyBulkPageAction({...env,...overrides},user,'remove_tag',[9991,9992],bulkOptions);return 200;},
 };
 type Operation=keyof typeof operations;
-async function setup(operation:Operation){if(operation==='remove_tag')for(const id of [9991,9992])await env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) VALUES (?,9994)').bind(id).run();}
+async function setup(operation:Operation){if(operation==='remove_tag')for(const id of [9991,9992])await env.DB.prepare('INSERT INTO page_tags(id,page_id,tag_id) VALUES (?,?,9994)').bind(id,id).run();}
 async function call(operation:Operation,overrides:Partial<Env>={}){try{return await operations[operation](overrides);}catch{return 503;}}
 async function events(){return(await env.DB.prepare("SELECT * FROM audit_events WHERE action IN ('page.weight','page.weights','page.reorder','page.update') AND outcome='success' ORDER BY seq").all()).results;}
 async function state(){return Promise.all(['pages','page_versions','page_tags'].map(async t=>(await env.DB.prepare(`SELECT * FROM ${t} ORDER BY id`).all()).results));}
@@ -60,7 +60,7 @@ for(const operation of Object.keys(operations) as Operation[]){
     await env.DB.prepare(`CREATE TRIGGER ${trigger} ${sql}`).run();expect(await call(operation)).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);
   });
   it.each(['policy','session','role','target','taxonomy','floor'])(`refuses ${operation} if %s changes before its write transaction`,async change=>{
-    await setup(operation);if(change==='taxonomy'&&operation!=='add_tag')for(const id of [9991,9992])await env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) SELECT ?,9994 WHERE NOT EXISTS (SELECT 1 FROM page_tags WHERE page_id=? AND tag_id=9994)').bind(id,id).run();
+    await setup(operation);if(change==='taxonomy'&&operation!=='add_tag')for(const id of [9991,9992])await env.DB.prepare('INSERT INTO page_tags(id,page_id,tag_id) SELECT ?,?,9994 WHERE NOT EXISTS (SELECT 1 FROM page_tags WHERE page_id=? AND tag_id=9994)').bind(id,id,id).run();
     const DB=race(async()=>{
       if(change==='policy')return classify();if(change==='session')return env.DB.prepare('DELETE FROM sessions').run();if(change==='role')return env.DB.prepare("UPDATE users SET role='viewer' WHERE id=9990").run();
       if(change==='target')return env.DB.prepare("UPDATE pages SET name='Concurrent' WHERE id=9991").run();if(change==='taxonomy')return env.DB.prepare('UPDATE tags SET taxonomy_slug=NULL WHERE id=9994').run();
@@ -120,8 +120,19 @@ it('retains a committed job slice receipt when the commit acknowledgment is lost
 it('retains exact tag identifiers in per-page evidence without copying labels',async()=>{
   expect(await call('add_tag')).toBe(200);const row=(await events())[0];expect(JSON.parse(String(row.detail))).toMatchObject({tags_before:[],tags_after:[9994],tag_count:1});
 });
+it('gives bulk add_tag links distinct ids above any stored id, not the time/nonce default',async()=>{
+  // An id above the whole time+16-bit-nonce range: the legacy column default can
+  // never reach it, so only explicit MAX(id)+offset ids land above it.
+  const seed=900_000_000_000_000;
+  await env.DB.prepare("INSERT INTO pages(id,uuid,name,slug,weight,page_type,lect) VALUES (9995,'private-uuid-9995','Other','other',5,'article','{}')").run();
+  await env.DB.prepare("INSERT INTO tags(id,name,slug,taxonomy_slug) VALUES (9996,'Second Tag','second-tag','clinical')").run();
+  await env.DB.prepare('INSERT INTO page_tags(id,page_id,tag_id) VALUES (?,9995,9994)').bind(seed).run();
+  await applyBulkPageAction(env,user,'add_tag',[9991,9992],{...bulkOptions,targetTagIds:[9994,9996]});
+  const rows=(await env.DB.prepare('SELECT id FROM page_tags WHERE page_id IN (9991,9992) ORDER BY rowid').all<{id:number}>()).results;
+  expect(rows.map(r=>r.id)).toEqual([seed+1,seed+2,seed+3,seed+4]);
+});
 it('preserves legacy duplicate memberships during text-only changes',async()=>{
-  await env.DB.prepare('INSERT INTO page_tags(page_id,tag_id) VALUES (9991,9994),(9991,9994)').run();expect(await call('replace_text')).toBe(200);expect((await env.DB.prepare('SELECT * FROM page_tags WHERE page_id=9991').all()).results).toHaveLength(2);
+  await env.DB.prepare('INSERT INTO page_tags(id,page_id,tag_id) VALUES (1,9991,9994),(2,9991,9994)').run();expect(await call('replace_text')).toBe(200);expect((await env.DB.prepare('SELECT * FROM page_tags WHERE page_id=9991').all()).results).toHaveLength(2);
 });
 it.each(['page','version','tags','policy','floor','second-event'])('rolls back the entire multi-page slice after %s corruption',async failure=>{
   const before=await state();const sql=failure==='page'?"AFTER INSERT ON audit_events WHEN NEW.action='page.update' BEGIN UPDATE pages SET lect='altered' WHERE id=9991; END"

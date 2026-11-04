@@ -69,8 +69,8 @@ async function tagPage(page: Page, tagId: number, taxonomy: string | null): Prom
   await env.DB.prepare('INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (?, ?, ?, ?)')
     .bind(tagId, `Tag ${tagId}`, `tag-${tagId}`, taxonomy)
     .run();
-  await env.DB.prepare('INSERT INTO page_tags (page_id, tag_id, weight) VALUES (?, ?, 1)')
-    .bind(page.id, tagId)
+  await env.DB.prepare('INSERT INTO page_tags (id, page_id, tag_id, weight) VALUES (?, ?, ?, 1)')
+    .bind(tagId, page.id, tagId)
     .run();
 }
 

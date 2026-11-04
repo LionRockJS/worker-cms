@@ -4063,6 +4063,9 @@ async function resetData(): Promise<void> {
     'audit_log',
     'audit_events',
     'data_classes',
+    // Plugin rows take a time+16-bit-random id; left between tests, two
+    // inserts in the same second can collide on plugins.id.
+    'plugins',
   ];
   for (const table of adminTables) {
     await env.DB.prepare(`DELETE FROM ${table}`).run();

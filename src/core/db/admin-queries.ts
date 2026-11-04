@@ -5,6 +5,7 @@ import type { Page, PageVersion, PageTag, Tag, Taxonomy } from '../../types';
 import { recordPageReads, recordTableReads } from '../http/access-log';
 import { num } from '../http/forms';
 import { countPageMetadata } from './count-metadata';
+import { nextIdSql } from '../pages/snapshot-id';
 
 export interface DashboardListResult {
   results: Page[];
@@ -230,7 +231,7 @@ export async function trashDraftPage(db: D1DatabaseClient, pageId: number): Prom
       .all<PageTag>();
     for (const pt of pageTags.results) {
       await db.prepare(
-        `INSERT OR IGNORE INTO trash_page_tags (uuid, page_id, tag_id, weight) VALUES (?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO trash_page_tags (id, uuid, page_id, tag_id, weight) VALUES (${nextIdSql('trash_page_tags')}, ?, ?, ?, ?)`,
       )
         .bind(pt.uuid, trashPage.id, pt.tag_id, pt.weight)
         .run();
@@ -303,8 +304,9 @@ export async function trashDraftPages(db: D1DatabaseClient, ids: number[]): Prom
     ).bind(...foundIds),
     // Copy page tags.
     db.prepare(
-      `INSERT OR IGNORE INTO trash_page_tags (uuid, page_id, tag_id, weight)
-       SELECT uuid, page_id, tag_id, weight FROM page_tags WHERE page_id IN (${foundPh})`,
+      `INSERT OR IGNORE INTO trash_page_tags (id, uuid, page_id, tag_id, weight)
+       SELECT ${nextIdSql('trash_page_tags')} + ROW_NUMBER() OVER (ORDER BY id) - 1, uuid, page_id, tag_id, weight
+       FROM page_tags WHERE page_id IN (${foundPh})`,
     ).bind(...foundIds),
     // Remove from draft.
     db.prepare(`DELETE FROM pages WHERE id IN (${foundPh})`).bind(...foundIds),
@@ -368,8 +370,8 @@ export async function restoreTrashedPages(
     ).bind(...params),
     // 3. Tags.
     db.prepare(
-      `INSERT OR IGNORE INTO page_tags (uuid, page_id, tag_id, weight)
-       SELECT uuid, page_id, tag_id, weight FROM trash_page_tags
+      `INSERT OR IGNORE INTO page_tags (id, uuid, page_id, tag_id, weight)
+       SELECT ${nextIdSql('page_tags')} + ROW_NUMBER() OVER (ORDER BY id) - 1, uuid, page_id, tag_id, weight FROM trash_page_tags
        WHERE page_id IN (${idSubquery})`,
     ).bind(...params),
     // 4. Remove the restored rows from trash (children first; trash_pages cascades too).
