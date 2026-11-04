@@ -7,6 +7,7 @@ import { incomingSensitivityStatements } from './sensitivity';
 import { readD1PageSource } from '../publish/d1';
 import { liveSourceReads } from '../publish/read-audit';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+import { nextIdSql } from '../pages/snapshot-id';
 
 export async function setDraftPageTags(
   db: D1DatabaseClient,
@@ -22,7 +23,7 @@ export async function setDraftPageTags(
   }
 
   for (const tagId of numericTagIds(tags)) {
-    await db.prepare('INSERT OR IGNORE INTO page_tags (page_id, tag_id) VALUES (?, ?)')
+    await db.prepare(`INSERT INTO page_tags (id, page_id, tag_id) VALUES (${nextIdSql('page_tags')}, ?, ?)`)
       .bind(pageId, tagId)
       .run();
   }
@@ -130,7 +131,7 @@ async function copyPublishedTagsToDraft(
 
   for (const tag of tags.results) {
     await draftDb.prepare(
-      'INSERT OR IGNORE INTO page_tags (uuid, page_id, tag_id, weight) VALUES (?, ?, ?, ?)',
+      `INSERT INTO page_tags (id, uuid, page_id, tag_id, weight) VALUES (${nextIdSql('page_tags')}, ?, ?, ?, ?)`,
     )
       .bind(tag.uuid, draftPageId, tag.tag_id, tag.weight)
       .run();
