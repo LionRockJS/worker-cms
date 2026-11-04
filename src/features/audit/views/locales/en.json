@@ -72,7 +72,19 @@
     "anchored": "Anchored externally to",
     "anchor_unbound": "No checkpoint receiver bound: seals exist only in this database.",
     "pending_since": "Segment frozen, not yet sealed, since",
-    "archive_fault": "Archive fault:"
+    "archive_fault": "Archive fault:",
+    "signal_review": {
+      "title": "Signal review",
+      "last": "Last review",
+      "never": "No review has been recorded.",
+      "overdue": "Review overdue",
+      "outcome": "Outcome",
+      "no_action": "Reviewed, no action",
+      "false_positive": "False positive",
+      "incident_opened": "Incident opened",
+      "reference": "Case reference",
+      "save": "Record review"
+    }
   },
   "view_strings": {
     "sections_audit.audit_log": "Audit Log"

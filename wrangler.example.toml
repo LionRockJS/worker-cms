@@ -195,3 +195,6 @@ DEFAULT_TIMEZONE = "+0800"
 # AUDIT_OUTAGE_MONITORING = "true"
 # AUDIT_MONITOR_SOURCE = "cms-prod-01"
 # AUDIT_ARCHIVE_MAX_LAG_SECONDS = "3600"
+# Days between recorded signal reviews before the review screen and heartbeat
+# report one overdue (W13). Set to the cadence the incident owner approved.
+# AUDIT_REVIEW_INTERVAL_DAYS = "7"

@@ -221,6 +221,8 @@ export interface Env {
   AUDIT_MONITOR_SOURCE?: string;
   /** Archive lag alert threshold (seconds); defaults to 3600, not a standards mandate. */
   AUDIT_ARCHIVE_MAX_LAG_SECONDS?: string;
+  /** Days between recorded signal reviews before one is overdue (W13); defaults to 7. */
+  AUDIT_REVIEW_INTERVAL_DAYS?: string;
   /** Cloudflare Images binding used for media thumbnails; falls back to the original when unbound. */
   IMAGES?: ImagesBinding;
   /** Comma-separated built-in publish targets ("d1", "r2"). Defaults to "d1".

@@ -72,7 +72,19 @@
     "anchored": "外部錨定至",
     "anchor_unbound": "未綁定檢查點接收器：封存印記只存在於此資料庫。",
     "pending_since": "區段已凍結但尚未封存，始於",
-    "archive_fault": "封存故障："
+    "archive_fault": "封存故障：",
+    "signal_review": {
+      "title": "訊號審查",
+      "last": "上次審查",
+      "never": "尚未記錄任何審查。",
+      "overdue": "審查逾期",
+      "outcome": "結果",
+      "no_action": "已審查，無需處理",
+      "false_positive": "誤報",
+      "incident_opened": "已開立事件",
+      "reference": "案件編號",
+      "save": "記錄審查"
+    }
   },
   "view_strings": {
     "sections_audit.audit_log": "審計日誌"

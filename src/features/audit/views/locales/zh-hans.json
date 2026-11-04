@@ -72,7 +72,19 @@
     "anchored": "外部锚定至",
     "anchor_unbound": "未绑定检查点接收器：归档印记只存在于此数据库。",
     "pending_since": "分段已冻结但尚未封存，始于",
-    "archive_fault": "归档故障："
+    "archive_fault": "归档故障：",
+    "signal_review": {
+      "title": "信号审查",
+      "last": "上次审查",
+      "never": "尚未记录任何审查。",
+      "overdue": "审查逾期",
+      "outcome": "结果",
+      "no_action": "已审查，无需处理",
+      "false_positive": "误报",
+      "incident_opened": "已开立事件",
+      "reference": "案件编号",
+      "save": "记录审查"
+    }
   },
   "view_strings": {
     "sections_audit.audit_log": "审计日志"

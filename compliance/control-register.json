@@ -325,7 +325,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w13-incident-readiness.md"
       ]
     },
     {
@@ -346,7 +347,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w5-archive-protection.md"
+        "docs/w5-archive-protection.md",
+        "docs/w13-incident-readiness.md"
       ]
     },
     {
@@ -369,7 +371,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/w4b-remaining-scope-2026-11-02.md",
-        "docs/w9-identity-access-crypto.md"
+        "docs/w9-identity-access-crypto.md",
+        "docs/w13-incident-readiness.md"
       ]
     },
     {
@@ -391,7 +394,8 @@
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
         "docs/w4b-remaining-scope-2026-11-02.md",
-        "docs/w5-archive-protection.md"
+        "docs/w5-archive-protection.md",
+        "docs/w13-incident-readiness.md"
       ]
     },
     {
@@ -559,7 +563,8 @@
       "reviewer": null,
       "nextReview": null,
       "evidence": [
-        "docs/iso-27001-coverage-review-2026-11-03.md"
+        "docs/iso-27001-coverage-review-2026-11-03.md",
+        "docs/w13-incident-readiness.md"
       ]
     },
     {
@@ -907,7 +912,8 @@
       "nextReview": null,
       "evidence": [
         "docs/iso-27001-coverage-review-2026-11-03.md",
-        "docs/w5-archive-protection.md"
+        "docs/w5-archive-protection.md",
+        "docs/w13-incident-readiness.md"
       ]
     },
     {
