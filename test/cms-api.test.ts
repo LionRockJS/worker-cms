@@ -701,6 +701,50 @@ describe('Plugin API create / read / list / update / delete', () => {
     }
   });
 
+  it('looks up batched pages by id and filters them by a top-level range', async () => {
+    const inserted = await env.DB.prepare(
+      `INSERT INTO pages (uuid, page_type, name, slug, weight, lect, created_at, updated_at)
+       VALUES (?, 'guest', 'Jan', 'jan', 0, '{"due":"2026-01-15"}', '2026-01-01', '2026-01-01'),
+              (?, 'guest', 'Feb', 'feb', 0, '{"due":"2026-02-15"}', '2026-01-02', '2026-01-02'),
+              (?, 'guest', 'Mar', 'mar', 0, '{"due":"2026-03-15"}', '2026-01-03', '2026-01-03')
+       RETURNING id`,
+    ).bind(crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()).all<{ id: number }>();
+    const [jan, , mar] = inserted.results.map((row) => row.id);
+
+    const response = await cmsApi('POST', '/__cms/pages/list-batch', {
+      queries: [
+        { key: 'picked', page_type: 'guest', limit: 10, sort: 'name', order: 'asc', ids: [jan, mar] },
+        { key: 'window', page_type: 'guest', limit: 10, sort: 'name', order: 'asc', range_key: 'due', range_from: '2026-02-01', range_to: '2026-03-31' },
+        { key: 'until', page_type: 'guest', limit: 10, sort: 'name', order: 'asc', range_key: 'due', range_to: '2026-02-28' },
+        // An id of another type stays out: the lookup is scoped to page_type.
+        { key: 'other', page_type: 'event', limit: 10, sort: 'name', order: 'asc', ids: [jan] },
+      ],
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as { pages_by_type: Record<string, { pages: Array<{ name: string }> }> };
+    const names = (key: string) => body.pages_by_type[key].pages.map((page) => page.name);
+    expect(names('picked')).toEqual(['Jan', 'Mar']);
+    expect(names('window')).toEqual(['Feb', 'Mar']);
+    expect(names('until')).toEqual(['Feb', 'Jan']);
+    expect(names('other')).toEqual([]);
+
+    for (const bad of [
+      { range_key: 'due' },
+      { range_from: '2026-01-01' },
+      { range_key: "due') OR 1=1 --", range_from: '2026-01-01' },
+      { range_key: 'due', range_from: 1 },
+      { ids: [] },
+      { ids: ['1'] },
+      { ids: 1 },
+    ]) {
+      const rejected = await cmsApi('POST', '/__cms/pages/list-batch', {
+        queries: [{ key: 'guest', page_type: 'guest', limit: 1, sort: 'weight', order: 'asc', ...bad }],
+      });
+      expect(rejected.status).toBe(400);
+      expect(await rejected.json()).toEqual({ error: 'invalid_query' });
+    }
+  });
+
   it('groups a page resource by one tag taxonomy without extra API calls', async () => {
     const taxonomy = `resource-${crypto.randomUUID().slice(0, 8)}`;
     await env.DB.prepare('INSERT INTO taxonomies (name, slug) VALUES (?, ?)')

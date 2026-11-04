@@ -95,6 +95,8 @@ interface PageListBatchQuery {
   order: 'ASC' | 'DESC';
   groupBy: PageListBatchGroupBy | null;
   field: { key: string; values: string[] } | null;
+  range: { key: string; from: string; to: string } | null;
+  ids: number[] | null;
 }
 
 interface PageResourceRow extends Page {
@@ -390,11 +392,32 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
       }
       field = { key: fieldKey, values: [...new Set(fieldValues as string[])] };
     }
+    // Optional inclusive range on a top-level scalar, as GET /pages
+    // range_key/range_from/range_to: at least one bound.
+    let range: PageListBatchQuery['range'] = null;
+    if (input.range_key !== undefined || input.range_from !== undefined || input.range_to !== undefined) {
+      const rangeKey = typeof input.range_key === 'string' ? input.range_key.trim() : '';
+      const from = input.range_from === undefined ? '' : typeof input.range_from === 'string' ? input.range_from.trim() : null;
+      const to = input.range_to === undefined ? '' : typeof input.range_to === 'string' ? input.range_to.trim() : null;
+      if (!LECT_FIELD_KEY.test(rangeKey) || from === null || to === null || (!from && !to)) {
+        return c.json({ error: 'invalid_query' }, 400);
+      }
+      range = { key: rangeKey, from, to };
+    }
+    // Optional id lookup, as GET /pages ids=: still scoped to page_type.
+    let ids: number[] | null = null;
+    if (input.ids !== undefined) {
+      if (!Array.isArray(input.ids) || input.ids.length === 0 || input.ids.length > 500
+        || input.ids.some((id) => !Number.isSafeInteger(id))) {
+        return c.json({ error: 'invalid_query' }, 400);
+      }
+      ids = [...new Set(input.ids as number[])];
+    }
     if (keys.has(key)) return c.json({ error: 'duplicate_key', key }, 400);
     if (!pageTypeScopeAllows(auth.readableTypes, pageType)) return forbiddenPageType(c, auth, pageType);
     keys.add(key);
     requestedPages += limit;
-    queries.push({ key, pageType, limit, sort, order, groupBy, field });
+    queries.push({ key, pageType, limit, sort, order, groupBy, field, range, ids });
   }
   if (requestedPages > MAX_LIST_BATCH_PAGES) {
     return c.json({ error: 'batch_too_large', max: MAX_LIST_BATCH_PAGES }, 413);
@@ -403,12 +426,26 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
 
   const results = await c.env.DB.batch<PageResourceRow>(queries.map((query) => {
     const sort = LIST_BATCH_SORTS[query.sort];
-    // The field path is inlined (key validated by LECT_FIELD_KEY) so an
-    // expression index on it can be used, as in GET /pages.
-    const where = query.field
-      ? `page_type = ? AND json_extract(lect, '$.${query.field.key}') IN (SELECT value FROM json_each(?))`
-      : 'page_type = ?';
-    const whereParams = query.field ? [query.pageType, JSON.stringify(query.field.values)] : [query.pageType];
+    // Field and range paths are inlined (keys validated by LECT_FIELD_KEY) so
+    // an expression index on them can be used, as in GET /pages.
+    let where = 'page_type = ?';
+    const whereParams: unknown[] = [query.pageType];
+    if (query.ids) {
+      where += ' AND id IN (SELECT value FROM json_each(?))';
+      whereParams.push(JSON.stringify(query.ids));
+    }
+    if (query.field) {
+      where += ` AND json_extract(lect, '$.${query.field.key}') IN (SELECT value FROM json_each(?))`;
+      whereParams.push(JSON.stringify(query.field.values));
+    }
+    if (query.range?.from) {
+      where += ` AND json_extract(lect, '$.${query.range.key}') >= ?`;
+      whereParams.push(rangeBound(query.range.from));
+    }
+    if (query.range?.to) {
+      where += ` AND json_extract(lect, '$.${query.range.key}') <= ?`;
+      whereParams.push(rangeBound(query.range.to));
+    }
     if (!query.groupBy) {
       return c.env.DB.prepare(
         `SELECT * FROM pages WHERE ${where} ORDER BY ${sort} ${query.order}, id ${query.order} LIMIT ?`,
