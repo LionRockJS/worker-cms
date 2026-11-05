@@ -317,6 +317,27 @@ npm run dev
 
 Visit **http://localhost:8787** → redirects to the login page.
 
+#### Self-hosting on this machine with a public domain
+
+`server.mjs` runs the same Worker under Miniflare without `wrangler dev`. It reads
+`wrangler.toml` and `.dev.vars` and shares `.wrangler/state` with `npm run dev`:
+
+```bash
+node server.mjs --build   # build and bundle, then serve on http://127.0.0.1:8787
+node server.mjs           # serve the last bundle
+```
+
+To serve a public domain from this machine, run `npm run setup -- --local` (or
+answer yes to "Run it on this machine") and enter the https origin, for example
+`https://cms.example.com`. This writes `CANONICAL_ORIGIN` and `OAUTH_REDIRECT_URI`
+to `.dev.vars`. When `CANONICAL_ORIGIN` is not localhost, `server.mjs` rewrites each
+request to that origin, so the Worker behaves as it does on Cloudflare (https,
+`__Host-` cookies, canonical-host and Origin checks). Put a tunnel or reverse proxy
+in front that terminates HTTPS, forwards the domain to `127.0.0.1:8787`, and sends
+the client address as `CF-Connecting-IP`. Cloudflare Tunnel does this already; with
+nginx, add `proxy_set_header CF-Connecting-IP $remote_addr;`. Without it, every
+visitor shares one sign-in rate limit. Keep the port reachable only from the proxy.
+
 ### 9. Deploy
 
 ```bash
