@@ -831,6 +831,42 @@ describe('plugin admin proxy', () => {
     expect(body).not.toContain('javascript:PLUGIN_LINK');
   });
 
+  it.each([
+    ['owned page', 'event', true],
+    ['foreign page type', 'default', false],
+    ['missing page', null, false],
+  ])('enables plugin screen collaboration only for a validated owned page: %s', async (_label, pageType, enabled) => {
+    testEnv.PLUGIN_SECRET = 'server-secret';
+    const url = 'https://plugin-collaboration.local';
+    await env.DB.prepare('INSERT INTO plugins (label, url, enabled) VALUES (?, ?, 1)').bind('Events', url).run();
+    let pageId = '999999999';
+    if (pageType) {
+      const inserted = await env.DB.prepare('INSERT INTO pages (name, slug, weight, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+        .bind('Collaboration', 'collaboration', 0, pageType, '{}').run();
+      const row = await env.DB.prepare('SELECT id FROM pages WHERE rowid = ?').bind(inserted.meta.last_row_id).first<{ id: number }>();
+      pageId = String(row!.id);
+    }
+    __injectPluginFetcher(url, {
+      fetch: async (input: RequestInfo | URL): Promise<Response> => {
+        const path = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).pathname;
+        if (path === '/__plugin/manifest') return Response.json(EVENTS_MANIFEST);
+        return Response.json({ cmsEditPresence: { pageId: 'forged', currentUserId: 'forged' } }, {
+          headers: { 'x-cms-chrome': '1', 'x-cms-client-view': '1', 'x-cms-view-path': '/templates/details.json', 'x-cms-editor-page-id': pageId },
+        });
+      },
+    } as unknown as Fetcher);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJWT({ sub: '1', email: 'admin@example.com', name: 'Admin User', role: 'admin', type: 'access', exp: now + 900, iat: now }, env.JWT_SECRET);
+    const response = await worker.fetch(new Request('http://localhost/admin/plugins/events/details', {
+      headers: { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' },
+    }));
+    expect(response.status).toBe(200);
+    const payload = renderPayload(await response.text());
+    expect(payload.layoutData.editorSync).toBe(enabled);
+    expect(payload.bodyView?.data.cmsEditPresence).toEqual(enabled
+      ? { pageId, currentUserId: '1', userAvatar: expect.any(String) } : null);
+  });
+
   it('wraps structured plugin client views without rendering plugin HTML on the Worker', async () => {
     testEnv.PLUGIN_SECRET = 'server-secret';
     const url = 'https://plugin-client-view.local';
