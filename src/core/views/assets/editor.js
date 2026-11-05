@@ -881,12 +881,12 @@
   //   (a) reject stale remote ops, and
   //   (b) replay un-synced local edits when we (re)connect — including edits
   //       typed while we were solo and live sync was still disabled.
-  var register = {};
+  var register = Object.create(null);
 
   // baseline[path] = the last-saved value (the field's value at page load, and
   // refreshed whenever the page is saved). Fields revert here when an editor
   // abandons their unsaved changes.
-  var baseline = {};
+  var baseline = Object.create(null);
 
   var ws = null;
   var reconnectTimer = null;
@@ -973,8 +973,8 @@
   // ── Live editing highlights ──────────────────────────────────────────────
   // editorsByPath[path] = { userId: { name, color, avatar } } — who else is
   // currently in each field. Drives a coloured outline + corner badge.
-  var editorsByPath = {};
-  var badgeEls = {};
+  var editorsByPath = Object.create(null);
+  var badgeEls = Object.create(null);
   var highlightOverlay = document.createElement('div');
   highlightOverlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:60';
   document.body.appendChild(highlightOverlay);
@@ -1053,7 +1053,7 @@
   }
 
   function setFieldEditor(path, userId, info) {
-    if (!editorsByPath[path]) editorsByPath[path] = {};
+    if (!editorsByPath[path]) editorsByPath[path] = Object.create(null);
     editorsByPath[path][userId] = info;
     renderHighlight(path);
   }
@@ -1079,8 +1079,8 @@
       var el = findField(path);
       if (el) el.style.outline = '';
     });
-    badgeEls = {};
-    editorsByPath = {};
+    badgeEls = Object.create(null);
+    editorsByPath = Object.create(null);
   }
 
   function repositionBadges() {
@@ -1123,7 +1123,7 @@
       if (msg.type === 'snapshot') {
         // 1. Pull: apply the server's state (applyRemote skips our own + stale).
         //    Ops are per-(path,user), so track the highest HLC seen per path.
-        var serverMax = {};
+        var serverMax = Object.create(null);
         (msg.ops || []).forEach(function (op) {
           if (!serverMax[op.path] || op.hlc > serverMax[op.path]) serverMax[op.path] = op.hlc;
           applyRemote(op);
@@ -1168,7 +1168,7 @@
           var el = findField(path);
           if (el) baseline[path] = el.value;
         });
-        register = {};
+        register = Object.create(null);
       }
     };
 

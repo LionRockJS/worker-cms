@@ -747,8 +747,11 @@
     return name === 'href' || name === 'src' || name === 'action' || name === 'formaction' || name === 'xlink:href';
   }
 
+  // Script-capable schemes. data: is allowed only for raster images.
   function isJavascriptUrl(value) {
-    return String(value).replace(/[\u0000-\u001f\u007f\s]+/g, '').toLowerCase().startsWith('javascript:');
+    const url = String(value).replace(/[\u0000-\u001f\u007f\s]+/g, '').toLowerCase();
+    if (url.startsWith('javascript:') || url.startsWith('vbscript:')) return true;
+    return url.startsWith('data:') && !/^data:image\/(?:png|gif|jpe?g|webp|avif)[;,]/.test(url);
   }
 
   function hasLiquidSyntax(value) {
@@ -756,7 +759,8 @@
   }
 
   function escapeComment(value) {
-    return String(value).replace(/-->/g, '--&gt;');
+    // Escape every ">" so neither "-->" nor "--!>" can close the comment.
+    return String(value).replace(/>/g, '&gt;');
   }
 
   function escapeHtml(value) {

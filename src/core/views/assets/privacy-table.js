@@ -89,15 +89,21 @@
     return explicitTargets(table).concat(fallbackTargets(table));
   }
 
+  // Original cell content, kept as cloned nodes (never re-parsed as HTML).
+  var originals = new WeakMap();
+
   function ensureOriginal(target) {
-    if (!target.hasAttribute('data-private-original-html')) {
-      target.setAttribute('data-private-original-html', target.innerHTML);
-      target.setAttribute('data-private-original-text', target.textContent || '');
+    if (!originals.has(target)) {
+      var content = document.createDocumentFragment();
+      Array.from(target.childNodes).forEach(function(node) {
+        content.appendChild(node.cloneNode(true));
+      });
+      originals.set(target, { content: content, text: target.textContent || '' });
     }
     if (!target.hasAttribute('data-private-mask')) {
       target.setAttribute(
         'data-private-mask',
-        maskValue(target.getAttribute('data-private-original-text') || '', target.getAttribute('data-private-field') || ''),
+        maskValue(originals.get(target).text, target.getAttribute('data-private-field') || ''),
       );
     }
   }
@@ -114,7 +120,9 @@
       return;
     }
     if (target.getAttribute('data-private-masked') !== '1') return;
-    target.innerHTML = target.getAttribute('data-private-original-html') || '';
+    var original = originals.get(target);
+    if (original) target.replaceChildren(original.content.cloneNode(true));
+    else target.replaceChildren();
     target.removeAttribute('data-private-masked');
   }
 

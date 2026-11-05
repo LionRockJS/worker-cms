@@ -15,21 +15,20 @@
     if (!value) return '';
     try {
       const source = new URL(value, window.location.origin);
-      if (source.origin !== window.location.origin) return value;
-      if (!source.pathname.startsWith('/media/')) return value;
+      if (!['http:', 'https:', 'blob:'].includes(source.protocol)) return '';
+      if (source.origin !== window.location.origin) return source.href;
+      if (!source.pathname.startsWith('/media/')) return source.href;
       return `/media-preview/${source.pathname.replace(/^\/media\//, '')}${source.search}`;
     } catch {
-      return value;
+      return '';
     }
   }
 
+  // Plain text of an HTML error body. DOMParser never runs scripts.
   function cleanResponseText(value) {
-    const text = String(value || '')
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const doc = new DOMParser().parseFromString(String(value || ''), 'text/html');
+    doc.querySelectorAll('script, style').forEach((node) => node.remove());
+    const text = (doc.body ? doc.body.textContent : '').replace(/\s+/g, ' ').trim();
     return text.slice(0, 180);
   }
 
@@ -47,9 +46,10 @@
 
     function setPreview(url) {
       if (!preview) return;
-      if (url) {
+      const src = url ? previewUrl(url) : '';
+      if (src) {
         preview.dataset.originalSrc = url;
-        preview.src = previewUrl(url);
+        preview.src = src;
         preview.classList.remove('hidden');
         if (empty) empty.classList.add('hidden');
       } else {

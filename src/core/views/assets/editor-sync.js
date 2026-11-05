@@ -110,14 +110,14 @@
     var userAvatar = bar.dataset.userAvatar || '';
     var indicator = document.getElementById('sync-indicator');
     var hlcCounter = 0;
-    var register = {};
-    var baseline = {};
-    var textDocs = {};
+    var register = Object.create(null);
+    var baseline = Object.create(null);
+    var textDocs = Object.create(null);
     var ws = null;
     var reconnectTimer = null;
     var liveSyncEnabled = false;
-    var editorsByPath = {};
-    var badgeEls = {};
+    var editorsByPath = Object.create(null);
+    var badgeEls = Object.create(null);
     var highlightOverlay = document.createElement('div');
     highlightOverlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:60';
     document.body.appendChild(highlightOverlay);
@@ -364,7 +364,7 @@
     }
 
     function setFieldEditor(path, userId, info) {
-      if (!editorsByPath[path]) editorsByPath[path] = {};
+      if (!editorsByPath[path]) editorsByPath[path] = Object.create(null);
       editorsByPath[path][userId] = info;
       renderHighlight(path);
     }
@@ -390,8 +390,8 @@
         var el = findField(path);
         if (el) el.style.outline = '';
       });
-      badgeEls = {};
-      editorsByPath = {};
+      badgeEls = Object.create(null);
+      editorsByPath = Object.create(null);
     }
 
     function repositionBadges() {
@@ -431,7 +431,7 @@
         var msg;
         try { msg = JSON.parse(e.data); } catch (_error) { return; }
         if (msg.type === 'snapshot') {
-          var serverMax = {};
+          var serverMax = Object.create(null);
           (msg.ops || []).forEach(function (op) {
             if (!serverMax[op.path] || op.hlc > serverMax[op.path]) serverMax[op.path] = op.hlc;
             applyRemote(op);
@@ -489,7 +489,7 @@
             var el = findField(path);
             if (el) baseline[path] = fieldValue(el);
           });
-          register = {};
+          register = Object.create(null);
           Object.keys(textDocs).forEach(function (path) {
             var state = textDocs[path];
             state.baseline = state.text.toString();
