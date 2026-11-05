@@ -54,7 +54,8 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(`0xCMS interactive Cloudflare setup
 
 Usage:
-  npm run setup
+  npm run setup             ask where the CMS runs
+  npm run setup -- --local  run it on this machine (server.mjs / wrangler dev)
 
 The wizard asks for one namespace and derives every resource name from it
 (<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit); each can
@@ -63,9 +64,12 @@ wrangler.toml and the audit switch in cms.features.json, applies migrations,
 configures OAuth secrets, and does a first bootstrap deploy that bypasses the
 release gate. Later releases go through "npm run deploy".
 
-Entering an http://localhost:<port> origin runs a local setup instead: nothing
-is created in Cloudflare, migrations go to the local D1 state used by
-"npm run dev", and secrets are written to .dev.vars rather than uploaded.`);
+A local setup runs the CMS on this machine instead of Cloudflare Workers:
+nothing is created in Cloudflare, migrations go to the local D1 state shared by
+"npm run dev" and server.mjs, and secrets are written to .dev.vars rather than
+uploaded. An http://localhost:<port> origin is always local. A public https
+origin (e.g. https://cms.example.com) can be local too, with server.mjs behind
+a tunnel or reverse proxy that forwards that domain to this machine.`);
   process.exit(0);
 }
 
@@ -459,7 +463,12 @@ async function main() {
     origin,
   )).replace(/\/$/, '');
   const callback = `${canonicalOrigin}/auth/callback`;
-  const local = isLocalOrigin(canonicalOrigin);
+  // "local" means the CMS runs on this machine. A public origin can still be
+  // local: server.mjs serves it behind a tunnel or reverse proxy.
+  const loopback = isLocalOrigin(canonicalOrigin);
+  const local = loopback
+    || process.argv.includes('--local')
+    || await confirm('Run it on this machine (server.mjs behind a tunnel or proxy) instead of Cloudflare Workers?', false);
 
   if (local) {
     console.log('Local setup: nothing is created in Cloudflare and secrets go to .dev.vars.');
@@ -648,9 +657,24 @@ code fails closed without them (sign-in included), so apply them before deployin
   if (local) await writeLocalSecrets({ canonicalOrigin, providers, clientIds });
 
   console.log(`\nSetup complete.\nCMS origin: ${canonicalOrigin}\nOAuth callback: ${callback}`);
-  if (local) {
+  if (local && loopback) {
     const port = new URL(canonicalOrigin).port || '80';
     console.log(`Start it with: npm run dev${port === '8787' ? '' : ` -- --port ${port}`}`);
+    console.log(`         or: ${port === '8787' ? '' : `PORT=${port} `}node server.mjs --build`);
+  } else if (local) {
+    const host = new URL(canonicalOrigin).host;
+    console.log(`
+Start it with: node server.mjs --build
+It listens on http://127.0.0.1:8787 (set PORT/HOST to change). Route ${host}
+to that address with a tunnel or reverse proxy, for example:
+  Cloudflare Tunnel  cloudflared tunnel route dns <tunnel> ${host}
+                     ingress: hostname ${host} -> service http://127.0.0.1:8787
+  nginx              proxy_pass http://127.0.0.1:8787;
+                     proxy_set_header CF-Connecting-IP $remote_addr;
+The proxy terminates HTTPS. It must send the client's address as CF-Connecting-IP
+(Cloudflare Tunnel already does), or every visitor shares one sign-in rate limit
+and the audit log records the proxy's address. Keep port 8787 unreachable from
+anywhere but the proxy.`);
   }
 }
 
