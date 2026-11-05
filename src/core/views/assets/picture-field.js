@@ -16,8 +16,8 @@
     try {
       const source = new URL(value, window.location.origin);
       if (!['http:', 'https:', 'blob:'].includes(source.protocol)) return '';
-      if (source.origin !== window.location.origin) return '';
-      if (!source.pathname.startsWith('/media/')) return '';
+      if (source.origin !== window.location.origin) return source.href;
+      if (!source.pathname.startsWith('/media/')) return source.href;
       return `/media-preview/${source.pathname.replace(/^\/media\//, '')}${source.search}`;
     } catch {
       return '';
