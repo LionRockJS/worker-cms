@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
 
@@ -87,6 +88,12 @@ import TurndownService from 'turndown';
       syncingSource = false;
     }
 
+    // The preview shows stored or collaborator-supplied HTML in the admin page,
+    // so sanitize it first. The source textarea keeps the HTML as authored.
+    function setPreviewHtml(html) {
+      preview.innerHTML = DOMPurify.sanitize(html);
+    }
+
     function setSourceHtml(html) {
       source.value = html;
       notifySource();
@@ -130,7 +137,7 @@ import TurndownService from 'turndown';
 
     function syncFromMarkdown(emit = false) {
       const html = markdownToHtml(markdown.value);
-      preview.innerHTML = html;
+      setPreviewHtml(html);
       setSourceHtml(html);
       updateCounts();
       if (emit) emitCollaborativeChange();
@@ -138,7 +145,7 @@ import TurndownService from 'turndown';
 
     function syncFromSource(emit = false) {
       source.value = encodeWordJoiners(source.value);
-      preview.innerHTML = source.value;
+      setPreviewHtml(source.value);
       markdown.value = htmlToMarkdown(source.value);
       updateCounts();
       if (emit) emitCollaborativeChange();
@@ -161,7 +168,7 @@ import TurndownService from 'turndown';
     bindings.set(root, { markdown, syncFromMarkdown });
     preview.addEventListener('input', function () { syncFromPreview(true); });
     preview.addEventListener('blur', function () {
-      preview.innerHTML = source.value;
+      setPreviewHtml(source.value);
       source.dispatchEvent(new Event('blur'));
     });
     preview.addEventListener('focus', function () {

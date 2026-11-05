@@ -36,6 +36,7 @@
     "@cloudflare/vitest-plugin": "^1.4.11",
     "@cloudflare/workers-types": "^5.20261101.1",
     "@tailwindcss/cli": "^4.3.3",
+    "dompurify": "^3.4.17",
     "esbuild": "^0.28.2",
     "marked": "^18.1.2",
     "tailwindcss": "^4.3.3",
