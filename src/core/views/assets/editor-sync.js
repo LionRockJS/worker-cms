@@ -128,7 +128,22 @@
 
     function findField(path) {
       var escaped = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      return document.querySelector('[name="' + escaped + '"]');
+      return document.querySelector('[data-cms-sync-path="' + escaped + '"]')
+        || document.querySelector('[name="' + escaped + '"]');
+    }
+
+    // Explicit aliases let bespoke plugin inputs keep their own POST field names.
+    function fieldPath(el) {
+      return el.getAttribute('data-cms-sync-path') || el.name || '';
+    }
+
+    function fieldValue(el) {
+      return el.hasAttribute('data-cms-sync-path') && el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value;
+    }
+
+    function setFieldValue(el, value) {
+      if (el.hasAttribute('data-cms-sync-path') && el.type === 'checkbox') el.checked = value === '1';
+      else el.value = value;
     }
 
     function sendRaw(path, value, hlc) {
@@ -251,29 +266,30 @@
       if (cur && cur.hlc >= (op.hlc || '')) return;
       register[path] = { value: value, hlc: op.hlc };
       var el = findField(path);
-      if (el) el.value = value;
+      if (el) setFieldValue(el, value);
     }
 
     function sendOp(el) {
       var hlc = nextHlc();
-      register[el.name] = { value: el.value, hlc: hlc };
-      sendRaw(el.name, el.value, hlc);
+      var path = fieldPath(el), value = fieldValue(el);
+      register[path] = { value: value, hlc: hlc };
+      sendRaw(path, value, hlc);
     }
 
     document.querySelectorAll('input[name], textarea[name], select[name]').forEach(function (el) {
-      var name = el.getAttribute('name') || '';
+      var name = fieldPath(el);
       if (!/^[.@*#\d]/.test(name)) return;
       if (el.hasAttribute('data-richtext-source')) return;
-      baseline[name] = el.value;
+      baseline[name] = fieldValue(el);
       el.addEventListener('input', function () { sendOp(el); });
       el.addEventListener('change', function () { sendOp(el); });
-      el.addEventListener('focus', function () { sendFocus(el.name); });
-      el.addEventListener('blur', function () { sendBlur(el.name); });
+      el.addEventListener('focus', function () { sendFocus(fieldPath(el)); });
+      el.addEventListener('blur', function () { sendBlur(fieldPath(el)); });
     });
 
     function forceField(path, value) {
       var el = findField(path);
-      if (el) el.value = value;
+      if (el) setFieldValue(el, value);
     }
 
     function userColor(userId) {
@@ -409,7 +425,7 @@
           ws.send(JSON.stringify({ type: 'text-sync', path: path, baseline: state.baseline }));
         });
         var active = document.activeElement;
-        if (active && active.name && /^[.@*#\d]/.test(active.name)) sendFocus(active.name);
+        if (active && /^[.@*#\d]/.test(fieldPath(active))) sendFocus(fieldPath(active));
       };
       ws.onmessage = function (e) {
         var msg;
@@ -471,7 +487,7 @@
         } else if (msg.type === 'saved') {
           Object.keys(baseline).forEach(function (path) {
             var el = findField(path);
-            if (el) baseline[path] = el.value;
+            if (el) baseline[path] = fieldValue(el);
           });
           register = {};
           Object.keys(textDocs).forEach(function (path) {

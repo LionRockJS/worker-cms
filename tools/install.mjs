@@ -19,6 +19,7 @@ const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
 const EXAMPLE_CONFIG_PATH = new URL('../wrangler.example.toml', import.meta.url);
 const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
 const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
+const DEV_VARS_PATH = new URL('../.dev.vars', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const PROVIDERS = {
@@ -60,7 +61,11 @@ The wizard asks for one namespace and derives every resource name from it
 still be overridden. It creates or reuses D1, R2, and Queue resources, updates
 wrangler.toml and the audit switch in cms.features.json, applies migrations,
 configures OAuth secrets, and does a first bootstrap deploy that bypasses the
-release gate. Later releases go through "npm run deploy".`);
+release gate. Later releases go through "npm run deploy".
+
+Entering an http://localhost:<port> origin runs a local setup instead: nothing
+is created in Cloudflare, migrations go to the local D1 state used by
+"npm run dev", and secrets are written to .dev.vars rather than uploaded.`);
   process.exit(0);
 }
 
@@ -128,10 +133,14 @@ function resourceName(value) {
   return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value);
 }
 
+function isLocalOrigin(value) {
+  return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname);
+}
+
 function origin(value) {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'https:'
+    return (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLocalOrigin(value)))
       && Boolean(parsed.hostname)
       && parsed.pathname === '/'
       && !parsed.search
@@ -289,13 +298,15 @@ async function updateConfig(settings) {
   const lines = original.split('\n');
 
   setRootValue(lines, 'name', settings.workerName);
+  // A local setup has no Cloudflare database IDs; it keeps whatever IDs the
+  // config already holds, since wrangler keys local D1 state by them.
   setBindingValues(lines, 'd1_databases', 'DB', {
     database_name: settings.databaseName,
-    database_id: settings.databaseId,
+    ...(settings.databaseId ? { database_id: settings.databaseId } : {}),
   });
   setBindingValues(lines, 'd1_databases', 'PUBLISHED_DB', {
     database_name: settings.publishedDatabaseName,
-    database_id: settings.publishedDatabaseId,
+    ...(settings.publishedDatabaseId ? { database_id: settings.publishedDatabaseId } : {}),
   });
   setBindingValues(lines, 'r2_buckets', 'MEDIA_BUCKET', {
     bucket_name: settings.bucketName,
@@ -323,6 +334,57 @@ async function updateConfig(settings) {
 
   await writeFile(CONFIG_PATH, lines.join('\n'));
   console.log(existing === null ? 'Created wrangler.toml from wrangler.example.toml.' : 'Updated wrangler.toml.');
+}
+
+function devVar(lines, key) {
+  const line = lines.find((item) => item.startsWith(`${key}=`));
+  return line?.slice(key.length + 1) || undefined;
+}
+
+/** Replaces KEY= (or a commented-out "# KEY=") in place, else appends it. */
+function setDevVar(lines, key, value) {
+  let index = lines.findIndex((line) => line.startsWith(`${key}=`));
+  if (index === -1) index = lines.findIndex((line) => new RegExp(`^#\\s*${key}=`).test(line));
+  const replacement = `${key}=${value}`;
+  if (index !== -1) lines[index] = replacement;
+  else if (lines.at(-1) === '') lines.splice(lines.length - 1, 0, replacement);
+  else lines.push(replacement);
+}
+
+/**
+ * Local setup: secrets go to .dev.vars, which wrangler dev reads and git
+ * ignores. CANONICAL_ORIGIN and OAUTH_REDIRECT_URI are written too, because
+ * .dev.vars overrides [vars] and a stale value there would win over the
+ * origin just entered. Existing secrets are kept unless replaced.
+ */
+async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
+  const existing = await readFile(DEV_VARS_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  const lines = (existing ?? '# Local development only. Gitignored; never reuse these values in a deployed Worker.\n').split('\n');
+
+  setDevVar(lines, 'CANONICAL_ORIGIN', canonicalOrigin);
+  setDevVar(lines, 'OAUTH_REDIRECT_URI', `${canonicalOrigin}/auth/callback`);
+  if (devVar(lines, 'JWT_SECRET')) {
+    console.log('Keeping the existing JWT_SECRET in .dev.vars.');
+  } else {
+    setDevVar(lines, 'JWT_SECRET', randomBytes(32).toString('hex'));
+    console.log('Generated JWT_SECRET.');
+  }
+
+  for (const provider of providers) {
+    const key = PROVIDERS[provider].secret;
+    if (devVar(lines, key) && !await confirm(`Replace the existing ${key} in .dev.vars?`, false)) continue;
+    const secret = provider === 'apple'
+      ? await appleClientSecret(clientIds.apple)
+      : await ask(`${provider} client secret (blank to add later)`, undefined, () => true);
+    if (secret) setDevVar(lines, key, secret);
+    else console.log(`Add ${key} to .dev.vars before signing in with ${provider}.`);
+  }
+
+  await writeFile(DEV_VARS_PATH, lines.join('\n'));
+  console.log(existing === null ? 'Created .dev.vars.' : 'Updated .dev.vars.');
 }
 
 async function featureEnabled(id) {
@@ -391,14 +453,26 @@ the .p8 key you download once from
 async function main() {
   console.log('\n0xCMS Cloudflare setup\n');
 
-  const auth = command(['whoami'], { capture: true });
-  if (auth.status !== 0) {
-    if (!await confirm('Wrangler is not signed in. Open Cloudflare login now?')) {
-      throw new Error('Cloudflare login is required.');
-    }
-    run(['login']);
+  const canonicalOrigin = (await ask(
+    'Public HTTPS origin (custom domain or workers.dev URL; http://localhost:port for local dev)',
+    undefined,
+    origin,
+  )).replace(/\/$/, '');
+  const callback = `${canonicalOrigin}/auth/callback`;
+  const local = isLocalOrigin(canonicalOrigin);
+
+  if (local) {
+    console.log('Local setup: nothing is created in Cloudflare and secrets go to .dev.vars.');
   } else {
-    console.log('Cloudflare authentication confirmed.');
+    const auth = command(['whoami'], { capture: true });
+    if (auth.status !== 0) {
+      if (!await confirm('Wrangler is not signed in. Open Cloudflare login now?')) {
+        throw new Error('Cloudflare login is required.');
+      }
+      run(['login']);
+    } else {
+      console.log('Cloudflare authentication confirmed.');
+    }
   }
 
   // Every resource name derives from one namespace. The longest suffix is
@@ -455,12 +529,6 @@ async function main() {
   const auditBucketName = auditEnabled && await confirm('Enable the audit archive?')
     ? await name('Audit archive R2 bucket name', derived.auditBucketName)
     : null;
-  const canonicalOrigin = (await ask(
-    'Public HTTPS origin (custom domain or workers.dev URL)',
-    undefined,
-    origin,
-  )).replace(/\/$/, '');
-  const callback = `${canonicalOrigin}/auth/callback`;
 
   let providers;
   while (!providers) {
@@ -482,12 +550,19 @@ async function main() {
     }
   }
 
-  console.log('\nCreating or reusing Cloudflare resources...');
-  const { id: databaseId, reused: databaseReused } = await ensureD1(databaseName);
-  const { id: publishedDatabaseId } = await ensureD1(publishedDatabaseName);
-  ensureR2(bucketName);
-  if (auditBucketName) ensureR2(auditBucketName);
-  ensureQueue(queueName);
+  let databaseId;
+  let publishedDatabaseId;
+  let databaseReused = false;
+  if (local) {
+    console.log('\nwrangler dev simulates D1, R2 and Queues locally under .wrangler/state.');
+  } else {
+    console.log('\nCreating or reusing Cloudflare resources...');
+    ({ id: databaseId, reused: databaseReused } = await ensureD1(databaseName));
+    ({ id: publishedDatabaseId } = await ensureD1(publishedDatabaseName));
+    ensureR2(bucketName);
+    if (auditBucketName) ensureR2(auditBucketName);
+    ensureQueue(queueName);
+  }
 
   await updateConfig({
     workerName,
@@ -510,9 +585,10 @@ async function main() {
     runNpm(['run', 'build:migrations']);
   }
 
-  if (await confirm('Apply production D1 migrations now?')) {
-    run(['d1', 'migrations', 'apply', databaseName, '--remote']);
-    run(['d1', 'migrations', 'apply', publishedDatabaseName, '--remote']);
+  if (await confirm(local ? 'Apply D1 migrations to the local databases now?' : 'Apply production D1 migrations now?')) {
+    const target = local ? '--local' : '--remote';
+    run(['d1', 'migrations', 'apply', databaseName, target]);
+    run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
   }
 
   // A fresh database gets the audit/classification tables from the baseline.
@@ -533,7 +609,7 @@ code fails closed without them (sign-in included), so apply them before deployin
 
   // Default off for a reused database: deploying before its upgrades locks
   // everyone out, and they are applied by hand outside this wizard.
-  const deployed = await confirm('Deploy 0xCMS now?', !databaseReused);
+  const deployed = !local && await confirm('Deploy 0xCMS now?', !databaseReused);
   if (deployed) {
     // Create the Worker before uploading secrets. Wrangler otherwise prompts
     // to create a missing Worker, which is incompatible with piped secrets.
@@ -546,7 +622,7 @@ code fails closed without them (sign-in included), so apply them before deployin
       'Bootstrap deploy bypassed the release gate; record it as a W14 exception.\n'
       + 'Release later changes with "npm run deploy" from a committed, pushed revision.',
     );
-  } else {
+  } else if (!local) {
     console.log('Skipping secret uploads because the Worker was not deployed.');
   }
 
@@ -569,7 +645,13 @@ code fails closed without them (sign-in included), so apply them before deployin
     run(['secret', 'put', PROVIDERS[provider].secret]);
   }
 
+  if (local) await writeLocalSecrets({ canonicalOrigin, providers, clientIds });
+
   console.log(`\nSetup complete.\nCMS origin: ${canonicalOrigin}\nOAuth callback: ${callback}`);
+  if (local) {
+    const port = new URL(canonicalOrigin).port || '80';
+    console.log(`Start it with: npm run dev${port === '8787' ? '' : ` -- --port ${port}`}`);
+  }
 }
 
 try {

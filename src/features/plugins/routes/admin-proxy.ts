@@ -349,20 +349,31 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
   // (no header) keep the legacy behavior.
   if (wantsCmsChrome(upstreamResponse)) {
     const clientView = await readPluginClientViewData(upstreamResponse.clone());
+    const base = await buildBaseProps(c);
+    // Bespoke plugin screens opt into the page editor's collaboration client.
+    // Identity and content permissions remain host-controlled.
+    const pageId = Number(upstreamResponse.headers.get('x-cms-editor-page-id'));
+    let editPresence: { pageId: string; currentUserId: string; userAvatar: string } | null = null;
+    if (clientView && Number.isSafeInteger(pageId) && pageId > 0
+      && effectivePermissions(await resolveRolePermissions(c.env), c.get('user').role).has('content:write')) {
+      const page = await c.env.DB.prepare('SELECT page_type FROM pages WHERE id = ?').bind(pageId).first<{ page_type: string }>();
+      if (page && Object.hasOwn(plugin.manifest.contentTypes?.blueprint ?? {}, page.page_type)) {
+        editPresence = { pageId: String(pageId), currentUserId: base.currentUserId, userAvatar: base.userAvatar };
+      }
+    }
     const body = clientView
       ? pluginClientView(
           clientView.viewPath,
-          clientView.data,
+          { ...clientView.data, cmsEditPresence: editPresence },
           `/admin/plugins/${pluginId}/views`,
           pluginViewRevision(plugin.manifest),
           plugin.manifest.i18n === true,
         )
       : await sanitizePluginHtmlFragment(await upstreamResponse.text());
     const title = decodePluginTitle(upstreamResponse.headers.get('x-cms-title')) || plugin.manifest.name || 'Plugin';
-    const base = await buildBaseProps(c);
     const declaredAssetPaths = new Set((plugin.manifest.assets ?? []).map((asset) => asset.path));
     const approvedPluginAssets = await approvedAssetsFor(c, plugin.manifest, declaredAssetPaths);
-    const wrapped = await adminLayout(viewsFor(c.env), base, { title, body, approvedPluginAssets });
+    const wrapped = await adminLayout(viewsFor(c.env), base, { title, body, approvedPluginAssets, editorSync: !!editPresence });
     const response = c.html(wrapped, upstreamResponse.status as 200);
     // Opt-in capability relaxation: a plugin page can request the camera (e.g.
     // the check-in kiosk scanner) by returning `x-cms-permissions: camera`. We
