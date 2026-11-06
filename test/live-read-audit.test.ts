@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createExecutionContext } from 'cloudflare:test';
 import worker from '../src/index';
 import { getLiveLect, liveMapForDraftPages, listLiveByTypes } from '../src/core/publish';
-import { d1Adapter } from '../src/core/publish/d1';
 import { r2Adapter } from '../src/core/publish/r2';
 import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from '../src/core/publish/adapter';
 import { coreExtensions, registerCoreExtensions } from '../src/core/extensions';

@@ -125,6 +125,9 @@ function sortDeep(value) {
 function mergeCatalog(into, from, owner, trail = []) {
   for (const [key, value] of Object.entries(from)) {
     const at = [...trail, key];
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      throw new Error(`locale key "${at.join('.')}" uses a reserved name`);
+    }
     const existing = into[key];
     if (existing === undefined) {
       into[key] = value;

@@ -876,12 +876,12 @@
     return Date.now() + '.' + (++hlcCounter).toString().padStart(6, '0') + '.' + currentUserId;
   }
 
-  // register[path] = { value, hlc } — our local replica of the LWW state,
+  // register: path -> { value, hlc } — our local replica of the LWW state,
   // updated from BOTH our own edits and remote ops. It lets us:
   //   (a) reject stale remote ops, and
   //   (b) replay un-synced local edits when we (re)connect — including edits
   //       typed while we were solo and live sync was still disabled.
-  var register = Object.create(null);
+  var register = new Map();
 
   // baseline[path] = the last-saved value (the field's value at page load, and
   // refreshed whenever the page is saved). Fields revert here when an editor
@@ -934,9 +934,9 @@
     // newer HLC, so a slower remote op for the same field is rejected right here.
     // (We must NOT additionally skip on focus: a field can be focused/parked
     // without being edited, and that field still needs to receive updates.)
-    var cur = register[path];
+    var cur = register.get(path);
     if (cur && cur.hlc >= (op.hlc || '')) return;
-    register[path] = { value: value, hlc: op.hlc };
+    register.set(path, { value: value, hlc: op.hlc });
 
     var el = findField(path);
     if (el) el.value = value;
@@ -946,7 +946,7 @@
     // Always record the edit locally, even while disabled/disconnected, so it
     // can be replayed on connect. Sending happens only when the socket is open.
     var hlc = nextHlc();
-    register[el.name] = { value: el.value, hlc: hlc };
+    register.set(el.name, { value: el.value, hlc: hlc });
     sendRaw(el.name, el.value, hlc);
   }
 
@@ -974,7 +974,7 @@
   // editorsByPath: path -> Map(userId -> { name, color, avatar }) — who else is
   // currently in each field. Drives a coloured outline + corner badge.
   var editorsByPath = new Map();
-  var badgeEls = Object.create(null);
+  var badgeEls = new Map();
   var highlightOverlay = document.createElement('div');
   highlightOverlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:60';
   document.body.appendChild(highlightOverlay);
@@ -991,7 +991,7 @@
   }
 
   function positionBadge(path) {
-    var badge = badgeEls[path];
+    var badge = badgeEls.get(path);
     var el = findField(path);
     if (!badge || !el) return;
     var r = el.getBoundingClientRect();
@@ -1005,7 +1005,7 @@
     var el = findField(path);
     var users = editorsByPath.get(path) ? Array.from(editorsByPath.get(path).keys()) : [];
     if (!el || !users.length) {
-      if (badgeEls[path]) { badgeEls[path].remove(); delete badgeEls[path]; }
+      if (badgeEls.get(path)) { badgeEls.get(path).remove(); badgeEls.delete(path); }
       if (el) el.style.outline = '';
       return;
     }
@@ -1013,12 +1013,12 @@
     el.style.outline = '2px solid ' + color;
     el.style.outlineOffset = '1px';
 
-    var badge = badgeEls[path];
+    var badge = badgeEls.get(path);
     if (!badge) {
       badge = document.createElement('div');
       badge.style.cssText = 'position:absolute;display:flex;gap:2px;transform:translate(-50%,-50%)';
       highlightOverlay.appendChild(badge);
-      badgeEls[path] = badge;
+      badgeEls.set(path, badge);
     }
     badge.replaceChildren();
     users.forEach(function (uid) {
@@ -1074,17 +1074,17 @@
   }
 
   function clearAllHighlights() {
-    Object.keys(badgeEls).forEach(function (path) {
-      badgeEls[path].remove();
+    Array.from(badgeEls.keys()).forEach(function (path) {
+      badgeEls.get(path).remove();
       var el = findField(path);
       if (el) el.style.outline = '';
     });
-    badgeEls = Object.create(null);
+    badgeEls = new Map();
     editorsByPath = new Map();
   }
 
   function repositionBadges() {
-    Object.keys(badgeEls).forEach(positionBadge);
+    Array.from(badgeEls.keys()).forEach(positionBadge);
   }
   window.addEventListener('scroll', repositionBadges, true);
   window.addEventListener('resize', repositionBadges);
@@ -1123,16 +1123,16 @@
       if (msg.type === 'snapshot') {
         // 1. Pull: apply the server's state (applyRemote skips our own + stale).
         //    Ops are per-(path,user), so track the highest HLC seen per path.
-        var serverMax = Object.create(null);
+        var serverMax = new Map();
         (msg.ops || []).forEach(function (op) {
-          if (!serverMax[op.path] || op.hlc > serverMax[op.path]) serverMax[op.path] = op.hlc;
+          if (!serverMax.get(op.path) || op.hlc > serverMax.get(op.path)) serverMax.set(op.path, op.hlc);
           applyRemote(op);
         });
         // 2. Push: replay local edits the server hasn't seen yet — this is what
         //    propagates work done while solo, and makes connect bidirectional.
-        Object.keys(register).forEach(function (path) {
-          var r = register[path];
-          if (!serverMax[path] || r.hlc > serverMax[path]) sendRaw(path, r.value, r.hlc);
+        Array.from(register.keys()).forEach(function (path) {
+          var r = register.get(path);
+          if (!serverMax.get(path) || r.hlc > serverMax.get(path)) sendRaw(path, r.value, r.hlc);
         });
       } else if (msg.type === 'op') {
         // Real-time broadcast — server never echoes back to sender.
@@ -1154,10 +1154,10 @@
         // next editor's value, or to the saved baseline. Force past LWW.
         (msg.entries || []).forEach(function (entry) {
           if (entry.baseline) {
-            delete register[entry.path];
+            register.delete(entry.path);
             forceField(entry.path, baseline[entry.path] != null ? baseline[entry.path] : '');
           } else {
-            register[entry.path] = { value: entry.value, hlc: entry.hlc };
+            register.set(entry.path, { value: entry.value, hlc: entry.hlc });
             forceField(entry.path, entry.value);
           }
         });
@@ -1168,7 +1168,7 @@
           var el = findField(path);
           if (el) baseline[path] = el.value;
         });
-        register = Object.create(null);
+        register = new Map();
       }
     };
 

@@ -32,7 +32,7 @@
 //   node scripts/build-migrations.mjs --enable X # additive migration for X
 // ============================================================
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeIfChanged } from './write-if-changed.mjs';
