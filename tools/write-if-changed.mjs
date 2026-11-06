@@ -13,7 +13,7 @@
 // ever reacts to edits a human made.
 // ============================================================
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -22,7 +22,13 @@ import path from 'node:path';
  */
 export function writeIfChanged(file, contents) {
   const next = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
-  if (existsSync(file) && Buffer.compare(readFileSync(file), next) === 0) return false;
+  let current = null;
+  try {
+    current = readFileSync(file);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (current && Buffer.compare(current, next) === 0) return false;
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, next);
   return true;

@@ -33,6 +33,9 @@ export async function sanitizePluginHtmlFragment(html: string): Promise<string> 
   ).text();
 }
 
+// Script-capable schemes. data: is allowed only for raster images.
 function isJavascriptUrl(value: string): boolean {
-  return value.replace(/[\u0000-\u001f\u007f\s]+/g, '').toLowerCase().startsWith('javascript:');
+  const url = value.replace(/[\u0000-\u001f\u007f\s]+/g, '').toLowerCase();
+  if (url.startsWith('javascript:') || url.startsWith('vbscript:')) return true;
+  return url.startsWith('data:') && !/^data:image\/(?:png|gif|jpe?g|webp|avif)[;,]/.test(url);
 }

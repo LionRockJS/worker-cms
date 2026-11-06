@@ -110,14 +110,14 @@
     var userAvatar = bar.dataset.userAvatar || '';
     var indicator = document.getElementById('sync-indicator');
     var hlcCounter = 0;
-    var register = {};
-    var baseline = {};
-    var textDocs = {};
+    var register = Object.create(null);
+    var baseline = Object.create(null);
+    var textDocs = Object.create(null);
     var ws = null;
     var reconnectTimer = null;
     var liveSyncEnabled = false;
-    var editorsByPath = {};
-    var badgeEls = {};
+    var editorsByPath = new Map();
+    var badgeEls = Object.create(null);
     var highlightOverlay = document.createElement('div');
     highlightOverlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:60';
     document.body.appendChild(highlightOverlay);
@@ -316,13 +316,13 @@
 
     function renderHighlight(path) {
       var el = findField(path);
-      var users = editorsByPath[path] ? Object.keys(editorsByPath[path]) : [];
+      var users = editorsByPath.get(path) ? Array.from(editorsByPath.get(path).keys()) : [];
       if (!el || !users.length) {
         if (badgeEls[path]) { badgeEls[path].remove(); delete badgeEls[path]; }
         if (el) el.style.outline = '';
         return;
       }
-      var color = editorsByPath[path][users[0]].color;
+      var color = editorsByPath.get(path).get(users[0]).color;
       el.style.outline = '2px solid ' + color;
       el.style.outlineOffset = '1px';
       var badge = badgeEls[path];
@@ -334,7 +334,7 @@
       }
       badge.replaceChildren();
       users.forEach(function (uid) {
-        var info = editorsByPath[path][uid];
+        var info = editorsByPath.get(path).get(uid);
         var node;
         if (info.avatar) {
           node = document.createElement('img');
@@ -364,23 +364,23 @@
     }
 
     function setFieldEditor(path, userId, info) {
-      if (!editorsByPath[path]) editorsByPath[path] = {};
-      editorsByPath[path][userId] = info;
+      if (!editorsByPath.has(path)) editorsByPath.set(path, new Map());
+      editorsByPath.get(path).set(userId, info);
       renderHighlight(path);
     }
 
     function removeFieldEditor(path, userId) {
-      var entry = editorsByPath[path];
+      var entry = editorsByPath.get(path);
       if (entry) {
-        delete entry[userId];
-        if (!Object.keys(entry).length) delete editorsByPath[path];
+        entry.delete(userId);
+        if (!entry.size) editorsByPath.delete(path);
       }
       renderHighlight(path);
     }
 
     function removeUserHighlights(userId) {
-      Object.keys(editorsByPath).forEach(function (path) {
-        if (editorsByPath[path][userId]) removeFieldEditor(path, userId);
+      Array.from(editorsByPath.keys()).forEach(function (path) {
+        if (editorsByPath.get(path).has(userId)) removeFieldEditor(path, userId);
       });
     }
 
@@ -390,8 +390,8 @@
         var el = findField(path);
         if (el) el.style.outline = '';
       });
-      badgeEls = {};
-      editorsByPath = {};
+      badgeEls = Object.create(null);
+      editorsByPath = new Map();
     }
 
     function repositionBadges() {
@@ -431,7 +431,7 @@
         var msg;
         try { msg = JSON.parse(e.data); } catch (_error) { return; }
         if (msg.type === 'snapshot') {
-          var serverMax = {};
+          var serverMax = Object.create(null);
           (msg.ops || []).forEach(function (op) {
             if (!serverMax[op.path] || op.hlc > serverMax[op.path]) serverMax[op.path] = op.hlc;
             applyRemote(op);
@@ -442,7 +442,7 @@
           });
         } else if (msg.type === 'op') {
           applyRemote(msg);
-          if (!editorsByPath[msg.path] || !editorsByPath[msg.path][msg.userId]) {
+          if (!editorsByPath.get(msg.path) || !editorsByPath.get(msg.path).has(msg.userId)) {
             setFieldEditor(msg.path, msg.userId, { name: msg.userName, color: userColor(msg.userId), avatar: '' });
           }
         } else if (msg.type === 'text-sync') {
@@ -489,7 +489,7 @@
             var el = findField(path);
             if (el) baseline[path] = fieldValue(el);
           });
-          register = {};
+          register = Object.create(null);
           Object.keys(textDocs).forEach(function (path) {
             var state = textDocs[path];
             state.baseline = state.text.toString();
