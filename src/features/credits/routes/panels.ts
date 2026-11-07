@@ -113,7 +113,7 @@ creditPanelRoutes.post(SHARED_POOL_ADJUST_PATH, requirePermission('users:manage'
     return c.redirect(`${back}?error=A+note+is+required+for+credit+adjustments`);
   }
 
-  const result = await mutateCreditAdministration(c, {operation:'adjust-pool', amount, currency, note:note||undefined});
+  const result = await mutateCreditAdministration(c, {operation:'adjust-pool', amount, currency, note});
   if (!result.ok) {
     return c.redirect(`${back}?error=Cannot+deduct+below+zero+(pool+balance+${result.balance})`);
   }
@@ -163,7 +163,7 @@ creditPanelRoutes.post('/users/:id/credits', requirePermission('users:manage'), 
     return c.redirect(`${back}?error=A+note+is+required+for+credit+adjustments`);
   }
 
-  const result = await mutateCreditAdministration(c, {operation:'adjust-user', amount, currency, note:note||undefined, userId:id});
+  const result = await mutateCreditAdministration(c, {operation:'adjust-user', amount, currency, note, userId:id});
   if (!result.ok) {
     if(result.error==='unknown_user')return c.notFound();
     return c.redirect(result.error === 'insufficient_credits'

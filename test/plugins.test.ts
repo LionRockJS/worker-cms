@@ -367,6 +367,55 @@ describe('plugin tenant configuration management', () => {
       else testEnv.CANONICAL_ORIGIN = previousOrigin;
     }
   });
+
+  it('recovers from a stale tenant config read after the first Connect', async () => {
+    const url = `https://plugin-tenant-pending-${crypto.randomUUID()}.local`;
+    const secret = 'tenant-test-secret';
+    const row = await env.DB.prepare('INSERT INTO plugins (label, url, enabled, secret) VALUES (?, ?, 1, ?) RETURNING id')
+      .bind('Pending Tenant', url, secret).first<{ id: number }>();
+    let enrollments = 0;
+    let configReads = 0;
+    __injectPluginFetcher(url, {
+      fetch: async (input: string, init?: RequestInit) => {
+        switch (new URL(input).pathname) {
+          case '/__plugin/manifest':
+            return Response.json({
+              id: 'pending-tenant', name: 'Pending Tenant', version: '1', autoTenant: true, tenantVars: ['EMAIL_FROM'],
+            });
+          case '/__plugin/tenants/enroll':
+            enrollments++;
+            return Response.json({ ok: true });
+          case '/__plugin/tenants/config': {
+            const headers = new Headers(init?.headers);
+            if (headers.get('x-plugin-secret') !== secret || headers.get('x-cms-tenant') !== 'https://cms.example.com') {
+              return new Response(null, { status: 403 });
+            }
+            if (!enrollments || ++configReads <= 2) return new Response(null, { status: 403 });
+            return Response.json({ vars: { EMAIL_FROM: 'events@example.com', UNDECLARED: 'private' } });
+          }
+          default:
+            return new Response(null, { status: 404 });
+        }
+      },
+    } as unknown as Fetcher);
+
+    const base = `http://localhost/admin/plugins-manage/${row!.id}`;
+    const headers = { Cookie: await adminCookie(), 'Sec-Fetch-Site': 'same-origin' };
+    const before = await worker.fetch(new Request(`${base}/edit`, { headers }));
+    expect(bodyData(await before.text()).tenantConfigPending).toBe(false);
+
+    const connected = await worker.fetch(new Request(`${base}/connect`, { method: 'POST', headers, redirect: 'manual' }));
+    expect(connected.headers.get('location')).toContain('flash=connect-ok');
+    const edit = await worker.fetch(new Request(new URL(connected.headers.get('location')!, base), { headers }));
+    expect(bodyData(await edit.text())).toMatchObject({ tenantConfigAvailable: false, tenantConfigPending: true });
+
+    const pending = await worker.fetch(new Request(`${base}/tenant-config`, { headers }));
+    expect(await pending.json()).toMatchObject({ available: false, retryable: true });
+    const ready = await worker.fetch(new Request(`${base}/tenant-config`, { headers }));
+    expect(ready.headers.get('cache-control')).toBe('no-store');
+    expect(await ready.json()).toEqual({ available: true, values: { EMAIL_FROM: 'events@example.com' } });
+    expect(enrollments).toBe(1);
+  });
 });
 
 describe('plugin admin proxy', () => {

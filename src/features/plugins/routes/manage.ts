@@ -16,6 +16,7 @@ import { requirePermission } from '../../../core/auth/guards';
 import { renderPage } from '../../../core/render/chrome';
 import { contextActor, logAudit } from '../../../core/db/audit';
 import { auditUnavailable } from '../../../core/http/access-log';
+import type { AppContext } from '../../../core/http/context';
 import { auditPluginManagement } from '../disclosure-audit';
 import { recordContributorReads, recordMetadataReads, recordTableReads } from '../../../core/http/access-log';
 import { listIdentityApprovals } from '../identity';
@@ -150,10 +151,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 interface TenantConfigRead {
   available: boolean;
   values: Record<string, string>;
+  retryable?: boolean;
 }
 
 /** Reads only the manifest-declared tenant vars; never logs or stores values. */
 async function readPluginTenantConfig(
+  c: AppContext,
   plugin: ResolvedPlugin | undefined,
   tenantId: string,
   names: string[],
@@ -162,6 +165,7 @@ async function readPluginTenantConfig(
   const secret = plugin.apiSecret || plugin.secret;
   if (!secret) return { available: false, values: {} };
 
+  await auditPluginManagement(c.env, plugin.manifest.id, 'tenant-config-read', contextActor(c));
   try {
     const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${TENANT_CONFIG_PATH}`, {
       headers: {
@@ -169,7 +173,16 @@ async function readPluginTenantConfig(
         'x-cms-tenant': tenantId,
       },
     });
-    if (!response.ok) return { available: false, values: {} };
+    if (!response.ok) {
+      await response.body?.cancel();
+      return {
+        available: false,
+        values: {},
+        // An isolate can still see an empty registry, a missing tenant, or
+        // the legacy tenant while a newly enrolled KV record propagates.
+        retryable: [403, 404, 409, 500].includes(response.status),
+      };
+    }
     const body = await response.json().catch(() => null) as unknown;
     if (!isRecord(body)) return { available: false, values: {} };
     const rawVars = body.vars;
@@ -182,7 +195,7 @@ async function readPluginTenantConfig(
       ])),
     };
   } catch {
-    return { available: false, values: {} };
+    return { available: false, values: {}, retryable: true };
   }
 }
 
@@ -297,11 +310,10 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
   const { row: plugin, resolved } = found;
   const tenantId = pluginTenantId(c.env);
   const tenantVarNames = manifestTenantVars(resolved?.manifest);
-  if (resolved && tenantId && tenantVarNames.length && (resolved.apiSecret || resolved.secret)) {
-    try { await auditPluginManagement(c.env, resolved.manifest.id, 'tenant-config-read', contextActor(c)); }
-    catch { return auditUnavailable(c); }
-  }
-  const tenantConfig = await readPluginTenantConfig(resolved, tenantId, tenantVarNames);
+  const flash = c.req.query('flash');
+  let tenantConfig: TenantConfigRead;
+  try { tenantConfig = await readPluginTenantConfig(c, resolved, tenantId, tenantVarNames); }
+  catch { return auditUnavailable(c); }
   const identity = (await pluginIdentityStates(c.env)).find((state) => state.rowId === id);
   return renderPage(c, pluginFormPage, {
     isNew: false,
@@ -320,12 +332,24 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
     tenantKvKey: `tenant:${tenantId}`,
     tenantVars: tenantVarNames.map((name) => ({ name, value: tenantConfig.values[name] ?? '' })),
     tenantConfigAvailable: tenantConfig.available,
+    tenantConfigPending: !!tenantConfig.retryable && (flash === 'connect-ok' || flash === 'rotate-connect-ok'),
     tenantConfigAction: `/admin/plugins-manage/${plugin.id}/tenant-config`,
     // Connect is offered only when the plugin says it accepts enrollment AND
     // we have a canonical origin for it to verify us against.
     autoTenant: !!resolved && manifestAllowsAutoTenant(resolved.manifest) && !!tenantId,
-    flash: c.req.query('flash') ?? undefined,
+    flash,
   });
+});
+
+pluginsManageRoutes.get('/plugins-manage/:id/tenant-config', async (c) => {
+  const found = await resolvedPluginFor(c.env, Number(c.req.param('id')));
+  if (!found) return c.notFound();
+  try {
+    const config = await readPluginTenantConfig(c, found.resolved, pluginTenantId(c.env), manifestTenantVars(found.resolved?.manifest));
+    return c.json(config);
+  } catch {
+    return auditUnavailable(c);
+  }
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/tenant-config', async (c) => {

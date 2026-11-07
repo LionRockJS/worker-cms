@@ -128,7 +128,7 @@ beforeEach(async () => {
 
 describe('declaredCredits recurring validation', () => {
   it('normalizes recurring costs and defaults billing to advance', () => {
-    const defs = declaredCredits(MANIFEST, new Set(['event']));
+    const defs = declaredCredits(MANIFEST);
     expect(defs.map((def) => def.key)).toEqual(['record_storage', 'archive_storage', 'send_edm']);
     expect(defs.find((def) => def.key === 'record_storage')).toMatchObject({
       charge: 'recurring', per: 5000, billing: 'advance', defaultValue: 50, unit: 'record',
@@ -146,7 +146,7 @@ describe('declaredCredits recurring validation', () => {
         { key: 'neg_per', charge: 'recurring', per: -5, default: 3 },
       ],
     } as unknown as PluginManifest;
-    const defs = declaredCredits(manifest, new Set());
+    const defs = declaredCredits(manifest);
     expect(defs.find((def) => def.key === 'no_per')!.per).toBe(1);
     expect(defs.find((def) => def.key === 'neg_per')!.per).toBe(1);
   });

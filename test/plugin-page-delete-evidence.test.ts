@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import worker from '../src/index';
-import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, getPlugins } from '../src/features/plugins/registry';
+import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } from '../src/features/plugins/registry';
 import { clearConfigCache } from '../src/core/db/content-config';
 import type { Env } from '../src/types';
 

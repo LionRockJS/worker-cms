@@ -98,13 +98,13 @@
     </section>
     {% endif %}
 
-    {% render "menu-settings-links",
+    {% render "snippets/menu-settings-links.liquid",
       legendKey: "view_strings.sections_menu_settings.main_sidebar_links",
       options: mainSidebarOptions,
       iconOptions: iconOptions,
       iconHrefPrefix: iconHrefPrefix %}
 
-    {% render "menu-settings-links",
+    {% render "snippets/menu-settings-links.liquid",
       legendKey: "view_strings.sections_menu_settings.settings_sidebar_links",
       options: settingsSidebarOptions,
       iconOptions: iconOptions,

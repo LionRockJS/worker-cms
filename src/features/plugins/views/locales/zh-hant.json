@@ -139,6 +139,7 @@
     "sections_plugin_form.tenant_kv_description": "將此記錄新增至外掛程式 Worker 的 TENANTS KV 命名空間。",
     "sections_plugin_form.tenant_variables": "租戶變數",
     "sections_plugin_form.tenant_variables_description": "這些值會儲存在已連接外掛程式租戶的 TENANTS KV 記錄中。留空會刪除該變數。",
+    "sections_plugin_form.tenant_variables_loading": "已連接。正在等待租戶變數載入…",
     "sections_plugin_form.tenant_variables_unavailable": "租戶變數編輯目前不可用。請先連接外掛程式，並確認外掛程式提供已驗證的租戶設定 API。",
     "sections_plugin_form.save_tenant_variables": "儲存租戶變數",
     "sections_plugin_form.tenant_config_saved": "租戶變數已儲存。",

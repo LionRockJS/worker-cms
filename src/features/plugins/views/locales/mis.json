@@ -139,6 +139,7 @@
     "sections_plugin_form.tenant_kv_description": "Add this record to the plugin Worker's TENANTS KV namespace.",
     "sections_plugin_form.tenant_variables": "Tenant variables",
     "sections_plugin_form.tenant_variables_description": "These values are stored in the connected plugin tenant's TENANTS KV record. Blank values remove the variable.",
+    "sections_plugin_form.tenant_variables_loading": "Connected. Waiting for tenant variables to become available…",
     "sections_plugin_form.tenant_variables_unavailable": "Tenant variable editing is unavailable. Connect the plugin and make sure it exposes the authenticated tenant configuration API.",
     "sections_plugin_form.save_tenant_variables": "Save tenant variables",
     "sections_plugin_form.tenant_config_saved": "Tenant variables saved.",
