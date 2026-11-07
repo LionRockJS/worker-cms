@@ -3103,7 +3103,7 @@ describe('capability enforcement', () => {
 
     expect(response.status).toBe(403);
     expect(response.headers.get('X-CMS-Error')).toBe('insufficient-permissions');
-    expect(await response.json()).toEqual({ success: false, error: 'Insufficient permissions' });
+    expect(await response.json()).toEqual({ success: false, error: 'Insufficient permissions. Required permission: media:upload' });
   });
 
   it('lets editors manage tags but blocks moderators', async () => {
@@ -3173,7 +3173,7 @@ describe('capability enforcement', () => {
 
     expect(response.status).toBe(403);
     expect(response.headers.get('X-CMS-Error')).toBe('insufficient-permissions');
-    expect(await response.json()).toEqual({ success: false, error: 'Insufficient permissions' });
+    expect(await response.json()).toEqual({ success: false, error: 'Insufficient permissions. Required permission: content:read' });
   });
 
   it('requires content:read for draft page lists and search', async () => {

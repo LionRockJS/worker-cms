@@ -159,10 +159,11 @@ export function requirePermission(permission: Permission | string) {
     const map = await resolveRolePermissions(c.env);
     if (!effectivePermissions(map, user.role).has(permission as Permission)) {
       await logDenial(c, { permission });
+      const message = `Insufficient permissions. Required permission: ${permission}`;
       if (wantsJsonResponse(c.req.raw)) {
-        return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
+        return jsonError({ success: false, error: message }, 403, 'insufficient-permissions');
       }
-      return c.text('Forbidden: insufficient permissions', 403);
+      return c.text(`Forbidden: ${message}`, 403);
     }
     return next();
   });
@@ -179,10 +180,11 @@ export function requireAnyPermission(...permissions: Array<Permission | string>)
     const effective = effectivePermissions(map, user.role);
     if (!permissions.some((permission) => effective.has(permission as Permission))) {
       await logDenial(c, { permissions: permissions.join(',') });
+      const message = `Insufficient permissions. Required permission (one of): ${permissions.join(', ')}`;
       if (wantsJsonResponse(c.req.raw)) {
-        return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
+        return jsonError({ success: false, error: message }, 403, 'insufficient-permissions');
       }
-      return c.text('Forbidden: insufficient permissions', 403);
+      return c.text(`Forbidden: ${message}`, 403);
     }
     return next();
   });

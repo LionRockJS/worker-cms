@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 import worker from '../src/index';
 import { issueAuthTokens, type IssuedAuthTokens } from '../src/core/auth/sessions';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
-import { requireAnyPermission, requirePermission } from '../src/core/auth/guards';
+import { authMiddleware, requireAnyPermission, requirePermission } from '../src/core/auth/guards';
 import { recordAuthDenial, AuthDenialEvidenceUnavailableError } from '../src/core/auth/denials';
 import { drainAuditMutationOutbox } from '../src/core/db/audit-mutation-outbox';
 import { hashToken, signJWT } from '../src/core/auth/jwt';
@@ -288,4 +288,28 @@ it('reports only a coarse incomplete outage signal if denial persistence is unav
   const objects = await env.AUDIT_OUTAGE_BUCKET!.list({ prefix: 'audit-outages/incidents/' }); expect(objects.objects).toHaveLength(1);
   const incident = await (await env.AUDIT_OUTAGE_BUCKET!.get(objects.objects[0].key))!.json();
   expect(incident).toMatchObject({ records: [], captureComplete: false }); await privateValuesAbsent({ incident, alerts });
+});
+
+
+it.each(['text/html', 'application/json'])('shows missing permissions only after authentication (%s)', async accept => {
+  const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+  app.use('*', authMiddleware);
+  app.get('/single', requirePermission('users:manage'), c => c.text('private'));
+  app.get('/any', requireAnyPermission('roles:manage', 'users:manage'), c => c.text('private'));
+  for (const [path, requirement] of [
+    ['/single', 'Required permission: users:manage'],
+    ['/any', 'Required permission (one of): roles:manage, users:manage'],
+  ]) {
+    const anonymous = await app.request(path, { headers: { Accept: accept } }, env);
+    expect(anonymous.status).toBe(accept === 'application/json' ? 401 : 302);
+    expect(await anonymous.text()).not.toContain('manage');
+    const denied = await app.request(path, { headers: { Accept: accept, Cookie: `access_token=${issued.accessToken}` } }, env);
+    expect(denied.status).toBe(403);
+    if (accept === 'application/json') {
+      expect(denied.headers.get('X-CMS-Error')).toBe('insufficient-permissions');
+      expect(await denied.json()).toEqual({ success: false, error: `Insufficient permissions. ${requirement}` });
+    } else {
+      expect(await denied.text()).toBe(`Forbidden: Insufficient permissions. ${requirement}`);
+    }
+  }
 });
