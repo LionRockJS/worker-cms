@@ -131,6 +131,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
   tenantKvKey?: string;
   tenantVars?: Array<{ name: string; value: string }>;
   tenantConfigAvailable?: boolean;
+  tenantConfigPending?: boolean;
   tenantConfigAction?: string;
   autoTenant?: boolean;
   flash?: string;
@@ -153,6 +154,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     tenantKvKey,
     tenantVars,
     tenantConfigAvailable,
+    tenantConfigPending,
     tenantConfigAction,
     autoTenant,
     flash,
@@ -192,6 +194,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     hasTenantVars: !!tenantVars?.length,
     tenantVars: tenantVars ?? [],
     tenantConfigAvailable: !!tenantConfigAvailable,
+    tenantConfigPending: !!tenantConfigPending,
     tenantConfigAction: tenantConfigAction ?? '',
     usesSharedSecret: !secret,
     rotateSecretAction: isNew ? '' : `/admin/plugins-manage/${id}/rotate-secret`,
