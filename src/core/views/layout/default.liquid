@@ -305,7 +305,9 @@
           icon.style.display = 'none';
           icon.setAttribute('data-nav-hidden-icon', '1');
           icon.insertAdjacentHTML('beforebegin', spinner(icon.getAttribute('class') || 'h-4 w-4'));
-        } else if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement && /\binline-flex\b/.test(el.className)) {
+        } else if (el instanceof HTMLButtonElement) {
+          el.insertAdjacentHTML('afterbegin', spinner('nav-spinner-inline h-4 w-4'));
+        } else if (el instanceof HTMLAnchorElement && /\binline-flex\b/.test(el.className)) {
           // No icon to swap: lay the spinner over the centre and hide the
           // label behind it, so the button keeps its exact size.
           var color = getComputedStyle(el).color;
