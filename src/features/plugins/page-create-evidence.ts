@@ -196,5 +196,5 @@ export async function commitPluginPageCreates(c:AppContext,source:PluginPageCrea
     statements.push(...receiptGuards,...source.metadata(),c.env.DB.prepare('SELECT * FROM pages WHERE id IN (SELECT value FROM json_each(?))').bind(...idArgs));
     attempted=true;const results=await c.env.DB.batch(statements);const saved=results.at(-1)!.results as Page[];
     if(saved.length!==plans.length)throw new Error('Create result unavailable');return plans.map(p=>saved.find(row=>row.id===p.id)!);
-  }catch(error){return unavailable(c,source.authority,!attempted||(error instanceof Error&&/^D1_ERROR:.*SQLITE_/s.test(error.message)));}
+  }catch(error){return unavailable(c,source.authority,!attempted||(error instanceof Error && /^D1_ERROR:.*SQLITE_/s.test(error.message)));}
 }

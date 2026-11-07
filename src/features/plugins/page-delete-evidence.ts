@@ -101,7 +101,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
   }
   return mode==='single'?c.json({ok:true,id:Number(targets[0].id)}):c.json(mode==='batch'?{ok:true,trashed:acknowledged}:{trashed:acknowledged,done:total===acknowledged});
  }catch(error){
-  const unknown=inFlight&&!(error instanceof PageLifecycleUnavailableError&&error.rollbackKnown);
+  const unknown=inFlight&&!(error instanceof PageLifecycleUnavailableError && error.rollbackKnown);
   // Best effort error evidence cannot turn an unknown commit into a rollback.
   try{const receipt=serviceMutationAuditEvidence(c.env,{action:'page.delete.result',entityType:'page_delete_operation',outcome:'error',detail:{...detail,acknowledged_count:acknowledged,chunk_index:chunkIndex,commit_state:unknown?'unknown':acknowledged===Number(detail.selected_count)?'committed':acknowledged?'prefix_committed':'not_committed',unacknowledged_commit_state:unknown?'unknown':'not_committed'}},authority.actor,evidenceClass,authority.policy,c);await c.env.DB.batch([receipt.write,receipt.guard]);}catch{}
   await recordAuditOutage(c.env,'health',[],authority.actor,undefined,{captureIncomplete:true});throw new ServiceMutationUnavailableError();

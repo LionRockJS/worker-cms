@@ -19,6 +19,16 @@
 @import "tailwindcss" source(none);
 @import "./tailwind-sources.css";
 
+button:has(> .nav-spinner-inline) {
+  white-space: nowrap;
+}
+
+.nav-spinner-inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin-inline-end: 0.5rem;
+}
+
 [data-richtext-preview]:empty::before {
   color: var(--color-gray-400);
   content: attr(data-placeholder);

@@ -6,7 +6,7 @@ import { verifyJWT } from '../src/core/auth/jwt';
 import worker from '../src/index';
 import { signJWT } from './auth-fixtures';
 import { HOST_SETTINGS_KEYS,prepareHostSettingsMutation } from '../src/core/db/settings-mutation-evidence';
-import { APP_BRANDING_SETTING_KEY,ADMIN_HOME_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY,sidebarChromeSettingsFromRaw } from '../src/core/db/settings';
+import { APP_BRANDING_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY,sidebarChromeSettingsFromRaw } from '../src/core/db/settings';
 import type { Env,Variables } from '../src/types';
 
 let cookie='',counter=0;

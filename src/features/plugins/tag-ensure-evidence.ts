@@ -79,7 +79,7 @@ export async function ensurePluginTags(c:AppContext,authority:PluginPageMutation
   recordTagReads('tag.ensure-result',ensured.map(tag=>({id:tag.id,taxonomy_slug:tag.taxonomy})),authority.actor);
   return c.json({tags:ensured,errors});
  }catch(error){
-  const known=!attempted||(error instanceof Error&&/^D1_ERROR:.*SQLITE_/s.test(error.message));
+  const known=!attempted||(error instanceof Error && /^D1_ERROR:.*SQLITE_/s.test(error.message));
   try{const receipt=serviceMutationAuditEvidence(c.env,{action:'tag.ensure.result',entityType:'tag_ensure_operation',entityId:operationId,outcome:'error',detail:{...detail,commit_state:committed?'committed':known?'not_committed':'unknown'}},authority.actor,dataClass,authority.policy,c);await c.env.DB.batch([receipt.write,receipt.guard]);}catch{}
   await recordAuditOutage(c.env,'health',[],authority.actor,undefined,{captureIncomplete:true});throw new ServiceMutationUnavailableError();
  }

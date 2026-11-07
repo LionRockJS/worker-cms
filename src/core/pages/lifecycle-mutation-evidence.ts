@@ -36,7 +36,7 @@ export async function trashPagesAsService(env:Env,service:ServiceTrashAuthority,
   assertRegulatedWritesAllowed(env);
   let attempted=false;
   try { return await mutate(env,null,'trash',{ids},{request:service.request},service,()=>{attempted=true;}); }
-  catch(error) { await recordAuditOutage(env,'health',[],service.actor,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError(!attempted||(error instanceof Error&&/^D1_ERROR:.*SQLITE_/s.test(error.message))); }
+  catch(error) { await recordAuditOutage(env,'health',[],service.actor,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError(!attempted||(error instanceof Error && /^D1_ERROR:.*SQLITE_/s.test(error.message))); }
 }
 export type LifecycleAction='trash'|'restore'|'purge';
 export class PageLifecycleUnavailableError extends Error {constructor(readonly rollbackKnown=false){super('Page lifecycle change unavailable');}}
@@ -76,7 +76,7 @@ function mergeRows(existing:Row[],incoming:Row[],fields:string[]):Row[] {
 export async function mutatePageLifecycle(env:Env,user:JWTPayload,action:LifecycleAction,selection:LifecycleSelection={},context:ContentBatchContext={}):Promise<{count:number;pages:TrashedPageRef[]}> {
   assertRegulatedWritesAllowed(env);
   try{return await mutate(env,user,action,selection,context);}catch(error){
-    if(String(error).includes('sensitivity_reduction_requires_review')||error instanceof RecordHeldError)throw error;
+    if(String(error).includes('sensitivity_reduction_requires_review') || error instanceof RecordHeldError)throw error;
     await recordAuditOutage(env,'health',[],undefined,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError();
   }
 }

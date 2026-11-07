@@ -110,14 +110,14 @@
     var userAvatar = bar.dataset.userAvatar || '';
     var indicator = document.getElementById('sync-indicator');
     var hlcCounter = 0;
-    var register = Object.create(null);
+    var register = new Map();
     var baseline = Object.create(null);
     var textDocs = Object.create(null);
     var ws = null;
     var reconnectTimer = null;
     var liveSyncEnabled = false;
     var editorsByPath = new Map();
-    var badgeEls = Object.create(null);
+    var badgeEls = new Map();
     var highlightOverlay = document.createElement('div');
     highlightOverlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:60';
     document.body.appendChild(highlightOverlay);
@@ -262,9 +262,9 @@
       if (!op || op.userId === currentUserId) return;
       var path = op.path;
       var value = op.value != null ? String(op.value) : '';
-      var cur = register[path];
+      var cur = register.get(path);
       if (cur && cur.hlc >= (op.hlc || '')) return;
-      register[path] = { value: value, hlc: op.hlc };
+      register.set(path, { value: value, hlc: op.hlc });
       var el = findField(path);
       if (el) setFieldValue(el, value);
     }
@@ -272,7 +272,7 @@
     function sendOp(el) {
       var hlc = nextHlc();
       var path = fieldPath(el), value = fieldValue(el);
-      register[path] = { value: value, hlc: hlc };
+      register.set(path, { value: value, hlc: hlc });
       sendRaw(path, value, hlc);
     }
 
@@ -304,7 +304,7 @@
     }
 
     function positionBadge(path) {
-      var badge = badgeEls[path];
+      var badge = badgeEls.get(path);
       var el = findField(path);
       if (!badge || !el) return;
       var r = el.getBoundingClientRect();
@@ -318,19 +318,19 @@
       var el = findField(path);
       var users = editorsByPath.get(path) ? Array.from(editorsByPath.get(path).keys()) : [];
       if (!el || !users.length) {
-        if (badgeEls[path]) { badgeEls[path].remove(); delete badgeEls[path]; }
+        if (badgeEls.get(path)) { badgeEls.get(path).remove(); badgeEls.delete(path); }
         if (el) el.style.outline = '';
         return;
       }
       var color = editorsByPath.get(path).get(users[0]).color;
       el.style.outline = '2px solid ' + color;
       el.style.outlineOffset = '1px';
-      var badge = badgeEls[path];
+      var badge = badgeEls.get(path);
       if (!badge) {
         badge = document.createElement('div');
         badge.style.cssText = 'position:absolute;display:flex;gap:2px;transform:translate(-50%,-50%)';
         highlightOverlay.appendChild(badge);
-        badgeEls[path] = badge;
+        badgeEls.set(path, badge);
       }
       badge.replaceChildren();
       users.forEach(function (uid) {
@@ -385,17 +385,17 @@
     }
 
     function clearAllHighlights() {
-      Object.keys(badgeEls).forEach(function (path) {
-        badgeEls[path].remove();
+      Array.from(badgeEls.keys()).forEach(function (path) {
+        badgeEls.get(path).remove();
         var el = findField(path);
         if (el) el.style.outline = '';
       });
-      badgeEls = Object.create(null);
+      badgeEls = new Map();
       editorsByPath = new Map();
     }
 
     function repositionBadges() {
-      Object.keys(badgeEls).forEach(positionBadge);
+      Array.from(badgeEls.keys()).forEach(positionBadge);
     }
     window.addEventListener('scroll', repositionBadges, true);
     window.addEventListener('resize', repositionBadges);
@@ -431,14 +431,14 @@
         var msg;
         try { msg = JSON.parse(e.data); } catch (_error) { return; }
         if (msg.type === 'snapshot') {
-          var serverMax = Object.create(null);
+          var serverMax = new Map();
           (msg.ops || []).forEach(function (op) {
-            if (!serverMax[op.path] || op.hlc > serverMax[op.path]) serverMax[op.path] = op.hlc;
+            if (!serverMax.get(op.path) || op.hlc > serverMax.get(op.path)) serverMax.set(op.path, op.hlc);
             applyRemote(op);
           });
-          Object.keys(register).forEach(function (path) {
-            var r = register[path];
-            if (!serverMax[path] || r.hlc > serverMax[path]) sendRaw(path, r.value, r.hlc);
+          Array.from(register.keys()).forEach(function (path) {
+            var r = register.get(path);
+            if (!serverMax.get(path) || r.hlc > serverMax.get(path)) sendRaw(path, r.value, r.hlc);
           });
         } else if (msg.type === 'op') {
           applyRemote(msg);
@@ -477,10 +477,10 @@
         } else if (msg.type === 'reset') {
           (msg.entries || []).forEach(function (entry) {
             if (entry.baseline) {
-              delete register[entry.path];
+              register.delete(entry.path);
               forceField(entry.path, baseline[entry.path] != null ? baseline[entry.path] : '');
             } else {
-              register[entry.path] = { value: entry.value, hlc: entry.hlc };
+              register.set(entry.path, { value: entry.value, hlc: entry.hlc });
               forceField(entry.path, entry.value);
             }
           });
@@ -489,7 +489,7 @@
             var el = findField(path);
             if (el) baseline[path] = fieldValue(el);
           });
-          register = Object.create(null);
+          register = new Map();
           Object.keys(textDocs).forEach(function (path) {
             var state = textDocs[path];
             state.baseline = state.text.toString();

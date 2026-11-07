@@ -131,6 +131,7 @@ describe('view assembly', () => {
       env.VIEWS.fetch('https://views.local/snippets/menu-settings-links.liquid').then((response) => response.text()),
       env.VIEWS.fetch('https://views.local/assets/client-render.js').then((response) => response.text()),
     ]);
+    expect(settings.match(/{% render "snippets\/menu-settings-links\.liquid",/g)).toHaveLength(2);
     expect(settings).toContain('options: mainSidebarOptions');
     expect(settings).toContain('options: settingsSidebarOptions');
     expect(links).toContain('data-weight-sortable');
