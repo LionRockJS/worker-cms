@@ -300,15 +300,25 @@
         el.setAttribute('aria-busy', 'true');
         var icon = el.querySelector('svg:not([data-nav-spinner])');
         if (icon) {
-          // Keep the icon's own size classes so the button doesn't shift.
-          var size = (icon.getAttribute('class') || '').split(/\s+/).filter(function(name) {
-            return /^(?:h|w)-/.test(name);
-          }).join(' ') || 'h-4 w-4';
+          // Swap the icon in place, keeping its classes (size, margins) so
+          // nothing around it moves.
           icon.style.display = 'none';
           icon.setAttribute('data-nav-hidden-icon', '1');
-          icon.insertAdjacentHTML('beforebegin', spinner(size));
+          icon.insertAdjacentHTML('beforebegin', spinner(icon.getAttribute('class') || 'h-4 w-4'));
         } else if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement && /\binline-flex\b/.test(el.className)) {
-          el.insertAdjacentHTML('afterbegin', spinner('h-4 w-4'));
+          // No icon to swap: lay the spinner over the centre and hide the
+          // label behind it, so the button keeps its exact size.
+          var color = getComputedStyle(el).color;
+          if (getComputedStyle(el).position === 'static') {
+            el.style.position = 'relative';
+            el.setAttribute('data-nav-positioned', '1');
+          }
+          Array.prototype.forEach.call(el.children, function(child) {
+            child.style.visibility = 'hidden';
+            child.setAttribute('data-nav-hidden-child', '1');
+          });
+          el.style.color = 'transparent';
+          el.insertAdjacentHTML('beforeend', '<span data-nav-spinner style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:' + color + '">' + spinner('h-4 w-4') + '</span>');
         }
         el.style.cursor = 'progress';
       }
@@ -322,10 +332,19 @@
           icon.style.display = '';
           icon.removeAttribute('data-nav-hidden-icon');
         });
+        document.querySelectorAll('[data-nav-hidden-child]').forEach(function(child) {
+          child.style.visibility = '';
+          child.removeAttribute('data-nav-hidden-child');
+        });
+        document.querySelectorAll('[data-nav-positioned]').forEach(function(el) {
+          el.style.position = '';
+          el.removeAttribute('data-nav-positioned');
+        });
         document.querySelectorAll('[data-nav-busy]').forEach(function(el) {
           el.removeAttribute('data-nav-busy');
           el.removeAttribute('aria-busy');
           el.style.cursor = '';
+          el.style.color = '';
         });
       }
 
