@@ -29,7 +29,7 @@
     "check:export": "node --no-warnings tools/check-export.mjs"
   },
   "dependencies": {
-    "hono": "^4.13.14",
+    "hono": "^4.13.16",
     "yjs": "^13.6.33"
   },
   "devDependencies": {
