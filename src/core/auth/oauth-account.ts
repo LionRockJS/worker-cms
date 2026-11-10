@@ -7,6 +7,7 @@ import { safeRoleAuditValue } from './role-mutation-sql';
 import { oauthAccountAuditEvidence } from '../db/audit';
 import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
+import { isOwnAvatar } from './self-profile';
 
 interface OAuthAccountIdentity {
   provider: string;
@@ -87,7 +88,9 @@ export async function updateOAuthProfile(c: AppContext, userId: number, identity
   const before = await accountSnapshot(c, userId, identity);
   const after = { ...before, email: before.email_claimed ? before.email : identity.email,
     // Match SQLite trim(name): only ordinary spaces count as a missing name.
-    name: /^ *$/.test(before.name) ? identity.name : before.name, avatar_url: identity.avatarUrl };
+    name: /^ *$/.test(before.name) ? identity.name : before.name,
+    // A picture the user chose on their profile outranks the provider's.
+    avatar_url: isOwnAvatar(before.avatar_url) ? before.avatar_url : identity.avatarUrl };
   const fields = (['email', 'name', 'avatar_url'] as const).filter(field => before[field] !== after[field]);
   const statements = [classificationPolicyGuard(c.env, policy), snapshotGuard(c, before), identityGuard(c.env, identity, userId, true),
     abortIf(c.env, '(SELECT EXISTS (SELECT 1 FROM users WHERE email = ? AND id <> ?)) <> ?',

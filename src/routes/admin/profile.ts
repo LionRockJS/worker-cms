@@ -9,7 +9,7 @@ import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i
 import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';
 import { contextActor } from '../../core/db/audit';
 import { recordAuditOutage } from '../../core/db/audit-outages';
-import { disconnectOwnIdentity, updateOwnProfileName } from '../../core/auth/self-profile';
+import { disconnectOwnIdentity, isOwnAvatar, OWN_AVATAR_MAX_LENGTH, OWN_AVATAR_PATTERN, updateOwnAvatar, updateOwnProfileName } from '../../core/auth/self-profile';
 import { recordTableReads } from '../../core/http/access-log';
 
 
@@ -120,6 +120,7 @@ profileRoutes.get('/profile', async (c) => {
     email: user.email,
     roleLabel: roleLabel(user.role, roleOptions),
     avatarUrl: user.avatar_url ?? '',
+    hasOwnAvatar: isOwnAvatar(user.avatar_url),
     flash,
     error,
     identities,
@@ -149,6 +150,23 @@ profileRoutes.post('/profile', async (c) => {
     return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
   }
   return c.redirect('/admin/profile?flash=profile.name_saved', 303);
+});
+
+profileRoutes.post('/profile/avatar', async (c) => {
+  const form = await c.req.formData();
+  // A resized data URI built in the browser, or '' to remove the picture.
+  const avatar = str(form.get('avatar'));
+  if (avatar && (avatar.length > OWN_AVATAR_MAX_LENGTH || !OWN_AVATAR_PATTERN.test(avatar))) {
+    return c.redirect('/admin/profile?error=profile.invalid_avatar', 303);
+  }
+
+  try {
+    await updateOwnAvatar(c, avatar);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  return c.redirect(`/admin/profile?flash=${avatar ? 'profile.avatar_saved' : 'profile.avatar_removed'}`, 303);
 });
 
 profileRoutes.post('/profile/locale', async (c) => {

@@ -283,3 +283,22 @@ it('applies the existing-installation outbox upgrade idempotently without alteri
   expect(await auditMutationOutboxHealth(env)).toMatchObject({ pending: 0, exhausted: 0 });
   expect(await account()).toEqual(before); expect(await links()).toEqual(identities);
 });
+
+const ownAvatar = 'data:image/png;base64,iVBORw0KGgo=';
+const setAvatar = (avatar: string) => call('/admin/profile/avatar', new URLSearchParams({ avatar }));
+it('saves, audits and removes a user-chosen profile picture', async () => {
+  expect((await setAvatar(ownAvatar)).headers.get('Location')).toBe('/admin/profile?flash=profile.avatar_saved');
+  expect((await account())!.avatar_url).toBe(ownAvatar);
+  const saved = await events();
+  expect(saved).toHaveLength(1);
+  expect(JSON.parse(String(saved[0].detail)).fields).toEqual(['avatar_url']);
+  expect(String(saved[0].detail)).not.toContain('iVBOR');
+  expect((await setAvatar('')).headers.get('Location')).toBe('/admin/profile?flash=profile.avatar_removed');
+  expect((await account())!.avatar_url).toBe('');
+});
+it.each(['https://example.invalid/a.png', 'data:image/svg+xml;base64,PHN2Zz4=', `data:image/png;base64,${'A'.repeat(64 * 1024)}`])(
+  'refuses a profile picture that is not a small inline PNG/JPEG', async avatar => {
+    expect((await setAvatar(avatar)).headers.get('Location')).toBe('/admin/profile?error=profile.invalid_avatar');
+    expect((await account())!.avatar_url).toBe('private-avatar');
+    expect(await events()).toEqual([]);
+  });

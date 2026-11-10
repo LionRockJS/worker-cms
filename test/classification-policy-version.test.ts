@@ -181,3 +181,10 @@ it.each([
   expect(await version()).toBe(before); expect(await events()).toEqual([]);
   expect((await env.DB.prepare('SELECT * FROM users ORDER BY id').all()).results).toEqual(users);
 });
+
+it('keeps a user-chosen picture when a provider sign-in refreshes the profile', async () => {
+  const own = 'data:image/png;base64,iVBORw0KGgo=';
+  await env.DB.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(own, user.id).run();
+  expect((await invoke('oauthProfile')).status).toBe(200);
+  expect((await env.DB.prepare('SELECT avatar_url FROM users WHERE id = ?').bind(user.id).first<{ avatar_url: string }>())!.avatar_url).toBe(own);
+});

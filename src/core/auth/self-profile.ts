@@ -45,24 +45,42 @@ async function classification(c: AppContext, revocation: boolean) {
   return { dataClass: 'phi' as const, unavailable: true };
 }
 
-/** Only the current user's display name is editable through this service. */
-export async function updateOwnProfileName(c: AppContext, name: string): Promise<void> {
+/** A picture the user set themselves (upload or generated initials), stored
+ * inline. Provider sign-in refreshes must not overwrite it. */
+export const OWN_AVATAR_PATTERN = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/;
+export const OWN_AVATAR_MAX_LENGTH = 48 * 1024;
+export function isOwnAvatar(avatarUrl: string | null): boolean {
+  return !!avatarUrl && avatarUrl.startsWith('data:image/');
+}
+
+/** Only the current user's display name and picture are editable through this service. */
+async function updateOwnProfileField(c: AppContext, field: 'name' | 'avatar_url', value: string): Promise<void> {
   assertRegulatedWritesAllowed(c.env);
-  if (!name || name.length > 100 || name !== name.trim()) throw new Error('Invalid display name');
   const policy = await classification(c, false);
   const before = await ownAccount(c);
   if (!safeRoleAuditValue(before.role)) throw new Error('Profile evidence requires review');
   const refused = await flushReadAudit(c);
   if (refused) throw new Error('Protected read evidence unavailable');
   const statements = [classificationPolicyGuard(c.env, policy.policy!), sessionGuard(c), accountGuard(c, before)];
-  if (name !== before.name) {
+  if (value !== before[field]) {
     const evidence = mutationAuditEvidence(c, { action: 'profile.update', entityType: 'user', entityId: before.id,
-      detail: { fields: ['name'] } }, policy.dataClass, { requirePreviousChange: true, policy: policy.policy });
-    statements.push(c.env.DB.prepare('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(name, before.id),
+      detail: { fields: [field] } }, policy.dataClass, { requirePreviousChange: true, policy: policy.policy });
+    statements.push(c.env.DB.prepare(`UPDATE users SET ${field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(value, before.id),
       evidence.write, evidence.guard);
   }
-  statements.push(accountGuard(c, { ...before, name }), sessionGuard(c), classificationPolicyGuard(c.env, policy.policy!));
+  statements.push(accountGuard(c, { ...before, [field]: value }), sessionGuard(c), classificationPolicyGuard(c.env, policy.policy!));
   await c.env.DB.batch(statements);
+}
+
+export async function updateOwnProfileName(c: AppContext, name: string): Promise<void> {
+  if (!name || name.length > 100 || name !== name.trim()) throw new Error('Invalid display name');
+  await updateOwnProfileField(c, 'name', name);
+}
+
+/** `''` removes the picture; the next provider sign-in may then supply one. */
+export async function updateOwnAvatar(c: AppContext, avatarUrl: string): Promise<void> {
+  if (avatarUrl && (avatarUrl.length > OWN_AVATAR_MAX_LENGTH || !OWN_AVATAR_PATTERN.test(avatarUrl))) throw new Error('Invalid avatar');
+  await updateOwnProfileField(c, 'avatar_url', avatarUrl);
 }
 
 function identitiesGuard(c: AppContext, userId: number, identities: Identity[]) {
