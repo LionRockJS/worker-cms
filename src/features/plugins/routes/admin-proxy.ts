@@ -18,6 +18,7 @@ import { coreExtensions } from '../../../core/extensions';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../../core/auth/roles';
 import { appendQuery } from '../../../core/http/forms';
 import { jsonError, wantsJsonResponse } from '../../../core/auth/guards';
+import { setSyncGrantCookie } from '../../../core/auth/sync-grant';
 import { adminLayout, escHtml } from '../../../core/render/layout';
 import { pluginClientView } from '../../../core/render/liquid';
 import { buildBaseProps } from '../../../core/render/chrome';
@@ -354,11 +355,17 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
     // Identity and content permissions remain host-controlled.
     const pageId = Number(upstreamResponse.headers.get('x-cms-editor-page-id'));
     let editPresence: { pageId: string; currentUserId: string; userAvatar: string } | null = null;
-    if (clientView && Number.isSafeInteger(pageId) && pageId > 0
-      && effectivePermissions(await resolveRolePermissions(c.env), c.get('user').role).has('content:write')) {
+    if (clientView && Number.isSafeInteger(pageId) && pageId > 0) {
       const page = await c.env.DB.prepare('SELECT page_type FROM pages WHERE id = ?').bind(pageId).first<{ page_type: string }>();
       if (page && Object.hasOwn(plugin.manifest.contentTypes?.blueprint ?? {}, page.page_type)) {
-        editPresence = { pageId: String(pageId), currentUserId: base.currentUserId, userAvatar: base.userAvatar };
+        const user = c.get('user');
+        const canWrite = effectivePermissions(await resolveRolePermissions(c.env), user.role).has('content:write');
+        // The plugin decides who edits its own pages: without the content role,
+        // its word is carried to the sync routes as a grant for this page only.
+        if (!canWrite && user.sid) await setSyncGrantCookie(c, c.env.JWT_SECRET, user.sid, pageId);
+        if (canWrite || user.sid) {
+          editPresence = { pageId: String(pageId), currentUserId: base.currentUserId, userAvatar: base.userAvatar };
+        }
       }
     }
     const body = clientView

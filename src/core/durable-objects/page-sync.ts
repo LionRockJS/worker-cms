@@ -43,6 +43,8 @@ interface WsAttachment {
   userName: string;
   sid: string;
   exp: number;
+  /** Set when access came from a plugin sync grant instead of content:write: its expiry in seconds. */
+  grantExp?: number;
   window?: number;
   messages?: number;
 }
@@ -152,7 +154,7 @@ export class PageSyncDO implements DurableObject {
     const userId = request.headers.get('X-User-Id') ?? '';
     const userName = request.headers.get('X-User-Name') ?? '';
 
-    const attachment: WsAttachment = { userId, userName, pageId: request.headers.get('X-Page-Id') ?? undefined, sid: request.headers.get('X-Session-Id') ?? '', exp: Number(request.headers.get('X-Session-Expires')) };
+    const attachment: WsAttachment = { userId, userName, pageId: request.headers.get('X-Page-Id') ?? undefined, sid: request.headers.get('X-Session-Id') ?? '', exp: Number(request.headers.get('X-Session-Expires')), grantExp: Number(request.headers.get('X-Sync-Grant-Expires')) || undefined };
     if (!await this.validSession(attachment)) return new Response('Unauthorized', { status: 401 });
     if (this.state.getWebSockets().length >= 32) return new Response('Too many connections', { status: 429 });
     const { 0: client, 1: server } = new WebSocketPair();
@@ -403,7 +405,9 @@ export class PageSyncDO implements DurableObject {
       sub: attachment.userId, sid: attachment.sid, exp: attachment.exp,
       type: 'access', iat: 0, name: '', email: '', role: '',
     }, sessionIdleTtl(this.env));
-    return !!user && effectivePermissions(await resolveRolePermissions(this.env), user.role).has('content:write');
+    if (!user) return false;
+    if (effectivePermissions(await resolveRolePermissions(this.env), user.role).has('content:write')) return true;
+    return !!attachment.grantExp && attachment.grantExp > Math.floor(Date.now() / 1000);
   }
 
   private async authorize(ws: WebSocket): Promise<boolean> {

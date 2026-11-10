@@ -8,7 +8,7 @@ import { regulatedPages } from '../../core/publish/regulated';
 import { getLectLocalizedValue, safeParseLect } from '../../core/db/lect';
 import type { Env, Variables, Tag, Taxonomy, Page } from '../../types';
 import { num } from '../../core/http/forms';
-import { requirePermission } from '../../core/auth/guards';
+import { requirePageSync, requirePermission } from '../../core/auth/guards';
 import type { AppContext } from '../../core/http/context';
 import { resolveCmsConfig } from '../../core/db/content-config';
 
@@ -219,7 +219,7 @@ async function draftPageExists(c: AppContext, pageId: number): Promise<boolean> 
   return !!page;
 }
 
-apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c) => {
+apiRoutes.get('/api/sync/:pageId', requirePageSync('content:write'), async (c) => {
   const origin = c.req.header('Origin');
   if (!origin || origin !== new URL(c.req.url).origin) return c.text('Forbidden origin', 403);
   const rejected = rejectCrossSiteRequest(c.req.raw);
@@ -241,6 +241,7 @@ apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c)
   }
 
   const user = c.get('user');
+  const grantExp = c.get('syncGrantExp');
   return c.env.PAGE_SYNC.get(c.env.PAGE_SYNC.idFromName(`page-${pageId}`)).fetch(
     new Request(c.req.raw.url, {
       headers: {
@@ -250,6 +251,7 @@ apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c)
         'X-Session-Id': user.sid!,
         'X-Session-Expires': String(user.exp),
         'X-Page-Id': String(pageId),
+        ...(grantExp ? { 'X-Sync-Grant-Expires': String(grantExp) } : {}),
       },
     }),
   );
@@ -257,7 +259,7 @@ apiRoutes.get('/api/sync/:pageId', requirePermission('content:write'), async (c)
 
 // ── Presence ─────────────────────────────────────────────────────────────────
 
-apiRoutes.post('/api/presence/:pageId', requirePermission('content:write'), async (c) => {
+apiRoutes.post('/api/presence/:pageId', requirePageSync('content:write'), async (c) => {
   const pageId = parseInt(c.req.param('pageId'), 10);
   if (!Number.isFinite(pageId) || pageId <= 0) return c.json({ error: 'invalid_page_id' }, 400);
   if (!(await draftPageExists(c, pageId))) return c.json({ error: 'page_not_found' }, 404);
@@ -293,7 +295,7 @@ apiRoutes.post('/api/presence/:pageId', requirePermission('content:write'), asyn
   );
 });
 
-apiRoutes.get('/api/presence/:pageId', requirePermission('content:read'), async (c) => {
+apiRoutes.get('/api/presence/:pageId', requirePageSync('content:read'), async (c) => {
   const pageId = parseInt(c.req.param('pageId'), 10);
   if (!Number.isFinite(pageId) || pageId <= 0) return c.json({ error: 'invalid_page_id' }, 400);
   const page = await c.env.DB.prepare('SELECT id, page_type FROM pages WHERE id = ?').bind(pageId).first<{ id: number; page_type: string }>();
@@ -305,7 +307,7 @@ apiRoutes.get('/api/presence/:pageId', requirePermission('content:read'), async 
   );
 });
 
-apiRoutes.delete('/api/presence/:pageId', requirePermission('content:write'), async (c) => {
+apiRoutes.delete('/api/presence/:pageId', requirePageSync('content:write'), async (c) => {
   const pageId = parseInt(c.req.param('pageId'), 10);
   if (!Number.isFinite(pageId) || pageId <= 0) return c.json({ error: 'invalid_page_id' }, 400);
   if (!(await draftPageExists(c, pageId))) return c.json({ error: 'page_not_found' }, 404);

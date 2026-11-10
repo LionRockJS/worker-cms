@@ -300,4 +300,6 @@ export interface RateLimiter {
 // Hono context variables set by the auth middleware
 export interface Variables {
   user: JWTPayload;
+  /** Set by requirePageSync when access came from a plugin sync grant: its expiry in seconds. */
+  syncGrantExp?: number;
 }

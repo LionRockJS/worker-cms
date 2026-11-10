@@ -17,6 +17,7 @@ import { routePath } from 'hono/route';
 import type { AppContext } from '../http/context';
 import { verifyJWT } from './jwt';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from './roles';
+import { readSyncGrant } from './sync-grant';
 import type { Permission } from '../../types';
 import {
   accessCookieName,
@@ -165,6 +166,30 @@ export function requirePermission(permission: Permission | string) {
       }
       return c.text(`Forbidden: ${message}`, 403);
     }
+    return next();
+  });
+}
+
+/**
+ * Guards the presence and live-sync routes of one page (`:pageId`). Passes with
+ * the given permission, or with a sync grant the plugin proxy issued this
+ * session for that page; a grant's expiry is left in `syncGrantExp` for the
+ * sync socket.
+ */
+export function requirePageSync(permission: 'content:read' | 'content:write') {
+  return createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
+    const user = c.get('user');
+    if (splitRoles(user.role).includes('admin')) return next();
+    if (effectivePermissions(await resolveRolePermissions(c.env), user.role).has(permission)) return next();
+    const pageId = Number(c.req.param('pageId'));
+    const grantExp = user.sid && Number.isSafeInteger(pageId) && pageId > 0
+      ? await readSyncGrant(c, c.env.JWT_SECRET, user.sid, pageId)
+      : null;
+    if (grantExp === null) {
+      await logDenial(c, { permission });
+      return jsonError({ success: false, error: `Insufficient permissions. Required permission: ${permission}` }, 403, 'insufficient-permissions');
+    }
+    c.set('syncGrantExp', grantExp);
     return next();
   });
 }

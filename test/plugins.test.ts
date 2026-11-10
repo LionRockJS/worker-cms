@@ -7,6 +7,7 @@ import { deliverHook } from '../src/features/plugins/hooks';
 import { viewsFor } from '../src/features/plugins/views';
 import { cmsConfig } from '../src/cms-config';
 import { signJWT } from './auth-fixtures';
+import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { CMS_ADMIN_JOB_KIND } from '../src/features/jobs/queue';
 import type { CmsAdminJobMessage } from '../src/core/extensions';
 import { approveAsset, computeIntegrity } from '../src/features/plugins/assets';
@@ -914,6 +915,65 @@ describe('plugin admin proxy', () => {
     expect(payload.layoutData.editorSync).toBe(enabled);
     expect(payload.bodyView?.data.cmsEditPresence).toEqual(enabled
       ? { pageId, currentUserId: '1', userAvatar: expect.any(String) } : null);
+  });
+
+  it('grants a plugin editor without content:write presence and sync on that plugin page only', async () => {
+    testEnv.PLUGIN_SECRET = 'server-secret';
+    const url = 'https://plugin-sync-grant.local';
+    await env.DB.prepare('INSERT INTO plugins (label, url, enabled) VALUES (?, ?, 1)').bind('Events', url).run();
+    await env.DB.prepare('INSERT INTO roles (name, label, builtin) VALUES (?, ?, 0)').bind('eventstaff', 'Event Staff').run();
+    await env.DB.batch(['plugin:access', 'events:staff'].map((permission) =>
+      env.DB.prepare('INSERT INTO role_permissions (role, permission) VALUES (?, ?)').bind('eventstaff', permission)));
+    clearRolePermissionsCache();
+    const pageIds: number[] = [];
+    for (const slug of ['sync-grant-own', 'sync-grant-other']) {
+      const inserted = await env.DB.prepare('INSERT INTO pages (name, slug, weight, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+        .bind(slug, slug, 0, 'event', '{}').run();
+      pageIds.push((await env.DB.prepare('SELECT id FROM pages WHERE rowid = ?').bind(inserted.meta.last_row_id).first<{ id: number }>())!.id);
+    }
+    const [pageId, otherId] = pageIds;
+    __injectPluginFetcher(url, {
+      fetch: async (input: RequestInfo | URL): Promise<Response> => {
+        const path = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).pathname;
+        if (path === '/__plugin/manifest') return Response.json({ ...EVENTS_MANIFEST, permissions: [{ value: 'events:staff', label: 'Event staff' }] });
+        return Response.json({}, {
+          headers: { 'x-cms-chrome': '1', 'x-cms-client-view': '1', 'x-cms-view-path': '/templates/details.json', 'x-cms-editor-page-id': String(pageId) },
+        });
+      },
+    } as unknown as Fetcher);
+    const now = Math.floor(Date.now() / 1000);
+    const access = `access_token=${await signJWT({ sub: '977', email: 'sync-grant-staff@example.com', name: 'Staff', role: 'eventstaff', type: 'access', exp: now + 900, iat: now }, env.JWT_SECRET)}`;
+    const page = await worker.fetch(new Request('http://localhost/admin/plugins/events/details', {
+      headers: { Cookie: access, 'Sec-Fetch-Site': 'same-origin' },
+    }));
+    expect(page.status).toBe(200);
+    const payload = renderPayload(await page.text());
+    expect(payload.layoutData.editorSync).toBe(true);
+    expect(payload.bodyView?.data.cmsEditPresence).toMatchObject({ pageId: String(pageId), currentUserId: '977' });
+    const setCookie = page.headers.getSetCookie().find((cookie) => cookie.startsWith(`sync_grant_${pageId}=`))!;
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/Path=\/admin\/api/);
+    const grant = setCookie.split(';')[0];
+
+    const heartbeat = (id: number, cookie: string) => worker.fetch(new Request(`http://localhost/admin/api/presence/${id}`, {
+      method: 'POST',
+      body: '{}',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin' },
+    }));
+    expect((await heartbeat(pageId, `${access}; ${grant}`)).status).toBe(200);
+    expect((await heartbeat(pageId, access)).status).toBe(403);
+    // The grant names its page: replayed under another page's cookie name it does not verify.
+    expect((await heartbeat(otherId, `${access}; ${grant.replace(`sync_grant_${pageId}`, `sync_grant_${otherId}`)}`)).status).toBe(403);
+
+    const readers = await worker.fetch(new Request(`http://localhost/admin/api/presence/${pageId}`, { headers: { Cookie: `${access}; ${grant}` } }));
+    expect((await readers.json() as Array<{ user_id: string }>).map((row) => row.user_id)).toEqual(['977']);
+
+    const socket = await worker.fetch(new Request(`http://localhost/admin/api/sync/${pageId}`, {
+      headers: { Cookie: `${access}; ${grant}`, Upgrade: 'websocket', Origin: 'http://localhost' },
+    }));
+    expect(socket.status).toBe(101);
+    socket.webSocket?.accept();
+    socket.webSocket?.close();
   });
 
   it('wraps structured plugin client views without rendering plugin HTML on the Worker', async () => {
