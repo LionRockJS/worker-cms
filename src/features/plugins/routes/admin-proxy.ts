@@ -22,6 +22,7 @@ import { setSyncGrantCookie } from '../../../core/auth/sync-grant';
 import { adminLayout, escHtml } from '../../../core/render/layout';
 import { pluginClientView } from '../../../core/render/liquid';
 import { buildBaseProps } from '../../../core/render/chrome';
+import { resolveUiLocale } from '../../../core/i18n';
 import { viewsFor } from '../views';
 import {
   buildPluginProxyHeaders,
@@ -263,6 +264,8 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
 
   const permissions = await pluginUserPermissions(c.env, plugin.manifest, c.get('user').role);
   const headers = buildPluginProxyHeaders(c.req.raw.headers, c.get('user'), plugin.secret, pluginTenantId(c.env), permissions);
+  // The user's interface language, so text a plugin builds itself (titles, messages) matches the CMS's.
+  headers.set('x-cms-ui-locale', (await resolveUiLocale(c)).code);
 
   warnSharedPluginOrigin();
 

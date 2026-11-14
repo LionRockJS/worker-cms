@@ -417,7 +417,8 @@ CMS enforces on page creation), `credits` (chargeable actions and their
 wallet), `autoPublishTypes` (owned types republished on save once already
 live), `contentTypes.publishLect` (fields stripped at publish time — see
 [Publish targets](#publish-targets)), `i18n: true` (the plugin serves its own
-locale catalogs), and `autoTenant: true` (see
+locale catalogs; admin requests carry the user's interface language as
+`x-cms-ui-locale` for text the plugin builds itself), and `autoTenant: true` (see
 [Automatic tenant registration](#automatic-tenant-registration)).
 
 For a plugin that uses the shared SDK's enrollment helper, `tenantVars` may
