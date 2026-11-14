@@ -122,13 +122,13 @@
       var lastReported = lastInteraction;
       var lastAttempt = 0;
 
-      // A visible, focused page counts as reading. Hidden or unfocused tabs
-      // only report actual interaction, so background tabs still go idle.
+      // A visible page counts as reading, even when its window is inactive.
+      // Hidden tabs only report actual interaction, so they still go idle.
       async function refresh() {
         if (inFlight) return;
         inFlight = true;
         lastAttempt = Date.now();
-        if (document.visibilityState === 'visible' && document.hasFocus()) {
+        if (document.visibilityState === 'visible') {
           lastInteraction = Date.now();
         }
         var interaction = lastInteraction;

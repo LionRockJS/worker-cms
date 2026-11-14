@@ -4,10 +4,10 @@ Engineering record for W6 in [the compliance plan](compliance-implementation-pla
 
 ## Reading activity update (2026-11-15)
 
-The admin keepalive now reports a visible, focused page as reading activity every
+The admin keepalive now reports a visible page as reading activity every
 5 minutes, in both the bootstrap and Liquid layouts. This prevents quiet reading
-from triggering an idle sign-out. Hidden or unfocused tabs still report no new
-activity unless the person interacts. A foreground page left unattended also
+from triggering an idle sign-out. Window focus is not required. Hidden tabs still
+report no new activity unless the person interacts. A visible page left unattended also
 counts as reading: the browser cannot distinguish that from quiet reading.
 Server-side idle, revocation, token expiry and absolute lifetime checks are unchanged.
 
@@ -19,8 +19,8 @@ or external destinations fall back to `/admin`. This restores the page URL,
 including filters and pagination, but does not restore unsaved form input.
 
 `node --test tools/test-session-keepalive.mjs` exercises both actual scripts with
-a browser/clock fixture: nine hours of quiet reading, hidden/unfocused tabs,
-interaction age, rejected sessions and duplicate initialization. These checks also
+a browser/clock fixture: nine hours of quiet reading in focused and unfocused
+windows, hidden tabs, interaction age, rejected sessions and duplicate initialization. These checks also
 run in `npm test`; they simulate browser APIs rather than driving a real browser.
 
 The original W6 implementation record below describes the earlier interaction-only

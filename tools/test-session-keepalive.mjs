@@ -40,35 +40,35 @@ for (const [name, file] of sources) {
     };
   }
 
-  test(`${name}: quiet foreground reading keeps reporting activity beyond the idle window`, async () => {
-    const page = browser();
-    for (let i = 0; i < 108; i++) await page.tick(); // nine hours, without input
-    assert.equal(page.requests.length, 108);
-    for (const request of page.requests) {
-      assert.equal(request.url, '/auth/refresh');
-      assert.equal(request.method, 'POST');
-      assert.equal(request.credentials, 'same-origin');
-      assert.equal(request.headers['X-CMS-Idle-For'], '0');
-      assert.equal(request.headers['X-CMS-Background'], undefined);
-    }
-  });
-
-  for (const state of ['hidden', 'unfocused']) {
-    test(`${name}: ${state} pages do not extend idle activity`, async () => {
+  for (const focused of [true, false]) {
+    test(`${name}: visible reading with focus=${focused} keeps reporting activity beyond the idle window`, async () => {
       const page = browser();
-      if (state === 'hidden') page.document.visibilityState = 'hidden';
-      else page.document.hasFocus = () => false;
-      await page.tick();
-      assert.equal(page.requests[0].headers['X-CMS-Background'], '1');
-      assert.equal(page.requests[0].headers['X-CMS-Idle-For'], undefined);
+      page.document.hasFocus = () => focused;
+      for (let i = 0; i < 108; i++) await page.tick(); // nine hours, without input
+      assert.equal(page.requests.length, 108);
+      for (const request of page.requests) {
+        assert.equal(request.url, '/auth/refresh');
+        assert.equal(request.method, 'POST');
+        assert.equal(request.credentials, 'same-origin');
+        assert.equal(request.headers['X-CMS-Idle-For'], '0');
+        assert.equal(request.headers['X-CMS-Background'], undefined);
+      }
     });
   }
 
-  test(`${name}: actual interaction still reports its age after losing focus`, async () => {
+  test(`${name}: hidden pages do not extend idle activity`, async () => {
+    const page = browser();
+    page.document.visibilityState = 'hidden';
+    await page.tick();
+    assert.equal(page.requests[0].headers['X-CMS-Background'], '1');
+    assert.equal(page.requests[0].headers['X-CMS-Idle-For'], undefined);
+  });
+
+  test(`${name}: actual interaction still reports its age after becoming hidden`, async () => {
     const page = browser();
     page.advance(60_000);
     page.events.keydown();
-    page.document.hasFocus = () => false;
+    page.document.visibilityState = 'hidden';
     await page.tick();
     assert.equal(page.requests[0].headers['X-CMS-Idle-For'], '300');
     await page.tick();
