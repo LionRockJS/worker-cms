@@ -257,6 +257,7 @@
     }
   },
   "shell": {
+    "show_explanations": "Show explanations",
     "close_menu": "Close menu",
     "collapse_sidebar": "Collapse sidebar",
     "credit": "credit",

@@ -257,6 +257,7 @@
     }
   },
   "shell": {
+    "show_explanations": "显示说明",
     "close_menu": "关闭菜单",
     "collapse_sidebar": "收起侧边栏",
     "credit": "点数",
