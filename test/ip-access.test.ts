@@ -4,7 +4,7 @@ import { beforeEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { signJWT } from './auth-fixtures';
 import { createAuthSession } from '../src/core/auth/sessions';
-import { accountIpAllowed, connectingIp, ipMatchesAllowlist, parseIpAllowlist } from '../src/core/auth/ip-access';
+import { accountIpAllowed, connectingIp, ipMatchesAllowlist, ipMatchesRoleAllowlists, parseIpAllowlist } from '../src/core/auth/ip-access';
 import { resolveRolePermissions } from '../src/core/auth/roles';
 
 let cookie: string;
@@ -57,13 +57,35 @@ it('enforces fresh role policies on existing sessions and allows account exempti
   expect((await request('/admin/profile',undefined,'198.51.100.1')).status).toBe(200);
   expect((await request('/admin/users/98001/ip-access',{},'198.51.100.1')).status).toBe(400);
 });
-it('requires every restricted role and does not let unrestricted roles bypass a list', async () => {
-  await env.DB.prepare("INSERT INTO roles(name,label,ip_allowlist) VALUES('editor','Editor','[\"192.0.2.0/24\"]'),('moderator','Moderator','[\"192.0.2.10\"]')").run();
-  await env.DB.prepare("UPDATE users SET role='editor,moderator,viewer' WHERE id=98001").run();
-  expect(await accountIpAllowed(env,98001,'192.0.2.10')).toBe(true);
-  expect(await accountIpAllowed(env,98001,'192.0.2.11')).toBe(false);
+it('combines A and B while unrestricted C adds no bypass, across access and mutation authorization', async () => {
+  await env.DB.prepare(`INSERT INTO roles(name,label,ip_allowlist) VALUES
+    ('editor','A','["192.0.2.10","192.0.2.11"]'),
+    ('moderator','B','["192.0.2.11","192.0.2.12"]'),('viewer','C','[]')`).run();
+  await env.DB.prepare("UPDATE users SET role='admin,editor,moderator,viewer' WHERE id=98001").run();
+  for (const ip of ['192.0.2.10','192.0.2.11','192.0.2.12']) {
+    expect(await accountIpAllowed(env,98001,ip)).toBe(true);
+    expect((await request('/admin/profile',undefined,ip)).status).toBe(200);
+  }
+  expect(await accountIpAllowed(env,98001,'192.0.2.13')).toBe(false);
+  expect(await accountIpAllowed(env,98001,null)).toBe(false);
+  expect((await request('/admin/profile',undefined,'192.0.2.13')).status).toBe(403);
+  // IP3 matches B only: allow exemption changes and an edit to A via B's list.
+  expect((await request('/admin/users/98001/ip-access',{ip_unrestricted:'1'},'192.0.2.12')).status).toBe(302);
+  expect((await request('/admin/users/98001/ip-access',{},'192.0.2.12')).status).toBe(302);
+  expect((await request('/admin/roles/editor/ip-access',{ip_allowlist:'198.51.100.1'},'192.0.2.12')).status).toBe(302);
+  // Removing the last matching list would leave A restricting this IP.
+  expect((await request('/admin/roles/moderator/ip-access',{ip_allowlist:''},'192.0.2.12')).status).toBe(400);
   await env.DB.prepare("UPDATE roles SET ip_allowlist='bad' WHERE name='editor'").run();
-  await expect(accountIpAllowed(env,98001,'192.0.2.10')).rejects.toThrow();
+  await expect(accountIpAllowed(env,98001,'192.0.2.12')).rejects.toThrow();
+});
+it('allows any IP only when all role lists are empty, including implicit roles', async () => {
+  expect(ipMatchesRoleAllowlists(null,[])).toBe(true);
+  expect(ipMatchesRoleAllowlists(null,[[],[]])).toBe(true);
+  expect(ipMatchesRoleAllowlists('192.0.2.10',[[],['198.51.100.1']])).toBe(false);
+  expect(ipMatchesRoleAllowlists('2001:db8::1',[['192.0.2.0/24'],[],['2001:db8::/32']])).toBe(true);
+  expect(await accountIpAllowed(env,98001,null)).toBe(true);
+  await env.DB.prepare("INSERT INTO roles(name,label,ip_allowlist) VALUES('admin','Admin','[]')").run();
+  expect(await accountIpAllowed(env,98001,'198.51.100.1')).toBe(true);
 });
 it('rejects invalid lists, delegated policy changes, and self-lockout', async () => {
   expect((await request('/admin/roles/editor/ip-access',{ip_allowlist:'invalid'})).status).toBe(400);
@@ -78,12 +100,14 @@ it('rejects invalid lists, delegated policy changes, and self-lockout', async ()
 it('blocks explicit refresh before rotating tokens and reports unavailable policies without serving data', async () => {
   const issued = await createAuthSession(env, { id: 98001, email: 'ip-admin@example.invalid', name: 'IP admin', role: 'admin' });
   await request('/admin/roles/admin/ip-access',{ip_allowlist:'192.0.2.10'});
+  await env.DB.prepare(`INSERT INTO roles(name,label,ip_allowlist) VALUES('editor','Editor','["192.0.2.12"]')`).run();
+  await env.DB.prepare("UPDATE users SET role='admin,editor,viewer' WHERE id=98001").run();
   cookie = `refresh_token=${issued.refreshToken}`;
   const denied = await request('/auth/refresh',{},'198.51.100.1');
   expect(denied.status).toBe(401);
   expect(await denied.json()).toEqual({error:'ip_not_allowed'});
   expect(denied.headers.get('Set-Cookie')).toBeNull();
-  expect((await request('/auth/refresh',{},'192.0.2.10')).status).toBe(200);
+  expect((await request('/auth/refresh',{},'192.0.2.12')).status).toBe(200);
   cookie = `access_token=${issued.accessToken}`;
   await env.DB.prepare("UPDATE roles SET ip_allowlist='bad' WHERE name='admin'").run();
   const unavailable = await request('/admin/profile');

@@ -75,7 +75,7 @@
   },
   "ip_access": {
     "allowlist": "IP 白名單",
-    "description": "每行輸入一個 IPv4/IPv6 位址或 CIDR 網段，最多 100 項。留空表示不限制 IP。擁有多個受限制角色的帳戶須符合每個白名單。",
+    "description": "每行輸入一個 IPv4/IPv6 位址或 CIDR 網段，最多 100 項。多個角色的白名單會合併，符合任一白名單即可存取。留空的角色不會解除其他角色的限制；所有角色均留空才不限制 IP。",
     "save": "儲存 IP 存取設定",
     "unrestricted": "不限制 IP",
     "exemption": "允許此帳戶從任何 IP 位址存取，覆蓋所有角色的 IP 限制。"

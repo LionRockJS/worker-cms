@@ -2,7 +2,7 @@
 
 Administrators configure an IP allowlist on **Roles → Edit → IP allowlist**. Enter one IPv4/IPv6 literal or CIDR range per line (commas and whitespace also work), up to 100 entries. A blank list permits any IP for that role. Existing accounts and roles start unrestricted.
 
-For an account with several roles, every nonempty role list must match. An unrestricted role does not cancel another role's restriction. Administrators can check **Users → Edit → No IP limit** to exempt an individual account from all role lists. Delegated user/role managers cannot edit either IP control. Permission editing remains subject to its existing authority rules.
+For an account with several roles, the nonempty role lists are combined: an IP allowed by any restricted role permits access. For example, A allowing IP1/IP2 and B allowing IP2/IP3 permits IP1, IP2 and IP3. An unrestricted role does not cancel another role's restriction. Administrators can check **Users → Edit → No IP limit** to exempt an individual account from all role lists. Delegated user/role managers cannot edit either IP control. Permission editing remains subject to its existing authority rules.
 
 The policy applies to OAuth sign-in, explicit/silent token refresh, and every authenticated admin request, including existing sessions and plugin admin pages. Missing or invalid connecting IPs cannot satisfy a nonempty list. Unavailable or malformed stored policy denies access. Clearing a list removes its restriction. The admin role can be restricted too; the editor rejects changes that would exclude the current administrator's IP, including removing their own exemption while outside their role lists.
 

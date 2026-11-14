@@ -59,6 +59,14 @@ export function ipMatchesAllowlist(ip: string | null, entries: readonly string[]
   });
 }
 
+/** Combine restricted roles. Empty lists contribute no addresses; when every
+ * role is unrestricted the combined list is empty and access remains unrestricted.
+ * Callers parse every stored list before evaluating, so corrupt policy fails closed.
+ */
+export function ipMatchesRoleAllowlists(ip: string | null, lists: readonly (readonly string[])[]): boolean {
+  return ipMatchesAllowlist(ip, lists.flat());
+}
+
 export function storedIpAllowlist(value: string): string[] {
   const parsed: unknown = JSON.parse(value);
   if (!Array.isArray(parsed) || parsed.some(entry => typeof entry !== 'string')) throw new Error('Invalid stored IP policy');
@@ -75,7 +83,7 @@ export class IpAccessUnavailableError extends Error {
 }
 
 /** Fresh policy on every protected request, including existing sessions.
- * Every restricted role must match; adding an unrestricted role cannot bypass it.
+ * Any restricted role may allow the IP; unrestricted roles cannot bypass restrictions.
  * Missing IPs fail closed for restricted accounts; malformed policies throw.
  */
 export async function accountIpAllowed(env: Env, userId: string | number, ip: string | null): Promise<boolean> {
@@ -91,5 +99,5 @@ async function readAccountIpAllowed(env: Env, userId: string | number, ip: strin
   const roles = splitRoles(user.role);
   const rows = await env.DB.prepare('SELECT ip_allowlist FROM roles WHERE name IN (SELECT value FROM json_each(?))')
     .bind(JSON.stringify(roles)).all<{ ip_allowlist: string }>();
-  return rows.results.every(row => ipMatchesAllowlist(ip, storedIpAllowlist(row.ip_allowlist)));
+  return ipMatchesRoleAllowlists(ip, rows.results.map(row => storedIpAllowlist(row.ip_allowlist)));
 }

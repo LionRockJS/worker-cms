@@ -1,4 +1,4 @@
-import { ipMatchesAllowlist, storedIpAllowlist } from './ip-access';
+import { ipMatchesRoleAllowlists, storedIpAllowlist } from './ip-access';
 import type { Env, JWTPayload, Permission } from '../../types';
 import { buildRolePermissions, effectivePermissions, splitRoles } from './roles';
 import { safeRoleAuditValue } from './role-mutation-sql';
@@ -53,9 +53,9 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   const effective = effectivePermissions(roleMap, user.role);
   const actorRoles = splitRoles(user.role);
   const admin = actorRoles.includes('admin');
-  const ipAllowed = !sessionRequired || user.ip_unrestricted === 1 || managed
+  const ipAllowed = !sessionRequired || user.ip_unrestricted === 1 || ipMatchesRoleAllowlists(context?.auditRequest?.sourceIp ?? null, managed
     .filter(role => actorRoles.includes(role.name))
-    .every(role => ipMatchesAllowlist(context?.auditRequest?.sourceIp ?? null, storedIpAllowlist(role.ip_allowlist)));
+    .map(role => storedIpAllowlist(role.ip_allowlist)));
   return {
     capability: permission, allowed: ipAllowed && (permission === 'authenticated' || admin || effective.has(permission)), admin, permissions: effective, roleMap,
     guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u

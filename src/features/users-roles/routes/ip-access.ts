@@ -4,7 +4,7 @@ import { requirePermission } from '../../../core/auth/guards';
 import { recordPolicyDenial } from '../../../core/auth/denials';
 import { permissionsFor, splitRoles } from '../../../core/auth/roles';
 import { getRoleForEdit } from '../../../core/auth/role-store';
-import { storedIpAllowlist, connectingIp, ipMatchesAllowlist, parseIpAllowlist } from '../../../core/auth/ip-access';
+import { storedIpAllowlist, connectingIp, ipMatchesRoleAllowlists, parseIpAllowlist } from '../../../core/auth/ip-access';
 import { mutationAuditEvidence } from '../../../core/db/audit';
 import { abortIf } from '../../../core/db/transaction-guard';
 import { auditUnavailable, flushReadAudit } from '../../../core/http/access-log';
@@ -36,8 +36,13 @@ ipAccessRoutes.post('/roles/:name/ip-access', requirePermission('roles:manage'),
   const actor = await c.env.DB.prepare('SELECT role, ip_unrestricted FROM users WHERE id = ?').bind(c.get('user').sub)
     .first<{ role: string; ip_unrestricted: number }>();
   if (!actor) return c.notFound();
-  if (!actor.ip_unrestricted && splitRoles(actor.role).includes(name) && !ipMatchesAllowlist(connectingIp(c.req.raw.headers), entries)) {
-    return c.text('Include your current IP address to avoid locking yourself out', 400);
+  if (!actor.ip_unrestricted && splitRoles(actor.role).includes(name)) {
+    const otherPolicies = await c.env.DB.prepare('SELECT ip_allowlist FROM roles WHERE name != ? AND name IN (SELECT value FROM json_each(?))')
+      .bind(name, JSON.stringify(splitRoles(actor.role))).all<{ ip_allowlist: string }>();
+    const proposed = [...otherPolicies.results.map(row => storedIpAllowlist(row.ip_allowlist)), entries];
+    if (!ipMatchesRoleAllowlists(connectingIp(c.req.raw.headers), proposed)) {
+      return c.text('Your combined role IP lists must allow your current IP to avoid locking yourself out', 400);
+    }
   }
   const before = await c.env.DB.prepare('SELECT ip_allowlist FROM roles WHERE name = ?').bind(name).first<{ ip_allowlist: string }>();
   const classification = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
@@ -76,7 +81,7 @@ ipAccessRoutes.post('/users/:id/ip-access', requirePermission('users:manage'), a
   if (id === c.get('user').sub && !unrestricted) {
     const policies = await c.env.DB.prepare('SELECT ip_allowlist FROM roles WHERE name IN (SELECT value FROM json_each(?))')
       .bind(JSON.stringify(splitRoles(before.role))).all<{ ip_allowlist: string }>();
-    if (!policies.results.every(row => ipMatchesAllowlist(connectingIp(c.req.raw.headers), storedIpAllowlist(row.ip_allowlist)))) {
+    if (!ipMatchesRoleAllowlists(connectingIp(c.req.raw.headers), policies.results.map(row => storedIpAllowlist(row.ip_allowlist)))) {
       return c.text('Your current IP must match your role policies before removing your exemption', 400);
     }
   }
