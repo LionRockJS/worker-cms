@@ -338,6 +338,46 @@ the client address as `CF-Connecting-IP`. Cloudflare Tunnel does this already; w
 nginx, add `proxy_set_header CF-Connecting-IP $remote_addr;`. Without it, every
 visitor shares one sign-in rate limit. Keep the port reachable only from the proxy.
 
+#### Standalone workerd
+
+`server-workerd.mjs` generates a standalone `config.capnp` using the installed
+Miniflare binding implementations. Node.js is needed during preparation only;
+the running server is workerd:
+
+```bash
+node server-workerd.mjs --build
+node_modules/.bin/workerd serve --experimental config.capnp
+# Or prepare and launch in one command:
+node server-workerd.mjs --build --serve
+```
+
+It reads `wrangler.toml`, `.dev.vars`, and `.env` like `server.mjs`. `HOST` and
+`PORT` default to `127.0.0.1:8787`; `CRON_PORT` defaults to `8788`. Public
+`CANONICAL_ORIGIN` uses the same HTTPS proxy setup described above. The config
+embeds the bundle, bindings, local secrets, and absolute file/state paths;
+it is generated with private permissions and ignored by Git. Regenerate after
+changing code, bindings, secrets, or server settings. Keep the installed
+`node_modules/workerd` package for its binary and configuration schema.
+
+D1, R2, Durable Objects, queues, rate limits, and disk-backed views run within
+workerd. State uses `.wrangler/state/v3`, shared with the other local servers;
+stop those servers before preparing or running this one. Apply the local
+database migrations with `npm run db:migrate` before the first run. Images
+transforms are omitted, so media previews serve the originals. Queue messages
+are held in memory by the local emulator and do not survive a restart.
+
+Workerd does not automatically fire Wrangler cron triggers. A separate,
+loopback-only socket invokes all configured cron handlers on POST. For the
+current five-minute schedule, add this to the machine's crontab (adjust the port
+if `CRON_PORT` changes):
+
+```cron
+*/5 * * * * curl --fail --silent --show-error -X POST http://127.0.0.1:8788/
+```
+
+The generator uses Miniflare's debug configuration export and validates the
+expected service layout; recheck this path when upgrading Miniflare/Wrangler.
+
 ### 9. Deploy
 
 ```bash
