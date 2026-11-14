@@ -82,6 +82,10 @@
     "reveal_fields": "Reveal private fields"
   },
   "profile": {
+    "disable_account": "Disable account",
+    "disable_description": "Disabling signs you out on every device and releases all connected sign-in methods. Sign in to another account, then connect these methods from its Profile page. Your existing account data is retained; this account cannot be accessed after disabling.",
+    "disable_confirm": "Disable this account and release all its sign-in methods?",
+    "disable_acknowledge": "I understand that I will lose access to this account.",
     "avatar": "Avatar",
     "avatar_initials": "Use initials",
     "avatar_remove": "Remove picture",

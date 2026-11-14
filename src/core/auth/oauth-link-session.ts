@@ -14,7 +14,8 @@ export interface OAuthLinkSession {
 
 function sessionCondition(session: Omit<OAuthLinkSession, 'sessionId'> & { sessionId: number | null }) {
   return {
-    sql: `s.user_id = ? AND (? IS NULL OR s.id = ?) AND ? > CAST(strftime('%s', 'now') AS INTEGER)
+    sql: `EXISTS (SELECT 1 FROM users u WHERE u.id = s.user_id AND u.disabled_at IS NULL)
+      AND s.user_id = ? AND (? IS NULL OR s.id = ?) AND ? > CAST(strftime('%s', 'now') AS INTEGER)
       AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
       AND (? IS NULL OR (COALESCE(s.rotated_at, s.created_at) > datetime('now', ?)
         AND (s.refresh_token_hash = ? OR (s.previous_refresh_token_hash = ?

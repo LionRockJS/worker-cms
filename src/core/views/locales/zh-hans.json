@@ -82,6 +82,10 @@
     "reveal_fields": "显示个人信息字段"
   },
   "profile": {
+    "disable_account": "停用账户",
+    "disable_description": "停用后，所有设备都会退出登录，并解除所有登录方式的关联。请登录另一个账户，再到其个人资料页面关联这些登录方式。现有账户数据将保留；停用后将无法访问此账户。",
+    "disable_confirm": "确定停用此账户并解除所有登录方式的关联？",
+    "disable_acknowledge": "我了解停用后将无法访问此账户。",
     "avatar": "头像",
     "avatar_initials": "使用姓名首字母",
     "avatar_remove": "移除头像",

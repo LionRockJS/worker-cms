@@ -127,7 +127,7 @@ export async function rotateAuthSession(env: Env, refreshToken: string,
     const hash = await hashToken(payload.jti);
     const session = await findRefreshSession(env.DB, hash, idleTtl);
     if (!session || String(session.user_id) !== payload.sub) return { ok: false, error: 'session_revoked' };
-    const user = await env.DB.prepare('SELECT id, email, name, role FROM users WHERE id = ?').bind(session.user_id).first<AuthDbUser>();
+    const user = await env.DB.prepare('SELECT id, email, name, role FROM users WHERE disabled_at IS NULL AND id = ?').bind(session.user_id).first<AuthDbUser>();
     if (!user) return { ok: false, error: 'user_not_found' };
     if (!safeRoleAuditValue(user.role)) throw new Error('Session role evidence unavailable');
     const policy = await sessionPolicy(env);
@@ -291,7 +291,7 @@ async function findRefreshSession(
     `SELECT s.*, u.role,
             CASE WHEN refresh_token_hash = ?1 THEN 0 ELSE 1 END AS is_previous
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
+      WHERE u.disabled_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
         AND COALESCE(s.last_activity_at, s.created_at) > datetime('now', ?2)
         AND (
           refresh_token_hash = ?1
@@ -356,7 +356,7 @@ export async function validateAccessSession(db: D1DatabaseClient, payload: JWTPa
       || payload.exp <= Math.floor(Date.now() / 1000)) return null;
   const user = await db.prepare(
     `SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.id = ? AND s.user_id = ? AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
+     WHERE u.disabled_at IS NULL AND s.id = ? AND s.user_id = ? AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days')
        AND COALESCE(s.last_activity_at, s.created_at) > datetime('now', ?)`,
   ).bind(payload.sid, payload.sub, idleCutoff(idleTtl)).first<AuthDbUser>();
   return user ? { ...payload, email: user.email, name: user.name, role: user.role } : null;

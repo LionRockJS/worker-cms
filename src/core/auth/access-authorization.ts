@@ -36,7 +36,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   actor = { ...actor };
   if (!/^\d+$/.test(actor.sub) || (sessionRequired && !/^\d+$/.test(actor.sid ?? '')) || !safeRoleAuditValue(actor.role)) throw new Error('Access authorization unavailable');
   const [users, roles, grants] = await env.DB.batch([
-    env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(actor.sub),
+    env.DB.prepare('SELECT role FROM users WHERE disabled_at IS NULL AND id = ?').bind(actor.sub),
     env.DB.prepare('SELECT name, builtin FROM roles ORDER BY name'),
     env.DB.prepare('SELECT role, permission FROM role_permissions ORDER BY role, permission'),
   ]);
@@ -54,7 +54,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   return {
     capability: permission, allowed: permission === 'authenticated' || admin || effective.has(permission), admin, permissions: effective, roleMap,
     guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
-        WHERE u.id = ? AND u.role IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
+        WHERE u.disabled_at IS NULL AND u.id = ? AND u.role IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
           AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})
       OR (SELECT COUNT(*) FROM roles) <> ?
       OR EXISTS (SELECT name, builtin FROM roles EXCEPT

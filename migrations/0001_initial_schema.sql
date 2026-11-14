@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS users(
     avatar_url TEXT,
     -- role: comma-separated list of admin | editor | moderator | viewer
     role TEXT NOT NULL DEFAULT 'viewer',
+    disabled_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

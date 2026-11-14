@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { applyD1Migrations, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import worker from '../src/index';
-import { createAuthSession } from '../src/core/auth/sessions';
+import { rotateAuthSession, validateAccessSession, createAuthSession } from '../src/core/auth/sessions';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { auditMutationOutboxHealth, drainAuditMutationOutbox } from '../src/core/db/audit-mutation-outbox';
 import { auditDeliveryEvidence } from '../src/core/db/audit';
@@ -302,3 +302,65 @@ it.each(['https://example.invalid/a.png', 'data:image/svg+xml;base64,PHN2Zz4=', 
     expect((await account())!.avatar_url).toBe('private-avatar');
     expect(await events()).toEqual([]);
   });
+
+const disable = (overrides: Partial<Env> = {}) => call('/admin/profile/disable', new URLSearchParams({ confirm: 'disable', id: '2' }), overrides);
+
+it('disables only the current account, releases every identity and revokes every session', async () => {
+  const before = await account();
+  const issued = await createAuthSession(env, { id: userId, email: 'private@example.invalid', name: 'Private old name', role: 'viewer' });
+  await env.DB.prepare("INSERT INTO users (id, oauth_id, email) VALUES (9002, 'google:other', 'other@example.invalid')").run();
+  const response = await disable();
+  expect(response.status).toBe(303);
+  expect(response.headers.get('Location')).toBe('/auth/login');
+  expect(response.headers.get('Set-Cookie')).toContain('access_token=;');
+  expect(await account()).toMatchObject({ email: before!.email, name: before!.name, role: before!.role, disabled_at: expect.any(String) });
+  expect((await account())!.oauth_id).not.toBe(before!.oauth_id);
+  expect(await links()).toEqual([]);
+  expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').bind(userId).first()).toEqual({ n: 0 });
+  expect(await validateAccessSession(env.DB, issued.accessPayload, 86400)).toBeNull();
+  expect((await rotateAuthSession(env, issued.refreshToken)).ok).toBe(false);
+  await expect(createAuthSession(env, { id: userId, email: 'private@example.invalid', name: 'Private old name', role: 'viewer' })).rejects.toThrow();
+  expect(await env.DB.prepare('SELECT disabled_at FROM users WHERE id = 9002').first()).toEqual({ disabled_at: null });
+  const audit = await env.DB.prepare("SELECT * FROM audit_events WHERE action = 'user.disable'").first();
+  expect(audit).toMatchObject({ target_id: String(userId), actor_user_id: String(userId), data_class: 'phi' });
+  privateValuesAbsent(audit);
+});
+
+it('requires an authenticated session and explicit acknowledgment to disable', async () => {
+  const before = await account();
+  expect((await call('/admin/profile/disable')).status).toBe(303);
+  expect((await call('/admin/profile/disable', new URLSearchParams({ confirm: 'disable' }), {}, false)).status).toBe(302);
+  expect(await account()).toEqual(before);
+});
+
+it('commits disabling during a primary audit outage with durable pending evidence', async () => {
+  await fault("BEFORE INSERT ON audit_events WHEN NEW.action = 'user.disable' BEGIN SELECT RAISE(ABORT, 'unavailable'); END");
+  expect((await disable()).status).toBe(303);
+  expect((await account())!.disabled_at).toEqual(expect.any(String));
+  expect(await outbox()).toHaveLength(1);
+  await env.DB.prepare(`DROP TRIGGER ${triggers[0]}`).run();
+  await env.DB.prepare('UPDATE audit_mutation_outbox SET next_attempt_at = 0').run();
+  expect((await drainAuditMutationOutbox(env)).delivered).toBe(1);
+});
+
+it.each([
+  'BEFORE INSERT ON audit_mutation_outbox BEGIN SELECT RAISE(IGNORE); END',
+  'BEFORE DELETE ON user_oauth_identities BEGIN SELECT RAISE(IGNORE); END',
+  'BEFORE DELETE ON sessions BEGIN SELECT RAISE(IGNORE); END',
+  'BEFORE UPDATE ON users BEGIN SELECT RAISE(IGNORE); END',
+])('rolls back disabling when a required mutation or receipt is ignored: %s', async sql => {
+  const before = await account(); const identities = await links();
+  await fault(sql);
+  expect((await disable()).status).toBe(503);
+  expect(await account()).toEqual(before); expect(await links()).toEqual(identities);
+  expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').bind(userId).first()).toEqual({ n: 1 });
+});
+
+it('rejects disabled accounts even if a legacy session row remains', async () => {
+  const issued = await createAuthSession(env, { id: userId, email: 'private@example.invalid', name: 'Private old name', role: 'viewer' });
+  await env.DB.prepare('UPDATE users SET disabled_at = CURRENT_TIMESTAMP WHERE id = ?').bind(userId).run();
+  expect(await validateAccessSession(env.DB, issued.accessPayload, 86400)).toBeNull();
+  expect((await rotateAuthSession(env, issued.refreshToken)).ok).toBe(false);
+  expect((await disable()).status).toBe(302);
+  expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').bind(userId).first()).toEqual({ n: 2 });
+});

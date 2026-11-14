@@ -331,14 +331,14 @@ async function findUserByOAuthIdentity(db: D1DatabaseClient, oauthId: string): P
     `SELECT u.id, u.email, u.name, u.role
        FROM user_oauth_identities i
        JOIN users u ON u.id = i.user_id
-      WHERE i.oauth_id = ?`,
+      WHERE u.disabled_at IS NULL AND i.oauth_id = ?`,
   )
     .bind(oauthId)
     .first<AuthDbUser>();
   if (linked) return linked;
 
   // Legacy fallback for databases that have not backfilled identities yet.
-  return db.prepare('SELECT id, email, name, role FROM users WHERE oauth_id = ?')
+  return db.prepare('SELECT id, email, name, role FROM users WHERE disabled_at IS NULL AND oauth_id = ?')
     .bind(oauthId)
     .first<AuthDbUser>();
 }

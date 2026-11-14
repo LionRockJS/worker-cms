@@ -35,7 +35,7 @@ export async function sessionPolicy(env: Env, revocation = false) {
 }
 
 export function sessionUserGuard(env: Env, user: AuthDbUser) {
-  return abortIf(env, `NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND email IS ? AND name IS ? AND role IS ?)`,
+  return abortIf(env, `NOT EXISTS (SELECT 1 FROM users WHERE disabled_at IS NULL AND id = ? AND email IS ? AND name IS ? AND role IS ?)`,
     [user.id, user.email, user.name, user.role]);
 }
 

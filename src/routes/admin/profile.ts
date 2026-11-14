@@ -1,3 +1,4 @@
+import { accessCookieName, refreshCookieName, oauthStateCookieName, clearAuthCookie } from '../../core/auth/cookies';
 import { Hono } from 'hono';
 import { profilePage } from '../../core/templates/profile';
 import type { Env, Variables, User } from '../../types';
@@ -9,7 +10,7 @@ import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i
 import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';
 import { contextActor } from '../../core/db/audit';
 import { recordAuditOutage } from '../../core/db/audit-outages';
-import { disconnectOwnIdentity, isOwnAvatar, OWN_AVATAR_MAX_LENGTH, OWN_AVATAR_PATTERN, updateOwnAvatar, updateOwnProfileName } from '../../core/auth/self-profile';
+import { disableOwnAccount, disconnectOwnIdentity, isOwnAvatar, OWN_AVATAR_MAX_LENGTH, OWN_AVATAR_PATTERN, updateOwnAvatar, updateOwnProfileName } from '../../core/auth/self-profile';
 import { recordTableReads } from '../../core/http/access-log';
 
 
@@ -207,4 +208,17 @@ profileRoutes.post('/profile/identities/:id/disconnect', async (c) => {
   }
 
   return c.redirect('/admin/profile?flash=Sign-in+method+disconnected');
+});
+
+profileRoutes.post('/profile/disable', async (c) => {
+  const form = await c.req.formData();
+  if (form.get('confirm') !== 'disable') return c.redirect('/admin/profile', 303);
+  try {
+    await disableOwnAccount(c);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Account disabling unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  for (const name of [accessCookieName, refreshCookieName, oauthStateCookieName]) clearAuthCookie(c, name);
+  return c.redirect('/auth/login', 303);
 });

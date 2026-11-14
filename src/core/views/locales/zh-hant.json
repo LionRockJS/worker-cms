@@ -82,6 +82,10 @@
     "reveal_fields": "顯示個人資料欄位"
   },
   "profile": {
+    "disable_account": "停用帳戶",
+    "disable_description": "停用後，所有裝置都會登出，並解除所有登入方式的連結。請登入另一個帳戶，再到其個人資料頁面連結這些登入方式。現有帳戶資料將保留；停用後將無法存取此帳戶。",
+    "disable_confirm": "確定停用此帳戶並解除所有登入方式的連結？",
+    "disable_acknowledge": "我了解停用後將無法存取此帳戶。",
     "avatar": "頭像",
     "avatar_initials": "使用姓名首字母",
     "avatar_remove": "移除頭像",

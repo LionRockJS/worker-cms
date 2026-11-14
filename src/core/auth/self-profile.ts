@@ -17,7 +17,7 @@ interface Identity {
 async function ownAccount(c: AppContext): Promise<User> {
   const actor = c.get('user');
   if (!actor || !/^\d+$/.test(actor.sub) || !/^\d+$/.test(actor.sid ?? '')) throw new Error('Current account session required');
-  const user = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(actor.sub).first<User>();
+  const user = await c.env.DB.prepare('SELECT * FROM users WHERE disabled_at IS NULL AND id = ?').bind(actor.sub).first<User>();
   if (!user || user.role !== actor.role) throw new Error('Account changed');
   return user;
 }
@@ -29,7 +29,7 @@ function sessionGuard(c: AppContext) {
 }
 
 function accountGuard(c: AppContext, user: User) {
-  return abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND oauth_id IS ? AND email IS ?
+  return abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE disabled_at IS NULL AND id = ? AND oauth_id IS ? AND email IS ?
     AND name IS ? AND avatar_url IS ? AND role IS ?)`, [user.id, user.oauth_id, user.email, user.name, user.avatar_url, user.role]);
 }
 
@@ -127,4 +127,34 @@ export async function disconnectOwnIdentity(c: AppContext, identityId: number): 
   // Delivery is separate; its result cannot undo or misreport the revocation.
   await drainAuditMutationOutbox(c.env, envelope.row.eventId);
   return 'removed';
+}
+
+/** Disabling retains account data while releasing all sign-in keys. The
+ * revocation and durable evidence commit together, including during audit outages. */
+export async function disableOwnAccount(c: AppContext): Promise<void> {
+  const before = await ownAccount(c);
+  const policy = await classification(c, true);
+  const actor = contextActor(c);
+  const rolesUnavailable = !safeRoleAuditValue(before.role);
+  if (rolesUnavailable) actor.roles = null;
+  const envelope = mutationAuditEnvelope(c, { action: 'user.disable', entityType: 'user', entityId: before.id,
+    detail: { classification_unavailable: policy.unavailable, roles_unavailable: rolesUnavailable } }, 'phi', actor);
+  const evidence = auditOutboxEvidence(c.env, envelope);
+  // This namespace cannot be emitted by an OAuth provider. A random key also
+  // avoids collisions with legacy primary identities.
+  const retiredKey = `disabled:${crypto.randomUUID()}`;
+  await c.env.DB.batch([
+    sessionGuard(c), accountGuard(c, before),
+    c.env.DB.prepare('DELETE FROM user_oauth_identities WHERE user_id = ?').bind(before.id),
+    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(before.id),
+    c.env.DB.prepare(`UPDATE users SET disabled_at = CURRENT_TIMESTAMP, oauth_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND disabled_at IS NULL`).bind(retiredKey, before.id),
+    evidence.write, evidence.guard,
+    abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND disabled_at IS NOT NULL AND oauth_id = ?
+      AND email IS ? AND name IS ? AND avatar_url IS ? AND role IS ?)
+      OR EXISTS (SELECT 1 FROM user_oauth_identities WHERE user_id = ?)
+      OR EXISTS (SELECT 1 FROM sessions WHERE user_id = ?)`,
+    [before.id, retiredKey, before.email, before.name, before.avatar_url, before.role, before.id, before.id]),
+  ]);
+  await drainAuditMutationOutbox(c.env, envelope.row.eventId);
 }

@@ -54,6 +54,10 @@ function readEnvelope(id: string, payload: string): AuditEnvelope {
       || row.detail.user_id !== actor.userId || typeof row.detail.primary_replaced !== 'boolean'
       || !(row.detail.replacement_identity_id === null || (typeof row.detail.replacement_identity_id === 'number' && Number.isSafeInteger(row.detail.replacement_identity_id)))
       || !keysMatch(row.detail, ['user_id', 'primary_replaced', 'replacement_identity_id', 'classification_unavailable', 'roles_unavailable'])) throw new Error('Outbox evidence requires review');
+  } else if (row.action === 'user.disable') {
+    if (row.eventClass !== 'admin' || row.retentionClass !== 'admin_config' || row.targetType !== 'user'
+      || actor.via !== null || actor.userId !== row.targetId || actor.sessionSid === null
+      || !keysMatch(row.detail, ['classification_unavailable', 'roles_unavailable'])) throw new Error('Outbox evidence requires review');
   } else {
     const reasons: Record<string, string> = { 'auth.logout': 'logout', 'auth.session.revoke': 'explicit-revocation', 'auth.session.cap': 'session-cap', 'auth.session.expire': 'expired' };
     const reason = reasons[row.action];
