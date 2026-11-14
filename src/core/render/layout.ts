@@ -377,7 +377,7 @@ function adminSessionKeepaliveScript(): string {
   return `(function() {
       if (window.__cmsSessionKeepaliveBound) return;
       window.__cmsSessionKeepaliveBound = true;
-      var INTERVAL = 10 * 60 * 1000;
+      var INTERVAL = 5 * 60 * 1000;
       // Interaction after this long without a report is sent at once, so the
       // server's view of activity lags the person by at most this much.
       var REPORT_AFTER = 5 * 60 * 1000;
@@ -388,12 +388,15 @@ function adminSessionKeepaliveScript(): string {
       var lastReported = lastInteraction;
       var lastAttempt = 0;
 
-      // An open tab is not activity. The server records when the person last
-      // interacted, never when this timer fired, so an untouched tab goes idle.
+      // A visible, focused page counts as reading. Hidden or unfocused tabs
+      // only report actual interaction, so background tabs still go idle.
       async function refresh() {
         if (inFlight) return;
         inFlight = true;
         lastAttempt = Date.now();
+        if (document.visibilityState === 'visible' && document.hasFocus()) {
+          lastInteraction = Date.now();
+        }
         var interaction = lastInteraction;
         var headers = { Accept: 'application/json' };
         if (interaction > lastReported) {
@@ -407,7 +410,7 @@ function adminSessionKeepaliveScript(): string {
             credentials: 'same-origin',
             headers: headers
           });
-          if (res.status === 401) window.location.href = '/auth/login';
+          if (res.status === 401) window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
           else if (res.ok) lastReported = Math.max(lastReported, interaction);
         } catch (error) {
           /* retry on the next tick */

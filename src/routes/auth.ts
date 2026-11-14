@@ -1,3 +1,4 @@
+import { adminReturnTo } from '../core/auth/return-to';
 import { accountIpAllowed, connectingIp } from '../core/auth/ip-access';
 // ============================================================
 // OAuth 2.1 routes
@@ -100,6 +101,7 @@ interface NormalizedUser {
 }
 
 interface OAuthStatePayload extends JWTPayload {
+  return_to?: string;
   state?: string;
   code_verifier?: string;
   provider?: string;
@@ -383,6 +385,7 @@ authRoutes.get('/login', async (c) => {
       appFont: branding.appFont,
       providers: providers.length > 0 ? providers : ['github'],
       error,
+      returnTo: adminReturnTo(c.req.query('returnTo')),
       viewRevision: viewRevision(c.env),
       uiLocale: uiLocale.code,
       uiDirection: uiLocale.direction,
@@ -433,6 +436,7 @@ authRoutes.get('/start', async (c) => {
     state,
     code_verifier: codeVerifier,
     provider: providerName,
+    return_to: adminReturnTo(c.req.query('returnTo')),
     ...(linkUserId ? { link_user_id: String(linkUserId) } : {}),
     exp: Math.floor(Date.now() / 1000) + 600, // 10 minutes
   };
@@ -649,7 +653,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
   c.executionCtx.waitUntil(maintainSessionHygiene(c.env, dbUser.id));
   setAuthCookie(c, accessCookieName, issued.accessToken, ACCESS_TOKEN_TTL);
   setAuthCookie(c, refreshCookieName, issued.refreshToken, REFRESH_TOKEN_TTL);
-  return c.redirect('/admin');
+  return c.redirect(adminReturnTo(statePayload.return_to));
 }
 
 /**

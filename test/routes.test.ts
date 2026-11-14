@@ -267,8 +267,8 @@ describe('auth routes', () => {
       .toBe('登入以管理您的內容');
   });
 
-  it('GET /auth/callback exchanges a valid OAuth response, upserts the user, and creates a session', async () => {
-    const start = await fetchWorker('/auth/start?provider=eventuai');
+  it.each([undefined, '/admin/pages/list?page=3&filter=draft#rows', 'https://evil.example/admin'])('GET /auth/callback preserves a safe return page (%s), upserts the user, and creates a session', async (returnTo) => {
+    const start = await fetchWorker('/auth/start?provider=eventuai' + (returnTo ? '&returnTo=' + encodeURIComponent(returnTo) : ''));
     const location = new URL(start.headers.get('Location') ?? '');
     const state = location.searchParams.get('state');
     const stateCookie = cookieValue(start.headers.get('Set-Cookie'), 'oauth_state');
@@ -296,7 +296,7 @@ describe('auth routes', () => {
     });
 
     expect(callback.status).toBe(302);
-    expect(callback.headers.get('Location')).toBe('/admin');
+    expect(callback.headers.get('Location')).toBe(returnTo?.startsWith('/admin/') ? returnTo : '/admin');
     expect(callback.headers.get('Set-Cookie')).toContain('access_token=');
     expect(await env.DB.prepare('SELECT role FROM users WHERE oauth_id = ?')
       .bind('eventuai:eventuai-user')
@@ -2634,7 +2634,7 @@ describe('admin routes', () => {
     const response = await fetchWorker('/admin');
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/auth/login');
+    expect(response.headers.get('Location')).toBe('/auth/login?returnTo=%2Fadmin');
   });
 
   it('returns JSON for unauthenticated upload requests', async () => {

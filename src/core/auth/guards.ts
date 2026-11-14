@@ -1,3 +1,4 @@
+import { adminReturnTo } from './return-to';
 import { accountIpAllowed, connectingIp } from './ip-access';
 // ============================================================
 // Auth middleware – validates dual JWT on every protected route.
@@ -99,7 +100,10 @@ export const authMiddleware = createMiddleware<{
     if (wantsJsonResponse(c.req.raw)) {
       return jsonError({ success: false, error: 'Authentication required' }, 401, 'authentication-required');
     }
-    return c.redirect('/auth/login');
+    const url = new URL(c.req.url);
+    return c.redirect(c.req.method === 'GET'
+      ? '/auth/login?returnTo=' + encodeURIComponent(adminReturnTo(url.pathname + url.search))
+      : '/auth/login');
   }
 
   c.set('user', user);

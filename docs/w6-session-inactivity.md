@@ -2,6 +2,30 @@
 
 Engineering record for W6 in [the compliance plan](compliance-implementation-plan-2026-10-30.md#w6--bound-inactivity-without-breaking-revocation). It builds on the idle window added in `5db2885` (see [the ISO review §2](iso-27001-coverage-review-2026-11-01.md#a85-as-implemented)) and closes the gap that window left: an open admin tab kept its session alive indefinitely. **Nothing here was deployed or applied to a live database.** Each "verified" item is verified in source and in the test runtime only.
 
+## Reading activity update (2026-11-15)
+
+The admin keepalive now reports a visible, focused page as reading activity every
+5 minutes, in both the bootstrap and Liquid layouts. This prevents quiet reading
+from triggering an idle sign-out. Hidden or unfocused tabs still report no new
+activity unless the person interacts. A foreground page left unattended also
+counts as reading: the browser cannot distinguish that from quiet reading.
+Server-side idle, revocation, token expiry and absolute lifetime checks are unchanged.
+
+When a keepalive receives 401, it includes the current path, query and fragment
+in the sign-in URL. Unauthenticated admin GET requests also preserve their path
+and query. The login page passes the validated admin destination through each
+provider link and the signed OAuth state; successful login returns there. Invalid
+or external destinations fall back to `/admin`. This restores the page URL,
+including filters and pagination, but does not restore unsaved form input.
+
+`node --test tools/test-session-keepalive.mjs` exercises both actual scripts with
+a browser/clock fixture: nine hours of quiet reading, hidden/unfocused tabs,
+interaction age, rejected sessions and duplicate initialization. These checks also
+run in `npm test`; they simulate browser APIs rather than driving a real browser.
+
+The original W6 implementation record below describes the earlier interaction-only
+policy and its rollout.
+
 ## The gap this closes
 
 The idle window was measured from the last token refresh. Every admin page runs a keepalive that refreshes every 10 minutes and whenever the tab becomes visible, and the editor polls presence every 8 and 30 seconds. So an open, untouched tab refreshed forever, and only the 7-day refresh and 30-day absolute limits ended it. Access-token checks also skipped the idle window, so the tokens the keepalive kept issuing were accepted regardless.

@@ -91,7 +91,7 @@ it.each(['missing', 'malformed', 'expired', 'revoked'])('durably records a %s ex
 
 it.each(['missing', 'invalid'])('records a %s protected-route authentication refusal once before redirecting', async kind => {
   const response = await call('/admin/profile?search=attempted-user%40example.invalid', { cookie: kind === 'invalid' ? 'access_token=private-url-secret' : '' });
-  expect(response.headers.get('Location')).toBe('/auth/login');
+  expect(response.headers.get('Location')).toBe('/auth/login?returnTo=' + encodeURIComponent('/admin/profile?search=attempted-user%40example.invalid'));
   const rows = await events(); expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ action: 'auth.access', actor_user_id: null, session_sid: null });
   expect(JSON.parse(String(rows[0].detail))).toEqual({ reason: kind === 'missing' ? 'missing_credentials' : 'invalid_credentials' });
