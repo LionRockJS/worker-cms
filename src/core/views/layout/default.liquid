@@ -777,19 +777,6 @@
           </div>
         </a>
 
-        <div class="flex min-w-0 items-start gap-3 rounded-lg px-2 py-2 mb-3" data-sidebar-footer-action>
-        <form method="POST" action="/auth/logout" class="inline">
-        <button type="submit"
-        class="flex shrink-0 items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
-        data-sidebar-tooltip
-        data-sidebar-label="{{ "shell.sign_out" | t }}"
-        aria-label="{{ "shell.sign_out" | t }}">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
-        <span data-sidebar-text>{{ "shell.sign_out" | t }}</span>
-        </button>
-        </form>
-        </div>
-
         <div class="flex min-w-0 flex-wrap items-center gap-3 mb-3" data-sidebar-footer-controls>
           <form method="post" action="{{ uiLocaleAction }}" class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-gray-700 px-2.5 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
                 data-sidebar-locale
@@ -824,7 +811,7 @@
           </button>
         </div>
 
-        <div class="mt-2 border-t border-gray-700 pt-2" data-sidebar-footer-toggle>
+        <div class="mt-2 flex items-center gap-3 border-t border-gray-700 pt-2" data-sidebar-footer-toggle>
           <button type="button"
                   class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-gray-700 hover:text-white md:inline-flex"
                   data-sidebar-toggle
@@ -837,6 +824,16 @@
                   aria-label="{{ "shell.collapse_sidebar" | t }}">
             <svg class="h-4 w-4 transition-transform" data-sidebar-toggle-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sidebar"></use></svg>
           </button>
+          <form method="POST" action="/auth/logout" class="inline-flex" data-sidebar-footer-action>
+            <button type="submit"
+                    class="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
+                    data-sidebar-tooltip
+                    data-sidebar-label="{{ "shell.sign_out" | t }}"
+                    aria-label="{{ "shell.sign_out" | t }}">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
+              <span data-sidebar-text>{{ "shell.sign_out" | t }}</span>
+            </button>
+          </form>
         </div>
       </div>
     </aside>
