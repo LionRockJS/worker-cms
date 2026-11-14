@@ -1,3 +1,4 @@
+import { accountIpAllowed, connectingIp } from './ip-access';
 import type { Env, JWTPayload } from '../../types';
 import { generateTokenId, hashToken, signJWT, verifyJWT } from './jwt';
 import type { AppContext } from '../http/context';
@@ -93,7 +94,7 @@ export type RotateAuthSessionResult =
       /** Omitted when a concurrent request used the just-rotated token. */
       refreshToken?: string;
     }
-  | { ok: false; error: 'invalid_refresh_token' | 'session_revoked' | 'user_not_found' };
+  | { ok: false; error: 'invalid_refresh_token' | 'session_revoked' | 'user_not_found' | 'ip_not_allowed' };
 
 export async function issueAuthTokens(user: AuthDbUser, jwtSecret: string, sessionId?: string): Promise<IssuedAuthTokens> {
   const now = Math.floor(Date.now() / 1000);
@@ -129,6 +130,7 @@ export async function rotateAuthSession(env: Env, refreshToken: string,
     if (!session || String(session.user_id) !== payload.sub) return { ok: false, error: 'session_revoked' };
     const user = await env.DB.prepare('SELECT id, email, name, role FROM users WHERE disabled_at IS NULL AND id = ?').bind(session.user_id).first<AuthDbUser>();
     if (!user) return { ok: false, error: 'user_not_found' };
+    if (!await accountIpAllowed(env, user.id, c ? connectingIp(c.req.raw.headers) : null)) return { ok: false, error: 'ip_not_allowed' };
     if (!safeRoleAuditValue(user.role)) throw new Error('Session role evidence unavailable');
     const policy = await sessionPolicy(env);
     const source = c ? (c.req.path === '/auth/refresh' ? 'explicit-refresh' : 'silent-refresh') : 'internal-refresh';

@@ -1,3 +1,4 @@
+import { accountIpAllowed, connectingIp } from './ip-access';
 // ============================================================
 // Auth middleware – validates dual JWT on every protected route.
 //
@@ -102,6 +103,10 @@ export const authMiddleware = createMiddleware<{
   }
 
   c.set('user', user);
+  if (!await accountIpAllowed(c.env, user.sub, connectingIp(c.req.raw.headers))) {
+    await logDenial(c, { reason: 'ip_not_allowed' });
+    return c.json({ success: false, error: 'Access from this IP address is not allowed' }, 403, { 'Cache-Control': 'no-store' });
+  }
   return next();
 });
 

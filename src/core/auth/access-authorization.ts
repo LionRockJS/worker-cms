@@ -1,3 +1,4 @@
+import { ipMatchesAllowlist, storedIpAllowlist } from './ip-access';
 import type { Env, JWTPayload, Permission } from '../../types';
 import { buildRolePermissions, effectivePermissions, splitRoles } from './roles';
 import { safeRoleAuditValue } from './role-mutation-sql';
@@ -36,13 +37,13 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   actor = { ...actor };
   if (!/^\d+$/.test(actor.sub) || (sessionRequired && !/^\d+$/.test(actor.sid ?? '')) || !safeRoleAuditValue(actor.role)) throw new Error('Access authorization unavailable');
   const [users, roles, grants] = await env.DB.batch([
-    env.DB.prepare('SELECT role FROM users WHERE disabled_at IS NULL AND id = ?').bind(actor.sub),
-    env.DB.prepare('SELECT name, builtin FROM roles ORDER BY name'),
+    env.DB.prepare('SELECT role, ip_unrestricted FROM users WHERE disabled_at IS NULL AND id = ?').bind(actor.sub),
+    env.DB.prepare('SELECT name, builtin, ip_allowlist FROM roles ORDER BY name'),
     env.DB.prepare('SELECT role, permission FROM role_permissions ORDER BY role, permission'),
   ]);
-  const user = users.results[0] as { role: string } | undefined;
+  const user = users.results[0] as { role: string; ip_unrestricted: number } | undefined;
   if (!user || user.role !== actor.role) throw new Error('Access actor changed');
-  const managed = roles.results as Array<{ name: string; builtin: number }>;
+  const managed = roles.results as Array<{ name: string; builtin: number; ip_allowlist: string }>;
   const permissions = grants.results as Array<{ role: string; permission: string }>;
   const policy = await resolveDataClasses(env, true);
   const policyFailure = classificationPolicyFailureSql(policy);
@@ -50,19 +51,23 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
   const context = requestContext.getStore();
   if (context) context.rolePermissions = roleMap;
   const effective = effectivePermissions(roleMap, user.role);
-  const admin = splitRoles(user.role).includes('admin');
+  const actorRoles = splitRoles(user.role);
+  const admin = actorRoles.includes('admin');
+  const ipAllowed = !sessionRequired || user.ip_unrestricted === 1 || managed
+    .filter(role => actorRoles.includes(role.name))
+    .every(role => ipMatchesAllowlist(context?.auditRequest?.sourceIp ?? null, storedIpAllowlist(role.ip_allowlist)));
   return {
-    capability: permission, allowed: permission === 'authenticated' || admin || effective.has(permission), admin, permissions: effective, roleMap,
+    capability: permission, allowed: ipAllowed && (permission === 'authenticated' || admin || effective.has(permission)), admin, permissions: effective, roleMap,
     guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
-        WHERE u.disabled_at IS NULL AND u.id = ? AND u.role IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
+        WHERE u.disabled_at IS NULL AND u.id = ? AND u.role IS ? AND u.ip_unrestricted IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
           AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})
       OR (SELECT COUNT(*) FROM roles) <> ?
-      OR EXISTS (SELECT name, builtin FROM roles EXCEPT
-        SELECT json_extract(value, '$.name'), json_extract(value, '$.builtin') FROM json_each(?))
+      OR EXISTS (SELECT name, builtin, ip_allowlist FROM roles EXCEPT
+        SELECT json_extract(value, '$.name'), json_extract(value, '$.builtin'), json_extract(value, '$.ip_allowlist') FROM json_each(?))
       OR (SELECT COUNT(*) FROM role_permissions) <> ?
       OR EXISTS (SELECT role, permission FROM role_permissions EXCEPT
         SELECT json_extract(value, '$.role'), json_extract(value, '$.permission') FROM json_each(?))`,
-    [actor.sub, actor.role, ...(sessionRequired ? [actor.sid!, actor.exp] : []), managed.length, JSON.stringify(managed), permissions.length, JSON.stringify(permissions)]),
+    [actor.sub, actor.role, user.ip_unrestricted, ...(sessionRequired ? [actor.sid!, actor.exp] : []), managed.length, JSON.stringify(managed), permissions.length, JSON.stringify(permissions)]),
   };
 }
 

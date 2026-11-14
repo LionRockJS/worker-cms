@@ -1,3 +1,4 @@
+import { accountIpAllowed, connectingIp } from '../core/auth/ip-access';
 // ============================================================
 // OAuth 2.1 routes
 //   GET  /auth/login    – show the login page (HTML)
@@ -642,6 +643,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
     return c.redirect('/auth/login?error=db_error');
   }
 
+  if (!await accountIpAllowed(c.env, dbUser.id, connectingIp(c.req.raw.headers))) return c.redirect('/auth/login?error=ip_not_allowed');
   const issued = await createAuthSession(c.env, dbUser, c, normalized);
 
   c.executionCtx.waitUntil(maintainSessionHygiene(c.env, dbUser.id));

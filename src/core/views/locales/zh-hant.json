@@ -30,8 +30,9 @@
     "no_permission": "您沒有權限存取管理後台。",
     "provider_fallback": "您的登入服務供應商",
     "redirecting_to": "正在前往以下服務供應商登入：",
-    "signup_notice": "可使用您的常用帳戶免費註冊，但只限獲授權使用者存取。",
-    "version": "版本"
+    "signup_notice": "僅限獲授權使用者存取。",
+    "version": "版本",
+    "ip_not_allowed": "此 IP 位址不允許登入。請聯絡管理員。"
   },
   "nav": {
     "audit": "審計日誌",
@@ -248,6 +249,11 @@
       "visible": "顯示",
       "hidden": "隱藏",
       "help": "在管理介面顯示餘額、點數面板和點數連結。不使用點數或擁有無限點數的部署可將其隱藏。此顯示設定不會變更價格或扣費。"
+    },
+    "login_labels": {
+      "title": "登入頁面文字",
+      "description": "按語言自訂登入說明、按鈕文字和存取提示。",
+      "edit": "編輯登入頁面文字"
     }
   },
   "shell": {

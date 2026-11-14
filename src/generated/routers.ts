@@ -18,6 +18,7 @@ import { pluginsManageRoutes } from '../features/plugins/routes/manage';
 import { blockTypesRoutes, pageTypesRoutes } from '../features/runtime-content-types/routes';
 import { searchRoutes } from '../features/search/routes';
 import { trashRoutes } from '../features/trash/routes';
+import { ipAccessRoutes } from '../features/users-roles/routes/ip-access';
 import { rolesRoutes } from '../features/users-roles/routes/roles';
 import { usersRoutes } from '../features/users-roles/routes/users';
 
@@ -35,6 +36,7 @@ export const adminRouterEntries: readonly FeatureRouterEntry[] = [
   { id: 'runtime-content-types', router: pageTypesRoutes },
   { id: 'search', router: searchRoutes },
   { id: 'trash', router: trashRoutes },
+  { id: 'users-roles', router: ipAccessRoutes },
   { id: 'users-roles', router: rolesRoutes },
   { id: 'users-roles', router: usersRoutes },
 ];

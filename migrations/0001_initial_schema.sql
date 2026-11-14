@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users(
     -- role: comma-separated list of admin | editor | moderator | viewer
     role TEXT NOT NULL DEFAULT 'viewer',
     disabled_at DATETIME,
+    ip_unrestricted INTEGER NOT NULL DEFAULT 0 CHECK(ip_unrestricted IN (0, 1)),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
@@ -239,6 +240,7 @@ CREATE TABLE IF NOT EXISTS data_classes (
 --     customized. Built-in roles (admin/editor/moderator/viewer) are implicit
 --     in code (USER_ROLES) and only appear here after being edited.
 CREATE TABLE IF NOT EXISTS roles(
+    ip_allowlist TEXT NOT NULL DEFAULT '[]',
     name TEXT PRIMARY KEY,           -- slug-like role key
     label TEXT NOT NULL,
     -- 1 = a built-in role with customized permissions; 0 = a custom role

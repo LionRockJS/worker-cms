@@ -72,5 +72,12 @@
     "sections_users.users_are_created_on_first_sign_in_assign_their_roles_here": "Users are created on first sign-in. Assign their roles here.",
     "sections_users.when": "When",
     "sections_users.why_the_pool_is_changing": "Why the pool is changing"
+  },
+  "ip_access": {
+    "allowlist": "IP allowlist",
+    "description": "One IPv4/IPv6 address or CIDR range per line, up to 100 entries. Blank allows any IP. Accounts with multiple restricted roles must match every list.",
+    "save": "Save IP access",
+    "unrestricted": "No IP limit",
+    "exemption": "Allow this account from any IP address, overriding all role IP restrictions."
   }
 }

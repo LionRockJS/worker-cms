@@ -25,6 +25,8 @@ export async function rolesPage(views: Fetcher, opts: BaseTemplateProps & {
 }
 
 export async function roleFormPage(views: Fetcher, opts: BaseTemplateProps & {
+  canManageIp?: boolean;
+  ipAllowlist?: string;
   isNew: boolean;
   name: string;
   label: string;
@@ -37,6 +39,9 @@ export async function roleFormPage(views: Fetcher, opts: BaseTemplateProps & {
   const { isNew, name, label, builtin, locked, error, permissionOptions } = opts;
   const heading = isNew ? 'New Role' : locked ? `View Role: ${label}` : `Edit Role: ${label}`;
   const body = await renderView(views, '/templates/role-form.json', {
+    canManageIp: !!opts.canManageIp,
+    ipAllowlist: opts.ipAllowlist ?? '',
+    ipAction: `/admin/roles/${encodeURIComponent(name)}/ip-access`,
     isNew,
     builtin,
     locked,

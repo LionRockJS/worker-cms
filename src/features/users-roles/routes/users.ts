@@ -274,5 +274,7 @@ async function userForm(c: AppContext, user: User, error?: string, flash?: strin
       checked: held.has(option.name),
     })),
     panels: creditPanel,
+    canManageIp: hasAdminRole(c.get('user').role),
+    ipUnrestricted: (await c.env.DB.prepare('SELECT ip_unrestricted FROM users WHERE id = ?').bind(user.id).first<{ ip_unrestricted: number }>())?.ip_unrestricted === 1,
   });
 }

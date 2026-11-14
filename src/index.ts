@@ -1,3 +1,4 @@
+import { IpAccessUnavailableError } from './core/auth/ip-access';
 import { auditRequestFrom,ServiceMutationUnavailableError } from './core/db/audit';
 import { SettingsMutationUnavailableError } from './core/db/settings-mutation-evidence';
 import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
@@ -193,6 +194,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof IpAccessUnavailableError) return c.json({ error: 'ip_access_policy_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if(err instanceof ServiceMutationUnavailableError)return c.json({error:'service_mutation_unavailable'},503,{'Cache-Control':'no-store'});
   if (err instanceof SettingsMutationUnavailableError) return c.json({ error: 'settings_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof PageTagEvidenceUnavailableError) return c.json({ error: 'page_tag_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });

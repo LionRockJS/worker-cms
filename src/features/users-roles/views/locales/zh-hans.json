@@ -72,5 +72,12 @@
     "sections_users.users_are_created_on_first_sign_in_assign_their_roles_here": "用户首次登录时会自动创建。请在此分配角色。",
     "sections_users.when": "时间",
     "sections_users.why_the_pool_is_changing": "共享池调整原因"
+  },
+  "ip_access": {
+    "allowlist": "IP 白名单",
+    "description": "每行输入一个 IPv4/IPv6 地址或 CIDR 网段，最多 100 项。留空表示不限制 IP。拥有多个受限制角色的账户须符合每个白名单。",
+    "save": "保存 IP 访问设置",
+    "unrestricted": "不限制 IP",
+    "exemption": "允许此账户从任何 IP 地址访问，覆盖所有角色的 IP 限制。"
   }
 }

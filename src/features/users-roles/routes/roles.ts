@@ -2,6 +2,7 @@
 // Admin-gated (roles:manage). The 'admin' role is all-powerful and locked.
 
 import { Hono } from 'hono';
+import { storedIpAllowlist } from '../../../core/auth/ip-access';
 import { roleFormPage, rolesPage } from '../templates/roles';
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, USER_ROLES } from '../../../types';
 import type { Env, Variables, Permission } from '../../../types';
@@ -14,7 +15,7 @@ import { requirePermission } from '../../../core/auth/guards';
 import { recordPolicyDenial } from '../../../core/auth/denials';
 import type { AccessAuthorization } from '../../../core/auth/access-authorization';
 import { renderPage } from '../../../core/render/chrome';
-import { clearRolePermissionsCache, permissionsFor } from '../../../core/auth/roles';
+import { clearRolePermissionsCache, permissionsFor, splitRoles } from '../../../core/auth/roles';
 import { coreExtensions } from '../../../core/extensions';
 import {
   createCustomRole,
@@ -175,6 +176,8 @@ rolesRoutes.get('/roles/:name/edit', async (c) => {
     builtin: role.builtin,
     locked: role.locked,
     permissionOptions: await buildPermissionOptions(c.env, granted),
+    canManageIp: splitRoles(c.get('user').role).includes('admin'),
+    ipAllowlist: storedIpAllowlist((await c.env.DB.prepare('SELECT ip_allowlist FROM roles WHERE name = ?').bind(role.name).first<{ ip_allowlist: string }>())?.ip_allowlist ?? '[]').join('\n'),
   });
 });
 

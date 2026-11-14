@@ -1,7 +1,27 @@
 <div class="my-4 px-4 sm:px-6 lg:px-8">
   {% if hasFlash %}<div class="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">{{ flash | t }}</div>{% endif %}
   {% if hasError %}<div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{{ error }}</div>{% endif %}
-  <form method="get" action="/admin/settings/translations" class="mb-5 flex max-w-md items-end gap-3"><label class="flex-1 text-sm font-medium text-gray-700">{{ "i18n.fields.locale" | t }}<select name="locale" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2">{% for option in localeOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.code }})</option>{% endfor %}</select></label><button class="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold">{{ "common.open" | t }}</button></form>
+  {% if loginLabels %}<p class="mb-4 text-sm text-gray-500">{{ "i18n.login_labels.description" | t }}</p>{% endif %}
+  <form method="get" action="/admin/settings/translations" class="mb-5 flex max-w-md items-end gap-3">{% if loginLabels %}<input type="hidden" name="scope" value="login">{% endif %}<label class="flex-1 text-sm font-medium text-gray-700">{{ "i18n.fields.locale" | t }}<select name="locale" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2">{% for option in localeOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.code }})</option>{% endfor %}</select></label><button class="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold">{{ "common.open" | t }}</button></form>
+  {% if loginLabels %}
+    <div class="max-w-2xl space-y-4">
+      {% for message in messages %}
+        <form action="/admin/settings/translations" method="post" class="space-y-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <input type="hidden" name="locale" value="{{ localeCode }}">
+          <input type="hidden" name="scope" value="login">
+          <input type="hidden" name="key" value="{{ message.key }}">
+          <label class="block text-sm font-medium text-gray-700">
+            {{ message.labelKey | t }}
+            <textarea name="value" rows="2" required maxlength="4000" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">{{ message.editValue }}</textarea>
+          </label>
+          <div class="flex items-center gap-3">
+            <button class="h-10 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white">{{ "i18n.translations.save" | t }}</button>
+            {% if message.hasOverride %}<button formaction="{{ message.deleteAction }}" formnovalidate class="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700">{{ "i18n.login_labels.reset" | t }}</button>{% endif %}
+          </div>
+        </form>
+      {% endfor %}
+    </div>
+  {% else %}
   <form action="/admin/settings/translations" method="post" class="mb-5 grid grid-cols-1 gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:grid-cols-2">
     <input type="hidden" name="locale" value="{{ localeCode }}">
     <label class="text-sm font-medium text-gray-700">{{ "i18n.fields.key" | t }}<input name="key" required placeholder="plugin.example.label" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 font-mono"></label>
@@ -9,4 +29,5 @@
     <div class="sm:col-span-2"><button class="h-10 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white">{{ "i18n.translations.save" | t }}</button></div>
   </form>
   <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm"><table class="w-full min-w-[720px] text-left text-sm"><thead class="border-b border-gray-200 bg-gray-50"><tr><th class="px-4 py-3" style="width:200px">{{ "i18n.fields.key" | t }}</th><th class="px-4 py-3">{{ "i18n.fields.file_value" | t }}</th><th class="px-4 py-3">{{ "i18n.fields.override_value" | t }}</th><th class="px-4 py-3"></th></tr></thead><tbody class="divide-y divide-gray-100">{% if hasMessages %}{% for message in messages %}<tr><td class="px-4 py-3 font-mono text-xs" style="width:200px"><span class="block max-w-[200px] truncate" title="{{ message.key }}">{{ message.key }}</span></td><td class="px-4 py-3">{% if message.hasFileValue %}{{ message.fileValue }}{% else %}<span class="text-gray-400">—</span>{% endif %}</td><td class="px-4 py-3">{% if message.hasOverride %}{{ message.overrideValue }}{% else %}<span class="text-gray-400">—</span>{% endif %}</td><td class="px-4 py-3 text-right">{% if message.hasOverride %}<form action="{{ message.deleteAction }}" method="post"><button class="font-semibold text-red-600">{{ "common.delete" | t }}</button></form>{% endif %}</td></tr>{% endfor %}{% else %}<tr><td colspan="4" class="px-4 py-10 text-center text-gray-500">{{ "i18n.translations.empty" | t }}</td></tr>{% endif %}</tbody></table></div>
+  {% endif %}
 </div>

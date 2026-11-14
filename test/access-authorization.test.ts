@@ -88,7 +88,7 @@ function inject(beforeWrite: () => Promise<unknown>, beforeSnapshot?: () => Prom
   }
   const DB = { withSession: () => DB, prepare: (sql: string) => track(env.DB.prepare(sql), sql), batch: async (items: D1PreparedStatement[]) => {
     const sql = items.map(item => statements.get(item)?.sql ?? '');
-    if (!captured && sql.some(value => value === 'SELECT name, builtin FROM roles ORDER BY name')) { captured = true; if (beforeSnapshot) await beforeSnapshot(); }
+    if (!captured && sql.some(value => value === 'SELECT name, builtin, ip_allowlist FROM roles ORDER BY name')) { captured = true; if (beforeSnapshot) await beforeSnapshot(); }
     if (!injected && sql.some(value => /^(?:INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM) (?:users|roles|role_permissions)\b/.test(value))) { injected = true; await beforeWrite(); }
     return env.DB.batch(items.map(item => statements.get(item)?.actual ?? item));
   } };
@@ -101,13 +101,14 @@ it.each(Object.keys(operations) as Operation[])('permits %s under a current dele
 });
 
 for (const operation of Object.keys(operations) as Operation[]) {
-  it.each(['grant-revoked', 'actor-demoted', 'session-revoked', 'same-count-policy-swap'])(`refuses ${operation} if %s changes before the write batch`, async change => {
+  it.each(['grant-revoked', 'actor-demoted', 'session-revoked', 'ip-policy-changed', 'same-count-policy-swap'])(`refuses ${operation} if %s changes before the write batch`, async change => {
     const before = await target(); const beforeGrants = await grants();
     const capability = operation.startsWith('user.') ? 'users:manage' : 'roles:manage';
     const changed = inject(async () => {
       if (change === 'grant-revoked') await env.DB.prepare('DELETE FROM role_permissions WHERE role = ? AND permission = ?').bind('delegated', capability).run();
       else if (change === 'actor-demoted') await env.DB.prepare("UPDATE users SET role = 'viewer' WHERE id = ?").bind(actorId).run();
       else if (change === 'session-revoked') await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(actorId).run();
+      else if (change === 'ip-policy-changed') await env.DB.prepare("UPDATE roles SET ip_allowlist = '[\"203.0.113.1\"]' WHERE name = 'delegated'").run();
       else await env.DB.prepare("UPDATE role_permissions SET permission = 'plugin:manage' WHERE role = 'delegated' AND permission = ?").bind(capability).run();
     });
     expect((await invoke(operation, { DB: changed.DB })).status).toBe(503); expect(changed.injected()).toBe(true);

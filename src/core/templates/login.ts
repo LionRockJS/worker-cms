@@ -48,6 +48,7 @@ export async function loginPage(views: Fetcher, opts: {
     buildVersion: BUILD_VERSION,
     error,
     isForbidden: error === 'forbidden',
+    isIpDenied: error === 'ip_not_allowed',
     providers: providers.map((provider) => {
       const isPrimary = provider === 'eventuai';
       return {

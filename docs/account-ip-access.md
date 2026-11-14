@@ -1,0 +1,11 @@
+# Account IP access
+
+Administrators configure an IP allowlist on **Roles → Edit → IP allowlist**. Enter one IPv4/IPv6 literal or CIDR range per line (commas and whitespace also work), up to 100 entries. A blank list permits any IP for that role. Existing accounts and roles start unrestricted.
+
+For an account with several roles, every nonempty role list must match. An unrestricted role does not cancel another role's restriction. Administrators can check **Users → Edit → No IP limit** to exempt an individual account from all role lists. Delegated user/role managers cannot edit either IP control. Permission editing remains subject to its existing authority rules.
+
+The policy applies to OAuth sign-in, explicit/silent token refresh, and every authenticated admin request, including existing sessions and plugin admin pages. Missing or invalid connecting IPs cannot satisfy a nonempty list. Unavailable or malformed stored policy denies access. Clearing a list removes its restriction. The admin role can be restricted too; the editor rejects changes that would exclude the current administrator's IP, including removing their own exemption while outside their role lists.
+
+Requests use Cloudflare's `CF-Connecting-IP`, never a client-supplied forwarding chain or `CF-Connecting-IPv6`. Cloudflare's Pseudo IPv4 **Overwrite Headers** mode replaces the connecting IP with a synthetic IPv4 address; use its **Off** or **Add Header** mode when IPv6 allowlists are required. See [Cloudflare HTTP headers](https://developers.cloudflare.com/fundamentals/reference/http-headers/). New HTTP requests recheck policy; an already open WebSocket is not disconnected by a policy edit. Service-to-service plugin credentials are separate from account access and retain their existing authentication.
+
+Fresh installs receive `users.ip_unrestricted` and `roles.ip_allowlist` in the generated baseline. Before running this code against an existing database, apply `migrations/manual/2026-11-14_account_ip_access.sql` once to the private CMS database using the deployment's normal D1 SQL execution process. This manual upgrade is not part of `db:migrate`; do not apply it to a fresh baseline that already has the columns. No published-database changes are required. IP mutations use the existing audited, transaction-guarded access-management path.

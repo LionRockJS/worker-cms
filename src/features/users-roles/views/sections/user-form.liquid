@@ -101,4 +101,15 @@
   </section>
   {% endfor %}
   {% endif %}
+
+  {% if canManageIp %}
+    <form method="POST" action="{{ ipAction }}" class="mt-6 space-y-3 rounded-lg border border-gray-200 p-4">
+      <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+        <input type="checkbox" name="ip_unrestricted" value="1"{% if ipUnrestricted %} checked{% endif %} class="rounded border-gray-300 text-indigo-600">
+        {{ "ip_access.unrestricted" | t }}
+      </label>
+      <p class="text-xs text-gray-500">{{ "ip_access.exemption" | t }}</p>
+      <button type="submit" class="px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700">{{ "ip_access.save" | t }}</button>
+    </form>
+  {% endif %}
 </div>

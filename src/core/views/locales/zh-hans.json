@@ -30,8 +30,9 @@
     "no_permission": "您没有权限访问管理后台。",
     "provider_fallback": "您的登录服务商",
     "redirecting_to": "正在前往以下服务商登录：",
-    "signup_notice": "可使用您的常用账户免费注册，但仅限获授权用户访问。",
-    "version": "版本"
+    "signup_notice": "仅限获授权用户访问。",
+    "version": "版本",
+    "ip_not_allowed": "此 IP 地址不允许登录。请联系管理员。"
   },
   "nav": {
     "audit": "审计日志",
@@ -248,6 +249,11 @@
       "visible": "显示",
       "hidden": "隐藏",
       "help": "在管理界面显示余额、点数面板和点数链接。不使用点数或拥有无限点数的部署可将其隐藏。此显示设置不会更改价格或扣费。"
+    },
+    "login_labels": {
+      "title": "登录页面文字",
+      "description": "按语言自定义登录说明、按钮文字和访问提示。",
+      "edit": "编辑登录页面文字"
     }
   },
   "shell": {

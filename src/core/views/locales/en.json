@@ -30,8 +30,9 @@
     "no_permission": "You do not have permission to access the admin panel.",
     "provider_fallback": "your sign-in provider",
     "redirecting_to": "Redirecting to",
-    "signup_notice": "is free to sign up for with your everyday account, but access is restricted to authorized users.",
-    "version": "Version"
+    "signup_notice": "Access is restricted to authorized users.",
+    "version": "Version",
+    "ip_not_allowed": "Sign-in from this IP address is not allowed. Contact your administrator."
   },
   "nav": {
     "audit": "Audit Log",
@@ -248,6 +249,11 @@
       "visible": "Show",
       "hidden": "Hide",
       "help": "Show balances, credit panels, and credit links in the admin interface. Hide them for installations without credits or with unlimited credits. This display setting does not change prices or charges."
+    },
+    "login_labels": {
+      "title": "Login page labels",
+      "description": "Customize the sign-in description, button labels and access notice for each language.",
+      "edit": "Edit login page labels"
     }
   },
   "shell": {
