@@ -26,7 +26,7 @@ Validation results:
 
 The existing suite passing does not negate the findings: the added probes exercise cross-boundary cases absent from that suite. No production traffic or production data was used for these reproductions. No application source or deployment configuration was changed.
 
-The [probe source](/Users/colin/Documents/code/workers/cms/docs/security-assessment-probes.ts) is retained as assessment evidence, outside normal test discovery. Its assertions describe vulnerabilities, not acceptable future behavior. To reproduce locally, copy it to `test/security-assessment-local.test.ts`, run `npm exec --no -- vitest run test/security-assessment-local.test.ts`, then remove that temporary copy. Convert its assertions to rejection expectations when implementing fixes.
+The [probe source](/Users/colin/Documents/code/workers/cms/docs/audit/security-assessment-probes.ts) is retained as assessment evidence, outside normal test discovery. Its assertions describe vulnerabilities, not acceptable future behavior. To reproduce locally, copy it to `test/security-assessment-local.test.ts`, run `npm exec --no -- vitest run test/security-assessment-local.test.ts`, then remove that temporary copy. Convert its assertions to rejection expectations when implementing fixes.
 
 ## Findings
 

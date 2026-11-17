@@ -68,7 +68,7 @@ Enforcement errs early, never late:
 
 ## Verified in source (tests)
 
-[test/session-idle.test.ts](../test/session-idle.test.ts) and [test/security-hardening.test.ts](../test/security-hardening.test.ts):
+[test/session-idle.test.ts](../../test/session-idle.test.ts) and [test/security-hardening.test.ts](../../test/security-hardening.test.ts):
 
 | Plan acceptance criterion | Covered by |
 |---|---|
@@ -90,7 +90,7 @@ Not covered by a test:
 
 ## Rollout
 
-- **Apply [the manual migration](../migrations/manual/2026-11-02_session_last_activity.sql) to every existing private database before deploying.** `ADD COLUMN` cannot be written idempotently, so this ships under `migrations/manual/` and runs once. Without the column, the session queries fail closed and nobody can sign in or stay signed in.
+- **Apply [the manual migration](../../migrations/manual/2026-11-02_session_last_activity.sql) to every existing private database before deploying.** `ADD COLUMN` cannot be written idempotently, so this ships under `migrations/manual/` and runs once. Without the column, the session queries fail closed and nobody can sign in or stay signed in.
 - **The migration carries each session's current deadline over unchanged:** it backfills `last_activity_at` from the old idle base, `COALESCE(rotated_at, created_at)`. It neither extends nor ends a session at rollout. From then on, an open tab no longer counts, so a tab left open longer than `SESSION_IDLE_TTL` signs its user out.
 - **Fresh installs** get the column from the regenerated baseline.
 

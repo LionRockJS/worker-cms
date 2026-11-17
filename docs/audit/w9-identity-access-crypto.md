@@ -6,7 +6,7 @@ Controls: A.5.15, A.5.16, A.5.17, A.5.18, A.8.2, A.8.3, A.8.5, A.8.24, plus part
 
 ## Access model as implemented
 
-Authorization is capability-based. A route requires a permission, never just a role. `admin` is granted every permission in code ([guards.ts](../src/core/auth/guards.ts), `requirePermission`), including permissions plugins declare. Built-in defaults come from [roles.ts](../src/core/auth/roles.ts). An administrator can override any non-admin built-in role and create custom roles (`roles`, `role_permissions`).
+Authorization is capability-based. A route requires a permission, never just a role. `admin` is granted every permission in code ([guards.ts](../../src/core/auth/guards.ts), `requirePermission`), including permissions plugins declare. Built-in defaults come from [roles.ts](../../src/core/auth/roles.ts). An administrator can override any non-admin built-in role and create custom roles (`roles`, `role_permissions`).
 
 | Permission | admin | editor | moderator | viewer |
 |---|:-:|:-:|:-:|:-:|
@@ -32,8 +32,8 @@ A viewer, or any role without permissions, reaches only the landing page and the
 
 | Stage | Behaviour | Evidence |
 |---|---|---|
-| **Joiner** | Every OAuth sign-up creates a `viewer`, whatever the provider claims. `ALLOWED_EMAIL_DOMAINS` restricts who can sign up; unset means anyone with a supported provider account becomes a viewer. Account, identity and audit event commit together | [registration.ts](../src/core/auth/registration.ts); `test/registration-mutation-audit.test.ts` |
-| **Mover** | Role changes need `users:manage`. A manager can only assign or edit roles whose permissions are a subset of their own, and never `admin` unless they are an administrator. The last administrator cannot be demoted. The change applies on the next request, because authorization reads the current account rather than the token's role claim | [users.ts:56](../src/features/users-roles/routes/users.ts:56); `test/access-authorization.test.ts`; **new:** `test/identity-assurance.test.ts` (existing access token loses `users:manage` immediately) |
+| **Joiner** | Every OAuth sign-up creates a `viewer`, whatever the provider claims. `ALLOWED_EMAIL_DOMAINS` restricts who can sign up; unset means anyone with a supported provider account becomes a viewer. Account, identity and audit event commit together | [registration.ts](../../src/core/auth/registration.ts); `test/registration-mutation-audit.test.ts` |
+| **Mover** | Role changes need `users:manage`. A manager can only assign or edit roles whose permissions are a subset of their own, and never `admin` unless they are an administrator. The last administrator cannot be demoted. The change applies on the next request, because authorization reads the current account rather than the token's role claim | [users.ts:56](../../src/features/users-roles/routes/users.ts:56); `test/access-authorization.test.ts`; **new:** `test/identity-assurance.test.ts` (existing access token loses `users:manage` immediately) |
 | **Leaver** | Account deletion removes the user, their sessions and their provider identities in one audited transaction. Self-deletion and removing the last administrator are refused. Every outstanding access and refresh token stops working | `test/access-authorization.test.ts`, `test/session-lifecycle-evidence.test.ts`; **new:** `test/identity-assurance.test.ts` |
 | **Inactivity** | Sessions end after `SESSION_IDLE_TTL` without user activity, with a 30-day absolute cap and at most 5 sessions per user | [W6 record](w6-session-inactivity.md) |
 
@@ -57,12 +57,12 @@ A viewer, or any role without permissions, reaches only the landing page and the
 
 | Use | Mechanism | Where |
 |---|---|---|
-| Access, refresh and OAuth-state tokens | HS256 JWT with `JWT_SECRET`. Verification requires `alg: HS256`, `typ: JWT`, issuer, audience, expiry and a known `type` | [jwt.ts](../src/core/auth/jwt.ts) |
-| Refresh-token storage | SHA-256 of a random token ID, never the token itself; rotated on every refresh with a 30-second grace | [sessions.ts](../src/core/auth/sessions.ts) |
-| Single-use admin form tokens | HMAC with `JWT_SECRET` over a random nonce | [form-once.ts](../src/core/auth/form-once.ts) |
-| OAuth | Authorization code with PKCE (S256) and a signed state cookie | [pkce.ts](../src/core/auth/pkce.ts) |
-| Cookies | `HttpOnly`, `SameSite=Lax`, `Secure` with the `__Host-` prefix on HTTPS | [cookies.ts](../src/core/auth/cookies.ts) |
-| Secret strength | `JWT_SECRET` under 32 characters stops the Worker serving | [index.ts:44](../src/index.ts:44) |
+| Access, refresh and OAuth-state tokens | HS256 JWT with `JWT_SECRET`. Verification requires `alg: HS256`, `typ: JWT`, issuer, audience, expiry and a known `type` | [jwt.ts](../../src/core/auth/jwt.ts) |
+| Refresh-token storage | SHA-256 of a random token ID, never the token itself; rotated on every refresh with a 30-second grace | [sessions.ts](../../src/core/auth/sessions.ts) |
+| Single-use admin form tokens | HMAC with `JWT_SECRET` over a random nonce | [form-once.ts](../../src/core/auth/form-once.ts) |
+| OAuth | Authorization code with PKCE (S256) and a signed state cookie | [pkce.ts](../../src/core/auth/pkce.ts) |
+| Cookies | `HttpOnly`, `SameSite=Lax`, `Secure` with the `__Host-` prefix on HTTPS | [cookies.ts](../../src/core/auth/cookies.ts) |
+| Secret strength | `JWT_SECRET` under 32 characters stops the Worker serving | [index.ts:44](../../src/index.ts:44) |
 | Audit archive integrity | SHA-256 segment hashes and a rolling chain | [W5 record](w5-archive-protection.md) |
 | Transport and storage encryption | Cloudflare TLS at the edge; D1, R2 and KV encryption at rest | Provider; not verifiable from source |
 

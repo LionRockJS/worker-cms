@@ -18,7 +18,7 @@ What can be done now is the repository side: a repeatable migration drill, a sin
 
 ## Migration and rollback drill (in source)
 
-`npm run check:upgrade -- --from <revision>` ([tools/check-upgrade-path.mjs](../tools/check-upgrade-path.mjs)) builds both D1 schemas as a fresh install of `<revision>`, then applies the upgrade path:
+`npm run check:upgrade -- --from <revision>` ([tools/check-upgrade-path.mjs](../../tools/check-upgrade-path.mjs)) builds both D1 schemas as a fresh install of `<revision>`, then applies the upgrade path:
 1. manual core files added since then, in date order;
 2. numbered migrations added since then.
 

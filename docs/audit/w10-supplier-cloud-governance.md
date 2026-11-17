@@ -6,9 +6,9 @@ Record for W10 in [the compliance plan](compliance-implementation-plan-2026-10-3
 
 | File | What it is |
 |---|---|
-| [compliance/supplier-register.json](../compliance/supplier-register.json) | 9 supplier relationships: Cloudflare; five sign-in providers; GitHub as source host and CI; the npm registry; registered plugin Workers. Each records services used, data shared, a PHI note, agreement and assessment status, an exit route and an owner. Two agreements are marked `not-required` with a reason (the in-house Eventuai provider and the public npm registry). The other seven are `not-evidenced` |
-| [tools/check-inventory.mjs](../tools/check-inventory.mjs) | Now also fails if an inventoried supplier has no register entry, if an entry points at no supplier, or if an agreement or assessment is recorded without a reference or date |
-| [tools/check-export.mjs](../tools/check-export.mjs) | Exit drill: loads a `wrangler d1 export` file into stock SQLite and checks integrity, foreign keys and schema, then counts rows. `npm run check:export -- --file <export.sql>` |
+| [docs/compliance/supplier-register.json](../compliance/supplier-register.json) | 9 supplier relationships: Cloudflare; five sign-in providers; GitHub as source host and CI; the npm registry; registered plugin Workers. Each records services used, data shared, a PHI note, agreement and assessment status, an exit route and an owner. Two agreements are marked `not-required` with a reason (the in-house Eventuai provider and the public npm registry). The other seven are `not-evidenced` |
+| [tools/check-inventory.mjs](../../tools/check-inventory.mjs) | Now also fails if an inventoried supplier has no register entry, if an entry points at no supplier, or if an agreement or assessment is recorded without a reference or date |
+| [tools/check-export.mjs](../../tools/check-export.mjs) | Exit drill: loads a `wrangler d1 export` file into stock SQLite and checks integrity, foreign keys and schema, then counts rows. `npm run check:export -- --file <export.sql>` |
 
 ## Shared responsibility
 

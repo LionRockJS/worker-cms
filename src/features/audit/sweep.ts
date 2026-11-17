@@ -22,7 +22,7 @@
 //     verified checkpoints go to the independent receiver — because a chain
 //     whose only copy sits in the D1 it protects can be rewritten with it.
 //
-// See docs/access-logging-design-2026-10-29.md and docs/w5-archive-protection.md.
+// See docs/audit/access-logging-design-2026-10-29.md and docs/audit/w5-archive-protection.md.
 // ============================================================
 
 import type { Env } from '../../types';

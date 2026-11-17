@@ -21,7 +21,7 @@ Controls: A.5.33, A.5.34, A.8.10, plus parts of A.5.12, A.5.14, A.8.11, A.8.12.
 | Media (`media_files`, `MEDIA_BUCKET`) | Delete removes the object and the row | Kept until deleted. Edge caches already holding a public copy (`max-age=31536000`) must be purged at Cloudflare |
 | Users (`users`, `sessions`, `user_oauth_identities`) | User removal deletes all three | Pages keep `creator`/`editors` ids; audit keeps actor ids |
 | Admin jobs (`admin_jobs`) | Never deleted | **Body and user snapshot kept forever** (fixed below: opt-in clearing) |
-| Audit events (`audit_events`) | Archived to R2, then pruned per retention class | Hot copy: 90 days for access and auth, 365 for mutations and config ([sweep.ts](../src/features/audit/sweep.ts)). Archive: the R2 bucket's own lock and lifecycle (W5) |
+| Audit events (`audit_events`) | Archived to R2, then pruned per retention class | Hot copy: 90 days for access and auth, 365 for mutations and config ([sweep.ts](../../src/features/audit/sweep.ts)). Archive: the R2 bucket's own lock and lifecycle (W5) |
 | Plugin data (`plugin_state`, plugin Workers' own stores) | Written and deleted by the plugin | Each plugin's own rule |
 | Exports (`wrangler d1 export`, W10/W11) | Outside the CMS | Must follow the evidence system's retention. An export holds every row |
 | Backups (D1 Time Travel) | Expire with the Time Travel window | A deleted row stays recoverable until the window passes. Confirm the window for the plan (W11) |
@@ -32,8 +32,8 @@ Controls: A.5.33, A.5.34, A.8.10, plus parts of A.5.12, A.5.14, A.8.11, A.8.12.
 
 Ingest re-scans the whole published database on every complete pass, and re-mirrored any row without a draft. The code comment called this intentional. So a submission an editor trashed or purged came back as a new draft at the next pass. Its source row, which holds the personal data, was never deleted at all.
 
-- **Ingest now skips** any uuid in trash or erased ([submission-ingest.ts](../src/core/db/submission-ingest.ts)).
-- **Purging a submission mirror erases its source** ([submission-erasure.ts](../src/core/pages/submission-erasure.ts)):
+- **Ingest now skips** any uuid in trash or erased ([submission-ingest.ts](../../src/core/db/submission-ingest.ts)).
+- **Purging a submission mirror erases its source** ([submission-erasure.ts](../../src/core/pages/submission-erasure.ts)):
   - The purge batch records the uuid in `submission_erasures`, and the purge audit event lists it under `source_erasures`.
   - After the purge commits, the published row and its tag links are deleted, and `erased_at` confirms it.
   - If the published database is unreachable, the erasure stays pending and cron retries it.
@@ -53,7 +53,7 @@ A hold blocks permanent deletion of one page until it's released. Holds are stor
 
 ### 3. Opt-in retention
 
-Both settings are off until a data owner sets a period ([wrangler.example.toml](../wrangler.example.toml)):
+Both settings are off until a data owner sets a period ([wrangler.example.toml](../../wrangler.example.toml)):
 
 | Setting | Effect |
 |---|---|
@@ -62,7 +62,7 @@ Both settings are off until a data owner sets a period ([wrangler.example.toml](
 
 ## Verification
 
-**[test/record-lifecycle.test.ts](../test/record-lifecycle.test.ts)**, 9 tests:
+**[test/record-lifecycle.test.ts](../../test/record-lifecycle.test.ts)**, 9 tests:
 
 - **A synthetic submission, end to end:**
   1. It's ingested, then trashed, and doesn't return when the ingest cursor wraps.

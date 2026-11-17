@@ -128,6 +128,6 @@ provenance from current draft tags or an unrelated D1 database.
 Live reads also apply retained UUID sensitivity, and publication consults that
 floor before sending a snapshot. Classification reductions and lower-class
 retyping are contained until governed declassification exists. See the
-[sensitivity floor upgrade and evidence boundaries](../../../docs/sensitivity-floors.md),
+[sensitivity floor upgrade and evidence boundaries](../../../docs/audit/sensitivity-floors.md),
 including historical associations already erased before installation and
 copies outside this host's read path.

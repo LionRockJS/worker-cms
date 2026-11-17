@@ -33,7 +33,7 @@ These are starting points, not approved values.
 
 ## Restore drill
 
-[tools/check-export.mjs](../tools/check-export.mjs) now checks a restored set as well as an export:
+[tools/check-export.mjs](../../tools/check-export.mjs) now checks a restored set as well as an export:
 
 ```
 node tools/check-export.mjs --file <cms.sql> --media <media copy> --audit <audit copy>
@@ -85,7 +85,7 @@ This proves the restore check, not a production restore. Recovery time at real s
 
 ## Security during disruption
 
-[test/disruption.test.ts](../test/disruption.test.ts) issues a session, then takes the private database away. A baseline shows the same requests succeed while the database is reachable. With it unreachable:
+[test/disruption.test.ts](../../test/disruption.test.ts) issues a session, then takes the private database away. A baseline shows the same requests succeed while the database is reachable. With it unreachable:
 - an admin read with a valid access token is refused with 5xx and no data;
 - an admin change is refused, and the target row is untouched;
 - a refresh token gets no new access token;

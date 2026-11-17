@@ -554,7 +554,7 @@ Inspected existing classification, retyping, tag/taxonomy changes, versions, tra
 
 ### Upgrade and operating boundaries
 
-The baseline was regenerated from owning core/trash fragments. Existing deployments must apply **core first**, then trash if its tables exist, using the reviewed files [core upgrade](../migrations/manual/2026-10-31_sensitivity_core.sql) and [trash upgrade](../migrations/manual/2026-10-31_sensitivity_trash.sql). These manual files are not automatically discovered/applied by the normal migration command. No live migration, deployment, flag or binding changed.
+The baseline was regenerated from owning core/trash fragments. Existing deployments must apply **core first**, then trash if its tables exist, using the reviewed files [core upgrade](../../migrations/manual/2026-10-31_sensitivity_core.sql) and [trash upgrade](../../migrations/manual/2026-10-31_sensitivity_trash.sql). These manual files are not automatically discovered/applied by the normal migration command. No live migration, deployment, flag or binding changed.
 
 Backfill can establish only sensitivity still observable from current policy/type/tag data. It cannot infer erased pre-installation associations, historic retypes, unlabelled bodies or copies at external recipients. Review backups, quarantine unknown history/copies and apply reviewed additive floor backfill from verified UUIDs where evidence exists. Retained metadata must be included in backup/access/retention policy and effective regulated inventory. A public declaration cannot override a private UUID floor.
 

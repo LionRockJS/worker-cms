@@ -1,6 +1,6 @@
 # Security update — 7 September 2026
 
-This update implements the confirmed access-control fixes from the [assessment](/Users/colin/Documents/code/workers/cms/docs/security-assessment-2026-09-06.md), adds protections around plugin UI and resource use, and retains the historical assessment unchanged. It is a local source update; production has not been deployed or inspected.
+This update implements the confirmed access-control fixes from the [assessment](/Users/colin/Documents/code/workers/cms/docs/audit/security-assessment-2026-09-06.md), adds protections around plugin UI and resource use, and retains the historical assessment unchanged. It is a local source update; production has not been deployed or inspected.
 
 ## Implemented
 

@@ -7,7 +7,7 @@ This removes the identity's access to the existing account. Existing CMS session
 ## Installation
 
 - Fresh installations receive the table/index through the generated baseline, owned by `src/core/schema.sql`.
-- Existing installations must apply [the additive core upgrade](../migrations/manual/2026-11-02_audit_mutation_outbox.sql) to the reviewed private CMS database target before deploying this continuation. Regenerating the baseline does not upgrade an already initialized database. No production migration was run as part of implementation.
+- Existing installations must apply [the additive core upgrade](../../migrations/manual/2026-11-02_audit_mutation_outbox.sql) to the reviewed private CMS database target before deploying this continuation. Regenerating the baseline does not upgrade an already initialized database. No production migration was run as part of implementation.
 - Regulated readiness checks the outbox columns. Retain the existing regulated-write and PHI-publication containment; this migration does not authorize either release.
 - Include pending evidence in private database access, backup and recovery controls. It contains internal identity/user/session IDs and request metadata, with the same sensitivity as the primary audit stream. It is not independent tamper protection against a privileged database writer.
 

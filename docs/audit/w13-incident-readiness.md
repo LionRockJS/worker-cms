@@ -17,13 +17,13 @@ Controls: A.5.24, A.5.25, A.5.26, A.5.28, A.8.16, plus A.6.8 (event reporting) f
 | Audit trail | `audit_events`, sealed R2 archive, checkpoint receiver (W4, W5) | Attributable record of mutations, sensitive reads, denials and auth. Hash-chained and anchored outside the CMS |
 | Outage incidents | [audit-outage-monitoring.md](audit-outage-monitoring.md) | A failed audit write, classification read or health check becomes a journal incident. It's alerted to the receiver (`/incidents`), retried with backoff, and closed only by a recorded disposition with an evidence reference and digest |
 | Heartbeat | Same | Health every cron tick. The receiver alarms on failed checks and on missed heartbeats |
-| Security signals | [signals.ts](../src/features/audit/signals.ts), `/admin/audit/review` | Bulk classified reads, repeated refusals, and contributors reading regulated data alone |
+| Security signals | [signals.ts](../../src/features/audit/signals.ts), `/admin/audit/review` | Bulk classified reads, repeated refusals, and contributors reading regulated data alone |
 
 **Finding:** the signals were detection only. Nothing delivered them, and nothing recorded that anyone had looked, apart from the screen being opened. So the trail could be written and never examined, with no evidence either way.
 
 ## What changed
 
-- **Signal alerts** ([signal-review.ts](../src/features/audit/signal-review.ts)):
+- **Signal alerts** ([signal-review.ts](../../src/features/audit/signal-review.ts)):
   - An hourly check runs inside the existing health monitor.
   - Each flagged signal goes to the receiver's new `/signals` path, at most once per signal per UTC day.
   - The payload carries counts only: signal, flagged rows, window and threshold. The names, addresses and containers that tripped it stay behind `audit:read`.
@@ -90,7 +90,7 @@ To be approved, with names filled in, by the incident owner.
 
 ## Technical exercise, 4 November 2026
 
-[test/incident-exercise.test.ts](../test/incident-exercise.test.ts) runs the alert-to-investigation path on synthetic data. There are 5 tests:
+[test/incident-exercise.test.ts](../../test/incident-exercise.test.ts) runs the alert-to-investigation path on synthetic data. There are 5 tests:
 
 1. **Six refused requests** from one address trip `refused_access`.
 2. **The alert reaches a fake receiver at `/signals`** with exactly `{version, kind, source, signal, day, flagged, windowHours, threshold}`. The address isn't in it. A second check the same day sends nothing, and the next day sends again.

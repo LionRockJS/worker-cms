@@ -22,7 +22,7 @@ F1–F7 refer to findings in the readiness assessment. In particular, F6 contain
 
 All 93 identifiers are included: 37 organizational, 8 people, 14 physical and 34 technological controls. The 27 original assessed rows retain their historical findings. The remaining 66 now have a [repository-feasibility evaluation](iso-27001-remaining-controls-evaluation-2026-10-30.md), replacing the earlier “Not relevant — prior review scope” placeholder. Their delivery categories are not claims of implementation or approved SoA exclusions. Revalidate original findings against newer code before scheduling fixes.
 
-Control labels are concise paraphrases for navigation, not the standard's normative wording. Confirm exact titles and requirements against the licensed standard. Complete applicability, inclusion/exclusion justification, owner, evidence links and review dates for the formal SoA. [ISO overview](https://www.iso.org/standard/27001), [control structure overview](https://www.ibm.com/products/cloud/compliance/iso-27001).
+Control labels are concise paraphrases for navigation, not the standard's normative wording. Confirm exact titles and requirements against the licensed standard. Complete applicability, inclusion/exclusion justification, owner, evidence links and review dates for the formal SoA. [ISO overview](https://www.iso.org/standard/27001), [control structure overview](https://www.ibm.com/products/cloud/docs/compliance/iso-27001).
 
 ### Organizational — 37 controls
 

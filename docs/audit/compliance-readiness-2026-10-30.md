@@ -92,7 +92,7 @@ The current sweep retries `bucket.put` at the same key if the object write succe
 
 ### F7 — Deployment gate: supplier eligibility and BAAs are unverified
 
-No signed agreements or service eligibility evidence were inspected. Obtain written confirmation for every actual PHI path: Workers, D1, R2, Durable Objects, Queues, Images, logs, backups, plugin hosts and any email/analytics/AI services. Cloudflare's general HIPAA statement is not proof that this account and every used service are covered. Cloud providers handling ePHI can be business associates even when data is encrypted and they lack its key. [HHS cloud guidance](https://www.hhs.gov/hipaa/for-professionals/special-topics/health-information-technology/cloud-computing/index.html), [Cloudflare privacy FAQ](https://www.cloudflare.com/trust-hub/us-privacy-compliance/).
+No signed agreements or service eligibility evidence were inspected. Obtain written confirmation for every actual PHI path: Workers, D1, R2, Durable Objects, Queues, Images, logs, backups, plugin hosts and any email/analytics/AI services. Cloudflare's general HIPAA statement is not proof that this account and every used service are covered. Cloud providers handling ePHI can be business associates even when data is encrypted and they lack its key. [HHS cloud guidance](https://www.hhs.gov/hipaa/for-professionals/special-topics/health-information-technology/cloud-computing/index.html), [Cloudflare privacy FAQ](https://www.cloudflare.com/trust-hub/us-privacy-docs/compliance/).
 
 Maintain a data-flow/subprocessor register and approved destinations. Disable uncovered services for PHI. Review trusted plugin UI as code with the user's authority, and separately authorize hooks and publish destinations.
 

@@ -34,7 +34,7 @@ Logout can resolve two different sessions from its access/refresh cookies. Their
 
 ## Maintenance and recovery
 
-The existing core outbox schema/upgrade is reused; this continuation adds no new DDL. Existing installations still need the [outbox migration](../migrations/manual/2026-11-02_audit_mutation_outbox.sql) before deploying the code. See the [outbox runbook](audit-mutation-outbox.md) for restricted inspection, retention of exhausted receipts and reviewed retry.
+The existing core outbox schema/upgrade is reused; this continuation adds no new DDL. Existing installations still need the [outbox migration](../../migrations/manual/2026-11-02_audit_mutation_outbox.sql) before deploying the code. See the [outbox runbook](audit-mutation-outbox.md) for restricted inspection, retention of exhausted receipts and reviewed retry.
 
 Login/refresh run bounded hygiene through `waitUntil`, swallowing already-reported lifecycle failures so cleanup does not produce an unhandled response-lifetime rejection. The core scheduled handler performs hygiene before regulated readiness: one over-limit account and at most 50 expired sessions per tick. A large cap backlog is revisited on later ticks or that account's subsequent login/refresh. Transient/pre-existing excess is not claimed fully drained by one bounded sweep.
 

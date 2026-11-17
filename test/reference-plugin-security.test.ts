@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import plugin from '../examples/plugin-events/src/index';
+import plugin from '../docs/examples/plugin-events/src/index';
 
 const env = { PLUGIN_SECRET: 'reference-plugin-dedicated-secret' };
 

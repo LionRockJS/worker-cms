@@ -392,7 +392,7 @@ expected service layout; recheck this path when upgrading Miniflare/Wrangler.
 npm run deploy
 ```
 
-This deploys only a committed revision that has been pushed to its upstream branch. It runs the type check and the full test suite first, and tags the Worker version with the commit. Pass Wrangler options after `--`, for example `npm run deploy -- -c wrangler.production.toml`. See [docs/w14-secure-development.md](docs/w14-secure-development.md) for rollback.
+This deploys only a committed revision that has been pushed to its upstream branch. It runs the type check and the full test suite first, and tags the Worker version with the commit. Pass Wrangler options after `--`, for example `npm run deploy -- -c wrangler.production.toml`. See [docs/audit/w14-secure-development.md](docs/audit/w14-secure-development.md) for rollback.
 
 ---
 
@@ -402,6 +402,9 @@ The CMS can be extended with **plugins**, each of which is a separate Cloudflare
 Worker registered at runtime by HTTPS URL. Registration, enable/disable,
 credential rotation, delegated page-type scopes, assets, quotas, and credits are
 managed under **Admin → Plugins** without redeploying the CMS.
+
+See [Plugin API features and limits](docs/plugin-api.md) for the endpoint
+catalogue, approval requirements, batch sizes, storage caps and quotas.
 
 Every new manifest should declare one browser trust level with `trustLevel`
 (or `trust_level` in static JSON):
@@ -653,7 +656,7 @@ served on the CMS origin.
 
 ### Adding a plugin
 
-1. Build/deploy the plugin Worker (see [`examples/plugin-events`](examples/plugin-events)
+1. Build/deploy the plugin Worker (see [`docs/examples/plugin-events`](docs/examples/plugin-events)
    for a complete reference implementing all six capabilities).
 2. Open **Admin → Plugins → Register plugin**, enter its public HTTPS base URL,
    and leave it disabled until you have reviewed its manifest and code.
@@ -853,7 +856,7 @@ volumes.
   goes idle. Activity is observed when the access token is refreshed, so a
   session can be refused before its nominal deadline, never after it. A
   regulated deployment must set the value explicitly. See
-  [docs/w6-session-inactivity.md](docs/w6-session-inactivity.md).
+  [docs/audit/w6-session-inactivity.md](docs/audit/w6-session-inactivity.md).
   Existing sockets recheck authorization, including the idle deadline, before
   messages and deliveries, and sweep connections every 60 seconds.
 - Personal data (names, email, phone) is masked **server-side** on the users
@@ -869,7 +872,7 @@ volumes.
   Page types. Trusted plugin UI also requires host approval in the plugin edit
   form. Unapproved UI is sandboxed; custom page editors remain unavailable
   until both UI trust and page access are approved.
-- See [security update rollout](docs/security-update-2026-09-07.md) before
+- See [security update rollout](docs/audit/security-update-2026-09-07.md) before
   deploying this update, especially for cache invalidation and plugin setup.
 - Plugin URL validation rejects obvious private-address literals, but it is not
   a complete DNS-rebinding defense. Only users with `plugin:manage` should
@@ -1407,4 +1410,4 @@ the assembler.)
 
 ## Regulated deployments
 
-For the opt-in readiness, explicit container inventory and write containment pending durable mutation evidence, see [Regulated deployment profile](docs/regulated-profile.md). Regulated mode currently permits protected reads and designated containment/maintenance operations; content/configuration writes, queued jobs, ingestion and recurring billing stay held. Prepare queue consumers and required pinned plugin identities before activation. See [P0 progress](docs/compliance-p0-progress-2026-10-30.md) for implemented safeguards, verification and remaining coverage.
+For the opt-in readiness, explicit container inventory and write containment pending durable mutation evidence, see [Regulated deployment profile](docs/audit/regulated-profile.md). Regulated mode currently permits protected reads and designated containment/maintenance operations; content/configuration writes, queued jobs, ingestion and recurring billing stay held. Prepare queue consumers and required pinned plugin identities before activation. See [P0 progress](docs/audit/compliance-p0-progress-2026-10-30.md) for implemented safeguards, verification and remaining coverage.

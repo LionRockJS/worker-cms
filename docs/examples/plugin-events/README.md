@@ -39,7 +39,7 @@ non-2xx response is reported in the CMS editor as a failed publish target.
 ## Deploy + wire into the CMS
 
 ```bash
-cd examples/plugin-events
+cd docs/examples/plugin-events
 npm install
 npx wrangler deploy
 ```
@@ -49,7 +49,7 @@ URL, review the discovered manifest, and copy its generated secret. Store that
 secret on the plugin and redeploy it:
 
 ```bash
-cd examples/plugin-events
+cd docs/examples/plugin-events
 npx wrangler secret put PLUGIN_SECRET
 npx wrangler deploy
 ```

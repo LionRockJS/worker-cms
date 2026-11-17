@@ -52,7 +52,7 @@ migrations_dir = "migrations/published"
 # bucket_name = "worker-cms-audit"
 
 # Optional private outage diagnostics, separate from D1 and the sealed archive.
-# See docs/audit-outage-monitoring.md before enabling; do not expose this bucket.
+# See docs/audit/audit-outage-monitoring.md before enabling; do not expose this bucket.
 # [[r2_buckets]]
 # binding = "AUDIT_OUTAGE_BUCKET"
 # bucket_name = "worker-cms-audit-outages"
@@ -132,7 +132,7 @@ simple = { limit = 30, period = 60 }
 # ── Plugins (optional) ────────────────────────────────────────────────────────
 # Register plugin Workers by HTTPS URL under Admin → Plugins. Each row receives
 # a dedicated secret that must also be stored on that plugin Worker. No service
-# binding or CMS redeploy is required. See examples/plugin-events.
+# binding or CMS redeploy is required. See docs/examples/plugin-events.
 
 [vars]
 # PLUGINS is a deprecated service-binding-era setting and is intentionally unset.
@@ -184,7 +184,7 @@ DEFAULT_TIMEZONE = "+0800"
 # TRASH_RETENTION_DAYS = "90"
 # JOB_RETENTION_DAYS = "30"
 
-# Regulated deployment opt-in. See docs/regulated-profile.md before enabling.
+# Regulated deployment opt-in. See docs/audit/regulated-profile.md before enabling.
 # Holds content/configuration writes, queue execution, ingestion and billing until W4b.
 # Prepare queue consumers and pinned plugin identities; no write-enable bypass flag.
 # Add these inside [vars], with a complete approved inventory:

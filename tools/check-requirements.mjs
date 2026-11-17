@@ -1,7 +1,7 @@
 // ============================================================
 // Security requirements to regression tests (W14, A.8.25, A.8.29).
 //
-// compliance/security-requirements.json names, for each security requirement,
+// docs/compliance/security-requirements.json names, for each security requirement,
 // the tests that prove it. This fails when a named test is gone, so renaming
 // or deleting one changes the register in the same review, and when a
 // requirement cites a control the register does not hold. It reads source;
@@ -28,8 +28,8 @@ function testTitles(source) {
 
 function check() {
   const errors = [];
-  const { requirements } = read('compliance/security-requirements.json');
-  const controls = new Set(read('compliance/control-register.json').controls.map((control) => control.id));
+  const { requirements } = read('docs/compliance/security-requirements.json');
+  const controls = new Set(read('docs/compliance/control-register.json').controls.map((control) => control.id));
   const titles = new Map();
   const ids = new Set();
   let tests = 0;
@@ -41,7 +41,7 @@ function check() {
     if (!requirement.requirement?.trim()) errors.push(`${where}: no requirement text`);
     if (!requirement.controls?.length) errors.push(`${where}: no controls`);
     for (const control of requirement.controls ?? []) {
-      if (!controls.has(control)) errors.push(`${where}: control ${control} is not in compliance/control-register.json`);
+      if (!controls.has(control)) errors.push(`${where}: control ${control} is not in docs/compliance/control-register.json`);
     }
     if (!requirement.tests?.length) errors.push(`${where}: no tests`);
     for (const { file, title } of requirement.tests ?? []) {

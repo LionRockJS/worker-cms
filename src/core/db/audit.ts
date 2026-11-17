@@ -3,7 +3,7 @@
 //
 // Everything recorded goes into one stream, audit_events: admin mutations,
 // authentication, and permission denials. Reads and exports join them in a
-// later phase. See docs/access-logging-design-2026-10-29.md.
+// later phase. See docs/audit/access-logging-design-2026-10-29.md.
 //
 // Two rules the envelope exists to keep:
 //   - no email, ever. The actor is an internal user id, so erasing an account

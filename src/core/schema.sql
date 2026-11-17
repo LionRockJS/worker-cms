@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 -- 9b. Audit events – supersedes audit_log. One stream for mutations, reads,
 --     authentication and exports, carrying the request context a compliance
---     audit asks for. See docs/access-logging-design-2026-10-29.md.
+--     audit asks for. See docs/audit/access-logging-design-2026-10-29.md.
 --     audit_log is left in place as history; nothing writes to it any more.
 CREATE TABLE IF NOT EXISTS audit_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,   -- orders events written in the same millisecond

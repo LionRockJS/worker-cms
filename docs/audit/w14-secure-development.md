@@ -17,10 +17,10 @@ Controls: A.8.25, A.8.26, A.8.28, A.8.29, A.8.31, A.8.32, plus parts of A.5.21, 
 
 | Area | Found | Gap |
 |---|---|---|
-| CI ([ci.yml](../.github/workflows/ci.yml)) | Type check and `npm test` on every pull request and push to main. `npm test` runs the build plus the profile, boundary, generated-code and inventory checks. There's also an upgrade-path drill from `f9719a3` (W7) | The dependency audit ran with `continue-on-error`, so it never blocked |
-| Static analysis ([codeql.yml](../.github/workflows/codeql.yml)) | CodeQL `security-and-quality` on pull requests, pushes and weekly | Triage owner not named |
-| Dependencies ([dependabot.yml](../.github/dependabot.yml)) | Weekly npm and Actions updates | Its comment says Actions are SHA-pinned; **they were pinned by tag**, so a moved tag ran unreviewed code with CI's token |
-| Review ownership ([CODEOWNERS](../.github/CODEOWNERS)) | Paths listed | Every rule is commented out until a real owner is named (W8) |
+| CI ([ci.yml](../../.github/workflows/ci.yml)) | Type check and `npm test` on every pull request and push to main. `npm test` runs the build plus the profile, boundary, generated-code and inventory checks. There's also an upgrade-path drill from `f9719a3` (W7) | The dependency audit ran with `continue-on-error`, so it never blocked |
+| Static analysis ([codeql.yml](../../.github/workflows/codeql.yml)) | CodeQL `security-and-quality` on pull requests, pushes and weekly | Triage owner not named |
+| Dependencies ([dependabot.yml](../../.github/dependabot.yml)) | Weekly npm and Actions updates | Its comment says Actions are SHA-pinned; **they were pinned by tag**, so a moved tag ran unreviewed code with CI's token |
+| Review ownership ([CODEOWNERS](../../.github/CODEOWNERS)) | Paths listed | Every rule is commented out until a real owner is named (W8) |
 | Deploy (`npm run deploy`) | `npm run build && wrangler deploy` | It deployed whatever was on disk: no tests, no check that the code was committed or pushed, and no record of which commit went live (the W7 finding "deployed revisions unrecorded") |
 | External: branch protection, required checks, CI history, open alerts | **Not inspected.** `gh` is not installed here, and the settings need repository admin | See below |
 | History | Recent work merged into `main` locally by its author and pushed. No pull request, no second reviewer, and commits are unsigned | Review isn't enforced by the repository |
@@ -30,13 +30,13 @@ Controls: A.8.25, A.8.26, A.8.28, A.8.29, A.8.31, A.8.32, plus parts of A.5.21, 
 
 ### Security requirements register
 
-[compliance/security-requirements.json](../compliance/security-requirements.json) lists 16 requirements gathered from W1–W13. Each one names the Annex A controls it serves and the tests that prove it, 39 tests in all. Examples:
+[docs/compliance/security-requirements.json](../compliance/security-requirements.json) lists 16 requirements gathered from W1–W13. Each one names the Annex A controls it serves and the tests that prove it, 39 tests in all. Examples:
 - token confusion refused;
 - phi never published or served publicly;
 - the audit chain cannot fork;
 - a held page is never purged.
 
-[tools/check-requirements.mjs](../tools/check-requirements.mjs) runs inside `npm test`. It fails when:
+[tools/check-requirements.mjs](../../tools/check-requirements.mjs) runs inside `npm test`. It fails when:
 - a named test no longer exists, so renaming or deleting a security test changes the register in the same review;
 - a requirement cites a control not in the control register;
 - a duplicate id appears.
@@ -59,7 +59,7 @@ The same checker fails on any action used by tag. Dependabot moves the pins.
 
 ### Gated deploy
 
-`npm run deploy` now runs [tools/deploy.mjs](../tools/deploy.mjs). It refuses when:
+`npm run deploy` now runs [tools/deploy.mjs](../../tools/deploy.mjs). It refuses when:
 - the working tree has uncommitted changes;
 - the branch has no upstream;
 - HEAD isn't on its upstream, i.e. it hasn't been pushed for CI to see.
@@ -99,7 +99,7 @@ The representative change is **W13**: signal alerts and review receipts.
 
 | Step | Evidence | State |
 |---|---|---|
-| Requirement | W13 row of the compliance plan. Became SR-16 in the register, tied to two tests in [incident-exercise.test.ts](../test/incident-exercise.test.ts) | Done |
+| Requirement | W13 row of the compliance plan. Became SR-16 in the register, tied to two tests in [incident-exercise.test.ts](../../test/incident-exercise.test.ts) | Done |
 | Implementation | Commit `b18e9fb` on `claude/w13-incident-readiness` | Done |
 | Tests | Full suite, 97 files and 3,482 tests, on the branch before merge | Pass |
 | Review | Merged into `main` as `d0241fb` by the author's session. **No pull request and no second reviewer** | **Gap**: review not enforced |
@@ -119,7 +119,7 @@ What the walk shows: requirements, tests and rollback safety are now traceable i
 
    Then confirm all this, and that CodeQL and Dependabot alerts are being triaged, from the GitHub settings. That couldn't be checked from here.
 
-   **Done 4 November 2026:** the repository ruleset `main protection` is active on the default branch. Its export is committed at [.github/rulesets/main.json](../.github/rulesets/main.json). That file is the intended configuration, not proof that it's enforced; GitHub enforces only what's in Settings. At each quarterly review, export the ruleset again and diff it against this file. A difference is a finding: either the settings changed without review or the file is stale. Keep the dated export, and who set it up, in the restricted evidence system.
+   **Done 4 November 2026:** the repository ruleset `main protection` is active on the default branch. Its export is committed at [.github/rulesets/main.json](../../.github/rulesets/main.json). That file is the intended configuration, not proof that it's enforced; GitHub enforces only what's in Settings. At each quarterly review, export the ruleset again and diff it against this file. A difference is a finding: either the settings changed without review or the file is stale. Keep the dated export, and who set it up, in the restricted evidence system.
 
    The export shows:
    - deletion and force-push blocked;

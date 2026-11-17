@@ -17,7 +17,7 @@
 -- Creating the table changes nothing on its own: while it is empty, no read is
 -- recorded. Classifying a container is what turns read logging on for it.
 --
--- See docs/access-logging-design-2026-10-29.md.
+-- See docs/audit/access-logging-design-2026-10-29.md.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS data_classes (

@@ -6,9 +6,9 @@ Record for W8 in [the compliance plan](compliance-implementation-plan-2026-10-30
 
 | File | What it is |
 |---|---|
-| [compliance/asset-inventory.json](../compliance/asset-inventory.json) | 99 logical assets, each with purpose, data held and lifecycle: 15 bindings, 7 secrets, 1 credential file, 21 variables, 46 D1 tables, 5 suppliers and 4 environments. The `owner` field is empty everywhere |
-| [compliance/control-register.json](../compliance/control-register.json) | The 59 controls: the original 27, plus 13 repo-led and 19 hybrid. Each has its work packages, closure evidence and three separate states (see below). Owner, reviewer and next review are empty everywhere |
-| [tools/check-inventory.mjs](../tools/check-inventory.mjs) | Runs inside `npm test`. Fails if a binding, variable or secret in `Env`, a binding in `wrangler.example.toml`, or a table in either baseline has no inventory entry, or if an entry no longer exists in source. Also validates the register |
+| [docs/compliance/asset-inventory.json](../compliance/asset-inventory.json) | 99 logical assets, each with purpose, data held and lifecycle: 15 bindings, 7 secrets, 1 credential file, 21 variables, 46 D1 tables, 5 suppliers and 4 environments. The `owner` field is empty everywhere |
+| [docs/compliance/control-register.json](../compliance/control-register.json) | The 59 controls: the original 27, plus 13 repo-led and 19 hybrid. Each has its work packages, closure evidence and three separate states (see below). Owner, reviewer and next review are empty everywhere |
+| [tools/check-inventory.mjs](../../tools/check-inventory.mjs) | Runs inside `npm test`. Fails if a binding, variable or secret in `Env`, a binding in `wrangler.example.toml`, or a table in either baseline has no inventory entry, or if an entry no longer exists in source. Also validates the register |
 
 The inventory is deliberately **logical**: what the code depends on and holds, not one deployment's resource names or account IDs. Per-deployment detail belongs in the restricted evidence system, consistent with the [P0 acceptance record](p0-manual-acceptance-2026-10-31.md).
 
@@ -38,7 +38,7 @@ Current source states across the 59: 12 implemented, 11 partial, 9 supporting, 1
 
 - **Adding a binding, secret, variable or table** fails `npm test`, and therefore CI, until the inventory has an entry for it.
 - **Retiring one** fails until its entry is removed.
-- **Owners, reviewers and review dates** are edited in the JSON and reviewed like any other change. `CODEOWNERS` now lists `compliance/`, but like every rule in that file it is commented out until a real GitHub login or team replaces `OWNER`. Until then, and until branch protection requires code-owner review, nothing enforces that review.
+- **Owners, reviewers and review dates** are edited in the JSON and reviewed like any other change. `CODEOWNERS` now lists `docs/compliance/`, but like every rule in that file it is commented out until a real GitHub login or team replaces `OWNER`. Until then, and until branch protection requires code-owner review, nothing enforces that review.
 
 Verified locally: removing the `admin_jobs` entry made the check fail with `DB.admin_jobs has no inventory entry`.
 
@@ -65,7 +65,7 @@ Each needs an owner's decision. None is fixed here.
 
 | # | Finding | Controls | Belongs to |
 |---|---|---|---|
-| 1 | **Submissions stay in the published database indefinitely.** Public Workers (forms, RSVP) insert submissions into `PUBLISHED_DB.pages`. The cron ingest copies them into drafts but never mutates or deletes the published row ([submission-ingest.ts](../src/core/db/submission-ingest.ts)). Personal data therefore persists in the database public sites read, with no retention rule | A.8.10, A.5.34, A.8.12 | W12 |
+| 1 | **Submissions stay in the published database indefinitely.** Public Workers (forms, RSVP) insert submissions into `PUBLISHED_DB.pages`. The cron ingest copies them into drafts but never mutates or deletes the published row ([submission-ingest.ts](../../src/core/db/submission-ingest.ts)). Personal data therefore persists in the database public sites read, with no retention rule | A.8.10, A.5.34, A.8.12 | W12 |
 | 2 | **Legacy `audit_log` table.** Nothing in source reads, writes or prunes it, but it can still hold old admin records with actor details | A.5.33, A.8.10 | W12 |
 | 3 | **`admin_jobs` grows without bound.** Nothing deletes finished jobs | A.8.6, A.8.10 | W11/W12 |
 | 4 | **Trash never expires, and credit ledgers have no retention rule.** Trash empties only when an editor restores or purges. The ledgers are append-only | A.8.10 | W12 |

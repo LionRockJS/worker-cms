@@ -4,7 +4,7 @@ Engineering record for W5 in [the compliance plan](compliance-implementation-pla
 
 ## What the sweep now does
 
-`sweepAuditEvents` ([sweep.ts](../src/features/audit/sweep.ts)) runs one bounded pass per cron tick:
+`sweepAuditEvents` ([sweep.ts](../../src/features/audit/sweep.ts)) runs one bounded pass per cron tick:
 
 1. **Lease.** It claims the single-row lease in `audit_archive_state` with a conditional `UPDATE … RETURNING`. If another run holds an unexpired lease, it returns `skipped: 'claimed'`. The lease lasts 10 minutes and is released on exit.
 2. **Freeze, write, seal.** The intended segment is stored in `audit_archive_intents` before any object is written. The row holds the range, hashes, key and segment format, and is keyed by the chain position it extends. A retry recomputes the frozen rows from D1 and refuses (`segment-drift`) if they no longer hash to the intent. If an object already exists at the key and matches, the run adopts it. If it differs, the run refuses (`segment-conflict`) and does not overwrite it. The seal is inserted from the intent with a compare-and-swap on the chain head (`MAX(last_seq)` and its `rolling_hash`), and the intent is deleted in the same transaction. Even a runner whose lease lapsed cannot seal a second branch.
@@ -22,7 +22,7 @@ D1 failures still throw: there is no state to recover into, and the health check
 
 ## Verified in source (tests)
 
-[test/audit-archive-protection.test.ts](../test/audit-archive-protection.test.ts) covers the cases below. Every case also asserts that no unverified range was pruned.
+[test/audit-archive-protection.test.ts](../../test/audit-archive-protection.test.ts) covers the cases below. Every case also asserts that no unverified range was pruned.
 
 | Scenario | Outcome |
 |---|---|
@@ -63,7 +63,7 @@ None of the following can be established from this repository:
   Until it exists, `anchorConfigured` is false and the review screen says so. **Seals in D1 are then not independent tamper protection**, and must not be described as such.
 - **Alert delivery to an owner.** A test `archive` incident must reach the responsible person, be acknowledged, and leave retained review evidence through the existing reconcile flow.
 - **Throughput.** Measure backlog drain at representative peak load: 1,000 events per segment, one segment per five-minute tick.
-- **Migration.** Apply [0007_enable_audit.sql](../migrations/0007_enable_audit.sql) on every existing private database **before** deploying this code. It is idempotent: `CREATE … IF NOT EXISTS` plus `INSERT OR IGNORE` of the state row. The sweep and health check fail without these tables.
+- **Migration.** Apply [0007_enable_audit.sql](../../migrations/0007_enable_audit.sql) on every existing private database **before** deploying this code. It is idempotent: `CREATE … IF NOT EXISTS` plus `INSERT OR IGNORE` of the state row. The sweep and health check fail without these tables.
 
 ## Rollout notes
 

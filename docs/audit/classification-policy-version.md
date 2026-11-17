@@ -29,7 +29,7 @@ Logout, session cleanup/revocation, identity disconnection and refusal recording
 
 ## Existing-install rollout and recovery
 
-Fresh databases receive the generated core baseline. Existing private D1 databases need [the additive upgrade](../migrations/manual/2026-11-02_classification_policy_version.sql), after the sensitivity-floor upgrades and before version-aware code. This also applies to ordinary deployments: classification lookup fails closed without the new schema. No published-database schema changes are needed.
+Fresh databases receive the generated core baseline. Existing private D1 databases need [the additive upgrade](../../migrations/manual/2026-11-02_classification_policy_version.sql), after the sensitivity-floor upgrades and before version-aware code. This also applies to ordinary deployments: classification lookup fails closed without the new schema. No published-database schema changes are needed.
 
 1. Review/back up the target private database and verify its sensitivity-floor schema. Coordinate policy-writer maintenance while applying the upgrade and deploying compatible readers/writers.
 2. Apply the reviewed additive SQL to that private database. It creates the singleton and six triggers; reapplication preserves an existing generation. Never reset the generation during normal operation.
