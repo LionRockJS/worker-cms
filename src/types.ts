@@ -208,6 +208,12 @@ export interface Env {
   /** Optional manual fallback for local/dev environments without version metadata. */
   VIEW_REVISION?: string;
   MEDIA_BUCKET?: R2Bucket;
+  /** Private cache for plugin Liquid/JSON views; enabled per plugin. */
+  PLUGIN_VIEWS_BUCKET?: R2Bucket;
+  /** Self-hosted, read-only plugin source directory (injected by server scripts). */
+  PLUGIN_LOCAL_VIEWS?: Fetcher;
+  /** Self-hosted Nginx acceleration opt-in; injected from the server .env. */
+  PLUGIN_VIEWS_NGINX?: string;
   /** Where the audit sweep writes sealed archive segments. Without it the
    *  sweep does nothing at all — it never prunes what it could not archive. */
   AUDIT_BUCKET?: R2Bucket;

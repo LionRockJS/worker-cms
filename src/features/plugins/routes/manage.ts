@@ -1,3 +1,5 @@
+import type { PluginViewSource } from '../local-views';
+import { pluginViewSource } from '../view-source';
 import { mutatePluginSettings,PluginSettingsUnavailableError } from '../settings-evidence';
 import { mutatePluginApproval,PluginApprovalUnavailableError } from '../approval-evidence';
 import { preparePluginRegistrationMutation,PluginRegistrationUnavailableError,PluginRegistrationConflictError } from '../registration-evidence';
@@ -199,14 +201,23 @@ async function readPluginTenantConfig(
   }
 }
 
-function readForm(form: FormData): { input: PluginInput | null; error: string | null; raw: { label: string; url: string; enabled: boolean; sortOrder: number; config: string; trustedUi?: boolean } } {
+function readForm(form: FormData, bucketAvailable: boolean, localAvailable: boolean): { input: PluginInput | null; error: string | null; raw: { label: string; url: string; enabled: boolean; sortOrder: number; config: string; trustedUi?: boolean; viewSource: PluginViewSource } } {
   const label = str(form.get('label'));
   const [url, urlError] = normalizeUrl(str(form.get('url')));
   const enabled = form.get('enabled') != null;
   const sortOrder = num(form.get('sort_order'), 0);
   let [config, configError] = normalizeConfig(str(form.get('config')));
-  if (!configError) config = JSON.stringify({ ...JSON.parse(config || '{}'), cmsTrustedUi: form.get('trusted_ui') === '1' });
-  const raw = { label, url, enabled, sortOrder, trustedUi: form.get('trusted_ui') === '1', config: str(form.get('config')) };
+  const viewSource: PluginViewSource = form.get('view_source') === 'local' ? 'local' : form.get('view_source') === 'bucket' ? 'bucket' : 'host';
+  if (viewSource === 'bucket' && !bucketAvailable) configError = 'Configure the PLUGIN_VIEWS_BUCKET binding before selecting Bucket.';
+  if (viewSource === 'local' && !localAvailable) configError = 'Set PLUGIN_VIEWS_DIR in the self-hosted server .env and restart before selecting Local files.';
+  if (form.has('view_source') && !['host', 'bucket', 'local'].includes(str(form.get('view_source')))) configError = 'Invalid view source.';
+  if (!configError) {
+    const settings = { ...JSON.parse(config || '{}'), cmsTrustedUi: form.get('trusted_ui') === '1' };
+    if (viewSource !== 'host') settings.cmsViewSource = viewSource;
+    else delete settings.cmsViewSource;
+    config = JSON.stringify(settings);
+  }
+  const raw = { label, url, enabled, sortOrder, viewSource, trustedUi: form.get('trusted_ui') === '1', config: str(form.get('config')) };
 
   const error = urlError ?? configError;
   if (error) return { input: null, error, raw };
@@ -287,7 +298,7 @@ pluginsManageRoutes.get('/plugins-manage/new', async (c) => {
 });
 
 pluginsManageRoutes.post('/plugins-manage', async (c) => {
-  const { input, error, raw } = readForm(await c.req.formData());
+  const { input, error, raw } = readForm(await c.req.formData(), !!c.env.PLUGIN_VIEWS_BUCKET, !!c.env.PLUGIN_LOCAL_VIEWS);
   if (!input) {
     return renderPage(c, pluginFormPage, { isNew: true, ...raw, error: error ?? undefined });
   }
@@ -327,6 +338,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/edit', async (c) => {
     enabled: !!plugin.enabled,
     sortOrder: plugin.sort_order,
     config: plugin.config ?? '',
+    viewSource: pluginViewSource(plugin.config),
     trustedUi: (() => { try { return JSON.parse(plugin.config || '{}').cmsTrustedUi === true; } catch { return false; } })(),
     secret: plugin.secret ?? '',
     tenantKvKey: `tenant:${tenantId}`,
@@ -478,7 +490,7 @@ pluginsManageRoutes.post('/plugins-manage/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const mutation = await preparePluginRegistrationMutation(c);
   if (!mutation.row(id)) return c.notFound();
-  const { input, error, raw } = readForm(await c.req.formData());
+  const { input, error, raw } = readForm(await c.req.formData(), !!c.env.PLUGIN_VIEWS_BUCKET, !!c.env.PLUGIN_LOCAL_VIEWS);
   if (!input) return renderPage(c, pluginFormPage, { isNew: false, id, ...raw, error: error ?? undefined });
   try {
     await mutation.update(id,input);

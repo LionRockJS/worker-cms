@@ -58,11 +58,11 @@ Usage:
   npm run setup -- --local  run it on this machine (server.mjs / wrangler dev)
 
 The wizard asks for one namespace and derives every resource name from it
-(<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit); each can
-still be overridden. It creates or reuses D1, R2, and Queue resources, updates
+(<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit,
+<ns>-plugin-views); each can still be overridden. It creates or reuses D1, R2, and Queue resources, updates
 wrangler.toml and the audit switch in cms.features.json, applies migrations,
-configures OAuth secrets, and does a first bootstrap deploy that bypasses the
-release gate. Later releases go through "npm run deploy".
+optionally provisions the plugin view cache, configures OAuth secrets, and does
+a first bootstrap deploy that bypasses the release gate. Later releases go through "npm run deploy".
 
 A local setup runs the CMS on this machine instead of Cloudflare Workers:
 nothing is created in Cloudflare, migrations go to the local D1 state shared by
@@ -269,6 +269,17 @@ function uncommentBinding(lines, section, binding) {
   return true;
 }
 
+/** Support fresh templates, existing bindings, and configs predating an optional binding. */
+function ensureR2Binding(lines, binding, bucketName) {
+  const active = sectionRanges(lines, 'r2_buckets').some(({start, end}) =>
+    lines.slice(start, end).some((line) =>
+      new RegExp(`^\\s*binding\\s*=\\s*["']${binding}["']\\s*$`).test(line)));
+  if (!active && !uncommentBinding(lines, 'r2_buckets', binding)) {
+    lines.push('', '[[r2_buckets]]', `binding = ${JSON.stringify(binding)}`, `bucket_name = ${JSON.stringify(bucketName)}`);
+  }
+  setBindingValues(lines, 'r2_buckets', binding, { bucket_name: bucketName });
+}
+
 function setFirstSectionValue(lines, section, key, value) {
   const [range] = sectionRanges(lines, section);
   if (!range) throw new Error(`Could not find [[${section}]].`);
@@ -315,6 +326,9 @@ async function updateConfig(settings) {
   setBindingValues(lines, 'r2_buckets', 'MEDIA_BUCKET', {
     bucket_name: settings.bucketName,
   });
+  if (settings.pluginViewsBucketName) {
+    ensureR2Binding(lines, 'PLUGIN_VIEWS_BUCKET', settings.pluginViewsBucketName);
+  }
   if (settings.auditBucketName) {
     uncommentBinding(lines, 'r2_buckets', 'AUDIT_BUCKET');
     setBindingValues(lines, 'r2_buckets', 'AUDIT_BUCKET', {
@@ -485,17 +499,18 @@ async function main() {
   }
 
   // Every resource name derives from one namespace. The longest suffix is
-  // "-admin-jobs" (11 chars), and R2/Queue names stop at 63.
+  // "-plugin-views" (13 chars), and R2/Queue names stop at 63.
   const namespace = await ask(
     'Deployment namespace (prefixes every resource name)',
     'cms',
-    (value) => resourceName(value) && value.length <= 52,
+    (value) => resourceName(value) && value.length <= 50,
   );
   const derived = {
     workerName: namespace,
     databaseName: namespace,
     publishedDatabaseName: `${namespace}-published`,
     bucketName: `${namespace}-media`,
+    pluginViewsBucketName: `${namespace}-plugin-views`,
     queueName: `${namespace}-admin-jobs`,
     auditBucketName: `${namespace}-audit`,
   };
@@ -504,6 +519,7 @@ async function main() {
   Private D1          ${derived.databaseName}
   Published D1        ${derived.publishedDatabaseName}
   Media R2 bucket     ${derived.bucketName}
+  Plugin views R2     ${derived.pluginViewsBucketName} (if enabled)
   Admin job Queue     ${derived.queueName}
   Audit R2 bucket     ${derived.auditBucketName} (if enabled)
 `);
@@ -520,6 +536,12 @@ async function main() {
   );
   const bucketName = await name('Private R2 media bucket name', derived.bucketName);
   const queueName = await name('Admin job Queue name', derived.queueName);
+  const pluginViewsBucketName = await featureEnabled('plugins')
+    && await confirm('Enable the optional plugin view R2 cache?', false)
+    ? await name('Private R2 plugin view bucket name', derived.pluginViewsBucketName,
+      (value) => resourceName(value) && value.length <= 63 && value !== bucketName)
+    : null;
+
   // Recording audit_events is core and always on; the feature is the review
   // screens plus the archive sweep, so the bucket only matters with it on.
   console.log(
@@ -569,6 +591,7 @@ async function main() {
     ({ id: databaseId, reused: databaseReused } = await ensureD1(databaseName));
     ({ id: publishedDatabaseId } = await ensureD1(publishedDatabaseName));
     ensureR2(bucketName);
+    if (pluginViewsBucketName) ensureR2(pluginViewsBucketName);
     if (auditBucketName) ensureR2(auditBucketName);
     ensureQueue(queueName);
   }
@@ -580,6 +603,7 @@ async function main() {
     publishedDatabaseName,
     publishedDatabaseId,
     bucketName,
+    pluginViewsBucketName,
     auditBucketName,
     queueName,
     canonicalOrigin,

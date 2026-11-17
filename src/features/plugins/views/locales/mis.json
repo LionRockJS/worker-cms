@@ -29,7 +29,15 @@
       "rotate_connect_failed": "Secret rotated, but the plugin did not accept the new value. Press Connect to retry, or update it by hand.",
       "rotate_connect_ok": "Secret rotated and pushed to the plugin.",
       "rotate_to_assign": "fallback — rotate to assign its own.",
-      "rotated_flash": "Secret rotated. Update the plugin Worker to the new value — the old one no longer works."
+      "rotated_flash": "Secret rotated. Update the plugin Worker to the new value — the old one no longer works.",
+      "view_source": "View loading",
+      "view_source_host": "Host (default)",
+      "view_source_bucket": "Bucket (R2 cache)",
+      "view_source_help": "Host fetches views from the plugin. Bucket stores static Liquid/JSON views on first fetch and reuses them for the plugin revision. Requires a private PLUGIN_VIEWS_BUCKET binding.",
+      "view_source_local": "Local files (self-hosted)",
+      "local_views_setup": "Local files and Nginx setup",
+      "local_views_help": "Set PLUGIN_VIEWS_DIR in the self-hosted server .env and restart. The CMS can serve these files directly. Set PLUGIN_VIEWS_NGINX=true only when Nginx is configured below; the CMS then checks access and file existence before Nginx delivers the file. Missing files fall back to the plugin.",
+      "local_views_layout": "Copy each plugin’s static views into the layout below. Replace events with the manifest ID and REVISION with its Worker revision (or manifest version). Keep the Nginx alias and PLUGIN_VIEWS_DIR pointed at the same directory."
     },
     "identity": {
       "already_ok": "This plugin's identity already matches.",

@@ -344,6 +344,7 @@ export interface PluginFilePrefixApproval {
 export interface ResolvedPlugin {
   /** Host registry identity captured by production resolution. */
   registration?: {id:number;uuid:string};
+  viewSource?: 'host' | 'bucket' | 'local';
   binding: string;
   fetcher: Fetcher;
   manifest: PluginManifest;

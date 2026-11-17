@@ -28,7 +28,9 @@ Content management system on Workers
 npm install
 ```
 
-`npm run setup` runs every step below interactively. To do them by hand, start
+`npm run setup` runs every step below interactively. When the plugins feature is
+enabled, it also offers an optional private R2 cache for plugin views
+(`PLUGIN_VIEWS_BUCKET`, named `<namespace>-plugin-views` by default). To do them by hand, start
 this clone's config from the template. `wrangler.toml` is gitignored, so each
 clone keeps its own and a pull never overwrites it:
 
@@ -337,6 +339,12 @@ in front that terminates HTTPS, forwards the domain to `127.0.0.1:8787`, and sen
 the client address as `CF-Connecting-IP`. Cloudflare Tunnel does this already; with
 nginx, add `proxy_set_header CF-Connecting-IP $remote_addr;`. Without it, every
 visitor shares one sign-in rate limit. Keep the port reachable only from the proxy.
+
+For local plugin view files, set `PLUGIN_VIEWS_DIR` in the server `.env` and
+restart. Plugins → Edit → View loading → Local files includes directory and
+Nginx examples. Both launchers support this read-only directory binding; see
+[plugin view loading](docs/plugin-view-loading.md). Nginx delivery is optional:
+set `PLUGIN_VIEWS_NGINX=true` only after installing its internal file location.
 
 #### Standalone workerd
 

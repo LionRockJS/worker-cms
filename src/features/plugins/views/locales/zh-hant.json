@@ -29,7 +29,15 @@
       "rotate_connect_failed": "密鑰已輪換，但外掛程式未接受新值。請按「連接」重試，或手動更新。",
       "rotate_connect_ok": "密鑰已輪換並推送至外掛程式。",
       "rotate_to_assign": "後備密鑰；請輪換以分配專用密鑰。",
-      "rotated_flash": "密鑰已輪換。請將外掛程式 Worker 更新為新值；舊密鑰已失效。"
+      "rotated_flash": "密鑰已輪換。請將外掛程式 Worker 更新為新值；舊密鑰已失效。",
+      "view_source": "檢視載入",
+      "view_source_host": "主機（預設）",
+      "view_source_bucket": "儲存桶（R2 快取）",
+      "view_source_help": "主機從外掛取得檢視。儲存桶會在首次取得時儲存靜態 Liquid/JSON 檢視，並在同一外掛版本內重複使用。需要設定私人 PLUGIN_VIEWS_BUCKET 綁定。",
+      "view_source_local": "本機檔案（自架）",
+      "local_views_setup": "本機檔案與 Nginx 設定",
+      "local_views_help": "在自架伺服器的 .env 中設定 PLUGIN_VIEWS_DIR 並重新啟動。CMS 可直接提供這些檔案。僅在設定下方 Nginx 後設定 PLUGIN_VIEWS_NGINX=true；CMS 會先檢查存取權限和檔案是否存在，再交由 Nginx 傳送檔案。檔案缺少時回退至外掛。",
+      "local_views_layout": "依下方目錄結構複製外掛的靜態檢視。將 events 替換為資訊清單 ID，將 REVISION 替換為 Worker 修訂版本（或資訊清單版本）。Nginx alias 與 PLUGIN_VIEWS_DIR 必須指向同一目錄。"
     },
     "identity": {
       "already_ok": "此外掛的識別碼已相符。",

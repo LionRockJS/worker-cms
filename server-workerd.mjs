@@ -1,5 +1,6 @@
 // Generate a standalone workerd config, optionally build first or serve it.
 // Node/Miniflare are used during preparation only; the final server is workerd.
+import { localPluginViewsOptions } from './tools/local-plugin-views.mjs';
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,10 @@ if (args.has("--build")) {
 if (!existsSync(bundle)) throw new Error(`No ${bundle}. Run node server-workerd.mjs --build first.`);
 const config = unstable_readConfig({ config: "wrangler.toml" });
 const { workerOptions } = unstable_getMiniflareWorkerOptions("wrangler.toml");
+const localViews = localPluginViewsOptions();
+workerOptions.serviceBindings = { ...workerOptions.serviceBindings, ...localViews.serviceBindings };
+workerOptions.bindings = { ...workerOptions.bindings, ...localViews.bindings };
+
 const canonical = (workerOptions.bindings?.CANONICAL_ORIGIN ?? "").trim().replace(/\/$/, "");
 const loopback = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const publicOrigin = canonical && !loopback.has(new URL(canonical).hostname) ? canonical : "";

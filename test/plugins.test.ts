@@ -2172,6 +2172,63 @@ describe('plugin asset proxy', () => {
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
   });
 
+  it('loads bucket views through the authorized host route and bypasses them in host mode', async () => {
+    testEnv.PLUGIN_SECRET = 'server-secret';
+    const url = await registerViewPlugin('{"order":["search"]}');
+    await env.DB.prepare("UPDATE plugins SET config=json_set(COALESCE(config, '{}'), '$.cmsViewSource', 'bucket') WHERE url=?").bind(url).run();
+    let viewCalls = 0;
+    __injectPluginFetcher(url, { fetch: async (input: RequestInfo | URL) => {
+      const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(href).pathname === '/__plugin/manifest') return Response.json(ASSET_MANIFEST);
+      viewCalls++;
+      return Response.json({order:['search']});
+    } } as Fetcher);
+    const headers = {Cookie:await adminCookie()};
+    const href = 'https://cms.example.com/admin/plugins/checkin/views/templates/kiosk-search.json?r=bucket-test';
+    for (let i=0; i<2; i++) {
+      const response = await worker.fetch(new Request(href, {headers}));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({order:['search']});
+    }
+    expect(viewCalls).toBe(1);
+    const anonymous = await worker.fetch(new Request(href));
+    expect(anonymous.headers.get('content-type')).not.toContain('application/json');
+    expect(viewCalls).toBe(1);
+    await env.DB.prepare("UPDATE plugins SET config=json_set(config, '$.cmsViewSource', 'host') WHERE url=?").bind(url).run();
+    await worker.fetch(new Request(href, {headers}));
+    expect(viewCalls).toBe(2);
+  });
+
+  it('authorizes local file delivery and creates only host-controlled Nginx redirects', async () => {
+    const url = await registerViewPlugin('{"order":["search"]}');
+    await env.DB.prepare("UPDATE plugins SET config=json_set(COALESCE(config, '{}'), '$.cmsViewSource', 'local') WHERE url=?").bind(url).run();
+    const previous = {local:testEnv.PLUGIN_LOCAL_VIEWS,nginx:testEnv.PLUGIN_VIEWS_NGINX};
+    const paths:string[] = [];
+    testEnv.PLUGIN_LOCAL_VIEWS = {fetch:async(input:RequestInfo|URL,init?:RequestInit)=>{
+      paths.push(`${init?.method} ${input}`);
+      return new Response(null);
+    }} as Fetcher;
+    testEnv.PLUGIN_VIEWS_NGINX = 'true';
+    try {
+      const href = 'https://cms.example.com/admin/plugins/checkin/views/templates/kiosk-search.json?r=untrusted-revision';
+      const response = await worker.fetch(new Request(href,{headers:{Cookie:await adminCookie()}}));
+      expect(response.headers.get('x-accel-redirect')).toBe('/_plugin_views/checkin/1.0.0/templates/kiosk-search.json');
+      expect(paths).toEqual(['HEAD https://local-views.invalid/checkin/1.0.0/templates/kiosk-search.json']);
+      const anonymous = await worker.fetch(new Request(href));
+      expect(anonymous.headers.has('x-accel-redirect')).toBe(false);
+      expect(paths).toHaveLength(1);
+      testEnv.PLUGIN_VIEWS_NGINX = 'false';
+      const direct = await worker.fetch(new Request(href,{headers:{Cookie:await adminCookie()}}));
+      expect(direct.headers.has('x-accel-redirect')).toBe(false);
+      expect(paths[1]).toBe('GET https://local-views.invalid/checkin/1.0.0/templates/kiosk-search.json');
+    } finally {
+      if(previous.local === undefined) delete testEnv.PLUGIN_LOCAL_VIEWS;
+      else testEnv.PLUGIN_LOCAL_VIEWS = previous.local;
+      if(previous.nginx === undefined) delete testEnv.PLUGIN_VIEWS_NGINX;
+      else testEnv.PLUGIN_VIEWS_NGINX = previous.nginx;
+    }
+  });
+
   it('keeps unrevisioned plugin view files uncached', async () => {
     await registerViewPlugin('{"sections":{"main":{"type":"kiosk-search"}}}');
 

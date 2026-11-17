@@ -32,7 +32,7 @@ export default defineConfig({
       miniflare: {
         // Provide isolated buckets for audit archives and outage journals.
         // Tests cover missing bindings separately by passing them as undefined.
-        r2Buckets: ['AUDIT_BUCKET', 'AUDIT_OUTAGE_BUCKET'],
+        r2Buckets: ['AUDIT_BUCKET', 'AUDIT_OUTAGE_BUCKET', 'PLUGIN_VIEWS_BUCKET'],
         bindings: {
           JWT_SECRET: 'test-jwt-secret-0123456789abcdef0123456789abcdef',
           // Test value, so the suite does not depend on a developer's .dev.vars

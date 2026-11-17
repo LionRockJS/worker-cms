@@ -19,6 +19,7 @@ import {
   type ResolvedPlugin,
   type PluginRecord,
 } from './types';
+import { pluginViewSource } from './view-source';
 import { listEnabledPlugins, getPlugin } from './store';
 import { listIdentityApprovals } from './identity';
 import { claimAutomaticPluginIdentity } from './automatic-identity-evidence';
@@ -368,6 +369,7 @@ export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
     };
     return {
       registration: {id:record.id,uuid:record.uuid},
+      viewSource: pluginViewSource(record.config),
       binding: record.url, fetcher: fetcherForUrl(record.url), manifest: effective,
       requestedManifest: manifest, secret: record.secret || env.PLUGIN_SECRET || '',
       apiSecret: record.secret || '', label: record.label || '',

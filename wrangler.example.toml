@@ -198,3 +198,8 @@ DEFAULT_TIMEZONE = "+0800"
 # Days between recorded signal reviews before the review screen and heartbeat
 # report one overdue (W13). Set to the cadence the incident owner approved.
 # AUDIT_REVIEW_INTERVAL_DAYS = "7"
+
+# Optional private R2 cache for plugin view files (select Bucket in plugin settings).
+# [[r2_buckets]]
+# binding = "PLUGIN_VIEWS_BUCKET"
+# bucket_name = "cms-plugin-views"

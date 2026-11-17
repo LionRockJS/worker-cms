@@ -1,3 +1,4 @@
+import { fetchPluginView } from '../view-source';
 import { auditPluginDisclosure } from '../disclosure-audit';
 import { limitedBytes } from '../../../core/http/body-limit';
 // ============================================================
@@ -189,11 +190,11 @@ async function servePluginView(c: AppContext): Promise<Response> {
   const headers = buildPluginProxyHeaders(c.req.raw.headers, c.get('user'), plugin.secret, pluginTenantId(c.env), permissions);
   const refused = await auditPluginDisclosure(c, pluginId, 'view', 'plugin.view-disclosure');
   if (refused) return refused;
-  const upstreamResponse = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/admin/views${viewPath}${url.search}`, {
+  const upstreamResponse = await fetchPluginView(c.env, plugin, `${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/admin/views${viewPath}${url.search}`, {
     method: c.req.method,
     headers,
     redirect: 'manual',
-  });
+  }, true);
   const response = new Response(upstreamResponse.body, upstreamResponse);
   if (upstreamResponse.status === 200) {
     const revisioned = url.searchParams.has('r');

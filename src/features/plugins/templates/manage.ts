@@ -1,3 +1,4 @@
+import { localViewsEnvExample, localViewsNginxExample, type PluginViewSource } from '../local-views';
 import { adminLayout, type BaseTemplateProps } from '../../../core/render/layout';
 import { renderView } from '../../../core/render/liquid';
 
@@ -122,6 +123,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
   sortOrder: number;
   config: string;
   trustedUi?: boolean;
+  viewSource?: PluginViewSource;
   secret?: string;
   /** Pinned-identity state for this row (see registry.pluginIdentityStates). */
   identityStatus?: 'ok' | 'mismatch' | 'claimed' | 'unreachable' | 'disabled';
@@ -146,6 +148,7 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     sortOrder,
     config,
     trustedUi,
+    viewSource = 'host',
     secret,
     identityStatus,
     identityPinnedId,
@@ -175,6 +178,9 @@ export async function pluginFormPage(views: Fetcher, opts: BaseTemplateProps & {
     sortOrder,
     config,
     trustedUi,
+    viewSource,
+    localViewsEnvExample,
+    localViewsNginxExample,
     hasError: !!error,
     error: error ?? '',
     hasFlash: !!flashMessageKey,
