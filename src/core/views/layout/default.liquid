@@ -363,6 +363,10 @@
         var url;
         try { url = new URL(link.href, window.location.href); } catch (error) { return null; }
         if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+        // File links may open a viewer or download without loading another CMS page.
+        var pathname = url.pathname;
+        try { pathname = decodeURIComponent(pathname); } catch (error) { /* Keep the original path. */ }
+        if (/\.(?:pdf|csv|tsv|txt|rtf|docx?|xlsx?|pptx?|odt|ods|odp|zip|rar|7z|tar|gz|bz2|xz|jpe?g|png|gif|webp|avif|svg|ico|bmp|tiff?|heic|mp3|wav|ogg|m4a|flac|mp4|webm|mov|avi|mkv)$/i.test(pathname)) return null;
         // In-page anchors don't load anything.
         if (url.hash && url.pathname === window.location.pathname && url.search === window.location.search) return null;
         return link;
