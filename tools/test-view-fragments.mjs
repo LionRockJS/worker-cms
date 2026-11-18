@@ -3,9 +3,14 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { assembleViews } from './build-views.mjs';
 
-test('publishing controls assemble only into publish-enabled shared screens', () => {
+test('publishing controls assemble only into publish-enabled shared screens', async () => {
+  const browser = {};
+  runInNewContext(assembleViews({}).get('assets/liquid.browser.min.js').toString(), browser);
+  const liquid = new browser.liquidjs.Liquid();
+  liquid.registerFilter('t', (key) => key);
   const controls = {
-    dashboard: ['action="{{ page.publishAction }}"', 'action="{{ page.pullAction }}"', 'value="unpublish"'],
+    dashboard: ['action="{{ page.publishAction }}"', 'action="{{ page.pullAction }}"', 'value="unpublish"', 'data-live-weight'],
+    'advanced-search': ['Live weight is {{ page.liveWeight }}'],
     editor: ['data-publish-schedule-toggle', 'view_strings.sections_editor.save_and_publish'],
     tags: ['/admin/tags/sync-published'],
   };
@@ -16,6 +21,16 @@ test('publishing controls assemble only into publish-enabled shared screens', ()
       assert.ok(!section.includes('feature_fragment'));
       for (const marker of markers) assert.equal(section.includes(marker), publish, marker);
     }
+    const layout = views.get('layout/default.liquid').toString();
+    assert.equal(layout.includes('[data-weight-drift]'), publish);
+    assert.match(layout, /input.value = row.weight/);
+    const editor = await liquid.parseAndRender(views.get('sections/editor.liquid').toString(), {
+      publishEnabled: publish,
+      canPublishPage: true,
+      page: { start: '2030-01-01 08:30:59', end: '2030-01-02 12:05:00' },
+    });
+    assert.equal(editor.includes('value="2030-01-01T08:30"'), publish);
+    assert.equal(editor.includes('value="2030-01-02T12:05"'), publish);
     const strings = JSON.parse(views.get('locales/en.json')).view_strings;
     assert.equal('sections_editor.save_and_publish' in strings, publish);
     assert.ok(![...views.keys()].some(path => path.startsWith('fragments/')));

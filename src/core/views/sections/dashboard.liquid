@@ -77,7 +77,7 @@
       <tbody class="divide-y divide-gray-100">
         {% if hasPages %}
           {% for page in pages %}
-            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}{% if page.hasLiveWeight %} data-live-weight="{{ page.liveWeight }}"{% endif %}>
+            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}>
               {% if hasRowControls %}
               <td class="{% if canReorder %}px-4{% else %}px-6{% endif %} py-4 align-top">
                 <div class="flex items-center gap-1">

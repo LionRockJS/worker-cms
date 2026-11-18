@@ -9,6 +9,8 @@
 
 import type { Page } from '../types';
 
+export type PagePublicationStatus = 'draft' | 'scheduled' | 'live' | 'ended';
+
 /** A published tag link, denormalized so write-only targets (R2 JSON, plugins)
  *  can emit self-contained documents without a database to join against. */
 export interface PublishSnapshotTag {

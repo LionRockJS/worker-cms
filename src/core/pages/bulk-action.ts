@@ -16,7 +16,7 @@ import type { Env, JWTPayload, Page } from '../../types';
 import type { TrashedPageRef } from './trash-lifecycle';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
 import { logAuditBatch, type AuditActor } from '../db/audit';
-import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
+import { withDraftMetadata } from '../db/page-logic';
 import { safeParseLect, stringifyLect, type Lect } from '../db/lect';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
@@ -70,14 +70,10 @@ export async function resolveBulkTargetIds(env: Env, query: BulkTargetQuery, act
   const ids = await advancedSearchMatchingPageIds(env.DB, query.pageTypes, query.criteria, query.operator, access);
   if (!query.status) return ids;
 
-  const livePages = await publication()?.listLiveByTypes(env, query.pageTypes, actor) ?? [];
-  const liveMap = new Map(livePages.map((page) => [page.uuid, page]));
+  const publishing = publication();
+  if (!publishing) return query.status === 'draft' ? ids : [];
   const pages = await draftPagesByIds(env.DB, ids);
-  return pages.filter((page) => {
-    const livePage = liveMap.get(page.uuid);
-    if (query.status === 'draft') return !livePage;
-    return !!livePage && publicationStatusForPage(livePage, true) === query.status;
-  }).map((page) => page.id);
+  return publishing.filterDraftIdsByStatus(env, pages, query.pageTypes, query.status, actor);
 }
 
 /**

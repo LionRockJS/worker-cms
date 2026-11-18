@@ -1,7 +1,5 @@
 import type { FeatureServiceEntry } from '../services';
 import {
-  getLiveLect,
-  listLiveByTypes,
   liveMapForDraftPages,
   publishFlash,
   publishPageToTargets,
@@ -13,7 +11,7 @@ import {
   unpublishPagesFromTargets,
 } from './index';
 import { dashboardPublishedTags, filteredDashboardPages } from './dashboard';
-import { draftLectProjector } from './projection';
+import { annotateDraftPages, editorPublicationState, filterDraftIdsByStatus } from './status';
 import { ingestSubmissions } from './submission-ingest';
 import { eraseSubmissionSources } from './submission-erasure';
 import { submissionMirrorIds } from './submission-mirrors';
@@ -21,8 +19,6 @@ import { submissionMirrorIds } from './submission-mirrors';
 export const publishServices: FeatureServiceEntry = {
   id: 'publish',
   publication: {
-    getLiveLect,
-    listLiveByTypes,
     liveMapForDraftPages,
     publishFlash,
     publishPageToTargets,
@@ -34,7 +30,9 @@ export const publishServices: FeatureServiceEntry = {
     unpublishPagesFromTargets,
     dashboardPublishedTags,
     filteredDashboardPages,
-    draftLectProjector,
+    annotateDraftPages,
+    editorPublicationState,
+    filterDraftIdsByStatus,
     ingestSubmissions,
     eraseSubmissionSources,
     submissionMirrorIds,

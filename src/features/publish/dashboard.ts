@@ -3,7 +3,7 @@ import type { Page } from '../../types';
 import type { AppContext } from '../../core/http/context';
 import type { DashboardPageRow, DashboardPublicationQuery } from '../publication';
 import { listDashboardDraftPagesByUuids, listDashboardDraftPageUuids } from '../../core/db/admin-queries';
-import { publicationStatusForPage, withLiveStatus } from '../../core/db/page-logic';
+import { publicationStatusForPage, withLiveStatus } from './status';
 import { recordTagReads } from '../../core/http/access-log';
 import { readD1PageSource } from './d1';
 import { auditLiveReads } from './read-audit';

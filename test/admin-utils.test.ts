@@ -13,7 +13,8 @@ import {
   strParam,
 } from '../src/core/http/forms';
 import { validatePageBasics } from '../src/core/db/validation';
-import { planPageReorder, publicationStatusForPage } from '../src/core/db/page-logic';
+import { planPageReorder } from '../src/core/db/page-logic';
+import { publicationStatusForPage } from '../src/features/publish/status';
 import {
   advancedSearchCondition,
   advancedSearchOperator,

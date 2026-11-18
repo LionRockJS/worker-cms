@@ -12,6 +12,9 @@ it('runs the internal document lifecycle with no published database or bucket', 
   expect(env.PUBLISH_BUCKET).toBeUndefined();
   expect(featureInstalled('publish')).toBe(false);
   expect((await env.VIEWS.fetch('https://views.local/assets/publish-editor.js')).status).toBe(404);
+  const layout = await (await env.VIEWS.fetch('https://views.local/layout/default.liquid')).text();
+  expect(layout).toContain('input.value = row.weight');
+  expect(layout).not.toContain('data-weight-drift');
   for (const feature of ['jobs', 'plugins', 'search', 'trash']) {
     expect(featureInstalled(feature)).toBe(true);
   }
@@ -59,7 +62,9 @@ it('runs the internal document lifecycle with no published database or bucket', 
   expect(await view('/admin?status=live')).toMatchObject({
     publishEnabled: false, hasStatusFilters: false, pages: [{ name: 'Private record' }],
   });
-  expect(await view(`${edit}/edit`)).toMatchObject({ publishEnabled: false, isPublished: false });
+  expect(await view(`${edit}/edit`)).toMatchObject({
+    publishEnabled: false, isPublished: false, isLiveSynced: false, publicationStatus: 'draft',
+  });
   expect(await view('/admin/tags')).toMatchObject({ canSync: false });
   expect(await view('/admin/advanced-search?search1=Private')).toMatchObject({
     publishEnabled: false, pages: [{ name: 'Private record' }],
@@ -96,6 +101,7 @@ it('runs the internal document lifecycle with no published database or bucket', 
     ['name', 'Updated record'], ['slug', 'private-record'], ['tag_ids', String(tag!.id)],
   ])).status).toBe(302);
   expect(await env.DB.prepare('SELECT id, start, end, timezone FROM pages WHERE id = ?').bind(id).first()).toEqual(page);
+  expect(await view('/admin/pages/list')).toMatchObject({ pages: [{ name: 'Updated record', isPublished: false }] });
   expect(await env.DB.prepare('SELECT COUNT(*) FROM page_versions WHERE page_id = ?').bind(id).first('COUNT(*)')).toBe(2);
 
   expect((await request(`${edit}/delete`, 'POST')).status).toBe(302);

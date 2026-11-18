@@ -1,5 +1,5 @@
 {% if page.hasLiveWeight %}
-  <span data-weight-drift class="{% if page.hasLiveWeightDrift %}inline-flex{% else %}hidden{% endif %} items-center gap-2">
+  <span data-weight-drift data-live-weight="{{ page.liveWeight }}" class="{% if page.hasLiveWeightDrift %}inline-flex{% else %}hidden{% endif %} items-center gap-2">
     <span title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }} ({{ page.liveWeight }})"
           class="inline-flex items-center text-amber-600">
       <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>

@@ -261,11 +261,7 @@
               <td class="px-6 py-4">
                 <div class="flex min-w-0 items-center gap-2">
                   <span class="text-sm text-gray-700">{{ page.weight }}</span>
-                  {% if page.hasLiveWeightDrift %}
-                    <span title="Live weight is {{ page.liveWeight }}; publish to sync" class="inline-flex items-center text-amber-600">
-                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                    </span>
-                  {% endif %}
+                  {% feature_fragment publish/search-weight-drift %}
                 </div>
               </td>
               {% if publishEnabled %}

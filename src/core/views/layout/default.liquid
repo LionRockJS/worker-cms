@@ -946,22 +946,14 @@
       save(dragTable);
       dragSrc = null; dragTable = null; mdTarget = null; dragBefore = null;
     });
-    // Write the server's post-reorder weights back into the rows so the weight
-    // fields stop showing pre-drag numbers. A reorder rewrites the draft weight
-    // only, so a row that matched its published copy may now drift — the marker
-    // is rendered hidden on every published row for exactly this moment.
+    // Keep the draft weight inputs in sync after reordering.
     function applyWeights(table, weights) {
       (weights || []).forEach(function(row) {
         var tr = table.querySelector('tbody tr[data-id="' + row.id + '"]');
         if (!tr) return;
         var input = tr.querySelector('input[name="weight"]');
         if (input) input.value = row.weight;
-        var drift = tr.querySelector('[data-weight-drift]');
-        if (!drift) return;
-        var live = tr.getAttribute('data-live-weight');
-        var drifted = live !== null && Number(live) !== row.weight;
-        drift.classList.toggle('hidden', !drifted);
-        drift.classList.toggle('inline-flex', drifted);
+        {% feature_fragment publish/update-weight-drift %}
       });
     }
     function rowIds(table) {

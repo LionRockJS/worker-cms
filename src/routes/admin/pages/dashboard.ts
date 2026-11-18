@@ -17,7 +17,7 @@ import type { BlueprintEntry } from '../../../cms-config';
 import { dashboardPageHref, dashboardPageNumber, dashboardPageSize, dashboardStatusFilter, editorsFromForm, languageFromRequest, num, slugify, str, userIdFromContext } from '../../../core/http/forms';
 import { coreExtensions } from '../../../core/extensions';
 import { type DashboardPageRow, publication, reservePageCreate } from '../../../features/services';
-import { lectFromForm, withDraftMetadata, withLiveStatus } from '../../../core/db/page-logic';
+import { lectFromForm, withDraftMetadata } from '../../../core/db/page-logic';
 import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages } from '../../../core/db/admin-queries';
 import { recordPageReads } from '../../../core/http/access-log';
 import { dashboardPagination, renderPage } from '../../../core/render/chrome';
@@ -136,13 +136,11 @@ async function dashboardPagesForRequest(
       page: requestedPage,
       limit: pageSize,
     });
-    const [liveMap, projectDraft] = await Promise.all([
-      publishing?.liveMapForDraftPages(c.env, draftPages.results) ?? new Map(),
-      publishing?.draftLectProjector(c.env),
-    ]);
     result = {
       ...draftPages,
-      results: withLiveStatus(draftPages.results, liveMap, projectDraft, now),
+      results: publishing
+        ? await publishing.annotateDraftPages(c.env, draftPages.results, now)
+        : draftPages.results.map(page => ({ ...page, isPublished: false })),
     };
   }
 

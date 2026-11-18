@@ -11,7 +11,7 @@ import { stringifyLect } from '../../../core/db/lect';
 import type { Lect } from '../../../core/db/lect';
 import type { Page, PageVersion } from '../../../types';
 import { editorsFromForm, nullableStr, num } from '../../../core/http/forms';
-import { blockNamesFor, blockPropsByName, blueprintPropsFor, lectsMatch } from '../../../core/db/page-logic';
+import { blockNamesFor, blockPropsByName, blueprintPropsFor } from '../../../core/db/page-logic';
 import { editorTaxonomy, parentPageOption } from '../../../core/db/admin-queries';
 import { publication } from '../../../features/services';
 import type { AppContext } from '../../../core/http/context';
@@ -124,7 +124,15 @@ export async function editorPageData(
   parentId: string | number | null | undefined,
   requestedVersionId = NaN,
 ) {
-  const [parentPages, taxonomy, version, versions, liveLect, pageTags, projectDraft] = await Promise.all([
+  // `rowid`, not `id`, breaks the tie: created_at is second-granularity
+  // (cmsTimestamp), so a create and an update in the same second collide,
+  // and `id` embeds a 16-bit random that would order them arbitrarily.
+  // rowid is insert order, which is what "newest" has to mean here — the
+  // head of this list is the snapshot that mirrors the page's own lect.
+  const history = c.env.DB.prepare('SELECT * FROM page_versions WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 20')
+    .bind(page.id)
+    .all<PageVersion>();
+  const [parentPages, taxonomy, version, versions, pageTags, liveState] = await Promise.all([
     parentId && await requestPageAllowed(c, Number(parentId), 'read') ? parentPageOption(c.env.DB, parentId) : [],
     editorTaxonomy(c.env.DB),
     Number.isFinite(requestedVersionId)
@@ -132,19 +140,11 @@ export async function editorPageData(
           .bind(page.id, requestedVersionId)
           .first<PageVersion>()
       : Promise.resolve(null),
-    // `rowid`, not `id`, breaks the tie: created_at is second-granularity
-    // (cmsTimestamp), so a create and an update in the same second collide,
-    // and `id` embeds a 16-bit random that would order them arbitrarily.
-    // rowid is insert order, which is what "newest" has to mean here — the
-    // head of this list is the snapshot that mirrors the page's own lect.
-    c.env.DB.prepare('SELECT * FROM page_versions WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 20')
-      .bind(page.id)
-      .all<PageVersion>(),
-    publication()?.getLiveLect(c.env, page.uuid) ?? null,
+    history,
     c.env.DB.prepare('SELECT tag_id FROM page_tags WHERE page_id = ?')
       .bind(page.id)
       .all<{ tag_id: number }>(),
-    publication()?.draftLectProjector(c.env),
+    publication()?.editorPublicationState(c.env, page, history),
   ]);
 
   recordTagReads('tag.editor-options', taxonomy.tags);
@@ -163,15 +163,10 @@ export async function editorPageData(
     // Head of the history: the same query already loaded it, newest first.
     currentVersion: versions.results[0] ?? null,
     versions: versions.results,
-    // The live copy is projected at publish time, so each candidate version
-    // must be projected the same way before comparing (page-logic lectsMatch
-    // semantics keep byte-equality for non-projected types).
-    liveVersionId: liveLect !== null ? versions.results.find(
-      (candidate) => lectsMatch(projectDraft?.({ page_type: page.page_type, lect: candidate.lect }), liveLect),
-    )?.id : undefined,
-    isPublished: liveLect !== null,
-    isLiveSynced: liveLect !== null
-      && lectsMatch(projectDraft?.(page), liveLect),
+    liveVersionId: liveState?.liveVersionId,
+    publicationStatus: liveState?.publicationStatus ?? ('draft' as const),
+    isPublished: liveState?.isPublished ?? false,
+    isLiveSynced: liveState?.isLiveSynced ?? false,
     selectedTagIds: pageTags.results.map((pt) => pt.tag_id),
   };
 }

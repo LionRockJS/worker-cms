@@ -8,7 +8,7 @@ import {
   getLectPointer,
   getLectScalar,
 } from '../db/lect';
-import { publicationStatusForPage, type PagePublicationStatus } from '../db/page-logic';
+import type { PagePublicationStatus } from '../../contracts/publish';
 import type { BlueprintProps, FieldProps, Lect, LectItem } from '../db/lect';
 import type { CmsConfig } from '../../cms-config';
 import type { UiTranslator } from '../i18n';
@@ -608,9 +608,7 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   } = opts;
 
   const isEdit = !!page;
-  const publicationStatus: PagePublicationStatus = page
-    ? opts.publicationStatus ?? publicationStatusForPage(page, isPublished)
-    : 'draft';
+  const publicationStatus = opts.publicationStatus ?? 'draft';
   const selectedVersion = isVersionPreview && version ? version : undefined;
   const translate = opts.t ?? ((_key: string, fallback: string) => fallback);
   const pageTitle = isEdit
@@ -685,8 +683,8 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
       slug: page?.slug ?? '',
       pageType: page?.page_type ?? defaultPageType,
       weight: page?.weight ?? 5,
-      start: page?.start ? page.start.replace(' ', 'T').slice(0, 16) : '',
-      end: page?.end ? page.end.replace(' ', 'T').slice(0, 16) : '',
+      start: page?.start ?? '',
+      end: page?.end ?? '',
       timezone: page?.timezone ?? defaultTimezone,
       creator: page?.creator ?? '',
       creatorName: creatorName ?? '',

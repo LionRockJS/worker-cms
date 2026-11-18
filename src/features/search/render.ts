@@ -28,7 +28,6 @@ import {
 import { resolveCmsConfig } from '../../core/db/content-config';
 import { editorTaxonomy } from '../../core/db/admin-queries';
 import { publication } from '../services';
-import { withLiveStatus } from '../../core/db/page-logic';
 import { renderPage } from '../../core/render/chrome';
 import { coreExtensions } from '../../core/extensions';
 import {
@@ -108,10 +107,8 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
 
   // Only the rows on this results page need a live status, so look those up
   // by uuid rather than reading every live page of the searched types.
-  const [liveMap, projectDraft] = await Promise.all([
-    publication()?.liveMapForDraftPages(c.env, result.results),
-    publication()?.draftLectProjector(c.env),
-  ]);
+  const pages = await publication()?.annotateDraftPages(c.env, result.results)
+    ?? result.results.map(page => ({ ...page, isPublished: false }));
   const routeBase = selectedPageType === 'all'
     ? '/admin/advanced-search'
     : `/admin/advanced-search/${encodeURIComponent(selectedPageType)}`;
@@ -159,7 +156,7 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
       bulkAction: `${routeBase}/bulk?${queryWithoutPage}`,
       currentHref: `${routeBase}?${pageQuery(result.pagination.currentPage)}`,
       queryWithoutPage,
-      pages: withLiveStatus(result.results, liveMap ?? new Map(), projectDraft),
+      pages,
   });
 }
 

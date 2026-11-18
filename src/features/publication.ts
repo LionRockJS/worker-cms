@@ -1,8 +1,22 @@
-import type { Env, Page } from '../types';
+import type { Env, Page, PageVersion } from '../types';
 import type { AuditActor } from '../core/db/audit';
 import type { AppContext } from '../core/http/context';
-import type { PagePublicationStatus } from '../core/db/page-logic';
-import type { LivePageSnapshot } from '../contracts/publish';
+import type { LivePageSnapshot, PagePublicationStatus } from '../contracts/publish';
+
+export interface EditorPublicationState {
+  isPublished: boolean;
+  publicationStatus: PagePublicationStatus;
+  liveVersionId?: number;
+  isLiveSynced: boolean;
+}
+
+export interface DraftPublicationRow extends Page {
+  isPublished: boolean;
+  publicationStatus?: PagePublicationStatus;
+  liveWeight?: number;
+  hasLiveWeightDrift?: boolean;
+  hasLiveLectDrift?: boolean;
+}
 
 export type PublishRefusal = 'submission' | 'regulated' | 'classification_unavailable' | 'writes_unavailable';
 
@@ -66,18 +80,12 @@ export interface PublicationService {
   publishTagsToTargets(env: Env, tagIds?: number[], actor?: AuditActor): Promise<PublishOutcome & { count: number; refusedCount?: number }>;
   removeTagFromTargets(env: Env, tagId: number, actor?: AuditActor): Promise<PublishOutcome>;
   isD1Live(env: Env, uuid: string): Promise<boolean>;
-  getLiveLect(env: Env, uuid: string, actor?: AuditActor): Promise<string | null>;
-  listLiveByTypes(env: Env, pageTypes: string[], actor?: AuditActor): Promise<LivePageSnapshot[]>;
+  annotateDraftPages(env: Env, pages: Page[], now?: Date): Promise<DraftPublicationRow[]>;
+  editorPublicationState(env: Env, page: Page, versions: PromiseLike<{ results: PageVersion[] }>): Promise<EditorPublicationState>;
+  filterDraftIdsByStatus(env: Env, pages: Page[], pageTypes: string[], status: PagePublicationStatus, actor?: AuditActor): Promise<number[]>;
   liveMapForDraftPages(env: Env, pages: Page[], actor?: AuditActor): Promise<Map<string, LivePageSnapshot>>;
-  draftLectProjector(env: Env): Promise<(page: { page_type?: string | null; lect?: string | null }) => string | null>;
   filteredDashboardPages(c: AppContext, options: DashboardPublicationQuery): Promise<{
-    results: Array<DashboardPageRow & {
-      isPublished: boolean;
-      publicationStatus?: PagePublicationStatus;
-      liveWeight?: number;
-      hasLiveWeightDrift?: boolean;
-      hasLiveLectDrift?: boolean;
-    }>;
+    results: Array<DashboardPageRow & DraftPublicationRow>;
     pagination: { total: number; currentPage: number; totalPages: number; limit: number };
   }>;
   dashboardPublishedTags(c: AppContext, pageIds: number[]): Promise<Array<{ pageId: number; name: string }>>;
