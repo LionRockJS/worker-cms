@@ -10,7 +10,7 @@
 import type { BlueprintEntry, CmsConfig } from '../../cms-config';
 import type { Env, PageType } from '../../types';
 import type { ContributedContentTypes } from '../extensions';
-import { getSetting, saveSetting } from './settings';
+import { getSetting } from './settings';
 
 /** Loads database-defined page types, including retained rows in disabled profiles. */
 export async function listDbPageTypes(db: D1DatabaseClient): Promise<PageType[]> {
@@ -88,15 +88,6 @@ export async function loadPageTypeExtensions(env: Env): Promise<PageTypeExtensio
     if (blocks.length || taxonomies.length) extensions[slug] = { blocks, taxonomies };
   }
   return extensions;
-}
-
-/** Replaces one type's extension; an empty extension deletes the entry. */
-export async function savePageTypeExtension(env: Env, slug: string, extension: PageTypeExtension): Promise<void> {
-  if (UNSAFE_KEYS.has(slug)) return;
-  const extensions = await loadPageTypeExtensions(env);
-  if (extension.blocks.length || extension.taxonomies.length) extensions[slug] = extension;
-  else delete extensions[slug];
-  await saveSetting(env, PAGE_TYPE_EXTENSIONS_SETTING_KEY, JSON.stringify(extensions));
 }
 
 /** Unions extension entries into the lists of types that exist in the config. */
