@@ -15,7 +15,7 @@ import type { AccessAuthorization } from '../../../core/auth/access-authorizatio
 import { userCan } from '../../../core/auth/permissions';
 import { renderPage } from '../../../core/render/chrome';
 import { maskPrivateValue } from '../../../core/render/privacy';
-import { allRoleOptions } from '../../../core/auth/role-store';
+import { allRoleOptions } from '../../../core/auth/role-options';
 import { ROLE_LABELS, builtinRoleTranslationKey, effectivePermissions, splitRoles } from '../../../core/auth/roles';
 import { featureAdminScreenProps } from '../../services';
 import type { AppContext } from '../../../core/http/context';

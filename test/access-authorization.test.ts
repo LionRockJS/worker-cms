@@ -8,7 +8,7 @@ import { verifyJWT } from '../src/core/auth/jwt';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { captureAccessAuthorization } from '../src/core/auth/access-authorization';
 import { auditEvidence, mutationAuditEvidence, roleRemovalAuditEvidence } from '../src/core/db/audit';
-import { deleteCustomRole, readRolePermissionSnapshot, saveRolePermissions } from '../src/core/auth/role-store';
+import { deleteCustomRole, readRolePermissionSnapshot, saveRolePermissions } from '../src/features/users-roles/role-store';
 import { Hono } from 'hono';
 import type { Variables } from '../src/types';
 import { drainAuditMutationOutbox } from '../src/core/db/audit-mutation-outbox';

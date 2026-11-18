@@ -3,7 +3,7 @@ import { createExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
-import { readRolePermissionSnapshot, saveRolePermissions } from '../src/core/auth/role-store';
+import { readRolePermissionSnapshot, saveRolePermissions } from '../src/features/users-roles/role-store';
 import { auditEvidence } from '../src/core/db/audit';
 import { captureAccessAuthorization } from '../src/core/auth/access-authorization';
 import { verifyJWT } from '../src/core/auth/jwt';

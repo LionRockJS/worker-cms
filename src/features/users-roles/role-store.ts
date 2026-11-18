@@ -1,19 +1,19 @@
 // ============================================================
 // Role administration helpers (custom roles + permission grants).
 // Built-in roles (USER_ROLES) are implicit; the `roles` table stores custom
-// roles and any built-in whose permissions have been customized. See roles.ts
+// roles and any built-in whose permissions have been customized. See core/auth/roles.ts
 // for how these rows feed resolveRolePermissions().
 // ============================================================
 
 import { USER_ROLES } from '../../types';
 import type { Env, Permission } from '../../types';
-import { ROLE_LABELS, resolveRolePermissions } from './roles';
-import { recordMetadataReads } from '../http/access-log';
-import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
-import { safeRoleAuditValue, UNSAFE_USER_ROLE_SQL, USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from './role-mutation-sql';
-import type { MutationAuditEvidence, RoleRemovalAuditEvidence } from '../db/audit';
-import { abortIf } from '../db/transaction-guard';
-import { assertAccessAuthorization, assertDelegatedRolePermissions, type AccessAuthorization } from './access-authorization';
+import { ROLE_LABELS, resolveRolePermissions } from '../../core/auth/roles';
+import { recordMetadataReads } from '../../core/http/access-log';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
+import { safeRoleAuditValue, UNSAFE_USER_ROLE_SQL, USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../../core/auth/role-mutation-sql';
+import type { MutationAuditEvidence, RoleRemovalAuditEvidence } from '../../core/db/audit';
+import { abortIf } from '../../core/db/transaction-guard';
+import { assertAccessAuthorization, assertDelegatedRolePermissions, type AccessAuthorization } from '../../core/auth/access-authorization';
 
 export interface RoleSummary {
   name: string;
@@ -26,17 +26,6 @@ export interface RoleSummary {
 
 const BUILTIN = new Set<string>(USER_ROLES);
 const PERMISSION_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?::[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$/;
-
-/** All assignable roles (built-in + custom) as { name, label } for pickers. */
-export async function allRoleOptions(env: Env): Promise<Array<{ name: string; label: string }>> {
-  const custom = await env.DB.prepare('SELECT name, label FROM roles WHERE builtin = 0 ORDER BY label ASC')
-    .all<{ name: string; label: string }>();
-  recordMetadataReads('role.labels-read', 'roles', custom.results.map(row => row.name));
-  return [
-    ...USER_ROLES.map((name) => ({ name, label: ROLE_LABELS[name] })),
-    ...custom.results,
-  ];
-}
 
 /** Role summaries for the Roles list, with effective permission counts. */
 export async function listRolesForAdmin(env: Env): Promise<RoleSummary[]> {

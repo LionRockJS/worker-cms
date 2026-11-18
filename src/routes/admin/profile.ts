@@ -4,7 +4,7 @@ import { profilePage } from '../../core/templates/profile';
 import type { Env, Variables, User } from '../../types';
 import { renderPage } from '../../core/render/chrome';
 import { ROLE_LABELS } from '../../core/auth/roles';
-import { allRoleOptions } from '../../core/auth/role-store';
+import { allRoleOptions } from '../../core/auth/role-options';
 import { featureAdminScreenProps } from '../../features/services';
 import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i18n';
 import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';

@@ -27,7 +27,7 @@ import {
   rolePermissionsRecordable,
   storedRolePermissions,
   type RolePermissionSnapshot,
-} from '../../../core/auth/role-store';
+} from '../role-store';
 import type { AppContext } from '../../../core/http/context';
 
 export const rolesRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();

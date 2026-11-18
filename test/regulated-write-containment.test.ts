@@ -3,7 +3,7 @@ import { createExecutionContext } from 'cloudflare:test';
 import { beforeEach, afterEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { regulatedRequestWriteBlocked, assertRegulatedWritesAllowed } from '../src/core/http/regulated-writes';
-import { createCustomRole, deleteCustomRole, saveRolePermissions } from '../src/core/auth/role-store';
+import { createCustomRole, deleteCustomRole, saveRolePermissions } from '../src/features/users-roles/role-store';
 import { coreExtensions, registerCoreExtensions } from '../src/core/extensions';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, getPlugins } from '../src/features/plugins/registry';

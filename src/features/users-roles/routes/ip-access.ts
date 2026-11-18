@@ -3,7 +3,7 @@ import type { Env, Variables } from '../../../types';
 import { requirePermission } from '../../../core/auth/guards';
 import { recordPolicyDenial } from '../../../core/auth/denials';
 import { permissionsFor, splitRoles } from '../../../core/auth/roles';
-import { getRoleForEdit } from '../../../core/auth/role-store';
+import { getRoleForEdit } from '../role-store';
 import { storedIpAllowlist, connectingIp, ipMatchesRoleAllowlists, parseIpAllowlist } from '../../../core/auth/ip-access';
 import { mutationAuditEvidence } from '../../../core/db/audit';
 import { abortIf } from '../../../core/db/transaction-guard';

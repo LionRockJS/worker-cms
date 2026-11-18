@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { readRolePermissionSnapshot, saveRolePermissions } from '../src/core/auth/role-store';
+import { readRolePermissionSnapshot, saveRolePermissions } from '../src/features/users-roles/role-store';
 import { auditEvidence } from '../src/core/db/audit';
 import { captureAccessAuthorization } from '../src/core/auth/access-authorization';
 import { verifyJWT } from '../src/core/auth/jwt';
