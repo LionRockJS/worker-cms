@@ -6,9 +6,8 @@ import type { CmsFeature } from '../../core/feature';
  * into cms-config.ts or declared by a plugin manifest. resolveCmsConfig()
  * layers all three, database last, so a type added here overrides the others.
  *
- * Only the admin UI lives here. The stores themselves (utils/page-type-store,
- * utils/block-type-store) stay core because resolveCmsConfig reads them on
- * every request that resolves content types, plugins included.
+ * This feature owns the administration routes and form validation. Core
+ * continues reading existing page and block types when these routes are disabled.
  */
 export const runtimeContentTypesFeature: CmsFeature = {
   id: 'runtime-content-types',

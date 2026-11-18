@@ -4,19 +4,25 @@
 // A row in `block_types` is the runtime-editable equivalent of a
 // block defined in cms-config.ts `blocks`: a named blueprint that
 // merges into the effective CmsConfig's `blocks` map via
-// resolveCmsConfig() (src/plugins/config.ts).
+// resolveCmsConfig() (src/core/db/content-config.ts).
 // ============================================================
 
 import type { BlueprintEntry } from '../../cms-config';
 import type { BlockType } from '../../types';
 import type { ContributedContentTypes } from '../extensions';
 
-/** Loads all database-defined block types, ordered for display. */
+/** Loads database-defined block types, including retained rows in disabled profiles. */
 export async function listDbBlockTypes(db: D1DatabaseClient): Promise<BlockType[]> {
-  const { results } = await db
-    .prepare('SELECT * FROM block_types ORDER BY weight ASC, name ASC')
-    .all<BlockType>();
-  return results;
+  try {
+    const { results } = await db
+      .prepare('SELECT * FROM block_types ORDER BY weight ASC, name ASC')
+      .all<BlockType>();
+    return results;
+  } catch (error) {
+    // Fresh profiles without runtime content types omit this table.
+    if (error instanceof Error && /no such table: block_types(?:[:\s]|$)/i.test(error.message)) return [];
+    throw error;
+  }
 }
 
 /** Parses a JSON column into the expected shape, or returns the fallback. */

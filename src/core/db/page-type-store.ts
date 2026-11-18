@@ -4,7 +4,7 @@
 // A row in `page_types` is the runtime-editable equivalent of a
 // plugin content-type fragment: it is converted into the same
 // ContributedContentTypes shape and merged into the effective CmsConfig
-// by resolveCmsConfig() (src/plugins/config.ts).
+// by resolveCmsConfig() (src/core/db/content-config.ts).
 // ============================================================
 
 import type { BlueprintEntry, CmsConfig } from '../../cms-config';
@@ -12,12 +12,18 @@ import type { Env, PageType } from '../../types';
 import type { ContributedContentTypes } from '../extensions';
 import { getSetting, saveSetting } from './settings';
 
-/** Loads all database-defined page types, ordered for display. */
+/** Loads database-defined page types, including retained rows in disabled profiles. */
 export async function listDbPageTypes(db: D1DatabaseClient): Promise<PageType[]> {
-  const { results } = await db
-    .prepare('SELECT * FROM page_types ORDER BY weight ASC, name ASC')
-    .all<PageType>();
-  return results;
+  try {
+    const { results } = await db
+      .prepare('SELECT * FROM page_types ORDER BY weight ASC, name ASC')
+      .all<PageType>();
+    return results;
+  } catch (error) {
+    // Fresh profiles without runtime content types omit this table.
+    if (error instanceof Error && /no such table: page_types(?:[:\s]|$)/i.test(error.message)) return [];
+    throw error;
+  }
 }
 
 /** Parses a JSON column into the expected shape, or returns the fallback. */

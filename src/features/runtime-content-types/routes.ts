@@ -25,7 +25,8 @@ import {
   loadPageTypeExtensions,
 } from '../../core/db/page-type-store';
 import { listDbBlockTypes } from '../../core/db/block-type-store';
-import { configOnlyTypes, validateTypeForm } from '../../core/db/type-admin';
+import { configOnlyTypes } from '../../core/db/type-admin';
+import { validateTypeForm } from './validation';
 import type { AppContext } from '../../core/http/context';
 
 interface DbTypeRow {

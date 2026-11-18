@@ -79,3 +79,21 @@ describe('page-type extension storage', () => {
     expect(await loadPageTypeExtensions(cmsEnv)).toEqual({ good: { blocks: ['ok'], taxonomies: [] } });
   });
 });
+
+it('resolves compiled types when optional type tables are absent', async () => {
+  await env.DB.batch([
+    env.DB.prepare('ALTER TABLE page_types RENAME TO saved_page_types'),
+    env.DB.prepare('ALTER TABLE block_types RENAME TO saved_block_types'),
+  ]);
+  try {
+    const config = await resolveCmsConfig(cmsEnv);
+    expect(config.blueprint).toEqual(cmsConfig.blueprint);
+    expect(config.blocks).toEqual(cmsConfig.blocks);
+  } finally {
+    await env.DB.batch([
+      env.DB.prepare('ALTER TABLE saved_page_types RENAME TO page_types'),
+      env.DB.prepare('ALTER TABLE saved_block_types RENAME TO block_types'),
+    ]);
+    clearConfigCache();
+  }
+});
