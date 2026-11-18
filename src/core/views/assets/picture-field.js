@@ -5,15 +5,20 @@
     return;
   }
 
+  // Optional features (media) map a URL to a cheaper preview URL.
+  const rewriters = [];
+
   function previewUrl(url) {
     const value = String(url || '').trim();
     if (!value) return '';
     try {
       const source = new URL(value, window.location.origin);
       if (!['http:', 'https:', 'blob:'].includes(source.protocol)) return '';
-      if (source.origin !== window.location.origin) return source.href;
-      if (!source.pathname.startsWith('/media/')) return source.href;
-      return `/media-preview/${source.pathname.replace(/^\/media\//, '')}${source.search}`;
+      for (const rewrite of rewriters) {
+        const rewritten = rewrite(source);
+        if (rewritten) return rewritten;
+      }
+      return source.href;
     } catch {
       return '';
     }
@@ -47,8 +52,19 @@
       }
     });
 
-    if (urlInput?.value.trim()) setPreview(urlInput.value.trim());
+    const refresh = () => {
+      if (urlInput?.value.trim()) setPreview(urlInput.value.trim());
+    };
+    refreshers.push(refresh);
+    refresh();
     urlInput?.addEventListener('input', () => setPreview(urlInput.value.trim()));
+  }
+
+  const refreshers = [];
+
+  function addPreviewRewriter(rewrite) {
+    rewriters.push(rewrite);
+    refreshers.forEach((refresh) => refresh());
   }
 
   function scan(scope) {
@@ -59,6 +75,6 @@
     });
   }
 
-  window.WorkerCmsPictureField = { scan };
+  window.WorkerCmsPictureField = { scan, addPreviewRewriter };
   scan(document);
 })();

@@ -10,6 +10,6 @@ import type { CmsFeature } from '../../core/feature';
  */
 export const mediaFeature: CmsFeature = {
   id: 'media',
-  clientAssets: ['/assets/field-upload.js'],
+  clientAssets: ['/assets/field-upload.js', '/assets/media-preview.js'],
   navKeys: ['content'],
 };

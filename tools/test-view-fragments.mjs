@@ -78,8 +78,40 @@ test('dashboard and editor controls follow the search and media switches indepen
       assert.equal((editor.match(/data-picture-url/g) ?? []).length, 2);
       assert.equal((editor.match(/data-picture-file/g) ?? []).length, media ? 2 : 0);
       assert.equal(views.has('assets/field-upload.js'), media);
+      assert.equal(views.has('assets/media-preview.js'), media);
       assert.ok(views.has('assets/picture-field.js'));
     }
+  }
+});
+
+test('media owns the /media-preview rewrite of picture previews', () => {
+  for (const media of [false, true]) {
+    const views = assembleViews({ media });
+    const core = views.get('assets/picture-field.js').toString();
+    assert.doesNotMatch(core, /media-preview/);
+    const preview = { dataset: {}, classList: { add() {}, remove() {} }, addEventListener() {}, removeAttribute() {} };
+    const root = {
+      dataset: {},
+      querySelector: (selector) => ({
+        '[data-picture-url]': { value: '/media/pictures/a.png?v=1', addEventListener() {} },
+        '[data-picture-preview]': preview,
+      })[selector] ?? null,
+    };
+    const browser = {
+      URL,
+      location: { origin: 'https://cms.test' },
+      document: { querySelectorAll: () => [root] },
+    };
+    browser.window = browser;
+    runInNewContext(core, browser);
+    assert.equal(preview.src, 'https://cms.test/media/pictures/a.png?v=1');
+    if (media) {
+      const asset = views.get('assets/media-preview.js').toString();
+      runInNewContext(asset, browser);
+      runInNewContext(asset, browser);
+      assert.equal(preview.src, '/media-preview/pictures/a.png?v=1');
+    }
+    assert.equal(preview.dataset.originalSrc, '/media/pictures/a.png?v=1');
   }
 });
 
