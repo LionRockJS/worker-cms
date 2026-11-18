@@ -645,16 +645,38 @@
         renderState();
       }
 
+      function bindSidebarHelpToggle() {
+        var toggle = document.querySelector('[data-sidebar-help-toggle]');
+        if (!(toggle instanceof HTMLInputElement)) return;
+
+        var storageKey = 'worker-cms-verbose-mode';
+        try {
+          toggle.checked = window.localStorage.getItem(storageKey) === 'true';
+        } catch (error) {
+          /* ignore */
+        }
+
+        toggle.addEventListener('change', function() {
+          try {
+            window.localStorage.setItem(storageKey, toggle.checked ? 'true' : 'false');
+          } catch (error) {
+            /* ignore */
+          }
+        });
+      }
+
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
           bindMobileMenu();
           bindMobileHeaderAutoHide();
           bindDesktopSidebar();
+          bindSidebarHelpToggle();
         });
       } else {
         bindMobileMenu();
         bindMobileHeaderAutoHide();
         bindDesktopSidebar();
+        bindSidebarHelpToggle();
       }
     })();
   </script>
