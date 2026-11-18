@@ -9,6 +9,9 @@ JWT_SECRET=replace-with-a-random-32-byte-hex-string
 # PLUGIN_SECRET=replace-only-while-migrating-a-legacy-plugin
 CANONICAL_ORIGIN=http://localhost:8787
 OAUTH_REDIRECT_URI=http://localhost:8787/auth/callback
+# Optional initial grants, applied only when creating an account. Use the
+# provider's stable subject (not username/CMS ID), or a verified email.
+# INITIAL_USER_ROLES='[{"provider":"eventuai","providerUserId":"your-provider-user-id","roles":["admin"]}]'
 # Add a line per provider you enable:
 EVENTUAI_CLIENT_SECRET=your-eventuai-client-secret
 # GITHUB_CLIENT_SECRET=your-github-client-secret

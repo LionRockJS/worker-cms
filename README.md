@@ -28,7 +28,10 @@ Content management system on Workers
 npm install
 ```
 
-`npm run setup` runs every step below interactively. To do them by hand, start
+`npm run setup` interactively configures resources, migrations, and OAuth, and
+can grant the first administrator role on sign-in. When the plugins feature is
+enabled, it also offers an optional private R2 cache for plugin views
+(`PLUGIN_VIEWS_BUCKET`, named `<namespace>-plugin-views` by default). To do them by hand, start
 this clone's config from the template. `wrangler.toml` is gitignored, so each
 clone keeps its own and a pull never overwrites it:
 
@@ -296,13 +299,57 @@ not silently merge logged-out accounts just because their emails match.
    the lifetime at six months (`--expires-in-days`, default 180), so re-run this
    and re-upload the secret before it expires or Apple sign-in starts failing.
 
-> **Note:** New accounts start as `viewer`, regardless of the OAuth provider's
-> role claims. Promote the first account to `admin` (or another role) with the
-> SQL command in step 7.
+> **Note:** New accounts default to `viewer`, regardless of the OAuth provider's
+> role claims. Predefine initial roles as described below, or promote the first
+> account with the SQL command in step 7.
 
 ### 7. Set the first user's role
 
-After signing in for the first time, update your role to `admin` in the CMS database. Multiple roles can be stored as a comma-separated list, for example `admin,viewer`:
+`npm run setup` and `npm run setup -- --local` can grant `admin` on account
+creation. Choose an enabled OAuth provider and enter its stable account subject
+(`sub`), or the numeric user ID for GitHub. The wizard saves the grant in
+`.dev.vars` for local setup or uploads it after a Cloudflare deployment. Local
+setup keeps existing grants in `.dev.vars`. For Cloudflare, accepting the prompt
+replaces the existing `INITIAL_USER_ROLES` secret if one is set.
+
+To grant roles on first sign-in, set the optional `INITIAL_USER_ROLES` secret
+to a JSON array before the user creates their account:
+
+```json
+[
+  { "provider": "eventuai", "providerUserId": "your-provider-user-id", "roles": ["admin"] },
+  { "provider": "google", "email": "writer@example.com", "roles": ["editor", "moderator"] }
+]
+```
+
+Upload the JSON with `npx wrangler secret put INITIAL_USER_ROLES`. For local
+development, put the JSON on one line in the gitignored `.dev.vars` file (see
+`.dev.vars.example`). Keep personal identities out of committed configuration.
+
+Each entry requires a supported `provider`, exactly one of `providerUserId` or
+`email`, and a nonempty `roles` array. `providerUserId` is the exact, case-sensitive
+OAuth subject (`sub`), or GitHub numeric user ID represented as a string; it is
+not a username or the CMS user ID. Email matching trims whitespace, ignores case,
+and requires the provider's affirmative `email_verified` claim. Google and Apple
+support this claim; Eventuai currently reports it as false. GitHub's `/user`
+response and Microsoft profile email do not provide trusted verification for
+this purpose, so use `providerUserId` for them. Google email verification can
+reflect past ownership of a third-party mailbox; prefer a stable provider ID
+for privileged grants, especially outside Gmail or Google Workspace.
+
+Matching entries contribute the union of their roles. Built-in roles and existing
+custom role slugs are accepted. Malformed configuration or a missing matched
+custom role refuses new-account creation without issuing a session. Unset, empty,
+or unmatched configuration uses `viewer`. `ALLOWED_EMAIL_DOMAINS` still controls
+registration eligibility independently; initial roles do not bypass it.
+
+The configured roles and their audit evidence commit with account creation.
+Later sign-ins preserve the stored roles, including a demotion to `viewer`.
+Adding an existing user to this setting does not promote them; use Users
+administration for existing accounts. Removing an entry does not revoke a grant
+already applied. This works without the optional Users/Roles admin feature.
+
+To promote an account created without a grant, update its role to `admin` in the CMS database. Multiple roles can be stored as a comma-separated list, for example `admin,viewer`:
 
 ```bash
 npx wrangler d1 execute cms --remote \
@@ -338,13 +385,59 @@ the client address as `CF-Connecting-IP`. Cloudflare Tunnel does this already; w
 nginx, add `proxy_set_header CF-Connecting-IP $remote_addr;`. Without it, every
 visitor shares one sign-in rate limit. Keep the port reachable only from the proxy.
 
+For local plugin view files, set `PLUGIN_VIEWS_DIR` in the server `.env` and
+restart. Plugins → Edit → View loading → Local files includes directory and
+Nginx examples. Both launchers support this read-only directory binding; see
+[plugin view loading](docs/plugin-view-loading.md). Nginx delivery is optional:
+set `PLUGIN_VIEWS_NGINX=true` only after installing its internal file location.
+
+#### Standalone workerd
+
+`server-workerd.mjs` generates a standalone `config.capnp` using the installed
+Miniflare binding implementations. Node.js is needed during preparation only;
+the running server is workerd:
+
+```bash
+node server-workerd.mjs --build
+node_modules/.bin/workerd serve --experimental config.capnp
+# Or prepare and launch in one command:
+node server-workerd.mjs --build --serve
+```
+
+It reads `wrangler.toml`, `.dev.vars`, and `.env` like `server.mjs`. `HOST` and
+`PORT` default to `127.0.0.1:8787`; `CRON_PORT` defaults to `8788`. Public
+`CANONICAL_ORIGIN` uses the same HTTPS proxy setup described above. The config
+embeds the bundle, bindings, local secrets, and absolute file/state paths;
+it is generated with private permissions and ignored by Git. Regenerate after
+changing code, bindings, secrets, or server settings. Keep the installed
+`node_modules/workerd` package for its binary and configuration schema.
+
+D1, R2, Durable Objects, queues, rate limits, and disk-backed views run within
+workerd. State uses `.wrangler/state/v3`, shared with the other local servers;
+stop those servers before preparing or running this one. Apply the local
+database migrations with `npm run db:migrate` before the first run. Images
+transforms are omitted, so media previews serve the originals. Queue messages
+are held in memory by the local emulator and do not survive a restart.
+
+Workerd does not automatically fire Wrangler cron triggers. A separate,
+loopback-only socket invokes all configured cron handlers on POST. For the
+current five-minute schedule, add this to the machine's crontab (adjust the port
+if `CRON_PORT` changes):
+
+```cron
+*/5 * * * * curl --fail --silent --show-error -X POST http://127.0.0.1:8788/
+```
+
+The generator uses Miniflare's debug configuration export and validates the
+expected service layout; recheck this path when upgrading Miniflare/Wrangler.
+
 ### 9. Deploy
 
 ```bash
 npm run deploy
 ```
 
-This deploys only a committed revision that has been pushed to its upstream branch. It runs the type check and the full test suite first, and tags the Worker version with the commit. Pass Wrangler options after `--`, for example `npm run deploy -- -c wrangler.production.toml`. See [docs/w14-secure-development.md](docs/w14-secure-development.md) for rollback.
+This deploys only a committed revision that has been pushed to its upstream branch. It runs the type check and the full test suite first, and tags the Worker version with the commit. Pass Wrangler options after `--`, for example `npm run deploy -- -c wrangler.production.toml`. See [docs/audit/w14-secure-development.md](docs/audit/w14-secure-development.md) for rollback.
 
 ---
 
@@ -354,6 +447,9 @@ The CMS can be extended with **plugins**, each of which is a separate Cloudflare
 Worker registered at runtime by HTTPS URL. Registration, enable/disable,
 credential rotation, delegated page-type scopes, assets, quotas, and credits are
 managed under **Admin → Plugins** without redeploying the CMS.
+
+See [Plugin API features and limits](docs/plugin-api.md) for the endpoint
+catalogue, approval requirements, batch sizes, storage caps and quotas.
 
 Every new manifest should declare one browser trust level with `trustLevel`
 (or `trust_level` in static JSON):
@@ -417,7 +513,8 @@ CMS enforces on page creation), `credits` (chargeable actions and their
 wallet), `autoPublishTypes` (owned types republished on save once already
 live), `contentTypes.publishLect` (fields stripped at publish time — see
 [Publish targets](#publish-targets)), `i18n: true` (the plugin serves its own
-locale catalogs), and `autoTenant: true` (see
+locale catalogs; admin requests carry the user's interface language as
+`x-cms-ui-locale` for text the plugin builds itself), and `autoTenant: true` (see
 [Automatic tenant registration](#automatic-tenant-registration)).
 
 For a plugin that uses the shared SDK's enrollment helper, `tenantVars` may
@@ -604,7 +701,7 @@ served on the CMS origin.
 
 ### Adding a plugin
 
-1. Build/deploy the plugin Worker (see [`examples/plugin-events`](examples/plugin-events)
+1. Build/deploy the plugin Worker (see [`docs/examples/plugin-events`](docs/examples/plugin-events)
    for a complete reference implementing all six capabilities).
 2. Open **Admin → Plugins → Register plugin**, enter its public HTTPS base URL,
    and leave it disabled until you have reviewed its manifest and code.
@@ -804,7 +901,7 @@ volumes.
   goes idle. Activity is observed when the access token is refreshed, so a
   session can be refused before its nominal deadline, never after it. A
   regulated deployment must set the value explicitly. See
-  [docs/w6-session-inactivity.md](docs/w6-session-inactivity.md).
+  [docs/audit/w6-session-inactivity.md](docs/audit/w6-session-inactivity.md).
   Existing sockets recheck authorization, including the idle deadline, before
   messages and deliveries, and sweep connections every 60 seconds.
 - Personal data (names, email, phone) is masked **server-side** on the users
@@ -820,7 +917,7 @@ volumes.
   Page types. Trusted plugin UI also requires host approval in the plugin edit
   form. Unapproved UI is sandboxed; custom page editors remain unavailable
   until both UI trust and page access are approved.
-- See [security update rollout](docs/security-update-2026-09-07.md) before
+- See [security update rollout](docs/audit/security-update-2026-09-07.md) before
   deploying this update, especially for cache invalidation and plugin setup.
 - Plugin URL validation rejects obvious private-address literals, but it is not
   a complete DNS-rebinding defense. Only users with `plugin:manage` should
@@ -976,20 +1073,21 @@ files Wrangler applies:
 
 ```
 src/core/schema.sql + every enabled fragment  →  migrations/0001_initial_schema.sql
-src/core/publish/schema.sql                   →  migrations/published/0001_published_schema.sql
+src/features/publish/published.sql                   →  migrations/published/0001_published_schema.sql
 ```
 
 This exists because Wrangler allows exactly one `migrations_dir` per D1
 database and has no CLI override — features cannot each own a folder that
-Wrangler walks. It does **not** need extra databases: every feature shares the
-same two, owning tables rather than databases.
+Wrangler walks. Features share the private database. Publishing also owns the optional
+published database baseline.
 
-A feature may own code, tables, or both. Ten are switchable:
+A feature may own code, tables, or both.
 
 | Feature | Owns |
 |---|---|
 | `plugins` | The plugin platform: registry, hooks, proxy, manage UI, `/__cms` API — plus `plugins`, `plugin_asset_approvals`, `plugin_file_prefix_approvals`, `plugin_page_type_approvals`, `plugin_state` (+4 indexes) |
 | `credits` | Metered billing (credits and diamonds) and the credit summary screen — plus `credit_wallets`, `credit_ledger`, `shared_credits`, `shared_credit_ledger`, `credit_subscriptions` (+4 indexes) |
+| `publish` | Publish and withdraw pages, read live status, mirror tags, ingest public submissions, and retry source erasures. Owns the published D1 baseline and the private `submission_erasures` table. |
 | `search` | The advanced-search screen and bulk actions (code only; the query builder is core) |
 | `users-roles` | The user and role admin screens (code only; the tables and permission resolver are core) |
 | `i18n` | The languages and translations screens (code only; see the note below) |
@@ -1004,6 +1102,40 @@ After editing `cms.features.json`:
 ```bash
 npm run build
 ```
+
+#### Internal DMS build
+
+Publishing is enabled by default. For an internal document management system,
+set `"publish": false` under `features` in `cms.features.json` and run
+`npm run build`. The setup wizard skips the published D1 database and
+disables both `PUBLISHED_DB` and `PUBLISH_BUCKET` in its Wrangler config.
+When publishing is re-enabled, rerun setup to restore the D1 binding and
+any R2 binding marked as disabled by setup. If an older setup commented out
+your `PUBLISH_BUCKET` binding, uncomment that block manually.
+If you manage Wrangler configuration directly, remove those bindings and
+the `PUBLISH_TARGETS` variable from the deployment configuration.
+`npm run db:migrate` applies only the private database migrations in this
+profile. The cron trigger remains available for session, audit, and other
+feature maintenance.
+
+The DMS build uses private records for editing, history, tags, and search.
+Publish and withdrawal, live status, pull-to-draft, public submission ingest,
+and the publication endpoints in `/__cms` are unavailable. Plugins can
+continue using the private content API.
+
+For an existing deployment, stop external submission writers, complete
+pending submission erasures, and withdraw any copies that should no longer be
+served before disabling the feature. Flipping the switch leaves existing D1
+and R2 data and external copies in place. A legacy submission mirror cannot
+be permanently purged in the DMS build because its public source may still
+need to be erased.
+
+To add publishing to a database first installed in DMS mode, generate and
+apply the private migration with `npm run build:migrations -- --enable publish`.
+Enable the feature, configure the publish bindings, and apply the published
+database baseline for a new published database. Run
+`npm run check:dms-profile` to verify the disabled build with isolated
+local bindings.
 
 No code feature depends directly on another. Feature-owned runtime behavior is
 composed through `src/features/services.ts`, whose concrete entries are
@@ -1133,7 +1265,7 @@ immediately, so a rename reaches readers without republishing every page that
 uses it, and **Admin → Tags → Sync published** backfills a database whose
 catalogue predates this table. Rows here are partitioned by writer: this Worker only
 upserts and deletes rows keyed by uuids it minted, while external submission
-Workers are INSERT-only. See [`src/core/publish/README.md`](src/core/publish/README.md).
+Workers are INSERT-only. See [`src/features/publish/README.md`](src/features/publish/README.md).
 
 Keeping public content in this separate database allows a public Worker to read
 published pages without receiving access to users, sessions, drafts, trash,
@@ -1195,7 +1327,7 @@ adapter.
 
 ## Publish targets
 
-Publishing is adapter-based (`src/core/publish/`). Built-in targets are selected with
+Publishing is adapter-based (`src/features/publish/`). Built-in targets are selected with
 the `PUBLISH_TARGETS` var (comma-separated, defaults to `"d1"`):
 
 | Target | Requires | What it does |
@@ -1358,4 +1490,4 @@ the assembler.)
 
 ## Regulated deployments
 
-For the opt-in readiness, explicit container inventory and write containment pending durable mutation evidence, see [Regulated deployment profile](docs/regulated-profile.md). Regulated mode currently permits protected reads and designated containment/maintenance operations; content/configuration writes, queued jobs, ingestion and recurring billing stay held. Prepare queue consumers and required pinned plugin identities before activation. See [P0 progress](docs/compliance-p0-progress-2026-10-30.md) for implemented safeguards, verification and remaining coverage.
+For the opt-in readiness, explicit container inventory and write containment pending durable mutation evidence, see [Regulated deployment profile](docs/audit/regulated-profile.md). Regulated mode currently permits protected reads and designated containment/maintenance operations; content/configuration writes, queued jobs, ingestion and recurring billing stay held. Prepare queue consumers and required pinned plugin identities before activation. See [P0 progress](docs/audit/compliance-p0-progress-2026-10-30.md) for implemented safeguards, verification and remaining coverage.

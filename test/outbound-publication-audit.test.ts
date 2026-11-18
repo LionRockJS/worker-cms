@@ -1,11 +1,11 @@
 import { env, exports } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { publishPageToTargets, publishPagesToTargets, publishTagToTargets, publishTagsToTargets, unpublishPageFromTargets, removeTagFromTargets } from '../src/core/publish';
-import { auditPublishTransfer } from '../src/core/publish/audit';
-import { d1Adapter } from '../src/core/publish/d1';
-import { publishFlash } from '../src/routes/admin/pages/lifecycle';
-import { pagesApiRoutes } from '../src/features/plugins/api/pages';
+import { publishPageToTargets, publishPagesToTargets, publishTagToTargets, publishTagsToTargets, unpublishPageFromTargets, removeTagFromTargets } from '../src/features/publish';
+import { auditPublishTransfer } from '../src/features/publish/audit';
+import { d1Adapter } from '../src/features/publish/d1';
+import { publishFlash } from '../src/features/publish';
+import { pluginPublishRoutes } from '../src/features/plugins/routes/publish-api';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, getPlugins } from '../src/features/plugins/registry';
 import { approvePageTypeAccess } from '../src/features/plugins/page-types';
 import { signJWT } from './auth-fixtures';
@@ -168,7 +168,7 @@ it('reports write containment without mislabelling a public page as a submission
 it('returns containment correctly when the contributor router is mounted without the outer HTTP guard', async () => {
   await getPlugins(publishEnv()); // Prepare the reviewed identity before containment.
   const app = new Hono<{ Bindings: Env; Variables: Variables }>();
-  app.route('/__cms', pagesApiRoutes);
+  app.route('/__cms', pluginPublishRoutes);
   const response = await app.request('https://cms.example.com/__cms/pages/publish', {
     method: 'POST', headers: { 'x-plugin-id': pluginId, 'x-plugin-secret': 'test-secret', 'content-type': 'application/json' },
     body: JSON.stringify({ ids: [5700] }),

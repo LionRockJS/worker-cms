@@ -1,3 +1,4 @@
+import { accessCookieName, refreshCookieName, oauthStateCookieName, clearAuthCookie } from '../../core/auth/cookies';
 import { Hono } from 'hono';
 import { profilePage } from '../../core/templates/profile';
 import type { Env, Variables, User } from '../../types';
@@ -9,7 +10,7 @@ import { localeRegistry, resolveUiLocale, setUiLocaleCookie } from '../../core/i
 import { appendQuery, safeAdminReturnPath, str } from '../../core/http/forms';
 import { contextActor } from '../../core/db/audit';
 import { recordAuditOutage } from '../../core/db/audit-outages';
-import { disconnectOwnIdentity, updateOwnProfileName } from '../../core/auth/self-profile';
+import { disableOwnAccount, disconnectOwnIdentity, isOwnAvatar, OWN_AVATAR_MAX_LENGTH, OWN_AVATAR_PATTERN, updateOwnAvatar, updateOwnProfileName } from '../../core/auth/self-profile';
 import { recordTableReads } from '../../core/http/access-log';
 
 
@@ -120,6 +121,7 @@ profileRoutes.get('/profile', async (c) => {
     email: user.email,
     roleLabel: roleLabel(user.role, roleOptions),
     avatarUrl: user.avatar_url ?? '',
+    hasOwnAvatar: isOwnAvatar(user.avatar_url),
     flash,
     error,
     identities,
@@ -149,6 +151,23 @@ profileRoutes.post('/profile', async (c) => {
     return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
   }
   return c.redirect('/admin/profile?flash=profile.name_saved', 303);
+});
+
+profileRoutes.post('/profile/avatar', async (c) => {
+  const form = await c.req.formData();
+  // A resized data URI built in the browser, or '' to remove the picture.
+  const avatar = str(form.get('avatar'));
+  if (avatar && (avatar.length > OWN_AVATAR_MAX_LENGTH || !OWN_AVATAR_PATTERN.test(avatar))) {
+    return c.redirect('/admin/profile?error=profile.invalid_avatar', 303);
+  }
+
+  try {
+    await updateOwnAvatar(c, avatar);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  return c.redirect(`/admin/profile?flash=${avatar ? 'profile.avatar_saved' : 'profile.avatar_removed'}`, 303);
 });
 
 profileRoutes.post('/profile/locale', async (c) => {
@@ -189,4 +208,17 @@ profileRoutes.post('/profile/identities/:id/disconnect', async (c) => {
   }
 
   return c.redirect('/admin/profile?flash=Sign-in+method+disconnected');
+});
+
+profileRoutes.post('/profile/disable', async (c) => {
+  const form = await c.req.formData();
+  if (form.get('confirm') !== 'disable') return c.redirect('/admin/profile', 303);
+  try {
+    await disableOwnAccount(c);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    return c.json({ error: 'Account disabling unavailable' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  for (const name of [accessCookieName, refreshCookieName, oauthStateCookieName]) clearAuthCookie(c, name);
+  return c.redirect('/auth/login', 303);
 });

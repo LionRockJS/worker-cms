@@ -30,8 +30,9 @@
     "no_permission": "您沒有權限存取管理後台。",
     "provider_fallback": "您的登入服務供應商",
     "redirecting_to": "正在前往以下服務供應商登入：",
-    "signup_notice": "可使用您的常用帳戶免費註冊，但只限獲授權使用者存取。",
-    "version": "版本"
+    "signup_notice": "僅限獲授權使用者存取。",
+    "version": "版本",
+    "ip_not_allowed": "此 IP 位址不允許登入。請聯絡管理員。"
   },
   "nav": {
     "audit": "審計日誌",
@@ -82,7 +83,16 @@
     "reveal_fields": "顯示個人資料欄位"
   },
   "profile": {
+    "disable_account": "停用帳戶",
+    "disable_description": "停用後，所有裝置都會登出，並解除所有登入方式的連結。請登入另一個帳戶，再到其個人資料頁面連結這些登入方式。現有帳戶資料將保留；停用後將無法存取此帳戶。",
+    "disable_confirm": "確定停用此帳戶並解除所有登入方式的連結？",
+    "disable_acknowledge": "我了解停用後將無法存取此帳戶。",
     "avatar": "頭像",
+    "avatar_initials": "使用姓名首字母",
+    "avatar_remove": "移除頭像",
+    "avatar_removed": "頭像已移除",
+    "avatar_saved": "頭像已儲存",
+    "avatar_upload": "上傳頭像",
     "connect": "連接",
     "connected_identities": "已連接的身分",
     "description": "管理您的 CMS 帳戶及已連接的登入方式。",
@@ -92,6 +102,7 @@
     "donate_to_pool": "捐贈至共享池",
     "donation_note_placeholder": "此捐贈的用途",
     "interface_language": "介面語言",
+    "invalid_avatar": "請選擇圖片檔案（PNG、JPEG、WebP 或 GIF）。",
     "invalid_name": "請輸入 1 至 100 個字元的顯示名稱。",
     "language_not_enabled": "介面語言尚未啟用",
     "language_saved": "介面語言已儲存",
@@ -238,9 +249,15 @@
       "visible": "顯示",
       "hidden": "隱藏",
       "help": "在管理介面顯示餘額、點數面板和點數連結。不使用點數或擁有無限點數的部署可將其隱藏。此顯示設定不會變更價格或扣費。"
+    },
+    "login_labels": {
+      "title": "登入頁面文字",
+      "description": "按語言自訂登入說明、按鈕文字和存取提示。",
+      "edit": "編輯登入頁面文字"
     }
   },
   "shell": {
+    "show_explanations": "顯示說明",
     "close_menu": "關閉選單",
     "collapse_sidebar": "收合側邊欄",
     "credit": "點數",

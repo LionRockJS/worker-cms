@@ -28,6 +28,22 @@
       "manage": "Manage translations",
       "save": "Save translation",
       "title": "Translations"
+    },
+    "login_labels": {
+      "title": "Login page labels",
+      "description": "Edit the login page text for the selected language. The app name is configured in System Settings. The access notice is a complete message; it does not automatically include the app name.",
+      "reset": "Reset to default",
+      "authentication_error": "Authentication error prefix",
+      "connecting_to": "Connecting status prefix",
+      "continue_with": "Sign-in button prefix",
+      "no_permission": "Permission denied message",
+      "provider_fallback": "Provider fallback name",
+      "redirecting_to": "Redirect status prefix",
+      "signup_notice": "Access / sign-up notice",
+      "version": "Version label",
+      "ip_not_allowed": "IP access denied message",
+      "sign_in_to_manage_your_content": "Sign-in description",
+      "connecting": "Connecting status"
     }
   }
 }

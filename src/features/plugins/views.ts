@@ -1,3 +1,4 @@
+import { fetchPluginView } from './view-source';
 // ============================================================
 // Composite view source — wraps env.VIEWS so plugin-owned Liquid
 // templates (field/block snippets) resolve transparently.
@@ -31,7 +32,7 @@ export function viewsFor(env: Env): Fetcher {
     const path = new URL(url).pathname;
     for (const plugin of await getPlugins(env)) {
       if (pluginTrustLevel(plugin.manifest) !== 'trusted-ui') continue;
-      const response = await plugin.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/views${path}`);
+      const response = await fetchPluginView(env, plugin, `${PLUGIN_ORIGIN}${PLUGIN_PREFIX}/views${path}`);
       if (response.ok) return markViewSource(response, 'plugin');
     }
     return primary; // propagate the original 404

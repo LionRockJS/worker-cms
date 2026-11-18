@@ -349,3 +349,29 @@ it.each(['link', 'profile'])('reports only a coarse incomplete incident after %s
   expect(incident).toMatchObject({ reason: 'health', captureComplete: false, eventCount: 0, records: [] });
   privateDataAbsent({ alerts, incident });
 });
+
+it.each([false, true])('links a released identity to another account after disabling (legacy primary: %s)', async legacy => {
+  await env.DB.prepare("INSERT INTO users (id, oauth_id, email, role) VALUES (8902, ?, 'retained@example.invalid', 'admin')")
+    .bind(legacy ? oauthId : 'github:retired-primary').run();
+  if (!legacy) await seedIdentity(8902);
+  const old = await createAuthSession(env, { id: 8902, email: 'retained@example.invalid', name: '', role: 'admin' });
+  const ctx = createExecutionContext();
+  const disabled = await worker.fetch(new Request('https://cms.example.com/admin/profile/disable', {
+    method: 'POST', headers: { Cookie: `access_token=${old.accessToken}`, 'Sec-Fetch-Site': 'same-origin',
+      'Content-Type': 'application/x-www-form-urlencoded' }, body: 'confirm=disable',
+  }), { ...env, REGULATED_MODE: undefined, REGULATED_INVENTORY: undefined }, ctx);
+  await waitOnExecutionContext(ctx);
+  expect(disabled.status).toBe(303);
+  await session();
+  expect((await login(true)).headers.get('Location')).toBe('/admin');
+  expect(await identities()).toMatchObject([{ user_id: id, oauth_id: oauthId }]);
+  expect(await env.DB.prepare('SELECT disabled_at, role FROM users WHERE id = 8902').first())
+    .toEqual({ disabled_at: expect.any(String), role: 'admin' });
+});
+
+it('refuses a pending linking flow after its account is disabled', async () => {
+  await session(); const callback = await begin(true);
+  await env.DB.prepare('UPDATE users SET disabled_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run();
+  expect((await callback()).headers.get('Location')).toBe('/auth/login?error=link_session_mismatch');
+  expect(await identities()).toEqual([]);
+});

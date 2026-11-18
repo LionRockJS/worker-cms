@@ -1,12 +1,12 @@
 // ============================================================
 // Asset inventory and control register check (W8, A.5.9).
 //
-// compliance/asset-inventory.json is only useful while it matches the code.
+// docs/compliance/asset-inventory.json is only useful while it matches the code.
 // This fails when a binding, variable or secret in the Env type, a binding in
 // wrangler.example.toml, or a D1 table in either baseline has no inventory
 // entry, or when an entry no longer exists in source. It also validates the
-// shape of compliance/control-register.json, and checks that every inventoried
-// supplier has an entry in compliance/supplier-register.json (W10). Adding a resource therefore
+// shape of docs/compliance/control-register.json, and checks that every inventoried
+// supplier has an entry in docs/compliance/supplier-register.json (W10). Adding a resource therefore
 // forces the inventory change into the same commit — the update process the
 // standard asks to be demonstrated.
 //
@@ -22,6 +22,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { availableFeatures, buildCms, buildPublished } from './build-migrations.mjs';
 
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
 const read = (file) => readFileSync(path.join(rootDir, file), 'utf8');
@@ -71,12 +72,12 @@ function configNames(text, includeCommented) {
   return { bindings: new Set(bindings), vars: new Set(vars) };
 }
 
-function baselineTables(file) {
-  return new Set([...read(file).matchAll(/^CREATE TABLE IF NOT EXISTS ([a-z_][a-z0-9_]*)/gm)].map((m) => m[1]));
+function baselineTables(sql) {
+  return new Set([...sql.matchAll(/^CREATE TABLE IF NOT EXISTS ([a-z_][a-z0-9_]*)/gm)].map((m) => m[1]));
 }
 
 function checkInventory(errors) {
-  const inventory = JSON.parse(read('compliance/asset-inventory.json'));
+  const inventory = JSON.parse(read('docs/compliance/asset-inventory.json'));
   const holds = new Set(Object.keys(inventory.holds ?? {}));
   const ids = new Set();
   for (const asset of inventory.assets) {
@@ -100,17 +101,20 @@ function checkInventory(errors) {
     if (!bindingAssets.has(name)) errors.push(`inventory: wrangler.example.toml declares ${name} with no inventory entry`);
   }
 
-  for (const [store, file] of [['DB', 'migrations/0001_initial_schema.sql'], ['PUBLISHED_DB', 'migrations/published/0001_published_schema.sql']]) {
-    const tables = baselineTables(file);
+  // The inventory describes everything the repository can build, even when
+  // this checkout selects a profile with fewer tables.
+  const fullProfile = Object.fromEntries(availableFeatures().map(id => [id, true]));
+  for (const [store, sql] of [['DB', buildCms(fullProfile)], ['PUBLISHED_DB', buildPublished()]]) {
+    const tables = baselineTables(sql);
     const listed = new Set(inventory.assets.filter((a) => a.kind === 'table' && a.store === store).map((a) => a.table));
     for (const table of tables) if (!listed.has(table)) errors.push(`inventory: ${store}.${table} has no inventory entry`);
-    for (const table of listed) if (!tables.has(table)) errors.push(`inventory: ${store}.${table} is inventoried but not in ${file}`);
+    for (const table of listed) if (!tables.has(table)) errors.push(`inventory: ${store}.${table} is inventoried but missing from the full schema`);
   }
   return { inventory, bindingAssets };
 }
 
 function checkRegister(errors) {
-  const register = JSON.parse(read('compliance/control-register.json'));
+  const register = JSON.parse(read('docs/compliance/control-register.json'));
   const seen = new Set();
   const counts = Object.fromEntries(Object.keys(CONTROL_GROUPS).map((group) => [group, 0]));
   for (const control of register.controls) {
@@ -136,7 +140,7 @@ function checkRegister(errors) {
 /** Every inventoried supplier is in the register, and every register entry
  *  points at one. An executed agreement must say where it is recorded. */
 function checkSuppliers(errors, inventory) {
-  const register = JSON.parse(read('compliance/supplier-register.json'));
+  const register = JSON.parse(read('docs/compliance/supplier-register.json'));
   const agreement = new Set(Object.keys(register.statuses?.agreement ?? {}));
   const assessment = new Set(Object.keys(register.statuses?.assessment ?? {}));
   const holds = new Set(Object.keys(inventory.holds ?? {}));

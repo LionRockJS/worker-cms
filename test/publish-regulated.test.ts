@@ -18,8 +18,8 @@ import {
   publishPageToTargets,
   publishPagesToTargets,
   unpublishPageFromTargets,
-} from '../src/core/publish';
-import { regulatedPages } from '../src/core/publish/regulated';
+} from '../src/features/publish';
+import { regulatedPages } from '../src/core/db/regulated-pages';
 import type { Env, JWTPayload, Page } from '../src/types';
 
 const IncomingRequest = Request;

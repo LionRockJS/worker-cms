@@ -17,6 +17,7 @@ import {
   listLocales,
   localeRegistry,
   loadBundledLocaleCatalog,
+  buildTranslationCatalog,
 } from '../../core/i18n';
 
 export const i18nRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -114,6 +115,7 @@ i18nRoutes.post('/settings/languages/:code/delete', async (c) => {
 });
 
 i18nRoutes.get('/settings/translations', async (c) => {
+  const loginLabels = c.req.query('scope') === 'login';
   const locales = await listLocales(c.env);
   const requested = c.req.query('locale') ?? 'en';
   const selected = locales.find((locale) => locale.code === requested) ?? locales.find((locale) => locale.code === 'en') ?? locales[0];
@@ -123,8 +125,12 @@ i18nRoutes.get('/settings/translations', async (c) => {
     loadBundledLocaleCatalog(c.env, selected.code),
   ]);
   const overrides = new Map(messages.map((entry) => [entry.message_key, entry]));
-  const messageKeys = [...new Set([...Object.keys(bundledMessages), ...overrides.keys()])].sort();
+  const fallback = loginLabels ? await loadBundledLocaleCatalog(c.env, 'en') : {};
+  const effective = loginLabels && selected.ui_enabled === 1 ? await buildTranslationCatalog(c.env, selected.code) : {};
+  const messageKeys = [...new Set([...Object.keys(fallback), ...Object.keys(bundledMessages), ...overrides.keys()])]
+    .filter(key => !loginLabels || key.startsWith('login.') || key.startsWith('view_strings.sections_login.')).sort();
   return renderPage(c, translationsPage, {
+    loginLabels,
     localeCode: selected.code,
     localeLabel: selected.label,
     localeOptions: locales.map((locale) => ({ code: locale.code, label: locale.label, selected: locale.code === selected.code })),
@@ -132,12 +138,14 @@ i18nRoutes.get('/settings/translations', async (c) => {
       const override = overrides.get(key);
       return {
         key,
+        labelKey: `i18n.login_labels.${key.split('.').at(-1)}`,
+        editValue: override?.value ?? effective[key] ?? bundledMessages[key] ?? fallback[key] ?? '',
         fileValue: bundledMessages[key] ?? '',
         hasFileValue: key in bundledMessages,
         overrideValue: override?.value ?? '',
         hasOverride: !!override,
         deleteAction: override
-          ? `/admin/settings/translations/${encodeURIComponent(selected.code)}/${encodeURIComponent(key)}/delete`
+          ? `/admin/settings/translations/${encodeURIComponent(selected.code)}/${encodeURIComponent(key)}/delete${loginLabels ? '?scope=login' : ''}`
           : '',
       };
     }),
@@ -149,20 +157,22 @@ i18nRoutes.get('/settings/translations', async (c) => {
 i18nRoutes.post('/settings/translations', async (c) => {
   const form = await c.req.formData();
   const locale = String(form.get('locale') ?? 'en');
+  const scope = form.get('scope') === 'login' ? '&scope=login' : '';
   try {
     await mutateLocaleAdmin(c,{action:'message-save',code:locale,key:form.get('key'),value:form.get('value')});
-    return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}&flash=Translation+saved`, 303);
+    return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}${scope}&flash=Translation+saved`, 303);
   } catch (error) {
-    return validationRedirect(c,error,`/admin/settings/translations?locale=${encodeURIComponent(locale)}`);
+    return validationRedirect(c,error,`/admin/settings/translations?locale=${encodeURIComponent(locale)}${scope}`);
   }
 });
 
 i18nRoutes.post('/settings/translations/:locale/:key/delete', async (c) => {
   const requested = c.req.param('locale');
+  const scope = c.req.query('scope') === 'login' ? '&scope=login' : '';
   try {
     const locale = await mutateLocaleAdmin(c,{action:'message-delete',code:requested,key:c.req.param('key')});
-    return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}&flash=Translation+deleted`, 303);
+    return c.redirect(`/admin/settings/translations?locale=${encodeURIComponent(locale)}${scope}&flash=Translation+deleted`, 303);
   } catch(error) {
-    return validationRedirect(c,error,`/admin/settings/translations?locale=${encodeURIComponent(requested)}`);
+    return validationRedirect(c,error,`/admin/settings/translations?locale=${encodeURIComponent(requested)}${scope}`);
   }
 });

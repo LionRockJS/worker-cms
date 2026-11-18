@@ -28,6 +28,22 @@
       "manage": "管理翻译",
       "save": "保存翻译",
       "title": "翻译"
+    },
+    "login_labels": {
+      "title": "登录页面文字",
+      "description": "编辑所选语言的登录页面文字。应用程序名称可在系统设置中修改。访问提示是完整消息，不会自动加上应用程序名称。",
+      "reset": "恢复默认值",
+      "authentication_error": "验证错误前缀",
+      "connecting_to": "连接状态前缀",
+      "continue_with": "登录按钮前缀",
+      "no_permission": "权限不足消息",
+      "provider_fallback": "登录服务默认名称",
+      "redirecting_to": "重定向状态前缀",
+      "signup_notice": "访问／注册提示",
+      "version": "版本标签",
+      "ip_not_allowed": "IP 访问被拒绝消息",
+      "sign_in_to_manage_your_content": "登录说明",
+      "connecting": "连接状态"
     }
   }
 }

@@ -2,11 +2,11 @@
  * never become evidence values or dynamically expand the delivery contract. */
 export const AUTH_DENIAL_REASONS = {
   'auth.start': ['link_session_expired', 'rate_limited', 'unknown'],
-  'auth.login': ['provider_error', 'missing_params', 'missing_state', 'invalid_state', 'state_mismatch',
+  'auth.login': ['ip_not_allowed', 'provider_error', 'missing_params', 'missing_state', 'invalid_state', 'state_mismatch',
     'unsupported_provider', 'provider_not_configured', 'token_exchange_failed', 'no_id_token', 'invalid_id_token',
     'no_access_token', 'userinfo_not_configured', 'userinfo_failed', 'invalid_userinfo', 'link_session_mismatch',
     'identity_already_linked', 'email_not_allowed', 'identity_not_linked', 'db_error', 'rate_limited', 'unknown'],
-  'auth.refresh': ['no_refresh_token', 'invalid_refresh_token', 'session_revoked', 'user_not_found', 'rate_limited', 'unknown'],
+  'auth.refresh': ['ip_not_allowed', 'no_refresh_token', 'invalid_refresh_token', 'session_revoked', 'user_not_found', 'rate_limited', 'unknown'],
   'auth.access': ['missing_credentials', 'invalid_credentials', 'unknown'],
 } as const;
 export type AuthDenialAction = keyof typeof AUTH_DENIAL_REASONS | 'permission.denied';
@@ -14,7 +14,7 @@ export const PERMISSION_DENIAL_REASONS = [
   'credit_insufficient_balance', 'credit_self_transfer', 'credit_recipient_admin',
   'plugin_identity_claimed', 'plugin_identity_required', 'plugin_file_prefix_conflict',
   'locale_protected', 'locale_default_required', 'locale_ui_required', 'locale_fallback_invalid',
-  'editor_required', 'target_role_exceeds_authority', 'requested_role_exceeds_authority',
+  'ip_not_allowed', 'editor_required', 'target_role_exceeds_authority', 'requested_role_exceeds_authority',
   'grant_exceeds_authority', 'locked_role', 'builtin_role', 'self_deletion', 'last_administrator', 'management_permission_changed', 'unknown'] as const;
 export type PermissionDenialReason = typeof PERMISSION_DENIAL_REASONS[number];
 export const permissionDenialReason = (value: string) => (PERMISSION_DENIAL_REASONS as readonly string[]).includes(value) ? value : 'unknown';

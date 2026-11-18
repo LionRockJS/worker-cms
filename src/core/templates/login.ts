@@ -1,3 +1,4 @@
+import { adminReturnTo } from '../auth/return-to';
 import { assetRevisionQuery, layout } from '../render/layout';
 import { renderView } from '../render/liquid';
 import { BUILD_VERSION } from '../../generated/build-info';
@@ -34,6 +35,7 @@ export async function loginPage(views: Fetcher, opts: {
   appFont: string;
   providers: string[];
   error?: string;
+  returnTo?: string;
   viewRevision?: string;
   uiLocale: string;
   uiDirection: 'ltr' | 'rtl';
@@ -48,11 +50,12 @@ export async function loginPage(views: Fetcher, opts: {
     buildVersion: BUILD_VERSION,
     error,
     isForbidden: error === 'forbidden',
+    isIpDenied: error === 'ip_not_allowed',
     providers: providers.map((provider) => {
       const isPrimary = provider === 'eventuai';
       return {
         name: provider,
-        href: `/auth/start?provider=${encodeURIComponent(provider)}`,
+        href: `/auth/start?provider=${encodeURIComponent(provider)}&returnTo=${encodeURIComponent(adminReturnTo(opts.returnTo))}`,
         label: providerLabel(provider),
         icon: providerIcon(provider, revisionQuery),
         buttonClass: isPrimary

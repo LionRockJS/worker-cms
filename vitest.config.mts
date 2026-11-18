@@ -7,6 +7,7 @@ import { availableFeatures, baselinePaths, buildCms, readManifest } from './tool
 import { assembleViews, availableViewFeatures } from './tools/build-views.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
+const dmsProfile = process.env.CMS_TEST_PROFILE === 'dms';
 
 // The migration assembler runs in Node, but the assembly tests run inside
 // workerd where there is no filesystem — so the SQL it produces is handed over
@@ -32,7 +33,7 @@ export default defineConfig({
       miniflare: {
         // Provide isolated buckets for audit archives and outage journals.
         // Tests cover missing bindings separately by passing them as undefined.
-        r2Buckets: ['AUDIT_BUCKET', 'AUDIT_OUTAGE_BUCKET'],
+        r2Buckets: ['AUDIT_BUCKET', 'AUDIT_OUTAGE_BUCKET', 'PLUGIN_VIEWS_BUCKET'],
         bindings: {
           JWT_SECRET: 'test-jwt-secret-0123456789abcdef0123456789abcdef',
           // Test value, so the suite does not depend on a developer's .dev.vars
@@ -53,7 +54,7 @@ export default defineConfig({
           CANONICAL_ORIGIN: 'https://cms.example.com',
           SITE_TITLE: '0xCMS',
           TEST_MIGRATIONS: await readD1Migrations(path.join(rootDir, 'migrations')),
-          TEST_PUBLISHED_MIGRATIONS: await readD1Migrations(path.join(rootDir, 'migrations/published')),
+          TEST_PUBLISHED_MIGRATIONS: dmsProfile ? [] : await readD1Migrations(path.join(rootDir, 'migrations/published')),
           TEST_SENSITIVITY_UPGRADE: (await readD1Migrations(path.join(rootDir, 'migrations/manual'))).filter(migration => migration.name.includes('sensitivity_')),
           TEST_AUDIT_OUTBOX_UPGRADE: (await readD1Migrations(path.join(rootDir, 'migrations/manual'))).filter(migration => migration.name.includes('audit_mutation_outbox')),
           TEST_COMMITTED_BASELINE: readFileSync(baselinePaths.cms, 'utf8'),
@@ -71,5 +72,6 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ['./test/setup.ts'],
+    include: dmsProfile ? ['test/profiles/dms.ts'] : ['test/**/*.test.ts'],
   },
 });

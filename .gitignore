@@ -6,6 +6,7 @@ dist/
 *.env
 .env
 .dev.vars
+/config.capnp
 wrangler.production.toml
 # Each clone's own deployment config, created by `npm run setup` from
 # wrangler.example.toml. The one exception is wrangler.eventuai.toml, which

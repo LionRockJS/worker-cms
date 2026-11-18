@@ -111,3 +111,14 @@ export interface PublishAdapter {
   liveMap?(uuids: string[]): Promise<Map<string, LivePageSnapshot>>;
   listLiveByTypes?(pageTypes: string[]): Promise<LivePageSnapshot[]>;
 }
+
+export interface PublishLectRule {
+  keep?: string[];
+  drop?: string[];
+}
+
+/** Authenticated transport supplied by the plugin platform for a target. */
+export interface PublishPluginTarget {
+  id: string;
+  send(path: string, body: unknown): Promise<Response>;
+}

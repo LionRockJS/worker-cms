@@ -1,3 +1,5 @@
+import { adminReturnTo } from './return-to';
+import { accountIpAllowed, connectingIp } from './ip-access';
 // ============================================================
 // Auth middleware – validates dual JWT on every protected route.
 //
@@ -17,6 +19,7 @@ import { routePath } from 'hono/route';
 import type { AppContext } from '../http/context';
 import { verifyJWT } from './jwt';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from './roles';
+import { readSyncGrant } from './sync-grant';
 import type { Permission } from '../../types';
 import {
   accessCookieName,
@@ -97,10 +100,17 @@ export const authMiddleware = createMiddleware<{
     if (wantsJsonResponse(c.req.raw)) {
       return jsonError({ success: false, error: 'Authentication required' }, 401, 'authentication-required');
     }
-    return c.redirect('/auth/login');
+    const url = new URL(c.req.url);
+    return c.redirect(c.req.method === 'GET'
+      ? '/auth/login?returnTo=' + encodeURIComponent(adminReturnTo(url.pathname + url.search))
+      : '/auth/login');
   }
 
   c.set('user', user);
+  if (!await accountIpAllowed(c.env, user.sub, connectingIp(c.req.raw.headers))) {
+    await logDenial(c, { reason: 'ip_not_allowed' });
+    return c.json({ success: false, error: 'Access from this IP address is not allowed' }, 403, { 'Cache-Control': 'no-store' });
+  }
   return next();
 });
 
@@ -159,11 +169,36 @@ export function requirePermission(permission: Permission | string) {
     const map = await resolveRolePermissions(c.env);
     if (!effectivePermissions(map, user.role).has(permission as Permission)) {
       await logDenial(c, { permission });
+      const message = `Insufficient permissions. Required permission: ${permission}`;
       if (wantsJsonResponse(c.req.raw)) {
-        return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
+        return jsonError({ success: false, error: message }, 403, 'insufficient-permissions');
       }
-      return c.text('Forbidden: insufficient permissions', 403);
+      return c.text(`Forbidden: ${message}`, 403);
     }
+    return next();
+  });
+}
+
+/**
+ * Guards the presence and live-sync routes of one page (`:pageId`). Passes with
+ * the given permission, or with a sync grant the plugin proxy issued this
+ * session for that page; a grant's expiry is left in `syncGrantExp` for the
+ * sync socket.
+ */
+export function requirePageSync(permission: 'content:read' | 'content:write') {
+  return createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
+    const user = c.get('user');
+    if (splitRoles(user.role).includes('admin')) return next();
+    if (effectivePermissions(await resolveRolePermissions(c.env), user.role).has(permission)) return next();
+    const pageId = Number(c.req.param('pageId'));
+    const grantExp = user.sid && Number.isSafeInteger(pageId) && pageId > 0
+      ? await readSyncGrant(c, c.env.JWT_SECRET, user.sid, pageId)
+      : null;
+    if (grantExp === null) {
+      await logDenial(c, { permission });
+      return jsonError({ success: false, error: `Insufficient permissions. Required permission: ${permission}` }, 403, 'insufficient-permissions');
+    }
+    c.set('syncGrantExp', grantExp);
     return next();
   });
 }
@@ -179,10 +214,11 @@ export function requireAnyPermission(...permissions: Array<Permission | string>)
     const effective = effectivePermissions(map, user.role);
     if (!permissions.some((permission) => effective.has(permission as Permission))) {
       await logDenial(c, { permissions: permissions.join(',') });
+      const message = `Insufficient permissions. Required permission (one of): ${permissions.join(', ')}`;
       if (wantsJsonResponse(c.req.raw)) {
-        return jsonError({ success: false, error: 'Insufficient permissions' }, 403, 'insufficient-permissions');
+        return jsonError({ success: false, error: message }, 403, 'insufficient-permissions');
       }
-      return c.text('Forbidden: insufficient permissions', 403);
+      return c.text(`Forbidden: ${message}`, 403);
     }
     return next();
   });

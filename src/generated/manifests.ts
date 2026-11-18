@@ -10,6 +10,7 @@ import { i18nFeature } from '../features/i18n/feature';
 import { jobsFeature } from '../features/jobs/feature';
 import { mediaFeature } from '../features/media/feature';
 import { pluginsFeature } from '../features/plugins/feature';
+import { publishFeature } from '../features/publish/feature';
 import { runtimeContentTypesFeature } from '../features/runtime-content-types/feature';
 import { searchFeature } from '../features/search/feature';
 import { trashFeature } from '../features/trash/feature';
@@ -23,6 +24,7 @@ export const featureManifests: readonly CmsFeature[] = [
   jobsFeature,
   mediaFeature,
   pluginsFeature,
+  publishFeature,
   runtimeContentTypesFeature,
   searchFeature,
   trashFeature,

@@ -30,8 +30,9 @@
     "no_permission": "您没有权限访问管理后台。",
     "provider_fallback": "您的登录服务商",
     "redirecting_to": "正在前往以下服务商登录：",
-    "signup_notice": "可使用您的常用账户免费注册，但仅限获授权用户访问。",
-    "version": "版本"
+    "signup_notice": "仅限获授权用户访问。",
+    "version": "版本",
+    "ip_not_allowed": "此 IP 地址不允许登录。请联系管理员。"
   },
   "nav": {
     "audit": "审计日志",
@@ -82,7 +83,16 @@
     "reveal_fields": "显示个人信息字段"
   },
   "profile": {
+    "disable_account": "停用账户",
+    "disable_description": "停用后，所有设备都会退出登录，并解除所有登录方式的关联。请登录另一个账户，再到其个人资料页面关联这些登录方式。现有账户数据将保留；停用后将无法访问此账户。",
+    "disable_confirm": "确定停用此账户并解除所有登录方式的关联？",
+    "disable_acknowledge": "我了解停用后将无法访问此账户。",
     "avatar": "头像",
+    "avatar_initials": "使用姓名首字母",
+    "avatar_remove": "移除头像",
+    "avatar_removed": "头像已移除",
+    "avatar_saved": "头像已保存",
+    "avatar_upload": "上传头像",
     "connect": "连接",
     "connected_identities": "已连接的身份",
     "description": "管理您的 CMS 账户和已连接的登录方式。",
@@ -92,6 +102,7 @@
     "donate_to_pool": "捐赠到共享池",
     "donation_note_placeholder": "此捐赠的用途",
     "interface_language": "界面语言",
+    "invalid_avatar": "请选择图片文件（PNG、JPEG、WebP 或 GIF）。",
     "invalid_name": "请输入 1 至 100 个字符的显示名称。",
     "language_not_enabled": "界面语言未启用",
     "language_saved": "界面语言已保存",
@@ -238,9 +249,15 @@
       "visible": "显示",
       "hidden": "隐藏",
       "help": "在管理界面显示余额、点数面板和点数链接。不使用点数或拥有无限点数的部署可将其隐藏。此显示设置不会更改价格或扣费。"
+    },
+    "login_labels": {
+      "title": "登录页面文字",
+      "description": "按语言自定义登录说明、按钮文字和访问提示。",
+      "edit": "编辑登录页面文字"
     }
   },
   "shell": {
+    "show_explanations": "显示说明",
     "close_menu": "关闭菜单",
     "collapse_sidebar": "收起侧边栏",
     "credit": "点数",

@@ -30,8 +30,9 @@
     "no_permission": "You do not have permission to access the admin panel.",
     "provider_fallback": "your sign-in provider",
     "redirecting_to": "Redirecting to",
-    "signup_notice": "is free to sign up for with your everyday account, but access is restricted to authorized users.",
-    "version": "Version"
+    "signup_notice": "Access is restricted to authorized users.",
+    "version": "Version",
+    "ip_not_allowed": "Sign-in from this IP address is not allowed. Contact your administrator."
   },
   "nav": {
     "audit": "Audit Log",
@@ -82,7 +83,16 @@
     "reveal_fields": "Reveal private fields"
   },
   "profile": {
+    "disable_account": "Disable account",
+    "disable_description": "Disabling signs you out on every device and releases all connected sign-in methods. Sign in to another account, then connect these methods from its Profile page. Your existing account data is retained; this account cannot be accessed after disabling.",
+    "disable_confirm": "Disable this account and release all its sign-in methods?",
+    "disable_acknowledge": "I understand that I will lose access to this account.",
     "avatar": "Avatar",
+    "avatar_initials": "Use initials",
+    "avatar_remove": "Remove picture",
+    "avatar_removed": "Picture removed",
+    "avatar_saved": "Picture saved",
+    "avatar_upload": "Upload picture",
     "connect": "Connect",
     "connected_identities": "Connected identities",
     "description": "Manage your CMS account and connected sign-in methods.",
@@ -92,6 +102,7 @@
     "donate_to_pool": "Donate to pool",
     "donation_note_placeholder": "What this donation is for",
     "interface_language": "Interface language",
+    "invalid_avatar": "Choose an image file (PNG, JPEG, WebP or GIF).",
     "invalid_name": "Enter a display name between 1 and 100 characters.",
     "language_not_enabled": "Interface language is not enabled",
     "language_saved": "Interface language saved",
@@ -238,6 +249,11 @@
       "visible": "Show",
       "hidden": "Hide",
       "help": "Show balances, credit panels, and credit links in the admin interface. Hide them for installations without credits or with unlimited credits. This display setting does not change prices or charges."
+    },
+    "login_labels": {
+      "title": "Login page labels",
+      "description": "Customize the sign-in description, button labels and access notice for each language.",
+      "edit": "Edit login page labels"
     }
   },
   "shell": {
@@ -251,6 +267,7 @@
     "go_to_dashboard": "Go to admin dashboard",
     "open_menu": "Open menu",
     "shared": "shared",
+    "show_explanations": "Show explanations",
     "sign_out": "Sign out",
     "theme": {
       "dark": "Dark",

@@ -22,6 +22,7 @@
 //
 // PORT and HOST can also live in .env. That file configures this server only;
 // Worker vars and secrets stay in .dev.vars. Variables already set in the shell win.
+import { localPluginViewsOptions } from './tools/local-plugin-views.mjs';
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { Log, LogLevel, Miniflare, convertV4MiniflareOptions } from "miniflare";
@@ -56,6 +57,9 @@ if (!existsSync(BUNDLE)) {
 
 const config = unstable_readConfig({ config: CONFIG });
 const { workerOptions } = unstable_getMiniflareWorkerOptions(CONFIG);
+const localViews = localPluginViewsOptions();
+workerOptions.serviceBindings = { ...workerOptions.serviceBindings, ...localViews.serviceBindings };
+workerOptions.bindings = { ...workerOptions.bindings, ...localViews.bindings };
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const canonical = (workerOptions.bindings?.CANONICAL_ORIGIN ?? "").trim().replace(/\/$/, "");

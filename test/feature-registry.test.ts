@@ -22,6 +22,7 @@ describe('feature registry', () => {
       'jobs',
       'media',
       'plugins',
+      'publish',
       'runtime-content-types',
       'search',
       'trash',

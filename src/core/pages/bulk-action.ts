@@ -11,16 +11,11 @@ import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext }
 // log — so it carries no job or screen concepts of its own.
 
 import { coreExtensions, type PageEvent, type PageEventPage } from '../extensions';
-import {
-  listLiveByTypes,
-  publishPagesToTargets,
-  unpublishPagesFromTargets,
-} from '../publish';
+import { publication } from '../../features/services';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { TrashedPageRef } from '../db/admin-queries';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
 import { logAuditBatch, type AuditActor } from '../db/audit';
-import { submissionMirrorIds } from '../db/submission-ingest';
 import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
 import { safeParseLect, stringifyLect, type Lect } from '../db/lect';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
@@ -75,7 +70,7 @@ export async function resolveBulkTargetIds(env: Env, query: BulkTargetQuery, act
   const ids = await advancedSearchMatchingPageIds(env.DB, query.pageTypes, query.criteria, query.operator);
   if (!query.status) return ids;
 
-  const livePages = await listLiveByTypes(env, query.pageTypes, actor);
+  const livePages = await publication()?.listLiveByTypes(env, query.pageTypes, actor) ?? [];
   const liveMap = new Map(livePages.map((page) => [page.uuid, page]));
   const pages = await draftPagesByIds(env.DB, ids);
   return pages.filter((page) => {
@@ -97,6 +92,7 @@ export async function applyBulkPageAction(
   options: BulkPageActionOptions = {},
   context: ContentBatchContext = {},
 ): Promise<BulkPageActionOutcome> {
+  const publishing = publication();
   if (action !== 'unpublish') assertRegulatedWritesAllowed(env);
   const failedTargets = new Set<string>();
   let updated = 0;
@@ -147,15 +143,17 @@ export async function applyBulkPageAction(
       const trashed=local.pages;
       if (!trashed.length) continue;
       // Withdraw the whole committed slice with one batch per target.
-      const outcome = await unpublishPagesFromTargets(env, trashed, { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null });
-      refused += outcome.refusedCount;
-      outcome.failures.forEach((target) => failedTargets.add(target));
+      const outcome = await publishing?.unpublishPagesFromTargets(env, trashed, { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null });
+      refused += outcome?.refusedCount ?? 0;
+      outcome?.failures.forEach((target) => failedTargets.add(target));
       deleted.push(...trashed);
       updated += trashed.length;
     }
     await emitPageLifecycle(env, user, 'delete', deleted,true);
     return { updated, refused, failedTargets };
   }
+
+  if (!publishing) throw new Error('Publishing is unavailable in this build');
 
   // Publish and unpublish both fan out to every configured target, so both go
   // through the set-based form: one submission-mirror check and one tag read
@@ -166,7 +164,7 @@ export async function applyBulkPageAction(
   const succeeded: Page[] = [];
 
   if (action === 'publish') {
-    const outcome = await publishPagesToTargets(env, pages, {
+    const outcome = await publishing.publishPagesToTargets(env, pages, {
       userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null,
     });
     outcome.failures.forEach((target) => failedTargets.add(target));
@@ -174,8 +172,8 @@ export async function applyBulkPageAction(
     updated += outcome.published.length;
     refused += outcome.refused.length;
   } else {
-    const mirrors = await submissionMirrorIds(env.DB, pages.map((page) => page.id));
-    const outcome = await unpublishPagesFromTargets(
+    const mirrors = await publishing.submissionMirrorIds(env.DB, pages.map((page) => page.id));
+    const outcome = await publishing.unpublishPagesFromTargets(
       env,
       pages.map((page) => ({ uuid: page.uuid, submission_origin: mirrors.has(page.id) ? 1 : 0 })),
       { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null },

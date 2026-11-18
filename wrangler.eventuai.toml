@@ -130,7 +130,7 @@ simple = { limit = 30, period = 60 }
 # ── Plugins (optional) ────────────────────────────────────────────────────────
 # Register plugin Workers by HTTPS URL under Admin → Plugins. Each row receives
 # a dedicated secret that must also be stored on that plugin Worker. No service
-# binding or CMS redeploy is required. See examples/plugin-events.
+# binding or CMS redeploy is required. See docs/examples/plugin-events.
 
 [vars]
 # PLUGINS is a deprecated service-binding-era setting and is intentionally unset.

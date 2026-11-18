@@ -39,11 +39,14 @@ export async function languagesPage(views: Fetcher, opts: BaseTemplateProps & {
 }
 
 export async function translationsPage(views: Fetcher, opts: BaseTemplateProps & {
+  loginLabels?: boolean;
   localeCode: string;
   localeLabel: string;
   localeOptions: Array<{ code: string; label: string; selected: boolean }>;
   messages: Array<{
     key: string;
+    labelKey?: string;
+    editValue?: string;
     fileValue: string;
     hasFileValue: boolean;
     overrideValue: string;
@@ -54,6 +57,7 @@ export async function translationsPage(views: Fetcher, opts: BaseTemplateProps &
   error?: string;
 }): Promise<string> {
   const body = await renderView(views, '/templates/translations.json', {
+    loginLabels: !!opts.loginLabels,
     localeCode: opts.localeCode,
     localeLabel: opts.localeLabel,
     localeOptions: opts.localeOptions,

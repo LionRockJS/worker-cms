@@ -1,0 +1,19 @@
+{
+  "name": "worker-cms-admin-assets",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i admin.css -o ../dist/views/assets/admin.css --minify",
+    "build:js": "esbuild richtext-md.js yjs.js --bundle --minify --format=iife --outdir=../dist/views/assets"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.18",
+    "marked": "^18.2.1",
+    "turndown": "^7.2.5",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.5",
+    "esbuild": "^0.28.2",
+    "tailwindcss": "^4.3.5"
+  }
+}

@@ -37,6 +37,8 @@ export async function usersPage(views: Fetcher, opts: BaseTemplateProps & {
 }
 
 export async function userFormPage(views: Fetcher, opts: BaseTemplateProps & {
+  canManageIp?: boolean;
+  ipUnrestricted?: boolean;
   id: number;
   name: string;
   email: string;
@@ -48,6 +50,9 @@ export async function userFormPage(views: Fetcher, opts: BaseTemplateProps & {
 }): Promise<string> {
   const { id, name, email, error, flash, roleOptions } = opts;
   const body = await renderView(views, '/templates/user-form.json', {
+    canManageIp: !!opts.canManageIp,
+    ipUnrestricted: !!opts.ipUnrestricted,
+    ipAction: `/admin/users/${id}/ip-access`,
     action: `/admin/users/${id}`,
     name,
     email,

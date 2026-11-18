@@ -25,9 +25,9 @@ import {
 } from '../../core/http/forms';
 import type { FormValue } from '../../core/http/forms';
 import { ensureDefaultLectName } from '../../core/db/page-logic';
-import { contextActor, logAudit } from '../../core/db/audit';
+import { contextActor } from '../../core/db/audit';
 import { requirePermission } from '../../core/auth/guards';
-import { publishTagToTargets, publishTagsToTargets, removeTagFromTargets } from '../../core/publish';
+import { publication } from '../../features/services';
 import { renderPage } from '../../core/render/chrome';
 import { userCan } from '../../core/auth/permissions';
 import { resolveCmsConfig } from '../../core/db/content-config';
@@ -106,7 +106,7 @@ tagsRoutes.post('/taxonomies/:id', requirePermission('taxonomy:write'), async (c
   if (!existing) return c.notFound();
   let moved:number[];
   try { moved=await saveTaxonomy(c,{name,slug},existing); } catch(error) { return contentMutationUnavailable(c,error); }
-  if(moved.length) await publishTagsToTargets(c.env,moved,contextActor(c));
+  if(moved.length) await publication()?.publishTagsToTargets(c.env,moved,contextActor(c));
   return c.redirect('/admin/taxonomies');
 });
 
@@ -118,7 +118,7 @@ tagsRoutes.post('/taxonomies/:id/delete', requirePermission('taxonomy:write'), a
   if (!taxonomy) return c.notFound();
   let orphaned:number[];
   try { orphaned=await deleteTaxonomy(c,taxonomy); } catch(error) { return contentMutationUnavailable(c,error); }
-  if(orphaned.length) await publishTagsToTargets(c.env,orphaned,contextActor(c));
+  if(orphaned.length) await publication()?.publishTagsToTargets(c.env,orphaned,contextActor(c));
   return c.redirect('/admin/taxonomies');
 });
 
@@ -129,7 +129,7 @@ tagsRoutes.get('/tags', async (c) => {
   const [taxonomies, tags, canSync] = await Promise.all([
     tagTaxonomyOptions(c),
     listTags(c.env.DB, filterTaxonomy),
-    userCan(c, 'tag:write'),
+    publication() ? userCan(c, 'tag:write') : false,
   ]);
   recordTagReads('tag.list', tags);
   return renderPage(c, tagsPage, {
@@ -155,23 +155,9 @@ tagsRoutes.post('/tags/batch-weight', requirePermission('tag:write'), async (c) 
   if(weights.length>5000||new Set(weights.map(u=>u.id)).size!==weights.length)return c.json({error:'Invalid input'},400);
   let changed:number[];
   try{changed=await updateTagWeights(c,weights);}catch(error){return contentMutationUnavailable(c,error);}
-  if(changed.length)await publishTagsToTargets(c.env,changed,contextActor(c));
+  if(changed.length)await publication()?.publishTagsToTargets(c.env,changed,contextActor(c));
 
   return c.json({ success: true });
-});
-
-// Backfills the published tag catalogue. A database that published pages before
-// the catalogue existed has tag links whose ids resolve to nothing there; edits
-// push one tag at a time, this pushes the lot.
-tagsRoutes.post('/tags/sync-published', requirePermission('tag:write'), async (c) => {
-  const outcome = await publishTagsToTargets(c.env, undefined, contextActor(c));
-  logAudit(c, 'tag.sync-published', 'tag', undefined, { count: outcome.count, failures: outcome.failures });
-  const error = outcome.refusedReason === 'writes_unavailable' ? 'Publication is unavailable while regulated writes are contained'
-    : outcome.refusedReason === 'classification_unavailable' ? 'Tag classification unavailable'
-    : outcome.refusedCount ? `${outcome.refusedCount} regulated tags withheld`
-    : outcome.failures.join(',');
-  const status = error ? `error=${encodeURIComponent(error)}` : `synced=${outcome.count}`;
-  return c.redirect(`/admin/tags?${status}`);
 });
 
 tagsRoutes.post('/tags', requirePermission('tag:write'), async (c) => {
@@ -187,7 +173,7 @@ tagsRoutes.post('/tags', requirePermission('tag:write'), async (c) => {
   const parentTagId = optionalNumericId(form.get('parent_tag'));
   let id:number;
   try{id=await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)});}catch(error){return contentMutationUnavailable(c,error);}
-  await publishTagToTargets(c.env,id,contextActor(c));
+  await publication()?.publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
 
@@ -199,7 +185,8 @@ tagsRoutes.get('/tags/:id/edit', async (c) => {
 });
 
 tagsRoutes.post('/tags/:id', requirePermission('tag:write'), async (c) => {
-  const id = parseInt(c.req.param('id'), 10);
+  const id = Number(c.req.param('id'));
+  if (!Number.isSafeInteger(id) || id <= 0) return c.notFound();
   const form = await c.req.formData();
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, form, config);
@@ -213,14 +200,14 @@ tagsRoutes.post('/tags/:id', requirePermission('tag:write'), async (c) => {
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
   try{await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)},existing);}catch(error){return contentMutationUnavailable(c,error);}
-  await publishTagToTargets(c.env,id,contextActor(c));
+  await publication()?.publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
 
 tagsRoutes.post('/tags/:id/delete', requirePermission('tag:write'), async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   try{await deleteTag(c,id);}catch(error){return contentMutationUnavailable(c,error);}
-  await removeTagFromTargets(c.env,id,contextActor(c));
+  await publication()?.removeTagFromTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
 

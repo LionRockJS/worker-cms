@@ -55,21 +55,22 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 
 Usage:
   npm run setup             ask where the CMS runs
-  npm run setup -- --local  run it on this machine (server.mjs / wrangler dev)
+  npm run setup -- --local  run it on this machine (Wrangler, server.mjs, or workerd)
 
 The wizard asks for one namespace and derives every resource name from it
-(<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit); each can
-still be overridden. It creates or reuses D1, R2, and Queue resources, updates
-wrangler.toml and the audit switch in cms.features.json, applies migrations,
-configures OAuth secrets, and does a first bootstrap deploy that bypasses the
-release gate. Later releases go through "npm run deploy".
+(<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit,
+<ns>-plugin-views); each can still be overridden. It creates or reuses D1, R2, and Queue resources, updates
+wrangler.toml and the feature switches in cms.features.json, applies migrations,
+optionally provisions the plugin view cache, and configures OAuth secrets and
+the first admin. The first bootstrap deploy bypasses the release gate. Later
+releases go through "npm run deploy".
 
 A local setup runs the CMS on this machine instead of Cloudflare Workers:
 nothing is created in Cloudflare, migrations go to the local D1 state shared by
-"npm run dev" and server.mjs, and secrets are written to .dev.vars rather than
-uploaded. An http://localhost:<port> origin is always local. A public https
-origin (e.g. https://cms.example.com) can be local too, with server.mjs behind
-a tunnel or reverse proxy that forwards that domain to this machine.`);
+"npm run dev", server.mjs, and server-workerd.mjs. Local secrets go to .dev.vars.
+An http://localhost:<port> origin is always local. A public https origin
+(e.g. https://cms.example.com) can be local too, with either server behind a
+tunnel or reverse proxy that forwards that domain to this machine.`);
   process.exit(0);
 }
 
@@ -213,6 +214,8 @@ function setRootValue(lines, key, value) {
   lines[index] = `${key} = ${JSON.stringify(value)}`;
 }
 
+const DISABLED_BINDING_NOTE = '# Disabled by setup while publishing is off.';
+
 function sectionRanges(lines, section) {
   const ranges = [];
   for (let start = 0; start < lines.length; start += 1) {
@@ -224,12 +227,16 @@ function sectionRanges(lines, section) {
   return ranges;
 }
 
-function setBindingValues(lines, section, binding, values) {
-  const range = sectionRanges(lines, section).find(({ start, end }) =>
+function bindingRange(lines, section, binding) {
+  return sectionRanges(lines, section).find(({ start, end }) =>
     lines.slice(start, end).some((line) =>
       new RegExp(`^\\s*binding\\s*=\\s*["']${binding}["']`).test(line),
     ),
   );
+}
+
+function setBindingValues(lines, section, binding, values) {
+  const range = bindingRange(lines, section, binding);
   if (!range) throw new Error(`Could not find ${binding} in [[${section}]].`);
 
   for (const [key, value] of Object.entries(values)) {
@@ -250,9 +257,10 @@ function setBindingValues(lines, section, binding, values) {
  * Turning it on is therefore part of provisioning, not of the checked-in
  * config. Returns false when there is nothing commented out to activate.
  */
-function uncommentBinding(lines, section, binding) {
-  const bindingIndex = lines.findIndex((line) =>
-    new RegExp(`^#\\s*binding\\s*=\\s*["']${binding}["']\\s*$`).test(line));
+function uncommentBinding(lines, section, binding, disabledBySetup = false) {
+  const matcher = new RegExp(`^#\\s*binding\\s*=\\s*["']${binding}["']\\s*(?:#.*)?$`);
+  const bindingIndex = lines.findIndex((line, index) =>
+    matcher.test(line) && (!disabledBySetup || lines[index - 2] === DISABLED_BINDING_NOTE));
   if (bindingIndex === -1) return false;
 
   const headerIndex = bindingIndex - 1;
@@ -263,10 +271,32 @@ function uncommentBinding(lines, section, binding) {
   uncomment(headerIndex);
   uncomment(bindingIndex);
   for (let index = bindingIndex + 1; index < lines.length; index += 1) {
-    if (!/^#\s*[a-z_]+\s*=/.test(lines[index])) break;
-    uncomment(index);
+    if (!/^#(?!\s*\[)/.test(lines[index])) break;
+    if (/^#\s*[a-z_]+\s*=/.test(lines[index])) uncomment(index);
   }
+  if (lines[headerIndex - 1] === DISABLED_BINDING_NOTE) lines.splice(headerIndex - 1, 1);
   return true;
+}
+
+/** Support fresh templates, existing bindings, and configs predating an optional binding. */
+function ensureR2Binding(lines, binding, bucketName) {
+  const active = sectionRanges(lines, 'r2_buckets').some(({start, end}) =>
+    lines.slice(start, end).some((line) =>
+      new RegExp(`^\\s*binding\\s*=\\s*["']${binding}["']\\s*$`).test(line)));
+  if (!active && !uncommentBinding(lines, 'r2_buckets', binding)) {
+    lines.push('', '[[r2_buckets]]', `binding = ${JSON.stringify(binding)}`, `bucket_name = ${JSON.stringify(bucketName)}`);
+  }
+  setBindingValues(lines, 'r2_buckets', binding, { bucket_name: bucketName });
+}
+
+function disableBinding(lines, section, binding, remember = false) {
+  const range = bindingRange(lines, section, binding);
+  if (!range) return;
+  lines[range.start] = `# ${lines[range.start].trimStart()}`;
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    if (/^\s*[a-z_]+\s*=/.test(lines[index])) lines[index] = `# ${lines[index]}`;
+  }
+  if (remember) lines.splice(range.start, 0, DISABLED_BINDING_NOTE);
 }
 
 function setFirstSectionValue(lines, section, key, value) {
@@ -308,13 +338,29 @@ async function updateConfig(settings) {
     database_name: settings.databaseName,
     ...(settings.databaseId ? { database_id: settings.databaseId } : {}),
   });
-  setBindingValues(lines, 'd1_databases', 'PUBLISHED_DB', {
-    database_name: settings.publishedDatabaseName,
-    ...(settings.publishedDatabaseId ? { database_id: settings.publishedDatabaseId } : {}),
-  });
+  if (settings.publishedDatabaseName) {
+    if (!bindingRange(lines, 'd1_databases', 'PUBLISHED_DB')
+      && !uncommentBinding(lines, 'd1_databases', 'PUBLISHED_DB')) {
+      lines.push('', '[[d1_databases]]', 'binding = "PUBLISHED_DB"', 'database_name = ""',
+        'database_id = "00000000-0000-0000-0000-000000000000"', 'migrations_dir = "migrations/published"');
+    }
+    setBindingValues(lines, 'd1_databases', 'PUBLISHED_DB', {
+      database_name: settings.publishedDatabaseName,
+      ...(settings.publishedDatabaseId ? { database_id: settings.publishedDatabaseId } : {}),
+    });
+    if (!bindingRange(lines, 'r2_buckets', 'PUBLISH_BUCKET')) {
+      uncommentBinding(lines, 'r2_buckets', 'PUBLISH_BUCKET', true);
+    }
+  } else {
+    disableBinding(lines, 'd1_databases', 'PUBLISHED_DB');
+    disableBinding(lines, 'r2_buckets', 'PUBLISH_BUCKET', true);
+  }
   setBindingValues(lines, 'r2_buckets', 'MEDIA_BUCKET', {
     bucket_name: settings.bucketName,
   });
+  if (settings.pluginViewsBucketName) {
+    ensureR2Binding(lines, 'PLUGIN_VIEWS_BUCKET', settings.pluginViewsBucketName);
+  }
   if (settings.auditBucketName) {
     uncommentBinding(lines, 'r2_buckets', 'AUDIT_BUCKET');
     setBindingValues(lines, 'r2_buckets', 'AUDIT_BUCKET', {
@@ -355,6 +401,21 @@ function setDevVar(lines, key, value) {
   else lines.push(replacement);
 }
 
+async function firstAdminGrant(providers, prompt) {
+  if (!await confirm(prompt, false)) return null;
+
+  const provider = (providers.length === 1 ? providers[0] : await ask(
+    `First admin's OAuth provider (${providers.join(', ')})`,
+    providers[0],
+    (value) => providers.includes(value.toLowerCase()),
+  )).toLowerCase();
+  const providerUserId = provider === 'github'
+    ? await ask('First admin\'s GitHub numeric user ID', undefined, (value) => /^[1-9]\d*$/.test(value))
+    : await ask(`First admin's ${provider} account subject (sub)`);
+
+  return JSON.stringify([{ provider, providerUserId, roles: ['admin'] }]);
+}
+
 /**
  * Local setup: secrets go to .dev.vars, which wrangler dev reads and git
  * ignores. CANONICAL_ORIGIN and OAUTH_REDIRECT_URI are written too, because
@@ -387,7 +448,18 @@ async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
     else console.log(`Add ${key} to .dev.vars before signing in with ${provider}.`);
   }
 
-  await writeFile(DEV_VARS_PATH, lines.join('\n'));
+  if (lines.some((line) => /^\s*(?:export\s+)?INITIAL_USER_ROLES\s*(?:=|:\s)/.test(line))) {
+    console.log('Keeping the existing INITIAL_USER_ROLES in .dev.vars.');
+  } else {
+    const grant = await firstAdminGrant(providers, 'Configure a first admin in .dev.vars?');
+    if (grant) {
+      // Keep the dotenv quoting and any variable expansion out of the JSON value.
+      const json = grant.replaceAll("'", '\\u0027').replaceAll('$', '\\u0024');
+      setDevVar(lines, 'INITIAL_USER_ROLES', `'${json}'`);
+    }
+  }
+
+  await writeFile(DEV_VARS_PATH, lines.join('\n'), { mode: 0o600 });
   console.log(existing === null ? 'Created .dev.vars.' : 'Updated .dev.vars.');
 }
 
@@ -468,7 +540,7 @@ async function main() {
   const loopback = isLocalOrigin(canonicalOrigin);
   const local = loopback
     || process.argv.includes('--local')
-    || await confirm('Run it on this machine (server.mjs behind a tunnel or proxy) instead of Cloudflare Workers?', false);
+    || await confirm('Run it on this machine behind a tunnel or proxy?', false);
 
   if (local) {
     console.log('Local setup: nothing is created in Cloudflare and secrets go to .dev.vars.');
@@ -485,25 +557,28 @@ async function main() {
   }
 
   // Every resource name derives from one namespace. The longest suffix is
-  // "-admin-jobs" (11 chars), and R2/Queue names stop at 63.
+  // "-plugin-views" (13 chars), and R2/Queue names stop at 63.
   const namespace = await ask(
     'Deployment namespace (prefixes every resource name)',
     'cms',
-    (value) => resourceName(value) && value.length <= 52,
+    (value) => resourceName(value) && value.length <= 50,
   );
+  const publishEnabled = await featureEnabled('publish');
   const derived = {
     workerName: namespace,
     databaseName: namespace,
     publishedDatabaseName: `${namespace}-published`,
     bucketName: `${namespace}-media`,
+    pluginViewsBucketName: `${namespace}-plugin-views`,
     queueName: `${namespace}-admin-jobs`,
     auditBucketName: `${namespace}-audit`,
   };
   console.log(`
   Worker              ${derived.workerName}
   Private D1          ${derived.databaseName}
-  Published D1        ${derived.publishedDatabaseName}
+  Published D1        ${publishEnabled ? derived.publishedDatabaseName : 'disabled'}
   Media R2 bucket     ${derived.bucketName}
+  Plugin views R2     ${derived.pluginViewsBucketName} (if enabled)
   Admin job Queue     ${derived.queueName}
   Audit R2 bucket     ${derived.auditBucketName} (if enabled)
 `);
@@ -513,13 +588,19 @@ async function main() {
 
   const workerName = await name('Worker name', derived.workerName);
   const databaseName = await name('Private D1 database name', derived.databaseName);
-  const publishedDatabaseName = await name(
+  const publishedDatabaseName = publishEnabled ? await name(
     'Published D1 database name',
     derived.publishedDatabaseName,
     (value) => resourceName(value) && value !== databaseName,
-  );
+  ) : null;
   const bucketName = await name('Private R2 media bucket name', derived.bucketName);
   const queueName = await name('Admin job Queue name', derived.queueName);
+  const pluginViewsBucketName = await featureEnabled('plugins')
+    && await confirm('Enable the optional plugin view R2 cache?', false)
+    ? await name('Private R2 plugin view bucket name', derived.pluginViewsBucketName,
+      (value) => resourceName(value) && value.length <= 63 && value !== bucketName)
+    : null;
+
   // Recording audit_events is core and always on; the feature is the review
   // screens plus the archive sweep, so the bucket only matters with it on.
   console.log(
@@ -543,7 +624,7 @@ async function main() {
   while (!providers) {
     const answer = await ask('OAuth providers (comma-separated)', 'github');
     const selected = [...new Set(answer.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
-    const invalid = selected.filter((provider) => !PROVIDERS[provider]);
+    const invalid = selected.filter((provider) => !Object.hasOwn(PROVIDERS, provider));
     if (selected.length && !invalid.length) providers = selected;
     else console.log(`Choose from: ${Object.keys(PROVIDERS).join(', ')}.`);
   }
@@ -567,8 +648,9 @@ async function main() {
   } else {
     console.log('\nCreating or reusing Cloudflare resources...');
     ({ id: databaseId, reused: databaseReused } = await ensureD1(databaseName));
-    ({ id: publishedDatabaseId } = await ensureD1(publishedDatabaseName));
+    if (publishedDatabaseName) ({ id: publishedDatabaseId } = await ensureD1(publishedDatabaseName));
     ensureR2(bucketName);
+    if (pluginViewsBucketName) ensureR2(pluginViewsBucketName);
     if (auditBucketName) ensureR2(auditBucketName);
     ensureQueue(queueName);
   }
@@ -580,6 +662,7 @@ async function main() {
     publishedDatabaseName,
     publishedDatabaseId,
     bucketName,
+    pluginViewsBucketName,
     auditBucketName,
     queueName,
     canonicalOrigin,
@@ -587,17 +670,14 @@ async function main() {
     clientIds,
     microsoftTenant,
   });
-  if (await setFeature('audit', auditEnabled)) {
-    // Regenerate the feature registries and baseline so the migrations applied
-    // below match the profile; deploy rebuilds everything again anyway.
-    runNpm(['run', 'build:features']);
-    runNpm(['run', 'build:migrations']);
-  }
+  await setFeature('audit', auditEnabled);
+  runNpm(['run', 'build:features']);
+  runNpm(['run', 'build:migrations']);
 
   if (await confirm(local ? 'Apply D1 migrations to the local databases now?' : 'Apply production D1 migrations now?')) {
     const target = local ? '--local' : '--remote';
     run(['d1', 'migrations', 'apply', databaseName, target]);
-    run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
+    if (publishedDatabaseName) run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
   }
 
   // A fresh database gets the audit/classification tables from the baseline.
@@ -620,6 +700,10 @@ code fails closed without them (sign-in included), so apply them before deployin
   // everyone out, and they are applied by hand outside this wizard.
   const deployed = !local && await confirm('Deploy 0xCMS now?', !databaseReused);
   if (deployed) {
+    const grant = await firstAdminGrant(
+      providers,
+      'Configure a first admin in Cloudflare (replaces any existing INITIAL_USER_ROLES secret)?',
+    );
     // Create the Worker before uploading secrets. Wrangler otherwise prompts
     // to create a missing Worker, which is incompatible with piped secrets.
     // This is a bootstrap that bypasses the release gate in tools/deploy.mjs:
@@ -631,6 +715,10 @@ code fails closed without them (sign-in included), so apply them before deployin
       'Bootstrap deploy bypassed the release gate; record it as a W14 exception.\n'
       + 'Release later changes with "npm run deploy" from a committed, pushed revision.',
     );
+    if (grant) {
+      run(['secret', 'put', 'INITIAL_USER_ROLES'], { input: `${grant}\n` });
+      console.log('Uploaded INITIAL_USER_ROLES.');
+    }
   } else if (!local) {
     console.log('Skipping secret uploads because the Worker was not deployed.');
   }
@@ -657,14 +745,18 @@ code fails closed without them (sign-in included), so apply them before deployin
   if (local) await writeLocalSecrets({ canonicalOrigin, providers, clientIds });
 
   console.log(`\nSetup complete.\nCMS origin: ${canonicalOrigin}\nOAuth callback: ${callback}`);
+  console.log('\nSee "Set the first user\'s role" in README.md for manual grants and promotion of existing users.');
   if (local && loopback) {
     const port = new URL(canonicalOrigin).port || '80';
+    const portSetting = port === '8787' ? '' : `PORT=${port} `;
     console.log(`Start it with: npm run dev${port === '8787' ? '' : ` -- --port ${port}`}`);
-    console.log(`         or: ${port === '8787' ? '' : `PORT=${port} `}node server.mjs --build`);
+    console.log(`         or: ${portSetting}node server.mjs --build`);
+    console.log(`         or: ${portSetting}${port === '8788' ? 'CRON_PORT=8789 ' : ''}node server-workerd.mjs --build --serve`);
   } else if (local) {
     const host = new URL(canonicalOrigin).host;
     console.log(`
 Start it with: node server.mjs --build
+           or: node server-workerd.mjs --build --serve
 It listens on http://127.0.0.1:8787 (set PORT/HOST to change). Route ${host}
 to that address with a tunnel or reverse proxy, for example:
   Cloudflare Tunnel  cloudflared tunnel route dns <tunnel> ${host}

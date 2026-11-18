@@ -14,14 +14,13 @@ import { resolveCmsConfig } from '../../../core/db/content-config';
 import { announcePageEvent } from '../../../core/page-events';
 import { viewSourceFor } from '../../../core/render/view-source';
 import { coreExtensions } from '../../../core/extensions';
-import { reservePageCreate, type FeatureReservation } from '../../../features/services';
+import { publication, reservePageCreate, type FeatureReservation } from '../../../features/services';
 import { blueprintToLect, safeParseLect, stringifyLect } from '../../../core/db/lect';
 import type { Env, Variables, Page, PageVersion } from '../../../types';
 import { appendQuery, dashboardPageNumber, dashboardPageSize, editorsFromForm, languageFromRequest, nullableStr, num, safeAdminReturnPath, str, userIdFromContext } from '../../../core/http/forms';
 import { validatePageBasics } from '../../../core/db/validation';
 import { applyStructuredAction, isStructuredEditorAction, lectForPage, lectFromForm, planPageReorder, withDraftMetadata, type ReorderSequenceRow } from '../../../core/db/page-logic';
 import { editorTaxonomy, ensureUniqueDraftSlug, fetchEditorUsers, fetchUserName, parentPageOption, resolveParentPageId } from '../../../core/db/admin-queries';
-import { publishPageToTargets } from '../../../core/publish';
 import { renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { requirePermission } from '../../../core/auth/guards';
@@ -29,7 +28,6 @@ import { userCan } from '../../../core/auth/permissions';
 import { notifyPageSaved } from '../../../core/db/page-store';
 import { contextActor } from '../../../core/db/audit';
 import { recordPageReads } from '../../../core/http/access-log';
-import { publishFlash } from './lifecycle';
 import {
   defaultTimezone,
   editorPageData,
@@ -95,6 +93,7 @@ pageCrudRoutes.get('/pages/new', requirePermission('content:write'), async (c) =
 
 pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
   const form = await c.req.formData();
+  if (form.get('action') === 'publish' && !publication()) return c.notFound();
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, form, config);
 
@@ -458,6 +457,8 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, form, config);
   const action = str(form.get('action'));
+  const publishing = publication();
+  if (action === 'publish' && !publishing) return c.notFound();
   const backHref = safeAdminReturnPath(form.get('return_to'));
 
   const name = str(form.get('name'));
@@ -546,9 +547,9 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   }
 
   const pageTypeVal = nullableStr(form.get('page_type')) ?? page.page_type ?? 'default';
-  const startVal = nullableStr(form.get('start'));
-  const endVal = nullableStr(form.get('end'));
-  const timezoneVal = nullableStr(form.get('timezone'));
+  const startVal = !publishing && !form.has('start') ? page.start : nullableStr(form.get('start'));
+  const endVal = !publishing && !form.has('end') ? page.end : nullableStr(form.get('end'));
+  const timezoneVal = !publishing && !form.has('timezone') ? page.timezone : nullableStr(form.get('timezone'));
   const pageIdVal = nullableStr(form.get('page_id'));
   const weightVal = num(form.get('weight'));
   const editorsVal = editorsFromForm(form);
@@ -574,22 +575,20 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   // Keep the built-in-editor override across the post-save reload.
   const nativeParam = preferNativeEditor(c) ? '&native=1' : '';
 
-  const autoRepublish = action !== 'publish'
+  const autoRepublish = publishing && action !== 'publish'
     && await (coreExtensions().autoPublishesPageType?.(c.env, pageTypeVal) ?? false)
-    && !!await c.env.PUBLISHED_DB.prepare('SELECT 1 FROM pages WHERE uuid = ?')
-      .bind(page.uuid)
-      .first();
+    && await publishing.isD1Live(c.env, page.uuid);
 
   // An auto-republish that was refused must not report a publish that did not
   // happen — a regulated page saved here is updated in draft and nowhere else.
   let republishRefused = false;
-  if (action === 'publish' || autoRepublish) {
-    const outcome = await publishPageToTargets(c.env, pageId, contextActor(c));
+  if (publishing && (action === 'publish' || autoRepublish)) {
+    const outcome = await publishing.publishPageToTargets(c.env, pageId, contextActor(c));
     if (!outcome) return c.notFound();
     republishRefused = !!outcome.refused;
     if (!outcome.refused) announcePageEvent(c, 'publish', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug });
     if (action === 'publish') {
-      return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&flash=${publishFlash(outcome)}${returnToParam}${nativeParam}`);
+      return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&flash=${publishing.publishFlash(outcome)}${returnToParam}${nativeParam}`);
     }
   }
 

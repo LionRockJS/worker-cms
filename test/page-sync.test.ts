@@ -179,6 +179,30 @@ async function snapshotOf(page: string): Promise<Json[]> {
   return snapshot.ops as Json[];
 }
 
+describe('PageSyncDO plugin sync grants', () => {
+  async function upgrade(grantExp?: number): Promise<Response> {
+    const exp = Math.floor(Date.now() / 1000) + 900;
+    const token = await signJWT({ sub: '120', name: 'Viewer', email: '120@example.invalid', role: 'viewer', type: 'access', exp }, env.JWT_SECRET);
+    const payload = (await verifyJWT(token, env.JWT_SECRET))!;
+    return env.PAGE_SYNC.get(env.PAGE_SYNC.idFromName(freshPage())).fetch('https://page-sync/api/sync', {
+      headers: {
+        Upgrade: 'websocket', 'X-User-Id': '120', 'X-User-Name': 'Viewer', 'X-Session-Id': payload.sid!, 'X-Session-Expires': String(exp),
+        ...(grantExp ? { 'X-Sync-Grant-Expires': String(grantExp) } : {}),
+      },
+    });
+  }
+
+  it('admits a session without content:write only while its grant is live', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect((await upgrade()).status).toBe(401);
+    expect((await upgrade(now - 1)).status).toBe(401);
+    const granted = await upgrade(now + 60);
+    expect(granted.status).toBe(101);
+    granted.webSocket?.accept();
+    granted.webSocket?.close();
+  });
+});
+
 describe('PageSyncDO multi-user sync', () => {
   it('merges concurrent edits within one richtext field with a sequence CRDT', async () => {
     const page = freshPage();

@@ -111,7 +111,7 @@
     (function() {
       if (window.__cmsSessionKeepaliveBound) return;
       window.__cmsSessionKeepaliveBound = true;
-      var INTERVAL = 10 * 60 * 1000;
+      var INTERVAL = 5 * 60 * 1000;
       // Interaction after this long without a report is sent at once, so the
       // server's view of activity lags the person by at most this much.
       var REPORT_AFTER = 5 * 60 * 1000;
@@ -122,12 +122,15 @@
       var lastReported = lastInteraction;
       var lastAttempt = 0;
 
-      // An open tab is not activity. The server records when the person last
-      // interacted, never when this timer fired, so an untouched tab goes idle.
+      // A visible page counts as reading, even when its window is inactive.
+      // Hidden tabs only report actual interaction, so they still go idle.
       async function refresh() {
         if (inFlight) return;
         inFlight = true;
         lastAttempt = Date.now();
+        if (document.visibilityState === 'visible') {
+          lastInteraction = Date.now();
+        }
         var interaction = lastInteraction;
         var headers = { Accept: 'application/json' };
         if (interaction > lastReported) {
@@ -141,7 +144,7 @@
             credentials: 'same-origin',
             headers: headers
           });
-          if (res.status === 401) window.location.href = '/auth/login';
+          if (res.status === 401) window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
           else if (res.ok) lastReported = Math.max(lastReported, interaction);
         } catch (error) {
           /* retry on the next tick */
@@ -360,6 +363,10 @@
         var url;
         try { url = new URL(link.href, window.location.href); } catch (error) { return null; }
         if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+        // File links may open a viewer or download without loading another CMS page.
+        var pathname = url.pathname;
+        try { pathname = decodeURIComponent(pathname); } catch (error) { /* Keep the original path. */ }
+        if (/\.(?:pdf|csv|tsv|txt|rtf|docx?|xlsx?|pptx?|odt|ods|odp|zip|rar|7z|tar|gz|bz2|xz|jpe?g|png|gif|webp|avif|svg|ico|bmp|tiff?|heic|mp3|wav|ogg|m4a|flac|mp4|webm|mov|avi|mkv)$/i.test(pathname)) return null;
         // In-page anchors don't load anything.
         if (url.hash && url.pathname === window.location.pathname && url.search === window.location.search) return null;
         return link;
@@ -777,19 +784,6 @@
           </div>
         </a>
 
-        <div class="flex min-w-0 items-start gap-3 rounded-lg px-2 py-2 mb-3" data-sidebar-footer-action>
-        <form method="POST" action="/auth/logout" class="inline">
-        <button type="submit"
-        class="flex shrink-0 items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
-        data-sidebar-tooltip
-        data-sidebar-label="{{ "shell.sign_out" | t }}"
-        aria-label="{{ "shell.sign_out" | t }}">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
-        <span data-sidebar-text>{{ "shell.sign_out" | t }}</span>
-        </button>
-        </form>
-        </div>
-
         <div class="flex min-w-0 flex-wrap items-center gap-3 mb-3" data-sidebar-footer-controls>
           <form method="post" action="{{ uiLocaleAction }}" class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-gray-700 px-2.5 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
                 data-sidebar-locale
@@ -824,19 +818,39 @@
           </button>
         </div>
 
-        <div class="mt-2 border-t border-gray-700 pt-2" data-sidebar-footer-toggle>
-          <button type="button"
-                  class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-gray-700 hover:text-white md:inline-flex"
-                  data-sidebar-toggle
-                  data-sidebar-tooltip
-                  data-sidebar-label="{{ "shell.collapse_sidebar" | t }}"
-                  data-collapse-label="{{ "shell.collapse_sidebar" | t }}"
-                  data-expand-label="{{ "shell.expand_sidebar" | t }}"
-                  aria-controls="admin-mobile-menu"
-                  aria-expanded="true"
-                  aria-label="{{ "shell.collapse_sidebar" | t }}">
-            <svg class="h-4 w-4 transition-transform" data-sidebar-toggle-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sidebar"></use></svg>
-          </button>
+        <div class="mt-2 flex items-center justify-between border-t border-gray-700 pt-2" data-sidebar-footer-toggle>
+          <form method="POST" action="/auth/logout" class="inline-flex" data-sidebar-footer-action>
+            <button type="submit"
+                    class="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
+                    data-sidebar-tooltip
+                    data-sidebar-label="{{ "shell.sign_out" | t }}"
+                    aria-label="{{ "shell.sign_out" | t }}">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
+              <span data-sidebar-text>{{ "shell.sign_out" | t }}</span>
+            </button>
+          </form>
+          <div class="flex items-center gap-1">
+            <label class="relative inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                   data-sidebar-help-control
+                   title="{{ "shell.show_explanations" | t }}">
+              <input type="checkbox" data-sidebar-help-toggle
+                     aria-label="{{ "shell.show_explanations" | t }}"
+                     style="position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#info-circle"></use></svg>
+            </label>
+            <button type="button"
+                    class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-gray-700 hover:text-white md:inline-flex"
+                    data-sidebar-toggle
+                    data-sidebar-tooltip
+                    data-sidebar-label="{{ "shell.collapse_sidebar" | t }}"
+                    data-collapse-label="{{ "shell.collapse_sidebar" | t }}"
+                    data-expand-label="{{ "shell.expand_sidebar" | t }}"
+                    aria-controls="admin-mobile-menu"
+                    aria-expanded="true"
+                    aria-label="{{ "shell.collapse_sidebar" | t }}">
+              <svg class="h-4 w-4 transition-transform" data-sidebar-toggle-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sidebar"></use></svg>
+            </button>
+          </div>
         </div>
       </div>
     </aside>

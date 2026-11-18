@@ -1,3 +1,4 @@
+import { featureInstalled } from '../index';
 // Advanced search pages and bulk actions. (CSV export moved to the
 // import-export plugin; renderAdvancedSearch links there when it's installed.)
 
@@ -82,10 +83,11 @@ async function bulkAdvancedSearch(
   const form = await c.req.formData();
   const action = bulkAction(form.get('bulk_action'));
   const returnTo = safeAdminReturnPath(form.get('return_to'), '/admin/advanced-search');
+  if ((action === 'publish' || action === 'unpublish') && !featureInstalled('publish')) return c.notFound();
   if (!action) return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Choose a bulk action')}`));
 
   if (!(await userCan(c, BULK_ACTIONS[action].permission))) {
-    return c.text('Forbidden: insufficient permissions', 403);
+    return c.text(`Forbidden: Insufficient permissions. Required permission: ${BULK_ACTIONS[action].permission}`, 403);
   }
 
   const scope = str(form.get('scope')) === 'all' ? 'all' : 'selected';

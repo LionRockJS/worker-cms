@@ -17,7 +17,7 @@ interface Identity {
 async function ownAccount(c: AppContext): Promise<User> {
   const actor = c.get('user');
   if (!actor || !/^\d+$/.test(actor.sub) || !/^\d+$/.test(actor.sid ?? '')) throw new Error('Current account session required');
-  const user = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(actor.sub).first<User>();
+  const user = await c.env.DB.prepare('SELECT * FROM users WHERE disabled_at IS NULL AND id = ?').bind(actor.sub).first<User>();
   if (!user || user.role !== actor.role) throw new Error('Account changed');
   return user;
 }
@@ -29,7 +29,7 @@ function sessionGuard(c: AppContext) {
 }
 
 function accountGuard(c: AppContext, user: User) {
-  return abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND oauth_id IS ? AND email IS ?
+  return abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE disabled_at IS NULL AND id = ? AND oauth_id IS ? AND email IS ?
     AND name IS ? AND avatar_url IS ? AND role IS ?)`, [user.id, user.oauth_id, user.email, user.name, user.avatar_url, user.role]);
 }
 
@@ -45,24 +45,42 @@ async function classification(c: AppContext, revocation: boolean) {
   return { dataClass: 'phi' as const, unavailable: true };
 }
 
-/** Only the current user's display name is editable through this service. */
-export async function updateOwnProfileName(c: AppContext, name: string): Promise<void> {
+/** A picture the user set themselves (upload or generated initials), stored
+ * inline. Provider sign-in refreshes must not overwrite it. */
+export const OWN_AVATAR_PATTERN = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/;
+export const OWN_AVATAR_MAX_LENGTH = 48 * 1024;
+export function isOwnAvatar(avatarUrl: string | null): boolean {
+  return !!avatarUrl && avatarUrl.startsWith('data:image/');
+}
+
+/** Only the current user's display name and picture are editable through this service. */
+async function updateOwnProfileField(c: AppContext, field: 'name' | 'avatar_url', value: string): Promise<void> {
   assertRegulatedWritesAllowed(c.env);
-  if (!name || name.length > 100 || name !== name.trim()) throw new Error('Invalid display name');
   const policy = await classification(c, false);
   const before = await ownAccount(c);
   if (!safeRoleAuditValue(before.role)) throw new Error('Profile evidence requires review');
   const refused = await flushReadAudit(c);
   if (refused) throw new Error('Protected read evidence unavailable');
   const statements = [classificationPolicyGuard(c.env, policy.policy!), sessionGuard(c), accountGuard(c, before)];
-  if (name !== before.name) {
+  if (value !== before[field]) {
     const evidence = mutationAuditEvidence(c, { action: 'profile.update', entityType: 'user', entityId: before.id,
-      detail: { fields: ['name'] } }, policy.dataClass, { requirePreviousChange: true, policy: policy.policy });
-    statements.push(c.env.DB.prepare('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(name, before.id),
+      detail: { fields: [field] } }, policy.dataClass, { requirePreviousChange: true, policy: policy.policy });
+    statements.push(c.env.DB.prepare(`UPDATE users SET ${field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(value, before.id),
       evidence.write, evidence.guard);
   }
-  statements.push(accountGuard(c, { ...before, name }), sessionGuard(c), classificationPolicyGuard(c.env, policy.policy!));
+  statements.push(accountGuard(c, { ...before, [field]: value }), sessionGuard(c), classificationPolicyGuard(c.env, policy.policy!));
   await c.env.DB.batch(statements);
+}
+
+export async function updateOwnProfileName(c: AppContext, name: string): Promise<void> {
+  if (!name || name.length > 100 || name !== name.trim()) throw new Error('Invalid display name');
+  await updateOwnProfileField(c, 'name', name);
+}
+
+/** `''` removes the picture; the next provider sign-in may then supply one. */
+export async function updateOwnAvatar(c: AppContext, avatarUrl: string): Promise<void> {
+  if (avatarUrl && (avatarUrl.length > OWN_AVATAR_MAX_LENGTH || !OWN_AVATAR_PATTERN.test(avatarUrl))) throw new Error('Invalid avatar');
+  await updateOwnProfileField(c, 'avatar_url', avatarUrl);
 }
 
 function identitiesGuard(c: AppContext, userId: number, identities: Identity[]) {
@@ -109,4 +127,34 @@ export async function disconnectOwnIdentity(c: AppContext, identityId: number): 
   // Delivery is separate; its result cannot undo or misreport the revocation.
   await drainAuditMutationOutbox(c.env, envelope.row.eventId);
   return 'removed';
+}
+
+/** Disabling retains account data while releasing all sign-in keys. The
+ * revocation and durable evidence commit together, including during audit outages. */
+export async function disableOwnAccount(c: AppContext): Promise<void> {
+  const before = await ownAccount(c);
+  const policy = await classification(c, true);
+  const actor = contextActor(c);
+  const rolesUnavailable = !safeRoleAuditValue(before.role);
+  if (rolesUnavailable) actor.roles = null;
+  const envelope = mutationAuditEnvelope(c, { action: 'user.disable', entityType: 'user', entityId: before.id,
+    detail: { classification_unavailable: policy.unavailable, roles_unavailable: rolesUnavailable } }, 'phi', actor);
+  const evidence = auditOutboxEvidence(c.env, envelope);
+  // This namespace cannot be emitted by an OAuth provider. A random key also
+  // avoids collisions with legacy primary identities.
+  const retiredKey = `disabled:${crypto.randomUUID()}`;
+  await c.env.DB.batch([
+    sessionGuard(c), accountGuard(c, before),
+    c.env.DB.prepare('DELETE FROM user_oauth_identities WHERE user_id = ?').bind(before.id),
+    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(before.id),
+    c.env.DB.prepare(`UPDATE users SET disabled_at = CURRENT_TIMESTAMP, oauth_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND disabled_at IS NULL`).bind(retiredKey, before.id),
+    evidence.write, evidence.guard,
+    abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND disabled_at IS NOT NULL AND oauth_id = ?
+      AND email IS ? AND name IS ? AND avatar_url IS ? AND role IS ?)
+      OR EXISTS (SELECT 1 FROM user_oauth_identities WHERE user_id = ?)
+      OR EXISTS (SELECT 1 FROM sessions WHERE user_id = ?)`,
+    [before.id, retiredKey, before.email, before.name, before.avatar_url, before.role, before.id, before.id]),
+  ]);
+  await drainAuditMutationOutbox(c.env, envelope.row.eventId);
 }

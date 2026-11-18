@@ -22,7 +22,7 @@
 -- request context the new envelope carries, and rewriting a live audit trail
 -- is worse than keeping two readable generations of it.
 --
--- See docs/access-logging-design-2026-10-29.md.
+-- See docs/audit/access-logging-design-2026-10-29.md.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS audit_events (

@@ -57,6 +57,7 @@ export interface SystemSettingsIconOption {
 }
 
 export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps & {
+  hasI18nFeature?: boolean;
   appName: string;
   appIcon: string;
   primaryColor: string;
@@ -78,6 +79,7 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
   errorKey?: string;
 }): Promise<string> {
   const body = await renderView(views, '/templates/menu-settings.json', {
+    hasI18nFeature: !!opts.hasI18nFeature,
     appName: opts.appName,
     appIcon: opts.appIcon,
     primaryColor: opts.primaryColor,

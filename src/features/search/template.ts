@@ -53,6 +53,7 @@ export async function advancedSearchPage(views: Fetcher, opts: BaseTemplateProps
 }): Promise<string> {
   const pageActionReturnQuery = `?return_to=${encodeURIComponent(opts.currentHref)}`;
   const body = await renderView(views, '/templates/advanced-search.json', {
+    publishEnabled: opts.publishEnabled !== false,
     ...opts,
     hasResults: opts.pages.length > 0,
     resultCountLabel: `${opts.count} result${opts.count === 1 ? '' : 's'}`,

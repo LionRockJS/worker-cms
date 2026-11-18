@@ -1,3 +1,4 @@
+import { IpAccessUnavailableError } from './core/auth/ip-access';
 import { auditRequestFrom,ServiceMutationUnavailableError } from './core/db/audit';
 import { SettingsMutationUnavailableError } from './core/db/settings-mutation-evidence';
 import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
@@ -27,13 +28,11 @@ import {
 } from './core/http/headers';
 import { accessLog, auditUnavailable, ReadAuditUnavailableError } from './core/http/access-log';
 import { assertRegulatedReady } from './core/http/regulated-profile';
-import { assertRegulatedWritesAllowed, regulatedRequestWriteBlocked, regulatedWritesBlocked, RegulatedWritesUnavailableError } from './core/http/regulated-writes';
+import { assertRegulatedWritesAllowed, regulatedRequestWriteBlocked, RegulatedWritesUnavailableError } from './core/http/regulated-writes';
 import { featureInstalled } from './features';
 import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
-import { ingestSubmissions } from './core/db/submission-ingest';
-import { eraseSubmissionSources } from './core/pages/submission-erasure';
 import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
 import { SessionEvidenceUnavailableError } from './core/auth/session-evidence';
 import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
@@ -193,6 +192,7 @@ app.notFound(async (c) => {
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.onError(async (err, c) => {
+  if (err instanceof IpAccessUnavailableError) return c.json({ error: 'ip_access_policy_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if(err instanceof ServiceMutationUnavailableError)return c.json({error:'service_mutation_unavailable'},503,{'Cache-Control':'no-store'});
   if (err instanceof SettingsMutationUnavailableError) return c.json({ error: 'settings_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });
   if (err instanceof PageTagEvidenceUnavailableError) return c.json({ error: 'page_tag_change_unavailable' }, 503, { 'Cache-Control': 'no-store' });
@@ -242,25 +242,12 @@ export default {
     }
   },
 
-  // Cron: pull live-only submission rows (published DB → draft pages) and
-  // bill due recurring credit subscriptions. Each tick handles one bounded
-  // batch of each; plugins can trigger the same ingest on demand via
-  // POST /__cms/ingest/submissions.
   async scheduled(_controller: ScheduledController, env: WorkerEnv, _ctx: ExecutionContext): Promise<void> {
     const sessionEnv = withD1Sessions(env);
     await maintainSessionHygiene(sessionEnv);
     await drainAuditMutationOutbox(sessionEnv, undefined, 10);
     await runFeatureMonitoringWork(sessionEnv);
     await assertRegulatedReady(sessionEnv, featureInstalled('audit'));
-    if (!regulatedWritesBlocked(sessionEnv)) {
-      const result = await ingestSubmissions(sessionEnv);
-      if (result.scanned) console.log('submission ingest:', JSON.stringify(result));
-      // Retries erasures a purge recorded but could not complete.
-      const erased = await eraseSubmissionSources(sessionEnv);
-      if (erased) console.log('submission erasure:', erased);
-    }
-    // Cron work owned by installed features (today, the credit subscription
-    // sweep) is composed through the generated feature-service registry.
     for (const featureWork of await runFeatureScheduledWork(sessionEnv)) {
       console.log(featureWork);
     }

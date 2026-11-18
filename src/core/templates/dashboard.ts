@@ -141,6 +141,7 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
   const pagesLabel = translate('nav.pages', 'Pages');
   const pageTitle = pageTypeFilter ? `${pagesLabel}: ${pageTypeFilter}` : pagesLabel;
   const body = await renderView(views, '/templates/dashboard.json', {
+    publishEnabled: opts.publishEnabled !== false,
     flash,
     hasFlash: !!flash,
     returnPath,

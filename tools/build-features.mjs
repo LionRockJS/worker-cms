@@ -73,7 +73,7 @@ function serviceExport(id) {
 }
 
 /** Every `*Routes` a slice exports, as { specifier, names, isPublic }. */
-function routerExports(id) {
+function routerExports(id, installed) {
   const dir = path.join(featuresDir, id);
   const candidates = [];
   const single = path.join(dir, 'routes.ts');
@@ -88,6 +88,10 @@ function routerExports(id) {
   const out = [];
   for (const [specifier, file, isPublic] of candidates) {
     const source = readFileSync(file, 'utf8');
+    // An integration router can require a second optional feature without
+    // making its owning feature require that feature.
+    const requires = /^export const requiresFeature = '([^']+)'/m.exec(source)?.[1];
+    if (requires && !installed.has(requires)) continue;
     const names = [...source.matchAll(/^export (?:const |\{[^}]*\bas\s+)(\w*Routes)\b/gm)].map((m) => m[1]).sort();
     // A routes file may declare its own mount prefix (e.g. /__cms); doing so
     // also takes it out of the admin stack.
@@ -123,8 +127,9 @@ function buildRouters(ids) {
   const imports = [];
   const admin = [];
   const publics = [];
+  const installed = new Set(ids);
   for (const id of ids) {
-    for (const { specifier, names, isPublic, basePath } of routerExports(id)) {
+    for (const { specifier, names, isPublic, basePath } of routerExports(id, installed)) {
       imports.push(`import { ${names.join(', ')} } from '${specifier}';`);
       const suffix = basePath ? `, basePath: '${basePath}'` : '';
       for (const name of names) {

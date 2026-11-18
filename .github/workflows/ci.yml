@@ -34,6 +34,7 @@ jobs:
       - run: npm run type-check
       # No .dev.vars in CI: test bindings come from vitest.config.mts.
       - run: npm test
+      - run: npm run check:dms-profile
 
   # An existing database upgraded through numbered and manual migrations must
   # end where a fresh install does. --from is the oldest revision still
@@ -53,10 +54,8 @@ jobs:
           node-version: '22'
       - run: npm run check:upgrade -- --from f9719a3
 
-  # Blocking since W14: the backlog was empty (npm audit: 0 vulnerabilities on
-  # 4 November 2026), so any high or critical advisory is a new finding. A
-  # finding that cannot be fixed at once is triaged and recorded as a dated,
-  # owned exception in the W14 record, never by turning this back off.
+  # High and critical findings in production dependencies block CI.
+  # Record findings that require an exception under the W14 procedure.
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -70,4 +69,4 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high

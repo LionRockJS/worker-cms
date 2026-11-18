@@ -14,7 +14,7 @@
 // data pays one `data_classes` query on requests that announced a read and
 // writes no rows at all.
 //
-// See docs/access-logging-design-2026-10-29.md.
+// See docs/audit/access-logging-design-2026-10-29.md.
 // ============================================================
 
 import { createMiddleware } from 'hono/factory';

@@ -11,6 +11,7 @@
 // live in crud.ts to keep the constraint local.
 
 import { describe, expect, it } from 'vitest';
+import { adminRoutes } from '../src/routes/admin';
 import { pagesRoutes } from '../src/routes/admin/pages';
 
 /** Registration order; Hono lists middleware and handler separately, so a
@@ -31,7 +32,10 @@ describe('admin page route order', () => {
 
   it('serves the whole page admin surface', () => {
     // De-duplicated: guards double up entries, and that is not what this pins.
-    expect([...new Set(table())].sort()).toEqual([
+    const mounted = adminRoutes.routes.filter(({ path, method }) =>
+      path.startsWith('/pages/') || path === '/pages' || (path === '/' && method === 'GET'),
+    ).map(({ method, path }) => `${method} ${path}`);
+    expect([...new Set(mounted)].sort()).toEqual([
       'GET /',
       'GET /pages/:id/edit',
       'GET /pages/:id/read',

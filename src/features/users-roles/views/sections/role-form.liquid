@@ -48,4 +48,13 @@
       <button form="role-delete-form" type="submit" class="w-full px-6 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto sm:w-auto">{{ "view_strings.sections_role_form.delete" | t }}</button>
     {% endif %}
   </div>
+
+  {% if canManageIp %}
+    <form method="POST" action="{{ ipAction }}" class="mt-6 space-y-3 rounded-lg border border-gray-200 p-4">
+      <label for="ip_allowlist" class="block text-sm font-medium text-gray-700">{{ "ip_access.allowlist" | t }}</label>
+      <p class="text-xs text-gray-500">{{ "ip_access.description" | t }}</p>
+      <textarea id="ip_allowlist" name="ip_allowlist" rows="5" maxlength="16384" class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">{{ ipAllowlist }}</textarea>
+      <button type="submit" class="px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700">{{ "ip_access.save" | t }}</button>
+    </form>
+  {% endif %}
 </div>

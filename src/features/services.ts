@@ -6,6 +6,7 @@
 // a feature implementation or a feature-owned contract directly.
 
 import type { AppContext } from '../core/http/context';
+import type { PublicationService } from '../core/publish/service';
 import type { Env } from '../types';
 import { featureServiceEntries } from '../generated/services';
 import { regulatedWritesBlocked } from '../core/http/regulated-writes';
@@ -39,6 +40,7 @@ export type FeatureReservation =
 
 export interface FeatureServiceEntry {
   readonly id: string;
+  publication?: PublicationService;
   reservePageCreate?(c: AppContext, pageType: string): Promise<FeatureReservation>;
   reservePageCreates?(env: Env, input: PageCreateReservationInput): Promise<FeatureReservation>;
   adminScreenProps?(c: AppContext, target: AdminScreenTarget): Promise<Record<string, unknown>>;
@@ -51,6 +53,10 @@ export interface FeatureServiceEntry {
 }
 
 const servicesById = new Map(featureServiceEntries.map((entry) => [entry.id, entry]));
+
+export function publication(): PublicationService | undefined {
+  return servicesById.get('publish')?.publication;
+}
 
 export function freeReservation(): FeatureReservation {
   return { ok: true, charged: 0, refund: async () => {} };

@@ -115,6 +115,7 @@ export interface BaseTemplateProps extends NavFlags {
   sidebarWallets?: SidebarWallet[];
   /** Whether the installed credits feature's interface is visible. */
   showCredits?: boolean;
+  publishEnabled?: boolean;
   currentUserId: string;
   /** Navigation entries contributed by active plugins, filtered to the user's roles. */
   pluginNav: Array<{ label: string; href: string }>;
@@ -377,7 +378,7 @@ function adminSessionKeepaliveScript(): string {
   return `(function() {
       if (window.__cmsSessionKeepaliveBound) return;
       window.__cmsSessionKeepaliveBound = true;
-      var INTERVAL = 10 * 60 * 1000;
+      var INTERVAL = 5 * 60 * 1000;
       // Interaction after this long without a report is sent at once, so the
       // server's view of activity lags the person by at most this much.
       var REPORT_AFTER = 5 * 60 * 1000;
@@ -388,12 +389,15 @@ function adminSessionKeepaliveScript(): string {
       var lastReported = lastInteraction;
       var lastAttempt = 0;
 
-      // An open tab is not activity. The server records when the person last
-      // interacted, never when this timer fired, so an untouched tab goes idle.
+      // A visible page counts as reading, even when its window is inactive.
+      // Hidden tabs only report actual interaction, so they still go idle.
       async function refresh() {
         if (inFlight) return;
         inFlight = true;
         lastAttempt = Date.now();
+        if (document.visibilityState === 'visible') {
+          lastInteraction = Date.now();
+        }
         var interaction = lastInteraction;
         var headers = { Accept: 'application/json' };
         if (interaction > lastReported) {
@@ -407,7 +411,7 @@ function adminSessionKeepaliveScript(): string {
             credentials: 'same-origin',
             headers: headers
           });
-          if (res.status === 401) window.location.href = '/auth/login';
+          if (res.status === 401) window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
           else if (res.ok) lastReported = Math.max(lastReported, interaction);
         } catch (error) {
           /* retry on the next tick */

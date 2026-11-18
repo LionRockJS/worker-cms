@@ -14,6 +14,7 @@ beforeEach(async () => {
   for (const table of ['sessions', 'user_oauth_identities', 'users', 'audit_events', 'data_classes']) {
     await env.DB.prepare(`DELETE FROM ${table}`).run();
   }
+  await env.DB.prepare("DELETE FROM roles WHERE name = 'initial-reviewer'").run();
 });
 afterEach(async () => {
   vi.unstubAllGlobals();
@@ -29,13 +30,17 @@ async function call(path: string, cookie = '', overrides: Partial<Env> = {}) {
   await waitOnExecutionContext(ctx);
   return response;
 }
-async function login(overrides: Partial<Env> = {}) {
-  const start = await call('/auth/start?provider=eventuai', '', overrides);
+async function login(overrides: Partial<Env> = {}, provider = 'eventuai', userinfo: Record<string, unknown> = profile) {
+  const start = await call(`/auth/start?provider=${provider}`, '', overrides);
   const state = new URL(start.headers.get('Location')!).searchParams.get('state')!;
   const cookie = start.headers.get('Set-Cookie')!.match(/(?:__Host-)?oauth_state=([^;]+)/)![1];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    if (String(input) === 'https://id.eventuai.com/oauth/token') return Response.json({ access_token: 'synthetic-provider-token' });
-    if (String(input) === 'https://id.eventuai.com/oauth/userinfo') return Response.json(profile);
+    if (['https://id.eventuai.com/oauth/token', 'https://oauth2.googleapis.com/token',
+      'https://github.com/login/oauth/access_token', 'https://login.microsoftonline.com/common/oauth2/v2.0/token'].includes(String(input))) {
+      return Response.json({ access_token: 'synthetic-provider-token' });
+    }
+    if (['https://id.eventuai.com/oauth/userinfo', 'https://www.googleapis.com/oauth2/v3/userinfo',
+      'https://api.github.com/user', 'https://graph.microsoft.com/oidc/userinfo'].includes(String(input))) return Response.json(userinfo);
     throw new Error('Unexpected external call');
   }));
   try {
@@ -73,6 +78,87 @@ it.each(['none', 'pii', 'phi'] as const)('commits account, viewer role, identity
   }
   expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions').first()).toEqual({ n: 1 });
 });
+
+function initialConfig(selector: Record<string, unknown> = { providerUserId: profile.sub }, roles = ['admin'], provider = 'eventuai') {
+  return { INITIAL_USER_ROLES: JSON.stringify([{ provider, ...selector, roles }]) };
+}
+
+it('commits configured initial roles with matching creation and login evidence', async () => {
+  expect((await login(initialConfig(undefined, ['editor', 'moderator']))).status).toBe(302);
+  expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: 'editor,moderator' });
+  const events = await creationEvents();
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ actor_roles: 'editor,moderator' });
+  expect(JSON.parse(String(events[0].detail))).toMatchObject({ role_after: 'editor,moderator' });
+  expect(await env.DB.prepare("SELECT actor_roles FROM audit_events WHERE action = 'auth.login'").first())
+    .toEqual({ actor_roles: 'editor,moderator' });
+  expect(JSON.stringify(events)).not.toContain(profile.email);
+  expect(JSON.stringify(events)).not.toContain(profile.sub);
+});
+
+it('preserves demotion on later sign-ins even when configuration changes or is invalid', async () => {
+  expect((await login(initialConfig())).status).toBe(302);
+  await env.DB.prepare("UPDATE users SET role = 'viewer'").run();
+  for (const overrides of [initialConfig(), initialConfig(undefined, ['editor']), { INITIAL_USER_ROLES: 'invalid' }, {}]) {
+    expect((await login(overrides)).status).toBe(302);
+    expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: 'viewer' });
+  }
+  expect(await creationEvents()).toHaveLength(1);
+});
+
+it('does not promote an existing viewer when added to the allowlist', async () => {
+  expect((await login()).status).toBe(302);
+  expect((await login(initialConfig())).status).toBe(302);
+  expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: 'viewer' });
+});
+
+it.each([true, false, undefined, 'true', 'false'])('requires a verified Google email claim (%s)', async (verified) => {
+  expect((await login(initialConfig({ email: ' PRIVATE-PERSON@example.invalid ' }, ['editor'], 'google'),
+    'google', { ...profile, email_verified: verified })).status).toBe(302);
+  expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: verified === true ? 'editor' : 'viewer' });
+});
+
+it.each(['eventuai', 'microsoft', 'github'])('does not trust an unverified %s email for role grants', async (provider) => {
+  expect((await login(initialConfig({ email: profile.email }, ['admin'], provider), provider,
+    { ...profile, id: 123, login: 'synthetic' })).status).toBe(302);
+  expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: 'viewer' });
+});
+
+it.each(['github', 'microsoft'])('supports stable %s user IDs', async (provider) => {
+  expect((await login(initialConfig({ providerUserId: provider === 'github' ? '123' : profile.sub }, ['editor'], provider),
+    provider, { ...profile, id: 123, login: 'synthetic' })).status).toBe(302);
+  expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: 'editor' });
+});
+
+it('validates custom initial roles within the registration transaction', async () => {
+  const config = initialConfig(undefined, ['initial-reviewer']);
+  await expectNoAccount(await login(config));
+  await env.DB.prepare("INSERT INTO roles (name, label, builtin) VALUES ('initial-reviewer', 'Reviewer', 0)").run();
+  expect((await login(config)).status).toBe(302);
+  expect(await env.DB.prepare('SELECT role FROM users').first()).toEqual({ role: 'initial-reviewer' });
+});
+
+it('rolls back if a custom initial role disappears during creation', async () => {
+  await env.DB.prepare("INSERT INTO roles (name, label, builtin) VALUES ('initial-reviewer', 'Reviewer', 0)").run();
+  await env.DB.prepare("CREATE TRIGGER w4b_registration_fail AFTER INSERT ON users BEGIN DELETE FROM roles WHERE name = 'initial-reviewer'; END").run();
+  await expectNoAccount(await login(initialConfig(undefined, ['initial-reviewer'])));
+});
+
+it('rolls back configured roles if creation evidence is missing or roles are rewritten', async () => {
+  for (const sql of [
+    "BEFORE INSERT ON audit_events WHEN NEW.action = 'user.create' BEGIN SELECT RAISE(IGNORE); END",
+    "AFTER INSERT ON audit_events WHEN NEW.action = 'user.create' BEGIN UPDATE users SET role = 'viewer'; END",
+  ]) {
+    await env.DB.prepare(`CREATE TRIGGER w4b_registration_fail ${sql}`).run();
+    await expectNoAccount(await login(initialConfig()));
+    await env.DB.prepare('DROP TRIGGER w4b_registration_fail').run();
+  }
+});
+
+it.each(['{', '{}', '[{"provider":"eventuai","providerUserId":"w4b-new-user","roles":["admin,editor"]}]'])
+  ('rejects malformed initial role configuration before creating an account (%s)', async (INITIAL_USER_ROLES) => {
+    await expectNoAccount(await login({ INITIAL_USER_ROLES }));
+  });
 
 it.each(['users', 'roles', 'role_permissions'])('inherits the %s source classification', async (table) => {
   await env.DB.prepare("INSERT INTO data_classes (container_kind, container_key, class) VALUES ('table', ?, 'phi')").bind(table).run();
@@ -112,7 +198,7 @@ it('does not create another account or creation event when an existing user sign
 });
 
 it('retains registration allowlist refusal without creating an account or event', async () => {
-  const response = await login({ ALLOWED_EMAIL_DOMAINS: 'approved.invalid' });
+  const response = await login({ ...initialConfig(), ALLOWED_EMAIL_DOMAINS: 'approved.invalid' });
   expect(response.headers.get('Location')).toBe('/auth/login?error=email_not_allowed');
   expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first()).toEqual({ n: 0 });
   expect(await creationEvents()).toEqual([]);

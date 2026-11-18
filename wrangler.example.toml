@@ -33,6 +33,7 @@ database_name = "cms"
 database_id = "00000000-0000-0000-0000-000000000001"
 migrations_dir = "migrations"
 
+# Omit this block for a build with "publish": false in cms.features.json.
 [[d1_databases]]
 binding = "PUBLISHED_DB"
 database_name = "cms-published"
@@ -52,7 +53,7 @@ migrations_dir = "migrations/published"
 # bucket_name = "worker-cms-audit"
 
 # Optional private outage diagnostics, separate from D1 and the sealed archive.
-# See docs/audit-outage-monitoring.md before enabling; do not expose this bucket.
+# See docs/audit/audit-outage-monitoring.md before enabling; do not expose this bucket.
 # [[r2_buckets]]
 # binding = "AUDIT_OUTAGE_BUCKET"
 # bucket_name = "worker-cms-audit-outages"
@@ -77,10 +78,8 @@ binding = "IMAGES"
 # binding = "PUBLISH_BUCKET"
 # bucket_name = "worker-cms-published"
 
-# Submission ingest: pulls every published page without a draft counterpart
-# into the draft DB as a submission mirror, firing submission hooks. Bounded
-# batch per tick; subscribed plugins can also trigger it on demand via
-# POST /__cms/ingest/submissions.
+# Scheduled maintenance includes sessions, audit, and enabled features.
+# With publishing enabled, this also ingests public submission mirrors.
 [triggers]
 crons = ["*/5 * * * *"]
 
@@ -132,7 +131,7 @@ simple = { limit = 30, period = 60 }
 # ── Plugins (optional) ────────────────────────────────────────────────────────
 # Register plugin Workers by HTTPS URL under Admin → Plugins. Each row receives
 # a dedicated secret that must also be stored on that plugin Worker. No service
-# binding or CMS redeploy is required. See examples/plugin-events.
+# binding or CMS redeploy is required. See docs/examples/plugin-events.
 
 [vars]
 # PLUGINS is a deprecated service-binding-era setting and is intentionally unset.
@@ -162,6 +161,8 @@ DEFAULT_TIMEZONE = "+0800"
 # Optional: restrict new sign-ups to these email domains (comma-separated).
 # Existing users always keep access. Unset = open registration (viewer role).
 # ALLOWED_EMAIL_DOMAINS = "cowise.co"
+# Optional first-sign-in role grants: set INITIAL_USER_ROLES as a JSON secret
+# with `wrangler secret put INITIAL_USER_ROLES`; see README and .dev.vars.example.
 
 # Secrets – set via: wrangler secret put JWT_SECRET
 # wrangler secret put EVENTUAI_CLIENT_SECRET
@@ -184,7 +185,7 @@ DEFAULT_TIMEZONE = "+0800"
 # TRASH_RETENTION_DAYS = "90"
 # JOB_RETENTION_DAYS = "30"
 
-# Regulated deployment opt-in. See docs/regulated-profile.md before enabling.
+# Regulated deployment opt-in. See docs/audit/regulated-profile.md before enabling.
 # Holds content/configuration writes, queue execution, ingestion and billing until W4b.
 # Prepare queue consumers and pinned plugin identities; no write-enable bypass flag.
 # Add these inside [vars], with a complete approved inventory:
@@ -198,3 +199,8 @@ DEFAULT_TIMEZONE = "+0800"
 # Days between recorded signal reviews before the review screen and heartbeat
 # report one overdue (W13). Set to the cadence the incident owner approved.
 # AUDIT_REVIEW_INTERVAL_DAYS = "7"
+
+# Optional private R2 cache for plugin view files (select Bucket in plugin settings).
+# [[r2_buckets]]
+# binding = "PLUGIN_VIEWS_BUCKET"
+# bucket_name = "cms-plugin-views"

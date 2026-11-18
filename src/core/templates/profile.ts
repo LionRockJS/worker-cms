@@ -23,6 +23,7 @@ export async function profilePage(views: Fetcher, opts: BaseTemplateProps & {
   name: string;
   roleLabel: string;
   avatarUrl: string;
+  hasOwnAvatar: boolean;
   flash?: string;
   error?: string;
   identities: ProfileIdentity[];
@@ -46,6 +47,7 @@ export async function profilePage(views: Fetcher, opts: BaseTemplateProps & {
     hasFlash: !!opts.flash,
     hasError: !!opts.error,
     hasAvatar: opts.avatarUrl.length > 0,
+    hasOwnAvatar: opts.hasOwnAvatar,
     initial: opts.name.trim().charAt(0).toUpperCase() || opts.email.trim().charAt(0).toUpperCase() || '?',
     hasIdentities: opts.identities.length > 0,
     identities: opts.identities,

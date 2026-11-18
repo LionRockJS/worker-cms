@@ -14,20 +14,17 @@ import type { Env, Variables, Page, Tag, Taxonomy } from '../../../types';
 import type { BlueprintEntry } from '../../../cms-config';
 import { dashboardPageHref, dashboardPageNumber, dashboardPageSize, dashboardStatusFilter, editorsFromForm, languageFromRequest, num, slugify, str, userIdFromContext } from '../../../core/http/forms';
 import { coreExtensions } from '../../../core/extensions';
-import { reservePageCreate } from '../../../features/services';
-import { lectFromForm, publicationStatusForPage, withDraftMetadata, withLiveStatus } from '../../../core/db/page-logic';
-import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages, listDashboardDraftPageUuids, listDashboardDraftPagesByUuids } from '../../../core/db/admin-queries';
-import { liveMapForDraftPages } from '../../../core/publish';
-import { draftLectProjector } from '../../../core/publish/projection';
+import { publication, reservePageCreate } from '../../../features/services';
+import { lectFromForm, withDraftMetadata, withLiveStatus } from '../../../core/db/page-logic';
+import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages } from '../../../core/db/admin-queries';
 import { recordPageReads } from '../../../core/http/access-log';
-import { readD1PageSource } from '../../../core/publish/d1';
-import { auditLiveReads } from '../../../core/publish/read-audit';
 import { dashboardPagination, renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { userCan } from '../../../core/auth/permissions';
 import { loadAdminHomeSettings } from '../../../core/db/settings';
 import { requirePermission } from '../../../core/auth/guards';
 import type { AppContext } from '../../../core/http/context';
+import type { DashboardPageRow } from '../../../core/publish/service';
 
 
 export const pageDashboardRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -42,12 +39,7 @@ async function importExportLinks(
 }
 
 type DashboardStatusFilter = ReturnType<typeof dashboardStatusFilter>;
-type DashboardLiveUuidRow = { uuid: string };
-type DashboardPageRow = Page & { isDraftMissing?: boolean; tagNames?: string[] };
 type DashboardPageTagNameRow = { page_id: number; id: number; name: string; taxonomy_slug: string | null };
-type DashboardPublishedPageTagRow = { page_id: number; tag_id: number; weight: number; id: number };
-type DashboardTagNameRow = { id: number; name: string; taxonomy_slug: string | null };
-
 function statusFilterLinks(routeBase: string, active: DashboardStatusFilter) {
   return [
     { label: 'All', translationKey: 'pages.status.all', href: routeBase, isActive: active === '' },
@@ -108,136 +100,19 @@ async function addDashboardPageTags<T extends DashboardPageRow>(c: AppContext, p
           .bind(...draftPageIds)
           .all<DashboardPageTagNameRow>()
       : Promise.resolve({ results: [] as DashboardPageTagNameRow[] }),
-    publishedPageIds.length
-      ? c.env.PUBLISHED_DB.prepare(
-          `SELECT page_id, tag_id, weight, id
-           FROM page_tags
-           WHERE page_id IN (${publishedPageIds.map(() => '?').join(',')})
-           ORDER BY page_id ASC, weight ASC, id ASC`,
-        )
-          .bind(...publishedPageIds)
-          .all<DashboardPublishedPageTagRow>()
-      : Promise.resolve({ results: [] as DashboardPublishedPageTagRow[] }),
+    publishedPageIds.length ? publication()?.dashboardPublishedTags(c, publishedPageIds) : undefined,
   ]);
 
   recordTagReads('tag.dashboard-label', draftTagRows.results);
 
   for (const row of draftTagRows.results) addTag(pageKey('draft', row.page_id), row.name);
 
-  const publishedTagIds = Array.from(new Set(publishedTagRows.results.map((row) => row.tag_id)));
-  if (publishedTagIds.length) {
-    const tagNames = await c.env.DB.prepare(
-      `SELECT id, name, taxonomy_slug FROM tags WHERE id IN (${publishedTagIds.map(() => '?').join(',')})`,
-    )
-      .bind(...publishedTagIds)
-      .all<DashboardTagNameRow>();
-    recordTagReads('tag.dashboard-label', tagNames.results);
-    const tagNamesById = new Map(tagNames.results.map((tag) => [tag.id, tag.name]));
-    for (const row of publishedTagRows.results) {
-      const name = tagNamesById.get(row.tag_id);
-      if (name) addTag(pageKey('published', row.page_id), name);
-    }
-  }
+  for (const row of publishedTagRows ?? []) addTag(pageKey('published', row.pageId), row.name);
 
   return pages.map((page) => ({
     ...page,
     tagNames: pageTagNames.get(pageKey(page.isDraftMissing ? 'published' : 'draft', page.id)) ?? [],
   }));
-}
-
-function dashboardPaginationResult<T>(items: T[], requestedPage: number, limit: number) {
-  const total = items.length;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const currentPage = Math.min(requestedPage, totalPages);
-  const offset = (currentPage - 1) * limit;
-  return {
-    results: items.slice(offset, offset + limit),
-    pagination: {
-      total,
-      totalPages,
-      currentPage,
-      limit,
-    },
-  };
-}
-
-async function liveDashboardUuids(c: AppContext): Promise<Set<string>> {
-  const source = await readD1PageSource<DashboardLiveUuidRow & { page_type: string | null }>(c.env.PUBLISHED_DB, 'identity', '1', []);
-  await auditLiveReads(c.env, { id: 'd1' }, source.provenance, undefined, 'page.live-status');
-  return new Set(source.rows.map((page) => page.uuid));
-}
-
-async function liveDashboardPagesForRequest(
-  c: AppContext,
-  options: {
-    pageType?: string;
-    requestedPage: number;
-    pageSize: number;
-    statusFilter: 'scheduled' | 'live' | 'ended';
-    now: Date;
-  },
-) {
-  const { pageType, requestedPage, pageSize, statusFilter, now } = options;
-  const whereSql = pageType ? 'p.page_type = ?' : '1';
-  const baseParams = pageType ? [pageType] : [];
-  // Filter on schedule columns only; lect and the rest are loaded below for
-  // just the rows on this page, not for every published page.
-  const source = await readD1PageSource<{ uuid: string; page_type: string | null; start: string | null; end: string | null; timezone: string | null }>(
-    c.env.PUBLISHED_DB, 'schedule', whereSql, baseParams, 'ORDER BY p.weight ASC, p.name ASC, p.id ASC',
-  );
-  await auditLiveReads(c.env, { id: 'd1' }, source.provenance, undefined, 'page.live-status');
-  const matchingRows = source.rows.filter((page) => (
-    publicationStatusForPage(page, true, now) === statusFilter
-  ));
-  const paginatedUuids = dashboardPaginationResult(matchingRows.map((page) => page.uuid), requestedPage, pageSize);
-  const pageUuids = paginatedUuids.results;
-  const liveRows = pageUuids.length
-    ? (await readD1PageSource<Page>(c.env.PUBLISHED_DB, 'full', 'p.uuid IN (SELECT value FROM json_each(?))', [JSON.stringify(pageUuids)])).rows
-    : [];
-  const liveMap = new Map(liveRows.map((page) => [page.uuid, page]));
-  const paginated = {
-    results: pageUuids.map((uuid) => liveMap.get(uuid)).filter((page): page is Page => !!page),
-    pagination: paginatedUuids.pagination,
-  };
-  const draftRows = await listDashboardDraftPagesByUuids(
-    c.env.DB,
-    paginated.results.map((page) => page.uuid),
-    { pageType },
-  );
-  const draftMap = new Map(draftRows.map((page) => [page.uuid, page]));
-  const results: DashboardPageRow[] = paginated.results.map((page) => {
-    const draft = draftMap.get(page.uuid);
-    return draft ?? { ...page, isDraftMissing: true };
-  });
-  const projectDraft = await draftLectProjector(c.env);
-
-  return {
-    results: withLiveStatus(results, liveMap, projectDraft, now),
-    pagination: paginated.pagination,
-  };
-}
-
-async function draftDashboardPagesForRequest(
-  c: AppContext,
-  options: { pageType?: string; requestedPage: number; pageSize: number },
-) {
-  const { pageType, requestedPage, pageSize } = options;
-  const [draftUuids, liveUuids] = await Promise.all([
-    listDashboardDraftPageUuids(c.env.DB, { pageType }),
-    liveDashboardUuids(c),
-  ]);
-  const draftOnlyUuids = draftUuids.filter((uuid) => !liveUuids.has(uuid));
-  const paginated = dashboardPaginationResult(draftOnlyUuids, requestedPage, pageSize);
-  const draftRows = await listDashboardDraftPagesByUuids(c.env.DB, paginated.results);
-  const draftMap = new Map(draftRows.map((page) => [page.uuid, page]));
-  const results = paginated.results
-    .map((uuid) => draftMap.get(uuid))
-    .filter((page): page is Page => !!page);
-
-  return {
-    results: withLiveStatus(results, new Map()),
-    pagination: paginated.pagination,
-  };
 }
 
 async function dashboardPagesForRequest(
@@ -246,34 +121,27 @@ async function dashboardPagesForRequest(
 ) {
   const { pageType, statusFilter, requestedPage, pageSize } = options;
   const now = new Date();
+  const publishing = publication();
   let result;
-  if (!statusFilter) {
+  if (publishing && statusFilter) {
+    result = await publishing.filteredDashboardPages(c, { pageType, requestedPage, pageSize, statusFilter, now });
+  } else {
     const draftPages = await listDashboardDraftPages(c.env.DB, {
       pageType,
       page: requestedPage,
       limit: pageSize,
     });
     const [liveMap, projectDraft] = await Promise.all([
-      liveMapForDraftPages(c.env, draftPages.results),
-      draftLectProjector(c.env),
+      publishing?.liveMapForDraftPages(c.env, draftPages.results) ?? new Map(),
+      publishing?.draftLectProjector(c.env),
     ]);
     result = {
       ...draftPages,
       results: withLiveStatus(draftPages.results, liveMap, projectDraft, now),
     };
-  } else if (statusFilter === 'draft') {
-    result = await draftDashboardPagesForRequest(c, { pageType, requestedPage, pageSize });
-  } else {
-    result = await liveDashboardPagesForRequest(c, {
-      pageType,
-      requestedPage,
-      pageSize,
-      statusFilter,
-      now,
-    });
   }
 
-  const results = await addDashboardPageTags(c, result.results);
+  const results = await addDashboardPageTags<(typeof result.results)[number]>(c, result.results);
   // Both list routes come through here, so one announcement covers them. A
   // mixed list is recorded as one row per page type, not one per row.
   recordPageReads('page.list', results.filter(page => !('isDraftMissing' in page && page.isDraftMissing)));
@@ -303,7 +171,7 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
   const search = c.req.query('search')?.trim() ?? '';
   const pageSize = dashboardPageSize(c.req.query('pagesize'));
   const requestedPage = dashboardPageNumber(c.req.query('page'));
-  const statusFilter = dashboardStatusFilter(c.req.query('status'));
+  const statusFilter = publication() ? dashboardStatusFilter(c.req.query('status')) : '';
 
   if (search) {
     return c.redirect(`/admin/advanced-search?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
@@ -329,7 +197,7 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     flash: flash || undefined,
     returnPath: dashboardPageHref(routeBase, draftPages.pagination.currentPage, pageSize, statusParams),
     statusFilter,
-    statusFilters: statusFilterLinks(routeBase, statusFilter),
+    statusFilters: publication() ? statusFilterLinks(routeBase, statusFilter) : [],
     searchAction: '/admin/advanced-search',
     advancedSearchHref: '/admin/advanced-search',
     importHref,
@@ -368,7 +236,7 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
   const search = c.req.query('search')?.trim() ?? '';
   const pageSize = dashboardPageSize(c.req.query('pagesize'));
   const requestedPage = dashboardPageNumber(c.req.query('page'));
-  const statusFilter = dashboardStatusFilter(c.req.query('status'));
+  const statusFilter = publication() ? dashboardStatusFilter(c.req.query('status')) : '';
 
   if (search) {
     return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
@@ -404,7 +272,7 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     returnPath: dashboardPageHref(routeBase, draftPages.pagination.currentPage, pageSize, statusParams),
     pageTypeFilter: pageType,
     statusFilter,
-    statusFilters: statusFilterLinks(routeBase, statusFilter),
+    statusFilters: publication() ? statusFilterLinks(routeBase, statusFilter) : [],
     searchAction: `/admin/advanced-search/${encodeURIComponent(pageType)}`,
     advancedSearchHref: `/admin/advanced-search/${encodeURIComponent(pageType)}`,
     importHref,

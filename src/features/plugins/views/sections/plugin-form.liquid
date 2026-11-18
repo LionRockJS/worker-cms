@@ -30,6 +30,24 @@
       {{ "plugins.security.trusted_ui" | t }}
       <span class="block text-xs text-gray-500 mt-1">{{ "plugins.security.trusted_ui_help" | t }}</span>
     </label>
+    <label class="block">
+      <span class="block text-sm font-medium text-gray-700 mb-1">{{ "plugins.form.view_source" | t }}</span>
+      <select name="view_source" class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+        <option value="host"{% if viewSource == 'host' %} selected{% endif %}>{{ "plugins.form.view_source_host" | t }}</option>
+        <option value="bucket"{% if viewSource == 'bucket' %} selected{% endif %}>{{ "plugins.form.view_source_bucket" | t }}</option>
+        <option value="local"{% if viewSource == 'local' %} selected{% endif %}>{{ "plugins.form.view_source_local" | t }}</option>
+      </select>
+      <span class="block text-xs text-gray-500 mt-1">{{ "plugins.form.view_source_help" | t }}</span>
+    </label>
+    <details class="rounded-lg border border-gray-200 p-3">
+      <summary class="cursor-pointer text-sm font-medium text-gray-700">{{ "plugins.form.local_views_setup" | t }}</summary>
+      <p class="mt-2 text-xs text-gray-500">{{ "plugins.form.local_views_help" | t }}</p>
+      <pre class="mt-2 overflow-x-auto rounded-lg bg-gray-50 p-3 text-xs"><code>{{ localViewsEnvExample }}</code></pre>
+      <p class="mt-2 text-xs text-gray-500">{{ "plugins.form.local_views_layout" | t }}</p>
+      <pre class="mt-2 overflow-x-auto rounded-lg bg-gray-50 p-3 text-xs"><code>/srv/cms/plugin-views/events/REVISION/templates/list.json
+/srv/cms/plugin-views/events/REVISION/sections/list.liquid</code></pre>
+      <pre class="mt-2 overflow-x-auto rounded-lg bg-gray-50 p-3 text-xs"><code>{{ localViewsNginxExample }}</code></pre>
+    </details>
     <div class="flex gap-4">
       <label class="flex items-center gap-2 text-sm text-gray-700">
         <input name="enabled" type="checkbox" value="1"{% if enabled %} checked{% endif %}> {{ "view_strings.sections_plugin_form.enabled" | t }}

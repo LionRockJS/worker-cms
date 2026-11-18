@@ -6,8 +6,8 @@
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyBulkPageAction, BULK_ACTION_PAGE_LIMIT } from '../src/core/pages/bulk-action';
-import { publishPagesToTargets } from '../src/core/publish';
-import { r2Adapter } from '../src/core/publish/r2';
+import { publishPagesToTargets } from '../src/features/publish';
+import { r2Adapter } from '../src/features/publish/r2';
 import { clearManifestCache } from '../src/features/plugins/registry';
 import type { PublishSnapshot } from '../src/core/publish/adapter';
 import type { Env, JWTPayload, Page } from '../src/types';

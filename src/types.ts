@@ -201,13 +201,19 @@ export interface Env {
   /** JSON array of {kind,key,class: public|pii|phi}; must match live classification. */
   REGULATED_INVENTORY?: string;
   DB: D1DatabaseClient;
-  PUBLISHED_DB: D1DatabaseClient;
+  PUBLISHED_DB?: D1DatabaseClient;
   VIEWS: Fetcher;
   /** Cloudflare Worker version metadata; changes on every deploy. */
   CF_VERSION_METADATA?: WorkerVersionMetadata;
   /** Optional manual fallback for local/dev environments without version metadata. */
   VIEW_REVISION?: string;
   MEDIA_BUCKET?: R2Bucket;
+  /** Private cache for plugin Liquid/JSON views; enabled per plugin. */
+  PLUGIN_VIEWS_BUCKET?: R2Bucket;
+  /** Self-hosted, read-only plugin source directory (injected by server scripts). */
+  PLUGIN_LOCAL_VIEWS?: Fetcher;
+  /** Self-hosted Nginx acceleration opt-in; injected from the server .env. */
+  PLUGIN_VIEWS_NGINX?: string;
   /** Where the audit sweep writes sealed archive segments. Without it the
    *  sweep does nothing at all — it never prunes what it could not archive. */
   AUDIT_BUCKET?: R2Bucket;
@@ -281,6 +287,9 @@ export interface Env {
    * e.g. "cowise.co,eventuai.com". Unset = open registration (viewer role).
    */
   ALLOWED_EMAIL_DOMAINS?: string;
+  /** JSON role allowlist applied only at account creation. Entries match a
+   * provider plus providerUserId or a provider-verified email. */
+  INITIAL_USER_ROLES?: string;
   /** Workers Rate Limiting bindings (optional – absent in local dev/tests). */
   AUTH_RATE_LIMITER?: RateLimiter;
   UPLOAD_RATE_LIMITER?: RateLimiter;
@@ -289,7 +298,7 @@ export interface Env {
 /** Raw bindings supplied by Cloudflare before request/job-scoped sessions are created. */
 export type WorkerEnv = Omit<Env, 'DB' | 'PUBLISHED_DB'> & {
   DB: D1Database;
-  PUBLISHED_DB: D1Database;
+  PUBLISHED_DB?: D1Database;
 };
 
 /** Shape of a Workers Rate Limiting binding. */
@@ -300,4 +309,6 @@ export interface RateLimiter {
 // Hono context variables set by the auth middleware
 export interface Variables {
   user: JWTPayload;
+  /** Set by requirePageSync when access came from a plugin sync grant: its expiry in seconds. */
+  syncGrantExp?: number;
 }

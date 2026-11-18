@@ -1,3 +1,5 @@
+import { adminReturnTo } from '../core/auth/return-to';
+import { accountIpAllowed, connectingIp } from '../core/auth/ip-access';
 // ============================================================
 // OAuth 2.1 routes
 //   GET  /auth/login    – show the login page (HTML)
@@ -94,11 +96,13 @@ interface NormalizedUser {
   providerUserId: string;
   oauthId: string;
   email: string;
+  emailVerified: boolean;
   name: string;
   avatarUrl: string;
 }
 
 interface OAuthStatePayload extends JWTPayload {
+  return_to?: string;
   state?: string;
   code_verifier?: string;
   provider?: string;
@@ -262,6 +266,7 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `eventuai:${sub}`,
       email,
+      emailVerified: data['email_verified'] === true,
       name: String(data['preferred_username'] ?? sub),
       avatarUrl: '',
     };
@@ -276,6 +281,7 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `google:${sub}`,
       email,
+      emailVerified: data['email_verified'] === true,
       name: String(data['name'] ?? ''),
       avatarUrl: String(data['picture'] ?? ''),
     };
@@ -294,6 +300,8 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `microsoft:${sub}`,
       email,
+      // Microsoft email/preferred_username are mutable profile claims.
+      emailVerified: false,
       name: String(data['name'] ?? ''),
       avatarUrl: '',
     };
@@ -308,6 +316,7 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `apple:${sub}`,
       email,
+      emailVerified: data['email_verified'] === true || data['email_verified'] === 'true',
       name: String(data['name'] ?? email),
       avatarUrl: '',
     };
@@ -321,6 +330,8 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
     providerUserId: String(id),
     oauthId: `github:${id}`,
     email: String(data['email'] ?? `${data['login']}@github.noreply`),
+    // /user does not attest email verification. Use providerUserId grants.
+    emailVerified: false,
     name: String(data['name'] ?? data['login'] ?? ''),
     avatarUrl: String(data['avatar_url'] ?? ''),
   };
@@ -331,14 +342,14 @@ async function findUserByOAuthIdentity(db: D1DatabaseClient, oauthId: string): P
     `SELECT u.id, u.email, u.name, u.role
        FROM user_oauth_identities i
        JOIN users u ON u.id = i.user_id
-      WHERE i.oauth_id = ?`,
+      WHERE u.disabled_at IS NULL AND i.oauth_id = ?`,
   )
     .bind(oauthId)
     .first<AuthDbUser>();
   if (linked) return linked;
 
   // Legacy fallback for databases that have not backfilled identities yet.
-  return db.prepare('SELECT id, email, name, role FROM users WHERE oauth_id = ?')
+  return db.prepare('SELECT id, email, name, role FROM users WHERE disabled_at IS NULL AND oauth_id = ?')
     .bind(oauthId)
     .first<AuthDbUser>();
 }
@@ -382,6 +393,7 @@ authRoutes.get('/login', async (c) => {
       appFont: branding.appFont,
       providers: providers.length > 0 ? providers : ['github'],
       error,
+      returnTo: adminReturnTo(c.req.query('returnTo')),
       viewRevision: viewRevision(c.env),
       uiLocale: uiLocale.code,
       uiDirection: uiLocale.direction,
@@ -432,6 +444,7 @@ authRoutes.get('/start', async (c) => {
     state,
     code_verifier: codeVerifier,
     provider: providerName,
+    return_to: adminReturnTo(c.req.query('returnTo')),
     ...(linkUserId ? { link_user_id: String(linkUserId) } : {}),
     exp: Math.floor(Date.now() / 1000) + 600, // 10 minutes
   };
@@ -626,7 +639,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
       return c.redirect('/auth/login?error=identity_not_linked');
     }
 
-    // New accounts always start as least-privilege viewers. Later logins only
+    // Initial role configuration applies only to new accounts. Later logins
     // refresh profile fields, so role changes made in the Users admin stick.
     try {
       dbUser = await registerOAuthUser(c, normalized);
@@ -642,12 +655,13 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
     return c.redirect('/auth/login?error=db_error');
   }
 
+  if (!await accountIpAllowed(c.env, dbUser.id, connectingIp(c.req.raw.headers))) return c.redirect('/auth/login?error=ip_not_allowed');
   const issued = await createAuthSession(c.env, dbUser, c, normalized);
 
   c.executionCtx.waitUntil(maintainSessionHygiene(c.env, dbUser.id));
   setAuthCookie(c, accessCookieName, issued.accessToken, ACCESS_TOKEN_TTL);
   setAuthCookie(c, refreshCookieName, issued.refreshToken, REFRESH_TOKEN_TTL);
-  return c.redirect('/admin');
+  return c.redirect(adminReturnTo(statePayload.return_to));
 }
 
 /**

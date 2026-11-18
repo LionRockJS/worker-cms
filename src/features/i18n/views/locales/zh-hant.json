@@ -28,6 +28,22 @@
       "manage": "管理翻譯",
       "save": "儲存翻譯",
       "title": "翻譯"
+    },
+    "login_labels": {
+      "title": "登入頁面文字",
+      "description": "編輯所選語言的登入頁面文字。應用程式名稱可在系統設定中修改。存取提示是完整訊息，不會自動加上應用程式名稱。",
+      "reset": "還原預設值",
+      "authentication_error": "驗證錯誤前綴",
+      "connecting_to": "連線狀態前綴",
+      "continue_with": "登入按鈕前綴",
+      "no_permission": "權限不足訊息",
+      "provider_fallback": "登入服務預設名稱",
+      "redirecting_to": "重新導向狀態前綴",
+      "signup_notice": "存取／註冊提示",
+      "version": "版本標籤",
+      "ip_not_allowed": "IP 存取遭拒訊息",
+      "sign_in_to_manage_your_content": "登入說明",
+      "connecting": "連線狀態"
     }
   }
 }

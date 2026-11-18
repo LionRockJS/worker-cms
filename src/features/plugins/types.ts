@@ -6,7 +6,7 @@
 // screens needs them.
 
 import type { BlueprintEntry } from '../../cms-config';
-import type { PublishLectRule } from '../../core/publish/projection';
+import type { PublishLectRule } from '../../core/publish/adapter';
 export type { PublishLectRule };
 
 export type PluginTrustLevel = 'server-only' | 'sandboxed-ui' | 'trusted-ui';
@@ -344,6 +344,7 @@ export interface PluginFilePrefixApproval {
 export interface ResolvedPlugin {
   /** Host registry identity captured by production resolution. */
   registration?: {id:number;uuid:string};
+  viewSource?: 'host' | 'bucket' | 'local';
   binding: string;
   fetcher: Fetcher;
   manifest: PluginManifest;

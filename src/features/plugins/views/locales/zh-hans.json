@@ -29,7 +29,15 @@
       "rotate_connect_failed": "密钥已轮换，但插件未接受新值。请点击“连接”重试，或手动更新。",
       "rotate_connect_ok": "密钥已轮换并推送至插件。",
       "rotate_to_assign": "后备密钥；请轮换以分配专用密钥。",
-      "rotated_flash": "密钥已轮换。请将插件 Worker 更新为新值；旧密钥已失效。"
+      "rotated_flash": "密钥已轮换。请将插件 Worker 更新为新值；旧密钥已失效。",
+      "view_source": "视图加载",
+      "view_source_host": "主机（默认）",
+      "view_source_bucket": "存储桶（R2 缓存）",
+      "view_source_help": "主机从插件获取视图。存储桶在首次获取时保存静态 Liquid/JSON 视图，并在同一插件版本内重复使用。需要配置私有 PLUGIN_VIEWS_BUCKET 绑定。",
+      "view_source_local": "本地文件（自托管）",
+      "local_views_setup": "本地文件与 Nginx 设置",
+      "local_views_help": "在自托管服务器的 .env 中设置 PLUGIN_VIEWS_DIR 并重启。CMS 可直接提供这些文件。仅在配置下方 Nginx 后设置 PLUGIN_VIEWS_NGINX=true；CMS 会先检查访问权限和文件是否存在，再交由 Nginx 传送文件。文件缺失时回退到插件。",
+      "local_views_layout": "按下方目录结构复制插件的静态视图。将 events 替换为清单 ID，将 REVISION 替换为 Worker 修订版本（或清单版本）。Nginx alias 与 PLUGIN_VIEWS_DIR 必须指向同一目录。"
     },
     "identity": {
       "already_ok": "此插件的标识已匹配。",

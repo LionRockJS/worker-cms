@@ -84,3 +84,36 @@ it('retains the full unregister approval manifest beyond 200 rows',async()=>{awa
 it('refuses a new identity claim after an unpinned unregister snapshot',async()=>{await env.DB.prepare('DELETE FROM plugin_identity_approvals').run();const DB=race(()=>env.DB.prepare("INSERT INTO plugin_identity_approvals(plugin_row_id,manifest_id) VALUES (17010,'sample-plugin')").run());expect((await call('remove',{DB})).status).toBe(503);expect(await events()).toEqual([]);expect((await env.DB.prepare('SELECT * FROM plugins').all()).results).toHaveLength(1);});
 it('invalidates stale remote manifests after an uncertain local configuration commit',async()=>{await env.DB.prepare('UPDATE plugins SET enabled=1 WHERE id=17010').run();let version='1';__injectPluginFetcher(url,{fetch:async()=>Response.json({id:'sample-plugin',name:'Plugin',version})} as Fetcher);expect((await getPlugins(env))[0].manifest.version).toBe('1');version='2';expect((await call('update',{DB:race(async()=>{},true)},{enabled:'on'})).status).toBe(503);expect((await getPlugins(env))[0].manifest.version).toBe('2');expect(await events()).toHaveLength(1);});
 it('uses database transaction time across timestamp-second boundaries',async()=>{expect((await call('update',{DB:race(async()=>{await new Promise(resolve=>setTimeout(resolve,1100));})})).status).toBe(302);expect(await events()).toHaveLength(1);});
+
+it('persists plugin view loading and defaults to host', async () => {
+  expect((await call('update')).status).toBe(302);
+  const config = async () => JSON.parse((await env.DB.prepare('SELECT config FROM plugins WHERE id=17010').first<{config:string}>())!.config);
+  expect((await config()).cmsViewSource ?? 'host').toBe('host');
+  expect((await call('update', {}, {view_source:'bucket'})).status).toBe(302);
+  expect((await config()).cmsViewSource).toBe('bucket');
+  expect((await config()).private).toBe('private-config');
+  expect((await call('update', {}, {view_source:'host'})).status).toBe(302);
+  expect((await config()).cmsViewSource ?? 'host').toBe('host');
+});
+
+it('rejects unavailable buckets and invalid view loading without changing registration', async () => {
+  const before = await state();
+  const unavailable = await call('update', {PLUGIN_VIEWS_BUCKET:undefined}, {view_source:'bucket'});
+  expect(unavailable.status).toBe(200);
+  expect(await unavailable.text()).toContain('Configure the PLUGIN_VIEWS_BUCKET binding');
+  expect(await state()).toEqual(before);
+  const invalid = await call('update', {}, {view_source:'invalid'});
+  expect(await invalid.text()).toContain('Invalid view source');
+  expect(await state()).toEqual(before);
+});
+
+it('persists local view loading only on a self-hosted directory binding',async()=>{
+  const before = await state();
+  const missing = await call('update',{}, {view_source:'local'});
+  expect(await missing.text()).toContain('Set PLUGIN_VIEWS_DIR');
+  expect(await state()).toEqual(before);
+  const local = {fetch:async()=>new Response(null,{status:404})} as Fetcher;
+  expect((await call('update',{PLUGIN_LOCAL_VIEWS:local},{view_source:'local'})).status).toBe(302);
+  const row = await env.DB.prepare('SELECT config FROM plugins WHERE id=17010').first<{config:string}>();
+  expect(JSON.parse(row!.config).cmsViewSource).toBe('local');
+});

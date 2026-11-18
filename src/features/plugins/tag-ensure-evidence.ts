@@ -9,7 +9,7 @@ import { auditBackgroundReads, flushReadAudit, recordTagReads } from '../../core
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { slugify } from '../../core/http/forms';
-import { publishTagsToTargets } from '../../core/publish';
+import { publication } from '../services';
 
 const TAX=['id','uuid','created_at','updated_at','name','slug'];
 const TAG=['id','uuid','created_at','updated_at','name','slug','weight','taxonomy_slug','parent_tag','lect'];
@@ -75,7 +75,7 @@ export async function ensurePluginTags(c:AppContext,authority:PluginPageMutation
   attempted=true;const result=await c.env.DB.batch(statements);committed=true;
   const rows=result.at(-1)!.results as Array<{id:number;uuid:string}>;
   const ensured=accepted.map(pair=>{const target=selected.find(s=>s.pair.taxonomy===pair.taxonomy&&s.pair.name===pair.name)!.tag;const row=rows.find(r=>r.uuid===target.uuid);if(!row||!Number.isSafeInteger(row.id)||row.id<=0)throw new Error('Tag result unavailable');return {taxonomy:pair.taxonomy,name:pair.name,id:row.id};});
-  await publishTagsToTargets(c.env,[...new Set(ensured.map(t=>t.id))],authority.actor);
+  await publication()?.publishTagsToTargets(c.env,[...new Set(ensured.map(t=>t.id))],authority.actor);
   recordTagReads('tag.ensure-result',ensured.map(tag=>({id:tag.id,taxonomy_slug:tag.taxonomy})),authority.actor);
   return c.json({tags:ensured,errors});
  }catch(error){

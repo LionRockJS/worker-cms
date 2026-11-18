@@ -7,6 +7,7 @@ import { safeRoleAuditValue } from './role-mutation-sql';
 import { oauthAccountAuditEvidence } from '../db/audit';
 import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
+import { isOwnAvatar } from './self-profile';
 
 interface OAuthAccountIdentity {
   provider: string;
@@ -23,7 +24,7 @@ export class OAuthIdentityConflictError extends Error {}
 async function accountSnapshot(c: AppContext, userId: number, identity: OAuthAccountIdentity): Promise<AccountSnapshot> {
   const user = await c.env.DB.prepare(`SELECT u.id, u.oauth_id, u.email, u.name, u.role, u.avatar_url,
     EXISTS (SELECT 1 FROM users other WHERE other.email = ? AND other.id <> u.id) AS email_claimed
-    FROM users u WHERE u.id = ?`).bind(identity.email, userId).first<AccountSnapshot>();
+    FROM users u WHERE u.disabled_at IS NULL AND u.id = ?`).bind(identity.email, userId).first<AccountSnapshot>();
   if (!user || !safeRoleAuditValue(user.role)) throw new Error('OAuth account state unavailable');
   return user;
 }
@@ -37,7 +38,7 @@ async function accountClass(c: AppContext) {
 }
 
 function snapshotGuard(c: AppContext, user: AccountSnapshot) {
-  return abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND oauth_id IS ? AND email IS ?
+  return abortIf(c.env, `NOT EXISTS (SELECT 1 FROM users WHERE disabled_at IS NULL AND id = ? AND oauth_id IS ? AND email IS ?
     AND name IS ? AND avatar_url IS ? AND role IS ?)`,
   [user.id, user.oauth_id, user.email, user.name, user.avatar_url, user.role]);
 }
@@ -87,7 +88,9 @@ export async function updateOAuthProfile(c: AppContext, userId: number, identity
   const before = await accountSnapshot(c, userId, identity);
   const after = { ...before, email: before.email_claimed ? before.email : identity.email,
     // Match SQLite trim(name): only ordinary spaces count as a missing name.
-    name: /^ *$/.test(before.name) ? identity.name : before.name, avatar_url: identity.avatarUrl };
+    name: /^ *$/.test(before.name) ? identity.name : before.name,
+    // A picture the user chose on their profile outranks the provider's.
+    avatar_url: isOwnAvatar(before.avatar_url) ? before.avatar_url : identity.avatarUrl };
   const fields = (['email', 'name', 'avatar_url'] as const).filter(field => before[field] !== after[field]);
   const statements = [classificationPolicyGuard(c.env, policy), snapshotGuard(c, before), identityGuard(c.env, identity, userId, true),
     abortIf(c.env, '(SELECT EXISTS (SELECT 1 FROM users WHERE email = ? AND id <> ?)) <> ?',

@@ -18,15 +18,13 @@ import {
   type PageCreateCandidate,
   type ReadViewContext,
 } from '../../core/extensions';
-import type { PublishAdapter } from '../../core/publish/adapter';
-import type { PublishLectRule } from '../../core/publish/projection';
+import type { PublishLectRule, PublishPluginTarget } from '../../core/publish/adapter';
 import { flattenMessages } from '../../core/i18n';
 import type { AppContext } from '../../core/http/context';
 import type { Env, JWTPayload } from '../../types';
 import { allPluginPermissions, getPlugins, pluginAutoPublishesPageType, pluginById, pluginNav, PLUGIN_ORIGIN, PLUGIN_PREFIX } from './registry';
 import { pluginTenantId, pluginUserHeader, pluginUserPermissions, setPluginAuthHeaders } from './proxy';
 import { deliverHooks } from './hooks';
-import { pluginAdapter } from './publish-adapter';
 import { checkCreateLimits, createCandidate, effectiveLimitsForPlugin, limitViolationMessage } from './limits';
 import { importExportHrefs } from './import-export';
 import { pluginEditView, pluginNewView, pluginReadView } from './edit-view';
@@ -37,16 +35,30 @@ import { actingUserId } from './api/create';
 import { recordContributorReads } from '../../core/http/access-log';
 
 registerCoreExtensions({
-  async publishAdapters(env: Env): Promise<PublishAdapter[]> {
-    const adapters: PublishAdapter[] = [];
+  async pluginPublishTargets(env: Env): Promise<PublishPluginTarget[]> {
+    const targets: PublishPluginTarget[] = [];
     for (const plugin of (await getPlugins(env)).filter((candidate) => candidate.manifest.publishTarget)) {
       if (!plugin.secret) {
         console.error(`Plugin ${plugin.manifest.id} declares publishTarget but has no secret configured`);
         continue;
       }
-      adapters.push(pluginAdapter(plugin, plugin.secret, pluginTenantId(env), env));
+      const id = plugin.manifest.id;
+      targets.push({
+        id,
+        async send(path, body) {
+          const current = await pluginById(env, id);
+          if (!current?.secret || !current.manifest.publishTarget) throw new Error('Publish plugin is no longer available');
+          const headers = new Headers({ 'content-type': 'application/json' });
+          setPluginAuthHeaders(headers, current.secret, pluginTenantId(env));
+          return current.fetcher.fetch(`${PLUGIN_ORIGIN}${PLUGIN_PREFIX}${path}`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+          });
+        },
+      });
     }
-    return adapters;
+    return targets;
   },
 
   async contentTypes(env: Env): Promise<ContributedContentTypes[]> {

@@ -154,6 +154,7 @@ settingsRoutes.get('/settings/system', async (c) => {
     ...pluginOptions.filter((option) => option.group === 'settings').map(pluginSidebarOption),
   ].sort(byWeight);
   return renderPage(c, systemSettingsPage, {
+    hasI18nFeature: featureInstalled('i18n'),
     appName: branding.appName,
     appIcon: branding.appIcon,
     primaryColor: branding.primaryColor,

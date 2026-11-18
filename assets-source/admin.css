@@ -362,6 +362,7 @@ th,
     padding-inline: 0;
   }
 
+  html[data-sidebar-collapsed="true"] [data-sidebar-help-control],
   html[data-sidebar-collapsed="true"] [data-sidebar-footer-action],
   html[data-sidebar-collapsed="true"] [data-sidebar-footer-controls] {
     display: none;
@@ -527,3 +528,12 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover { background: #38445a; background-clip: content-box; }
+
+/* Native explanation toggle shares the primary color in both themes. */
+html [data-admin-sidebar] [data-sidebar-help-control]:has([data-sidebar-help-toggle]:checked) {
+  color: var(--color-indigo-600);
+}
+[data-sidebar-help-control]:focus-within {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

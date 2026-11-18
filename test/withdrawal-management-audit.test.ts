@@ -1,8 +1,8 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, afterEach, expect, it } from 'vitest';
-import { unpublishPageFromTargets, unpublishPagesFromTargets, removeTagFromTargets } from '../src/core/publish';
-import { d1Adapter } from '../src/core/publish/d1';
-import { r2Adapter } from '../src/core/publish/r2';
+import { unpublishPageFromTargets, unpublishPagesFromTargets, removeTagFromTargets } from '../src/features/publish';
+import { d1Adapter } from '../src/features/publish/d1';
+import { r2Adapter } from '../src/features/publish/r2';
 import { trashDraftPage } from '../src/core/db/admin-queries';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, pluginById } from '../src/features/plugins/registry';
 import { enrollPluginTenant, revokePluginTenant } from '../src/features/plugins/enroll';

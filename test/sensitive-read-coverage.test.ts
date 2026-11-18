@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { signJWT } from './auth-fixtures';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
-import { pullPublishedPageToDraft } from '../src/core/db/page-store';
+import { pullPublishedPageToDraft } from '../src/features/publish/pull';
 import type { Env } from '../src/types';
 
 const worker = (exports as unknown as { default: Fetcher }).default;

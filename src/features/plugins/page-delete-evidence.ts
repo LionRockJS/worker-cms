@@ -14,7 +14,7 @@ import { pageTypeScopeAllows } from './page-types';
 import { forbiddenPageTypeBody } from './api/auth';
 import { collectionWhere, asPositiveSafeInteger } from './api/serialize';
 import { emitPluginHooks } from './api/hooks';
-import { unpublishPagesFromTargets, unpublishPageFromTargets } from '../../core/publish';
+import { publication } from '../services';
 
 const FIELDS=['id','uuid','page_type'];
 type Mode='single'|'batch'|'children';
@@ -96,8 +96,8 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
    emitPluginHooks(c,'delete',result.pages,auth.pluginId,{evidenceCommitted:true,actor:authority.actor});
    // Preserve the existing external behavior. Local receipts never attest to
    // publication withdrawal or hook delivery; those remain W4b/R4 work.
-   if(mode==='single')await unpublishPageFromTargets(c.env,result.pages[0].uuid,!!result.pages[0].submission_origin,authority.actor);
-   else if(mode==='batch')await unpublishPagesFromTargets(c.env,result.pages,authority.actor).catch(()=>{});
+   if(mode==='single')await publication()?.unpublishPageFromTargets(c.env,result.pages[0].uuid,!!result.pages[0].submission_origin,authority.actor);
+   else if(mode==='batch')await publication()?.unpublishPagesFromTargets(c.env,result.pages,authority.actor).catch(()=>{});
   }
   return mode==='single'?c.json({ok:true,id:Number(targets[0].id)}):c.json(mode==='batch'?{ok:true,trashed:acknowledged}:{trashed:acknowledged,done:total===acknowledged});
  }catch(error){
