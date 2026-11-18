@@ -18,7 +18,7 @@ import {
   type PageCreateCandidate,
   type ReadViewContext,
 } from '../../core/extensions';
-import type { PublishLectRule, PublishPluginTarget } from '../../core/publish/adapter';
+import type { PublishLectRule, PublishPluginTarget } from '../../contracts/publish';
 import { flattenMessages } from '../../core/i18n';
 import type { AppContext } from '../../core/http/context';
 import type { Env, JWTPayload } from '../../types';

@@ -3,7 +3,7 @@ import type { AuditActor } from '../../core/db/audit';
 import { resolveDataClasses } from '../../core/db/data-classes';
 import { auditBackgroundReads, recordRead, ReadAuditUnavailableError, type PendingRead } from '../../core/http/access-log';
 import { requestContext } from '../../core/http/request-context';
-import type { LivePageSnapshot, PublishAdapter } from '../../core/publish/adapter';
+import type { LivePageSnapshot, PublishAdapter } from '../../contracts/publish';
 
 /** Prepare evidence from captured source provenance, without a later tag lookup.
  * Copy producers must persist the returned reads before materializing rows. */

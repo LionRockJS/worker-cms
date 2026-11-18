@@ -1,0 +1,9 @@
+<form method="POST" action="{{ page.pullAction }}" class="inline shrink-0">
+  <button type="submit"
+          title="{{ "view_strings.sections_dashboard.ingest_submission" | t }}"
+          aria-label="Ingest submission {{ page.name }}"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-indigo-600 hover:bg-indigo-50 hover:text-indigo-800 transition-colors">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#download"></use></svg>
+    <span class="sr-only">{{ "view_strings.sections_dashboard.ingest_submission" | t }}</span>
+  </button>
+</form>

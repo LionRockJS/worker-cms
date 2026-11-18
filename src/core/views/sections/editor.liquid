@@ -88,25 +88,7 @@
                   placeholder="{{ "view_strings.sections_editor.default" | t }}"
                   class="w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium text-indigo-700 outline-none focus:border-transparent focus:outline-none focus:ring-0 sm:text-xs">
           </div>
-          {% if publishEnabled %}
-          {% if publicationStatus == 'scheduled' %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-600">
-              <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>{{ "pages.status.scheduled" | t }}
-            </span>
-          {% elsif publicationStatus == 'ended' %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
-              <span class="h-1.5 w-1.5 rounded-full bg-gray-500"></span>{{ "pages.status.ended" | t }}
-            </span>
-          {% elsif publicationStatus == 'live' %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 text-green-800">
-              <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>{{ "pages.status.live" | t }}
-            </span>
-          {% else %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800">
-              <span class="h-1.5 w-1.5 rounded-full bg-yellow-500"></span>{{ "pages.status.draft" | t }}
-            </span>
-          {% endif %}
-          {% endif %}
+          {% feature_fragment publish/editor-status %}
           <datalist id="page_type_options">
             {% for option in pageTypeOptions %}
               <option value="{{ option.value }}"></option>
@@ -159,69 +141,8 @@
         </div>
         </div>
 
-        {% if publishEnabled and canPublishPage %}
-        <div class="relative w-full">
+        {% feature_fragment publish/editor-schedule %}
 
-        <div class="rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm md:absolute md:left-0 md:right-0">
-        <div class="flex items-center justify-between gap-2">
-          <button type="button"
-                  class="flex w-full items-center justify-between font-bold text-gray-900 text-sm"
-                  data-publish-schedule-toggle
-                  data-collapse-label="{{ "view_strings.sections_editor.collapse_publish_schedule" | t }}"
-                  data-expand-label="{{ "view_strings.sections_editor.expand_publish_schedule" | t }}"
-                  aria-controls="publish_schedule_panel"
-                  aria-expanded="false"
-                  aria-label="{{ "view_strings.sections_editor.expand_publish_schedule" | t }}"
-                  title="{{ "view_strings.sections_editor.expand_publish_schedule" | t }}">
-            <span>{{ "view_strings.sections_editor.publish_schedule" | t }}</span>
-            <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-gray-500">
-              <svg class="hidden h-4 w-4" data-publish-schedule-expanded-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-down"></use></svg>
-              <svg class="h-4 w-4" data-publish-schedule-collapsed-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
-            </span>
-          </button>
-        </div>
-        <div id="publish_schedule_panel" data-publish-schedule-panel class="min-w-0 flex-1 mt-2" hidden>
-          <label for="start" class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-xs text-gray-500">{{ "view_strings.sections_editor.from" | t }}</span>
-            <input type="datetime-local" id="start" name="start"
-                  value="{{ page.start }}"
-                  class="min-w-0 flex-1 border-b border-transparent bg-transparent p-0 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none">
-          </label>
-          <label for="end" class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-xs text-gray-500">{{ "view_strings.sections_editor.until" | t }}</span>
-            <input type="datetime-local" id="end" name="end"
-                  value="{{ page.end }}"
-                  class="min-w-0 flex-1 border-b border-transparent bg-transparent p-0 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none">
-          </label>
-          <label for="timezone" class="flex min-w-0 items-center gap-2 sm:col-span-2">
-            <span class="shrink-0 text-xs text-gray-500">{{ "view_strings.sections_editor.timezone" | t }}</span>
-            <input type="text" id="timezone" name="timezone"
-                  value="{{ page.timezone }}"
-                  placeholder="+0800"
-                  class="min-w-0 flex-1 border-b border-transparent bg-transparent p-0 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none">
-          </label>
-        {% unless isVersionPreview %}
-          {% if isEdit %}
-            {% unless isPublished %}
-            <button type="submit" name="action" value="publish"
-                    class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.publish" | t }}</button>
-            {% endunless %}
-            {% if isPublished and isLiveSynced == false %}
-            <button type="submit" name="action" value="publish"
-                    class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.re_publish" | t }}</button>
-            {% endif %}
-            {% if isPublished %}
-            <button type="submit" formaction="{{ unpublishAction }}" formnovalidate data-unpublish-button data-confirm-message="{{ "view_strings.sections_editor.unpublish_page_confirm" | t }}"
-                    class="mt-4 w-full px-4 py-2 bg-yellow-600 text-white text-sm font-semibold rounded-lg hover:bg-yellow-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.un_publish" | t }}</button>
-            {% endif %}
-          {% endif %}
-        {% endunless %}
-        </div>
-        <!-- end publish schedule panel -->
-        </div>
-        {% endif %}
-
-        </div>
       </div>
     </div>
 
@@ -495,12 +416,7 @@
                 class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">
           {% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}
         </button>
-        {% if publishEnabled and canPublishPage and isEdit and isPublished %}
-          <button type="submit" name="action" value="publish"
-                  class="w-full px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm sm:w-auto">
-            {{ "view_strings.sections_editor.save_and_publish" | t }}
-          </button>
-        {% endif %}
+        {% feature_fragment publish/editor-save-and-publish %}
       {% endif %}
       <a href="{{ backHref }}" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">
         {{ "view_strings.sections_editor.cancel" | t }}

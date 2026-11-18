@@ -18,7 +18,8 @@
 # /src/features/audit/             OWNER
 
 # Anything that moves content or personal data out of the host.
-# /src/core/publish/               OWNER
+# /src/contracts/publish.ts        OWNER
+# /src/features/publish/           OWNER
 # /src/core/render/privacy.ts      OWNER
 # /src/features/plugins/           OWNER
 

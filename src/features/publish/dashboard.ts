@@ -1,7 +1,7 @@
 import { requestPageFilter } from '../../core/auth/page-access';
 import type { Page } from '../../types';
 import type { AppContext } from '../../core/http/context';
-import type { DashboardPageRow, DashboardPublicationQuery } from '../../core/publish/service';
+import type { DashboardPageRow, DashboardPublicationQuery } from '../publication';
 import { listDashboardDraftPagesByUuids, listDashboardDraftPageUuids } from '../../core/db/admin-queries';
 import { publicationStatusForPage, withLiveStatus } from '../../core/db/page-logic';
 import { recordTagReads } from '../../core/http/access-log';

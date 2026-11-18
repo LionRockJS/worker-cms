@@ -1,0 +1,27 @@
+{
+  "view_strings": {
+    "sections_dashboard.draft": "草稿",
+    "sections_dashboard.ingest_submission": "接收提交內容",
+    "sections_dashboard.live_content_differs_from_draft": "已發佈內容與草稿不同",
+    "sections_dashboard.live_content_differs_from_draft_publish_to_sync": "已發佈內容與草稿不同；請發佈以同步",
+    "sections_dashboard.live_weight_differs_from_draft": "已發佈權重與草稿不同",
+    "sections_dashboard.live_weight_differs_from_draft_publish_to_sync": "已發佈權重與草稿不同；請發佈以同步",
+    "sections_dashboard.publish": "發佈",
+    "sections_dashboard.published_page_is_missing_from_drafts": "已發佈頁面在草稿中缺失",
+    "sections_dashboard.unpublish": "取消發佈",
+    "sections_dashboard.unpublish_this_page": "要取消發佈此頁面嗎？",
+    "sections_editor.collapse_publish_schedule": "收合發佈排程",
+    "sections_editor.expand_publish_schedule": "展開發佈排程",
+    "sections_editor.from": "開始：",
+    "sections_editor.publish": "發佈",
+    "sections_editor.publish_schedule": "發佈排程",
+    "sections_editor.re_publish": "重新發佈",
+    "sections_editor.save_and_publish": "儲存並發佈",
+    "sections_editor.timezone": "時區：",
+    "sections_editor.un_publish": "取消發佈",
+    "sections_editor.unpublish_page_confirm": "取消發佈此頁面？",
+    "sections_editor.until": "結束：",
+    "sections_tags.sync_published": "同步至已發佈",
+    "sections_tags.sync_published_help": "將所有索引複製到已發佈資料庫，讓線上頁面可以解析索引。"
+  }
+}

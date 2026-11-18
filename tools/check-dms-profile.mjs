@@ -62,6 +62,14 @@ try {
     CMS_TEST_PROFILE: 'dms',
     CMS_TEST_WRANGLER_CONFIG: './wrangler.toml',
   });
+
+  // A dropped feature has neither source files nor a manifest entry. Keep
+  // plugins enabled to catch even type-only imports of the optional provider.
+  delete manifest.features.publish;
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  rmSync(path.join(fixture, 'src/features/publish'), { recursive: true });
+  run(['run', 'build:features']);
+  run(['run', 'type-check']);
 } finally {
   rmSync(fixture, { recursive: true, force: true });
 }

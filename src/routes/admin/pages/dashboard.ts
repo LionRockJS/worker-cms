@@ -15,7 +15,7 @@ import type { Env, Variables, Page, Tag, Taxonomy } from '../../../types';
 import type { BlueprintEntry } from '../../../cms-config';
 import { dashboardPageHref, dashboardPageNumber, dashboardPageSize, dashboardStatusFilter, editorsFromForm, languageFromRequest, num, slugify, str, userIdFromContext } from '../../../core/http/forms';
 import { coreExtensions } from '../../../core/extensions';
-import { publication, reservePageCreate } from '../../../features/services';
+import { type DashboardPageRow, publication, reservePageCreate } from '../../../features/services';
 import { lectFromForm, withDraftMetadata, withLiveStatus } from '../../../core/db/page-logic';
 import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages } from '../../../core/db/admin-queries';
 import { recordPageReads } from '../../../core/http/access-log';
@@ -25,7 +25,6 @@ import { userCan } from '../../../core/auth/permissions';
 import { loadAdminHomeSettings } from '../../../core/db/settings';
 import { requirePageListing, requirePermission } from '../../../core/auth/guards';
 import type { AppContext } from '../../../core/http/context';
-import type { DashboardPageRow } from '../../../core/publish/service';
 
 
 export const pageDashboardRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();

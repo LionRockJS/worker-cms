@@ -6,10 +6,12 @@
 // a feature implementation or a feature-owned contract directly.
 
 import type { AppContext } from '../core/http/context';
-import type { PublicationService } from '../core/publish/service';
+import type { PublicationService } from './publication';
 import type { Env } from '../types';
 import { featureServiceEntries } from '../generated/services';
 import { regulatedWritesBlocked } from '../core/http/regulated-writes';
+
+export type { DashboardPageRow } from './publication';
 
 export type AdminScreenTarget =
   | { screen: 'profile' }

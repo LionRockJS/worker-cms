@@ -19,7 +19,7 @@ import type {
   PageListBatchInput,
   PluginAuth,
 } from './types';
-import type { LivePageSnapshot } from '../../../core/publish/adapter';
+import type { LivePageSnapshot } from '../../../contracts/publish';
 import type { AppContext } from '../../../core/http/context';
 import { authenticatePlugin, forbiddenPageType, forbiddenPageTypeBody } from './auth';
 import { recordPageReads, recordRead, recordTagReads } from '../../../core/http/access-log';

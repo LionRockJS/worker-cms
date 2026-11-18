@@ -21,8 +21,8 @@ import type {
   PublishSnapshot,
   PublishSnapshotTag,
   PublishedTag,
-} from '../../core/publish/adapter';
-import type { PublishOutcome, BulkPublishOutcome, BulkUnpublishOutcome, PublishRefusal } from '../../core/publish/service';
+} from '../../contracts/publish';
+import type { PublishOutcome, BulkPublishOutcome, BulkUnpublishOutcome, PublishRefusal } from '../publication';
 import { d1Adapter } from './d1';
 import { coreExtensions } from '../../core/extensions';
 import { pluginAdapter } from './plugin-adapter';

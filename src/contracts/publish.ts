@@ -3,11 +3,11 @@
 //
 // Publishing fans a draft snapshot out to one or more targets
 // (D1 database, static JSON in R2, plugin Workers → IPFS, …).
-// Each target implements this interface; the registry in
-// ./index.ts builds the snapshot once and orchestrates the rest.
+// Each target implements this interface; the publish feature registry
+// builds the snapshot once and orchestrates the rest.
 // ============================================================
 
-import type { Page } from '../../types';
+import type { Page } from '../types';
 
 /** A published tag link, denormalized so write-only targets (R2 JSON, plugins)
  *  can emit self-contained documents without a database to join against. */

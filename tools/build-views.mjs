@@ -150,6 +150,7 @@ function mergeCatalog(into, from, owner, trail = []) {
 export function assembleViews(features) {
   const enabled = featuresWithViews(features);
   const files = new Map();
+  const fragments = new Map();
   const owners = new Map();
 
   const add = (rel, contents, owner) => {
@@ -185,6 +186,10 @@ export function assembleViews(features) {
     const seenLangs = new Set();
     for (const rel of walk(dir)) {
       if (isSourceOnlyLocale(rel)) continue;
+      if (rel.startsWith('fragments/')) {
+        fragments.set(id + '/' + rel.slice('fragments/'.length), readFileSync(path.join(dir, rel), 'utf8'));
+        continue;
+      }
       const lang = localeOf(rel);
       if (lang) {
         if (!catalogs.has(lang)) {
@@ -204,6 +209,23 @@ export function assembleViews(features) {
         throw new Error(`feature "${id}" ships locale fragments but not for: ${missing.join(', ')}`);
       }
     }
+  }
+
+  // Inline optional controls in their host Liquid scope. A disabled feature
+  // contributes no markup and its source directory need not exist.
+  const fragmentTag = /^( *)\{% feature_fragment ([a-z0-9-]+)\/([a-z0-9-]+) %\}$/gm;
+  for (const [rel, contents] of files) {
+    if (!rel.endsWith('.liquid')) continue;
+    const source = contents.toString();
+    if (!source.includes('{% feature_fragment')) continue;
+    const assembled = source.replace(fragmentTag, (_, indent, owner, name) => {
+      if (features[owner] !== true) return '';
+      const fragment = fragments.get(owner + '/' + name + '.liquid');
+      if (fragment === undefined) throw new Error(`Missing feature fragment ${owner}/${name} in ${rel}`);
+      return fragment.trimEnd().replace(/^(.+)$/gm, indent + '$1');
+    });
+    if (assembled.includes('{% feature_fragment')) throw new Error(`Invalid feature fragment in ${rel}`);
+    files.set(rel, Buffer.from(assembled));
   }
 
   for (const [lang, catalog] of catalogs) {

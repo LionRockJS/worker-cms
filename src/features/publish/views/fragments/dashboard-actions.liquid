@@ -1,0 +1,24 @@
+{% if publishEnabled %}
+{% if page.isPublished %}
+  <form method="POST" action="{{ page.unpublishAction }}" class="inline shrink-0"
+        data-confirm="{{ "view_strings.sections_dashboard.unpublish_this_page" | t }}">
+    <button type="submit"
+            title="{{ "view_strings.sections_dashboard.unpublish" | t }}"
+            aria-label="Unpublish {{ page.name }}"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-yellow-600 hover:bg-yellow-50 hover:text-yellow-800 transition-colors">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye-off"></use></svg>
+      <span class="sr-only">{{ "view_strings.sections_dashboard.unpublish" | t }}</span>
+    </button>
+  </form>
+{% else %}
+  <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
+    <button type="submit"
+            title="{{ "view_strings.sections_dashboard.publish" | t }}"
+            aria-label="Publish {{ page.name }}"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-green-600 hover:bg-green-50 hover:text-green-800 transition-colors">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#cloud-upload"></use></svg>
+      <span class="sr-only">{{ "view_strings.sections_dashboard.publish" | t }}</span>
+    </button>
+  </form>
+{% endif %}
+{% endif %}

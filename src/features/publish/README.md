@@ -2,7 +2,7 @@
 
 Publishing fans a draft-page snapshot out to the targets configured in
 `PUBLISH_TARGETS` (default `d1`). See `index.ts` for the registry and
-`adapter.ts` for the adapter contract.
+[the shared adapter contract](../../contracts/publish.ts).
 
 Registry publication entry points enforce regulated write containment before
 source reads/snapshot assembly/adapter discovery, and the shared transfer audit

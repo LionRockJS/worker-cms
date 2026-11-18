@@ -1,8 +1,8 @@
-import type { Env, Page } from '../../types';
-import type { AuditActor } from '../db/audit';
-import type { AppContext } from '../http/context';
-import type { PagePublicationStatus } from '../db/page-logic';
-import type { LivePageSnapshot } from './adapter';
+import type { Env, Page } from '../types';
+import type { AuditActor } from '../core/db/audit';
+import type { AppContext } from '../core/http/context';
+import type { PagePublicationStatus } from '../core/db/page-logic';
+import type { LivePageSnapshot } from '../contracts/publish';
 
 export type PublishRefusal = 'submission' | 'regulated' | 'classification_unavailable' | 'writes_unavailable';
 
@@ -45,11 +45,6 @@ export interface BulkUnpublishOutcome {
   failures: string[];
   auditFailures?: string[];
   refusedCount: number;
-}
-
-export interface PullPublishedPageResult {
-  page: Page;
-  created: boolean;
 }
 
 export type DashboardPageRow = Page & { isDraftMissing?: boolean; tagNames?: string[] };

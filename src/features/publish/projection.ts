@@ -17,7 +17,7 @@ import { safeParseLect, stringifyLect } from '../../core/db/lect';
 
 /** What survives publication for a page type: an allow-list, a deny-list, or
  *  neither (the whole lect is published). */
-import type { PublishLectRule } from '../../core/publish/adapter';
+import type { PublishLectRule } from '../../contracts/publish';
 
 /**
  * Effective projection rules by page type. A rule is honored only when the

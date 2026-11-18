@@ -4,7 +4,7 @@
 // page_tags / tags and serves the admin UI's live-state reads.
 // ============================================================
 
-import type { LivePageSnapshot, PublishAdapter, PublishSnapshot, PublishedTag } from '../../core/publish/adapter';
+import type { LivePageSnapshot, PublishAdapter, PublishSnapshot, PublishedTag } from '../../contracts/publish';
 import { nextIdSql } from '../../core/pages/snapshot-id';
 
 /** Internal projections only: capture taxonomy provenance with the source row,

@@ -9,7 +9,10 @@ import { liveSourceReads } from './read-audit';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { nextIdSql } from '../../core/pages/snapshot-id';
 
-import type { PullPublishedPageResult } from '../../core/publish/service';
+interface PullPublishedPageResult {
+  page: Page;
+  created: boolean;
+}
 
 export async function pullPublishedPageToDraft(
   env: Env,

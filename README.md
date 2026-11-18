@@ -1087,6 +1087,12 @@ the profile, discovering each slice by convention (`feature.ts` exports one
 generated files are the only thing importing a slice, dropping a feature takes
 its modules out of the bundle.
 
+**Shared screens.** A standalone `{% feature_fragment publish/editor-schedule %}`
+line in a Liquid source view includes `src/features/publish/views/fragments/editor-schedule.liquid`
+when publishing is enabled. The view build removes the line when the feature is
+disabled. Fragments inherit the surrounding Liquid scope and require no additional
+requests from the browser.
+
 **Schema.** Each feature keeps its SQL fragment next to its code —
 `src/features/trash/schema.sql`, `src/features/plugins/schema.sql`, and so on —
 and `tools/build-migrations.mjs` concatenates the enabled ones into the flat
@@ -1422,6 +1428,7 @@ features on and off.
 ├── src/
 │   ├── index.ts           # Worker entry: fetch, queue, scheduled, DO exports
 │   ├── types.ts           # Env bindings and shared content types
+│   ├── contracts/publish.ts  # Shared types for publish targets and plugin contributors
 │   ├── cms-config.ts      # Compiled base blueprint, blocks and taxonomies
 │   ├── core/              # Never optional
 │   │   ├── extensions.ts  # What core will call if a feature provides it
@@ -1436,10 +1443,10 @@ features on and off.
 │   │   │                  #   config, audit log, submission ingest, validation
 │   │   ├── render/        # Liquid, layout, admin chrome (buildBaseProps/renderPage)
 │   │   ├── pages/         # Bulk page actions (publish/unpublish/trash a set)
-│   │   ├── publish/       # Draft -> live pipeline and the d1/r2 adapters
 │   │   └── durable-objects/  # PageSyncDO (live editing), FormOnceDO (form tokens)
 │   ├── generated/         # GENERATED feature registries; do not edit
 │   ├── features/          # Optional; each directory is one switchable feature
+│   │   ├── publish/       # Publication pipeline, targets, routes and view fragments
 │   │   ├── plugins/       # The plugin platform: registry, hooks, proxy,
 │   │   │                  #   manage UI, and the /__cms write-back API
 │   │   ├── credits/       # Metered billing and the credit summary screen

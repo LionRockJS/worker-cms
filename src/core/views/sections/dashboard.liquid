@@ -89,8 +89,7 @@
             <select name="bulk_action" data-dashboard-bulk-action
                     class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
               {% if publishEnabled %}
-              <option value="publish">{{ "view_strings.shared_bulk_actions.publish" | t }}</option>
-              <option value="unpublish">{{ "view_strings.shared_bulk_actions.unpublish" | t }}</option>
+              {% feature_fragment publish/dashboard-bulk-options %}
               {% else %}
                 <option value="" selected disabled>—</option>
               {% endif %}
@@ -234,25 +233,7 @@
                       <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">{{ page.pageType }}</span>
                     {% endif %}
                   {% endif %}
-                  {% if publishEnabled %}
-                  {% if page.publicationStatus == 'scheduled' %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-600">
-                      <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>{{ "pages.status.scheduled" | t }}
-                    </span>
-                  {% elsif page.publicationStatus == 'ended' %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                      <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>{{ "pages.status.ended" | t }}
-                    </span>
-                  {% elsif page.publicationStatus == 'live' %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>{{ "pages.status.live" | t }}
-                    </span>
-                  {% else %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                      <span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>{{ "view_strings.sections_dashboard.draft" | t }}
-                    </span>
-                  {% endif %}
-                  {% endif %}
+                  {% feature_fragment publish/dashboard-status %}
                   {% if page.hasTags %}
                     {% for tag in page.tags %}
                       <span class="inline-flex max-w-full items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
@@ -263,31 +244,7 @@
                       <span class="inline-flex items-center rounded-full bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-500">{{ "view_strings.sections_dashboard.more" | t }}</span>
                     {% endif %}
                   {% endif %}
-                  {% if page.isPublished %}
-                    {% if page.isDraftMissing %}
-                      <span title="{{ "view_strings.sections_dashboard.published_page_is_missing_from_drafts" | t }}"
-                            class="inline-flex items-center text-amber-600">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.published_page_is_missing_from_drafts" | t }}</span>
-                      </span>
-                    {% endif %}
-                    {% if page.hasLiveLectDrift %}
-                      <span title="{{ "view_strings.sections_dashboard.live_content_differs_from_draft" | t }}"
-                            class="inline-flex items-center text-amber-600">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.live_content_differs_from_draft" | t }}</span>
-                      </span>
-                      <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.live_content_differs_from_draft_publish_to_sync" | t }}"
-                                aria-label="{{ "view_strings.sections_dashboard.live_content_differs_from_draft_publish_to_sync" | t }}"
-                                class="inline-flex h-6 w-6 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.live_content_differs_from_draft_publish_to_sync" | t }}</span>
-                        </button>
-                      </form>
-                    {% endif %}
-                  {% endif %}
+                  {% feature_fragment publish/dashboard-content-drift %}
                 </div>
               </td>
               <td class="px-6 py-4">
@@ -307,39 +264,14 @@
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
                       </button>
                     </form>
-                    {% if page.hasLiveWeight %}
-                      <span data-weight-drift class="{% if page.hasLiveWeightDrift %}inline-flex{% else %}hidden{% endif %} items-center gap-2">
-                        <span title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }} ({{ page.liveWeight }})"
-                              class="inline-flex items-center text-amber-600">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }}</span>
-                        </span>
-                        <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                          <button type="submit"
-                                  title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
-                                  aria-label="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
-                                  class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
-                            <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}</span>
-                          </button>
-                        </form>
-                      </span>
-                    {% endif %}
+                    {% feature_fragment publish/dashboard-weight-drift %}
                   </div>
                 {% endif %}
               </td>
               <td class="px-6 py-4 text-right">
                 <div class="flex flex-wrap items-center justify-end gap-2">
                   {% if page.isDraftMissing %}
-                    <form method="POST" action="{{ page.pullAction }}" class="inline shrink-0">
-                      <button type="submit"
-                              title="{{ "view_strings.sections_dashboard.ingest_submission" | t }}"
-                              aria-label="Ingest submission {{ page.name }}"
-                              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-indigo-600 hover:bg-indigo-50 hover:text-indigo-800 transition-colors">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#download"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.ingest_submission" | t }}</span>
-                      </button>
-                    </form>
+                    {% feature_fragment publish/dashboard-pull %}
                   {% else %}
                     <a href="{{ page.readHref }}"
                        title="{{ "view_strings.sections_dashboard.view" | t }}"
@@ -355,30 +287,7 @@
                       <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
                       <span class="sr-only">{{ "view_strings.sections_dashboard.edit" | t }}</span>
                     </a>
-                    {% if publishEnabled %}
-                    {% if page.isPublished %}
-                      <form method="POST" action="{{ page.unpublishAction }}" class="inline shrink-0"
-                            data-confirm="{{ "view_strings.sections_dashboard.unpublish_this_page" | t }}">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.unpublish" | t }}"
-                                aria-label="Unpublish {{ page.name }}"
-                                class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-yellow-600 hover:bg-yellow-50 hover:text-yellow-800 transition-colors">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye-off"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.unpublish" | t }}</span>
-                        </button>
-                      </form>
-                    {% else %}
-                      <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.publish" | t }}"
-                                aria-label="Publish {{ page.name }}"
-                                class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-green-600 hover:bg-green-50 hover:text-green-800 transition-colors">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#cloud-upload"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.publish" | t }}</span>
-                        </button>
-                      </form>
-                    {% endif %}
-                    {% endif %}
+                    {% feature_fragment publish/dashboard-actions %}
                     <form method="POST" action="{{ page.deleteAction }}" class="inline shrink-0"
                           data-confirm="{{ "view_strings.sections_dashboard.move_this_page_to_trash" | t }}">
                       <button type="submit"
