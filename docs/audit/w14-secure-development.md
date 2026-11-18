@@ -55,7 +55,7 @@ The same checker fails on any action used by tag. Dependabot moves the pins.
 
 ### Blocking dependency audit
 
-`npm audit --audit-level=high` reported **0 vulnerabilities**, so there was no backlog to triage. The CI job now blocks. A finding that can't be fixed at once becomes a recorded exception (below), not a disabled job.
+The full audit reported **0 vulnerabilities** when the gate became blocking on 4 November 2026. Since 18 November 2026, CI runs `npm audit --omit=dev --audit-level=high` and blocks on high or critical findings in the production dependency tree. Findings in scope that cannot be fixed at once follow the exception procedure below.
 
 ### Gated deploy
 
