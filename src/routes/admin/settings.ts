@@ -243,6 +243,7 @@ settingsRoutes.post('/settings/system', async (c) => {
   }, c.env.SITE_TITLE ?? '0xCMS');
   const sidebar = buildSidebarMenuSettings(visibleKeys, weights, {
     labels, settingsGroupWeight: form.get('settings_group_weight'), pluginWeights, pluginIcons, pluginVisibleKeys,
+    savedPluginMenu: saved,
   });
   await mutation.commit([
     { key: APP_BRANDING_SETTING_KEY, value: JSON.stringify(branding) },

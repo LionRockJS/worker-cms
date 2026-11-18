@@ -378,7 +378,14 @@ export async function saveSidebarMenuSettings(
 
 export function buildSidebarMenuSettings(
   visibleKeys: string[], weights: Record<string, unknown> = {},
-  options: { labels?: SidebarLabels; settingsGroupWeight?: unknown; pluginWeights?: Record<string, unknown>; pluginIcons?: Record<string, unknown>; pluginVisibleKeys?: string[] } = {},
+  options: {
+    labels?: SidebarLabels;
+    settingsGroupWeight?: unknown;
+    pluginWeights?: Record<string, unknown>;
+    pluginIcons?: Record<string, unknown>;
+    pluginVisibleKeys?: string[];
+    savedPluginMenu?: Pick<SidebarChromeSettings, 'pluginWeights' | 'pluginIcons' | 'hiddenPluginKeys'>;
+  } = {},
 ): { value: string; settings: SidebarChromeSettings } {
   const labels = normalizeSidebarLabels(options.labels ?? {});
   const visible = new Set(visibleKeys.map(legacySidebarMenuKey).filter((key): key is SidebarMenuItemKey => !!key));
@@ -386,9 +393,11 @@ export function buildSidebarMenuSettings(
   const settings = defaultSidebarMenuSettings();
   const hidden: SidebarMenuItemKey[] = [];
   const savedWeights: Record<string, number> = {};
-  const pluginWeights: Record<string, number> = {};
-  const pluginIcons: Record<string, AppIcon> = {};
-  const hiddenPluginKeys = new Set<string>();
+  // The form only edits contributed links. Preserve settings for absent links,
+  // including hidden links whose weight and icon both use their defaults.
+  const pluginWeights = { ...options.savedPluginMenu?.pluginWeights };
+  const pluginIcons = { ...options.savedPluginMenu?.pluginIcons };
+  const hiddenPluginKeys = new Set(options.savedPluginMenu?.hiddenPluginKeys);
   const visiblePluginKeys = new Set(options.pluginVisibleKeys ?? []);
   const settingsGroupWeight = finiteWeight(options.settingsGroupWeight, DEFAULT_SETTINGS_GROUP_WEIGHT);
 
@@ -402,12 +411,16 @@ export function buildSidebarMenuSettings(
 
   for (const [key, value] of Object.entries(options.pluginWeights ?? {})) {
     const weight = finiteWeight(value, defaultPluginNavWeight(key));
-    if (weight !== defaultPluginNavWeight(key)) pluginWeights[key] = weight;
-    if (!visiblePluginKeys.has(key)) hiddenPluginKeys.add(key);
+    if (weight === defaultPluginNavWeight(key)) delete pluginWeights[key];
+    else pluginWeights[key] = weight;
+    if (visiblePluginKeys.has(key)) hiddenPluginKeys.delete(key);
+    else hiddenPluginKeys.add(key);
   }
   for (const [key, value] of Object.entries(options.pluginIcons ?? {})) {
     if (typeof value === 'string' && APP_ICON_VALUES.has(value) && value !== 'beaker') {
       pluginIcons[key] = value as AppIcon;
+    } else {
+      delete pluginIcons[key];
     }
   }
 

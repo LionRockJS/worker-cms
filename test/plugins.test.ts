@@ -2064,6 +2064,44 @@ describe('plugin admin proxy', () => {
     expect(afterPayload.layoutData.sidebarSettingsNav).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Mail Settings' }),
     ]));
+
+    const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
+    await env.DB.prepare('UPDATE plugins SET enabled = 0 WHERE url = ?').bind(url).run();
+    clearManifestCache();
+    const disabled = await worker.fetch(new Request('http://localhost/admin/settings/system', { headers }));
+    expect(bodyData(await disabled.text()).pluginOptions).toEqual([]);
+
+    const saveWhileDisabled = await worker.fetch(new Request('http://localhost/admin/settings/system', {
+      method: 'POST',
+      redirect: 'manual',
+      headers,
+      body: new URLSearchParams([
+        ['app_name', 'Renamed CMS'],
+        ['visible_items', 'pages'],
+        // An unavailable link cannot be changed by an old or forged form.
+        [`plugin_weight_${encodeURIComponent(mainPluginKey)}`, '99'],
+        ['plugin_visible_items', settingsPluginKey],
+      ]),
+    }));
+    expect(saveWhileDisabled.status).toBe(302);
+
+    await env.DB.prepare('UPDATE plugins SET enabled = 1 WHERE url = ?').bind(url).run();
+    clearManifestCache();
+    const restored = await worker.fetch(new Request('http://localhost/admin/settings/system', { headers }));
+    const restoredPayload = renderPayload(await restored.text());
+    expect(restoredPayload.bodyView?.data).toMatchObject({
+      appName: 'Renamed CMS',
+      pluginOptions: expect.arrayContaining([
+        expect.objectContaining({ checked: true, weight: 1, icon: 'document', key: mainPluginKey }),
+        expect.objectContaining({ checked: false, weight: 1, key: settingsPluginKey }),
+      ]),
+    });
+    expect(restoredPayload.layoutData.sidebarNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: '/admin/plugins/events/dashboard', icon: 'document' }),
+    ]));
+    expect(restoredPayload.layoutData.sidebarSettingsNav).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: '/admin/plugins/events/mail-settings' }),
+    ]));
   });
 });
 
