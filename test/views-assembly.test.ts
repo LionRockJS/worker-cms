@@ -21,7 +21,7 @@ const FEATURE_VIEWS: Record<string, string[]> = {
     'sections/audit-classes.liquid', 'templates/audit-classes.json',
     'sections/audit-review.liquid', 'templates/audit-review.json',
   ],
-  'trash': ['sections/trash.liquid', 'templates/trash.json', 'sections/holds.liquid', 'templates/holds.json'],
+  'trash': ['sections/trash.liquid', 'templates/trash.json', 'sections/holds.liquid', 'templates/holds.json', 'assets/editor-trash.js'],
   'users-roles': ['sections/users.liquid', 'sections/roles.liquid', 'sections/user-form.liquid', 'sections/role-form.liquid'],
   'i18n': ['sections/languages.liquid', 'sections/translations.liquid'],
   'search': ['sections/advanced-search.liquid'],

@@ -14,15 +14,6 @@
   const flash = document.getElementById('flash');
   if (flash) setTimeout(() => flash.remove(), 4000);
 
-  const deleteButton = document.querySelector('[data-delete-button]');
-  if (deleteButton) {
-    deleteButton.addEventListener('click', (event) => {
-      const message = deleteButton.getAttribute('data-confirm-message')
-        || 'Move this page to trash? You can restore it later from Trash.';
-      if (!confirm(message)) event.preventDefault();
-    });
-  }
-
   document.querySelectorAll('[data-version-delete-button]').forEach((button) => {
     button.addEventListener('click', (event) => {
       const message = button.getAttribute('data-confirm-message')

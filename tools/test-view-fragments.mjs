@@ -110,9 +110,47 @@ test('trash controls follow the trash switch when search is installed', () => {
     const search = views.get('sections/advanced-search.liquid').toString();
     assert.equal(dashboard.includes('action="{{ page.deleteAction }}"'), trash);
     assert.equal(editor.includes('data-delete-button'), trash);
+    assert.equal(views.has('assets/editor-trash.js'), trash);
+    const editorScript = views.get('assets/editor.js').toString();
+    assert.doesNotMatch(editorScript, /\[data-delete-button\]/);
+    assert.match(editorScript, /\[data-version-delete-button\]/);
+    assert.match(editorScript, /\[data-clean-versions-button\]/);
     assert.equal(dashboard.includes('value="delete"'), trash);
     assert.equal(search.includes('value="delete"'), trash);
     assert.match(dashboard, /value="replace_text"/);
     assert.match(editor, /data-editor-form/);
   }
+});
+
+test('trash confirms page deletion once and cancels a declined click', () => {
+  const asset = assembleViews({ trash: true }).get('assets/editor-trash.js').toString();
+  const listeners = [];
+  const messages = [];
+  let accepted = false;
+  let prevented = 0;
+  const button = {
+    dataset: {},
+    getAttribute: () => 'Move this page to trash?',
+    addEventListener: (type, listener) => {
+      assert.equal(type, 'click');
+      listeners.push(listener);
+    },
+  };
+  const browser = {
+    document: { querySelector: () => button },
+    confirm: (message) => {
+      messages.push(message);
+      return accepted;
+    },
+  };
+  runInNewContext(asset, browser);
+  runInNewContext(asset, browser);
+  assert.equal(listeners.length, 1);
+
+  const event = { preventDefault: () => { prevented++; } };
+  listeners[0](event);
+  accepted = true;
+  listeners[0](event);
+  assert.deepEqual(messages, ['Move this page to trash?', 'Move this page to trash?']);
+  assert.equal(prevented, 1);
 });

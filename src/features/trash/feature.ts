@@ -11,4 +11,5 @@ import type { CmsFeature } from '../../core/feature';
 export const trashFeature: CmsFeature = {
   id: 'trash',
   navKeys: ['trash'],
+  clientAssets: ['/assets/editor-trash.js'],
 };
