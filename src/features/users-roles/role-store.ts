@@ -11,7 +11,8 @@ import { ROLE_LABELS, resolveRolePermissions } from '../../core/auth/roles';
 import { recordMetadataReads } from '../../core/http/access-log';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { safeRoleAuditValue, UNSAFE_USER_ROLE_SQL, USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../../core/auth/role-mutation-sql';
-import type { MutationAuditEvidence, RoleRemovalAuditEvidence } from '../../core/db/audit';
+import type { MutationAuditEvidence } from '../../core/db/audit';
+import type { RoleRemovalAuditEvidence } from './mutation-audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { assertAccessAuthorization, assertDelegatedRolePermissions, type AccessAuthorization } from '../../core/auth/access-authorization';
 

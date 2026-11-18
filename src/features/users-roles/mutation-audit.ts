@@ -1,7 +1,8 @@
 import type { Env } from '../../types';
 import type { AppContext } from '../../core/http/context';
 import { classFor, resolveDataClasses } from '../../core/db/data-classes';
-import { contextActor } from '../../core/db/audit';
+import { contextActor, mutationAuditSelect, type AuditActor, type AuditRequest, type AuditRow } from '../../core/db/audit';
+import { USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../../core/auth/role-mutation-sql';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { captureAccessAuthorization, type AccessAuthorization } from '../../core/auth/access-authorization';
 import { recordPolicyDenial } from '../../core/auth/denials';
@@ -39,4 +40,35 @@ export async function accessMutationUnavailable(c: AppContext): Promise<Response
 /** Invalid/oversized legacy policy metadata requires review before recording. */
 export function unsafeAccessEvidence(c: AppContext): Response {
   return c.json({ error: 'Access policy evidence requires review' }, 409, { 'Cache-Control': 'no-store' });
+}
+
+/**
+ * Record each user losing a deleted role, from the same D1 transaction as the
+ * later user updates. The role-store compares event count and final user roles
+ * before committing, so a skipped audit or skipped update cannot look successful.
+ */
+export interface RoleRemovalAuditEvidence {
+  write: D1PreparedStatement;
+  actor: AuditActor;
+  request: AuditRequest;
+  dataClass: AuditRow['dataClass'];
+}
+
+export function roleRemovalAuditEvidence(c: AppContext, role: string, operationId: string, occurredAt: string,
+  dataClass: AuditRow['dataClass']): RoleRemovalAuditEvidence {
+  // Internal ids and role names only; no free-text name/email is copied.
+  const { sql, bindings, actor, request } = mutationAuditSelect(c, { action: 'user.roles', entityType: 'user' }, dataClass, occurredAt, {
+    targetId: 'CAST(u.id AS TEXT)',
+    targetCount: '1',
+    detail: {
+      sql: `json_object('operation_id', ?, 'role_before', u.role, 'role_after', ${USER_WITHOUT_ROLE_SQL}, 'removed_role', ?)`,
+      bindings: [operationId, role, role],
+    },
+  });
+  return {
+    write: c.env.DB.prepare(`${sql} FROM users AS u
+      WHERE ${USER_HAS_ROLE_SQL} AND EXISTS (SELECT 1 FROM roles WHERE name = ? AND builtin = 0)`)
+      .bind(...bindings, role, role),
+    actor, request, dataClass,
+  };
 }
