@@ -268,12 +268,7 @@
       "title": "Regional settings"
     },
     "system_saved": "System settings saved",
-    "timezone_invalid": "Select a valid UTC offset.",
-    "login_labels": {
-      "title": "Login page labels",
-      "description": "Customize the sign-in description, button labels and access notice for each language.",
-      "edit": "Edit login page labels"
-    }
+    "timezone_invalid": "Select a valid UTC offset."
   },
   "shell": {
     "show_explanations": "Show explanations",

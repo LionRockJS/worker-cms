@@ -1,4 +1,11 @@
 {
+  "settings": {
+    "login_labels": {
+      "title": "登入頁面文字",
+      "description": "按語言自訂登入說明、按鈕文字和存取提示。",
+      "edit": "編輯登入頁面文字"
+    }
+  },
   "i18n": {
     "fields": {
       "code": "語言代碼",

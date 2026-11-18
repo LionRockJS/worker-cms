@@ -9,7 +9,8 @@ import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log'
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { clearConfigCache } from '../../core/db/content-config';
-import { CONTENT_DEFAULT_LANGUAGE_SETTING_KEY,DEFAULT_CONTENT_LANGUAGE,LocaleInputValidationError,defaultContentLanguageFromRows,normalizeLocaleCode,normalizeLocaleInput,normalizeLocaleMessageInput,type LocaleRecord } from '../../core/i18n';
+import { CONTENT_DEFAULT_LANGUAGE_SETTING_KEY,DEFAULT_CONTENT_LANGUAGE,LocaleInputValidationError,defaultContentLanguageFromRows,normalizeLocaleCode,type LocaleRecord } from '../../core/i18n';
+import { normalizeLocaleInput, normalizeLocaleMessageInput } from './validation';
 
 type Change={action:'create';input:Record<string,unknown>}|{action:'update';input:Record<string,unknown>;code:string}|{action:'delete';code:unknown}|{action:'default';code:unknown}|{action:'message-save';code:unknown;key:unknown;value:unknown}|{action:'message-delete';code:unknown;key:unknown};
 interface MessageRow {locale_code:string;message_key:string;value:string;updated_by:string|null;created_at:string;updated_at:string}
@@ -33,8 +34,7 @@ function guard(c:AppContext,table:string,fields:string[],rows:object[],where='1'
   return abortIf(c.env,`(SELECT COUNT(*) FROM ${table} WHERE ${where})<>? OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS
     (SELECT 1 FROM ${table} r WHERE ${fields.map(f=>`r.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...args,rows.length,json(rows)]);
 }
-/** Host locale/message administration only; DB-only core helpers keep their
- * own caller/evidence boundary. Payloads and message keys stay out of detail. */
+/** Audited locale and message edits. Payloads and message keys stay out of detail. */
 export async function mutateLocaleAdmin(c:AppContext,change:Change):Promise<string> {
   assertRegulatedWritesAllowed(c.env);
   try {return await mutate(c,change);}catch(error){

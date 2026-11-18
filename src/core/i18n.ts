@@ -1,7 +1,7 @@
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import type { Env } from '../types';
-import { getSetting, saveSetting } from './db/settings';
+import { getSetting } from './db/settings';
 import { coreExtensions } from './extensions';
 import { recordMetadataReads } from './http/access-log';
 
@@ -11,7 +11,6 @@ export const DEFAULT_UI_LOCALE = 'en';
 export const UI_LOCALE_COOKIE = 'cms_ui_locale';
 
 const LOCALE_CODE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/;
-const MESSAGE_KEY = /^[a-z0-9][a-z0-9_.:-]{0,199}$/i;
 
 export interface LocaleRecord {
   code: string;
@@ -79,63 +78,6 @@ export function defaultContentLanguageFromRows(available: LocaleRecord[], raw: s
     ?? DEFAULT_CONTENT_LANGUAGE;
 }
 
-export async function saveDefaultContentLanguage(env: Env, codeValue: unknown): Promise<string> {
-  const code = normalizeLocaleCode(codeValue);
-  const locale = await env.DB.prepare(
-    'SELECT code FROM locales WHERE code = ? AND content_enabled = 1',
-  ).bind(code).first<{ code: string }>();
-  if (!locale) throw new Error('The default content language must be enabled for content');
-  await saveSetting(env, CONTENT_DEFAULT_LANGUAGE_SETTING_KEY, code);
-  return code;
-}
-
-export function normalizeLocaleInput(input: Record<string, unknown>, currentDefault: string, existingCode?: string) {
-  const code = normalizeLocaleCode(existingCode ?? input.code);
-  const label = String(input.label ?? '').trim().slice(0, 100);
-  if (!label) throw new LocaleInputValidationError('Language label is required');
-  const contentEnabled = code === currentDefault ? 1 : truthy(input.content_enabled);
-  const uiEnabled = code === DEFAULT_CONTENT_LANGUAGE ? 0 : truthy(input.ui_enabled);
-  const direction: LocaleRecord['direction'] = input.direction === 'rtl' ? 'rtl' : 'ltr';
-  const fallback = input.fallback_code ? normalizeLocaleCode(input.fallback_code) : null;
-  if (fallback === code) throw new LocaleInputValidationError('A locale cannot fall back to itself');
-  const weight = finiteInteger(input.weight);
-
-  return { code, label, content_enabled: contentEnabled, ui_enabled: uiEnabled, direction, fallback_code: fallback, weight };
-}
-
-export async function saveLocale(env: Env, input: Record<string, unknown>, existingCode?: string): Promise<string> {
-  const { code, label, content_enabled: contentEnabled, ui_enabled: uiEnabled, direction, fallback_code: fallback, weight } = normalizeLocaleInput(input, await loadDefaultContentLanguage(env), existingCode);
-
-  if (existingCode && uiEnabled === 0) {
-    const remaining = await env.DB.prepare(
-      'SELECT COUNT(*) AS total FROM locales WHERE ui_enabled = 1 AND code != ?',
-    ).bind(code).first<{ total: number }>();
-    if ((remaining?.total ?? 0) === 0) throw new Error('At least one CMS interface locale must remain enabled');
-  }
-
-  if (existingCode) {
-    await env.DB.prepare(
-      `UPDATE locales SET label = ?, content_enabled = ?, ui_enabled = ?, direction = ?, fallback_code = ?, weight = ?
-       WHERE code = ?`,
-    ).bind(label, contentEnabled, uiEnabled, direction, fallback, weight, code).run();
-  } else {
-    await env.DB.prepare(
-      `INSERT INTO locales (code, label, content_enabled, ui_enabled, direction, fallback_code, weight)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(code, label, contentEnabled, uiEnabled, direction, fallback, weight).run();
-  }
-  return code;
-}
-
-export async function deleteLocale(env: Env, codeValue: unknown): Promise<void> {
-  const code = normalizeLocaleCode(codeValue);
-  if (code === DEFAULT_CONTENT_LANGUAGE) throw new Error('The unspecified content language cannot be deleted');
-  if (code === await loadDefaultContentLanguage(env)) throw new Error('The default content language cannot be deleted');
-  const row = await env.DB.prepare('SELECT builtin FROM locales WHERE code = ?').bind(code).first<{ builtin: number }>();
-  if (row?.builtin) throw new Error('Built-in locales cannot be deleted');
-  await env.DB.prepare('DELETE FROM locales WHERE code = ?').bind(code).run();
-}
-
 export async function listLocaleMessages(env: Env, localeCode: unknown): Promise<LocaleMessage[]> {
   const code = normalizeLocaleCode(localeCode);
   const result = await env.DB.prepare(
@@ -143,40 +85,6 @@ export async function listLocaleMessages(env: Env, localeCode: unknown): Promise
   ).bind(code).all<LocaleMessage>();
   recordMetadataReads('translation.read', 'locale_messages', result.results.map(row => `${row.locale_code}:${row.message_key}`));
   return result.results;
-}
-
-export function normalizeLocaleMessageInput(localeCode: unknown, keyValue: unknown, messageValue: unknown) {
-  const code = normalizeLocaleCode(localeCode);
-  const key = String(keyValue ?? '').trim();
-  const value = String(messageValue ?? '').trim().slice(0, 4000);
-  if (!MESSAGE_KEY.test(key)) throw new LocaleInputValidationError('Translation key contains unsupported characters');
-  if (!value) throw new LocaleInputValidationError('Translation value is required');
-  if (value.includes('{{') || value.includes('{%') || /[<>]/.test(value)) {
-    throw new LocaleInputValidationError('Translation values must be plain text');
-  }
-  return { code, key, value };
-}
-
-export async function saveLocaleMessage(
-  env: Env,
-  localeCode: unknown,
-  keyValue: unknown,
-  messageValue: unknown,
-  updatedBy?: string,
-): Promise<void> {
-  const { code, key, value } = normalizeLocaleMessageInput(localeCode, keyValue, messageValue);
-  await env.DB.prepare(
-    `INSERT INTO locale_messages (locale_code, message_key, value, updated_by)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(locale_code, message_key) DO UPDATE SET
-       value = excluded.value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
-  ).bind(code, key, value, updatedBy ?? null).run();
-}
-
-export async function deleteLocaleMessage(env: Env, localeCode: unknown, keyValue: unknown): Promise<void> {
-  const code = normalizeLocaleCode(localeCode);
-  const key = String(keyValue ?? '').trim();
-  await env.DB.prepare('DELETE FROM locale_messages WHERE locale_code = ? AND message_key = ?').bind(code, key).run();
 }
 
 export async function resolveUiLocale(c: Context<any>): Promise<LocaleRecord> {
@@ -274,15 +182,6 @@ export function flattenMessages(value: unknown, prefix = '', output: Record<stri
     else flattenMessages(child, path, output);
   }
   return output;
-}
-
-function truthy(value: unknown): number {
-  return value === true || value === '1' || value === 'on' ? 1 : 0;
-}
-
-function finiteInteger(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
 }
 
 function acceptLanguages(value?: string): string[] {

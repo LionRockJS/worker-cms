@@ -1,4 +1,11 @@
 {
+  "settings": {
+    "login_labels": {
+      "title": "Login page labels",
+      "description": "Customize the sign-in description, button labels and access notice for each language.",
+      "edit": "Edit login page labels"
+    }
+  },
   "i18n": {
     "fields": {
       "code": "Locale code",

@@ -268,12 +268,7 @@
       "title": "区域设置"
     },
     "system_saved": "系统设置已保存",
-    "timezone_invalid": "请选择有效的 UTC 时差。",
-    "login_labels": {
-      "title": "登录页面文字",
-      "description": "按语言自定义登录说明、按钮文字和访问提示。",
-      "edit": "编辑登录页面文字"
-    }
+    "timezone_invalid": "请选择有效的 UTC 时差。"
   },
   "shell": {
     "show_explanations": "显示说明",
