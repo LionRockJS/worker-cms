@@ -140,7 +140,6 @@
     "pagination_page": "第",
     "recipient_email": "收件人電郵",
     "save_language": "儲存語言",
-    "shared_pool_balance": "共享池餘額",
     "showing": "顯示",
     "showing_of": "項，共",
     "sign_in_description": "在登入狀態下啟動服務供應商流程，將其連結至此帳戶。",
@@ -270,13 +269,6 @@
     },
     "system_saved": "系統設定已儲存",
     "timezone_invalid": "請選擇有效的 UTC 時差。",
-    "credits": {
-      "title": "點數",
-      "show": "顯示點數",
-      "visible": "顯示",
-      "hidden": "隱藏",
-      "help": "在管理介面顯示餘額、點數面板和點數連結。不使用點數或擁有無限點數的部署可將其隱藏。此顯示設定不會變更價格或扣費。"
-    },
     "login_labels": {
       "title": "登入頁面文字",
       "description": "按語言自訂登入說明、按鈕文字和存取提示。",
@@ -294,7 +286,6 @@
     "expand_sidebar": "展開側邊欄",
     "go_to_dashboard": "前往管理後台首頁",
     "open_menu": "開啟選單",
-    "shared": "共享",
     "sign_out": "登出",
     "theme": {
       "dark": "深色",

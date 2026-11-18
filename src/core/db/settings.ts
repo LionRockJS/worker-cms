@@ -206,15 +206,6 @@ export async function saveSystemTimezone(env: Env, value: unknown): Promise<stri
   return timeZone;
 }
 
-/** Display preference only; pricing and charging remain independent. */
-export async function loadShowCredits(env: Env): Promise<boolean> {
-  return await getSetting(env, SHOW_CREDITS_SETTING_KEY) !== 'false';
-}
-
-export async function saveShowCredits(env: Env, show: boolean): Promise<void> {
-  await saveSetting(env, SHOW_CREDITS_SETTING_KEY, String(show));
-}
-
 export type SidebarLabels = Record<string, Record<string, string>>;
 
 export interface SidebarChromeSettings {

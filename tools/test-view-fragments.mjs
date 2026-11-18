@@ -66,3 +66,23 @@ test('dashboard and editor controls follow the search and media switches indepen
     }
   }
 });
+
+test('credits owns wallet panels, sidebar balances, and the visibility control', () => {
+  for (const credits of [false, true]) {
+    const views = assembleViews({ credits });
+    const profile = views.get('sections/profile.liquid').toString();
+    const layout = views.get('layout/default.liquid').toString();
+    const settings = views.get('sections/menu-settings.liquid').toString();
+    assert.equal(profile.includes('for wallet in creditWallets'), credits);
+    assert.equal(layout.includes('for wallet in sidebarWallets'), credits);
+    assert.equal(settings.includes('name="show_credits"'), credits);
+    assert.match(profile, /action="\/admin\/profile\/disable"/);
+    assert.match(layout, /data-sidebar-footer-controls/);
+    assert.match(settings, /name="app_name"/);
+
+    const catalog = JSON.parse(views.get('locales/en.json').toString());
+    assert.equal('credits' in catalog.settings, credits);
+    assert.equal('shared_pool_balance' in catalog.profile, credits);
+    assert.equal('shared' in catalog.shell, credits);
+  }
+});

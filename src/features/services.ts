@@ -5,6 +5,7 @@
 // interfaces and dispatch helpers in this file. Core therefore never imports
 // a feature implementation or a feature-owned contract directly.
 
+import type { HostSettingWrite } from '../core/db/settings-mutation-evidence';
 import type { AppContext } from '../core/http/context';
 import type { PublicationService } from './publication';
 import type { Env } from '../types';
@@ -14,6 +15,7 @@ import { regulatedWritesBlocked } from '../core/http/regulated-writes';
 export type { DashboardPageRow } from './publication';
 
 export type AdminScreenTarget =
+  | { screen: 'system-settings' }
   | { screen: 'profile' }
   | { screen: 'users' }
   | { screen: 'user'; userId: number };
@@ -46,6 +48,7 @@ export interface FeatureServiceEntry {
   reservePageCreate?(c: AppContext, pageType: string): Promise<FeatureReservation>;
   reservePageCreates?(env: Env, input: PageCreateReservationInput): Promise<FeatureReservation>;
   adminScreenProps?(c: AppContext, target: AdminScreenTarget): Promise<Record<string, unknown>>;
+  systemSettingsWrites?(form: FormData): HostSettingWrite[];
   scheduled?(env: Env): Promise<string | null>;
   /** Audit retention/archival only; business work is denied by default. */
   scheduledDuringWriteContainment?: true;
@@ -114,6 +117,11 @@ export async function featureAdminScreenProps(
       .map((entry) => entry.adminScreenProps!(c, target)),
   );
   return Object.assign({}, ...props);
+}
+
+/** Collects preferences submitted through the shared system settings form. */
+export function featureSystemSettingsWrites(form: FormData): HostSettingWrite[] {
+  return featureServiceEntries.flatMap(entry => entry.systemSettingsWrites?.(form) ?? []);
 }
 
 /** Runs bounded scheduled work contributed by installed features. */

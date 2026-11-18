@@ -1,4 +1,19 @@
 {
+  "settings": {
+    "credits": {
+      "title": "点数",
+      "show": "显示点数",
+      "visible": "显示",
+      "hidden": "隐藏",
+      "help": "在管理界面显示余额、点数面板和点数链接。不使用点数或拥有无限点数的部署可将其隐藏。此显示设置不会更改价格或扣费。"
+    }
+  },
+  "profile": {
+    "shared_pool_balance": "共享池余额"
+  },
+  "shell": {
+    "shared": "共享"
+  },
   "credits": {
     "currency": {
       "credit": "点数",

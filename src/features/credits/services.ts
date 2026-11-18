@@ -9,7 +9,8 @@ import type { CreditContributor,CreditPricingRow } from './contracts';
 import type { AppContext } from '../../core/http/context';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 import type { Env } from '../../types';
-import { loadShowCredits } from '../../core/db/settings';
+import { SHOW_CREDITS_SETTING_KEY } from '../../core/db/settings';
+import { loadShowCredits } from './settings';
 import { creditLedgerRowForView } from './ledger-view';
 import { recordTableReads } from '../../core/http/access-log';
 import { recordWalletReads } from './read-audit';
@@ -99,11 +100,18 @@ export const creditsServices: FeatureServiceEntry = {
   },
 
   async adminScreenProps(c: AppContext, target): Promise<Record<string, unknown>> {
-    if (!await loadShowCredits(c.env)) return { showCreditsPanel: false };
+    const showCredits = await loadShowCredits(c.env);
+    if (target.screen === 'system-settings') return { hasCreditsFeature: true, showCredits };
+    if (!showCredits) return { showCreditsPanel: false };
     if (target.screen === 'profile') return profileCreditProps(c);
     if (target.screen === 'users') return sharedPoolProps(c.env);
     if (target.screen === 'user') return userCreditProps(c, target.userId);
     return {};
+  },
+
+  systemSettingsWrites(form) {
+    if (!form.has('show_credits')) return [];
+    return [{ key: SHOW_CREDITS_SETTING_KEY, value: String(form.get('show_credits') === 'true') }];
   },
 
   /**

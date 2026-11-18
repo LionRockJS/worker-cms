@@ -9,6 +9,8 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 import { APP_BRANDING_SETTING_KEY,ADMIN_HOME_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY } from './settings';
 
 export const HOST_SETTINGS_KEYS=[APP_BRANDING_SETTING_KEY,ADMIN_HOME_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY] as const;
+export type HostSettingWrite = { key: typeof HOST_SETTINGS_KEYS[number]; value: string };
+
 type Row={key:string;value:string;created_at:string;updated_at:string};
 export class SettingsMutationUnavailableError extends Error {constructor(){super('Settings change unavailable');}}
 function json(value:unknown):string {
@@ -45,7 +47,7 @@ async function prepare(c:AppContext) {
       AND s.value IS json_extract(e.value,'$.value') AND s.created_at IS json_extract(e.value,'$.created_at') AND s.updated_at IS json_extract(e.value,'$.updated_at')))`,[keys,rows.length,json(rows)]);
   return {
     value(key:typeof HOST_SETTINGS_KEYS[number]):string|null {return rows.find(r=>r.key===key)?.value??null;},
-    async commit(writes:Array<{key:typeof HOST_SETTINGS_KEYS[number];value:string}>):Promise<void> {
+    async commit(writes: HostSettingWrite[]):Promise<void> {
       try {
         assertRegulatedWritesAllowed(env);
         if(writes.length>HOST_SETTINGS_KEYS.length||new Set(writes.map(w=>w.key)).size!==writes.length||writes.some(w=>!HOST_SETTINGS_KEYS.includes(w.key)||typeof w.value!=='string'))throw new Error('Invalid settings scope');

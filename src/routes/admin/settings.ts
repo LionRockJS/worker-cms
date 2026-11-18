@@ -4,6 +4,7 @@ import { requirePermission } from '../../core/auth/guards';
 import { coreExtensions } from '../../core/extensions';
 import { localeRegistry } from '../../core/i18n';
 import { featureInstalled } from '../../features';
+import { featureAdminScreenProps, featureSystemSettingsWrites } from '../../features/services';
 import { systemSettingsPage } from '../../core/templates/settings';
 import type { Env, Variables } from '../../types';
 import { renderPage } from '../../core/render/chrome';
@@ -19,7 +20,6 @@ import {
   loadAdminHomeSettings,
   loadSidebarChromeSettings,
   loadSystemTimezone,
-  loadShowCredits,
   normalizeSystemTimezone,
   pluginSidebarKey,
   normalizeAdminHomeSettings,
@@ -27,7 +27,7 @@ import {
   buildSidebarMenuSettings,
   sidebarChromeSettingsFromRaw,
   APP_BRANDING_SETTING_KEY, ADMIN_HOME_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY,
-  SHOW_CREDITS_SETTING_KEY, SIDEBAR_MENU_SETTING_KEY, DEFAULT_SYSTEM_TIMEZONE,
+  SIDEBAR_MENU_SETTING_KEY, DEFAULT_SYSTEM_TIMEZONE,
 } from '../../core/db/settings';
 
 export const settingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -45,17 +45,18 @@ settingsRoutes.get('/settings/menu', (c) => c.redirect('/admin/settings/system')
 // Shared row comparator: group by plugin, then by human label, then key.
 settingsRoutes.get('/settings/system', async (c) => {
   const fallbackName = c.env.SITE_TITLE ?? '0xCMS';
-  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, showCredits, { uiLocales }] = await Promise.all([
+  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, featureProps, { uiLocales }] = await Promise.all([
     loadSidebarChromeSettings(c.env),
     loadAppBrandingSettings(c.env, fallbackName),
     loadAdminHomeSettings(c.env),
     coreExtensions().sidebarNav?.(c.env) ?? [],
     loadSystemTimezone(c.env),
-    loadShowCredits(c.env),
+    featureAdminScreenProps(c, { screen: 'system-settings' }),
     localeRegistry(c.env),
   ]);
   // An entry owned by a feature that is not installed has nothing to configure
   // — the chrome would hide it whatever this screen saved.
+  const showCredits = featureProps.showCredits === true;
   const menuItems = installedMenuItems(featureInstalled);
   const menuOption = (item: typeof SIDEBAR_MENU_ITEMS[number], index: number) => ({
     value: item.key,
@@ -165,7 +166,7 @@ settingsRoutes.get('/settings/system', async (c) => {
       selected: option.value === branding.appFont,
     })),
     adminHomePath: adminHome.href,
-    hasCreditsFeature: featureInstalled('credits'),
+    hasCreditsFeature: featureProps.hasCreditsFeature === true,
     showCredits,
     systemTimezone,
     timezoneOptions: [
@@ -247,9 +248,7 @@ settingsRoutes.post('/settings/system', async (c) => {
     { key: APP_BRANDING_SETTING_KEY, value: JSON.stringify(branding) },
     { key: ADMIN_HOME_SETTING_KEY, value: JSON.stringify(normalizeAdminHomeSettings({href: form.get('admin_home_path')})) },
     { key: SYSTEM_TIMEZONE_SETTING_KEY, value: systemTimezone },
-    ...(featureInstalled('credits') && form.has('show_credits')
-      ? [{key: SHOW_CREDITS_SETTING_KEY, value: String(form.get('show_credits') === 'true')} as const]
-      : []),
+    ...featureSystemSettingsWrites(form),
     { key: SIDEBAR_MENU_SETTING_KEY, value: sidebar.value },
   ]);
   return c.redirect('/admin/settings/system?flash=saved');

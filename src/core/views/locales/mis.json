@@ -140,7 +140,6 @@
     "pagination_page": "Page",
     "recipient_email": "Recipient email",
     "save_language": "Save language",
-    "shared_pool_balance": "Shared pool balance",
     "showing": "Showing",
     "showing_of": "of",
     "sign_in_description": "Start a provider flow while signed in to attach it to this account.",
@@ -270,13 +269,6 @@
     },
     "system_saved": "System settings saved",
     "timezone_invalid": "Select a valid UTC offset.",
-    "credits": {
-      "title": "Credits",
-      "show": "Show credits",
-      "visible": "Show",
-      "hidden": "Hide",
-      "help": "Show balances, credit panels, and credit links in the admin interface. Hide them for installations without credits or with unlimited credits. This display setting does not change prices or charges."
-    },
     "login_labels": {
       "title": "Login page labels",
       "description": "Customize the sign-in description, button labels and access notice for each language.",
@@ -293,7 +285,6 @@
     "expand_sidebar": "Expand sidebar",
     "go_to_dashboard": "Go to admin dashboard",
     "open_menu": "Open menu",
-    "shared": "shared",
     "show_explanations": "Show explanations",
     "sign_out": "Sign out",
     "theme": {
