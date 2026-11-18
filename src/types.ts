@@ -287,6 +287,9 @@ export interface Env {
    * e.g. "cowise.co,eventuai.com". Unset = open registration (viewer role).
    */
   ALLOWED_EMAIL_DOMAINS?: string;
+  /** JSON role allowlist applied only at account creation. Entries match a
+   * provider plus providerUserId or a provider-verified email. */
+  INITIAL_USER_ROLES?: string;
   /** Workers Rate Limiting bindings (optional – absent in local dev/tests). */
   AUTH_RATE_LIMITER?: RateLimiter;
   UPLOAD_RATE_LIMITER?: RateLimiter;

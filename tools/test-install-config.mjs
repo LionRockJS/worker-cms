@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseEnv } from 'node:util';
 import { runInNewContext } from 'node:vm';
 import { unstable_readConfig } from 'wrangler';
 
@@ -60,8 +61,8 @@ test('declining the optional cache leaves fresh config unbound and preserves exi
   assert.equal(declined.config.r2_buckets.find(item=>item.binding==='PLUGIN_VIEWS_BUCKET').bucket_name,'existing-private-views');
 });
 
-test('DMS setup omits both publish bindings and can restore the D1 binding', async () => {
-  const active = example.replace('# [[r2_buckets]]\n# binding = "PUBLISH_BUCKET"\n# bucket_name = "worker-cms-published"', '[[r2_buckets]]\nbinding = "PUBLISH_BUCKET"\nbucket_name = "worker-cms-published"');
+test('DMS setup omits both publish bindings and restores existing publish resources', async () => {
+  const active = example.replace('# [[r2_buckets]]\n# binding = "PUBLISH_BUCKET"\n# bucket_name = "worker-cms-published"', '[[r2_buckets]]\nbinding = "PUBLISH_BUCKET" # snapshots\nbucket_name = "existing-publish-bucket"');
   const disabled = await transform(active, null, null);
   assert.deepEqual(disabled.config.d1_databases.map(({ binding }) => binding), ['DB']);
   assert.equal(disabled.config.r2_buckets.some(({ binding }) => binding === 'PUBLISH_BUCKET'), false);
@@ -69,4 +70,43 @@ test('DMS setup omits both publish bindings and can restore the D1 binding', asy
 
   const restored = await transform(disabled.text, null);
   assert.equal(restored.config.d1_databases.find(({ binding }) => binding === 'PUBLISHED_DB').database_name, 'fixture-published');
+  assert.equal(restored.config.r2_buckets.find(({ binding }) => binding === 'PUBLISH_BUCKET').bucket_name, 'existing-publish-bucket');
+
+  const freshDms = await transform(null, null, null);
+  const enabled = await transform(freshDms.text, null);
+  assert.equal(enabled.config.r2_buckets.some(({ binding }) => binding === 'PUBLISH_BUCKET'), false);
+});
+
+async function configureLocalAdmin(existing, confirmAdmin, providerUserId) {
+  const secretsFunctions = source.slice(source.indexOf('function devVar('), source.indexOf('async function featureEnabled('));
+  let result;
+  const writeSecrets = runInNewContext(`${secretsFunctions}\nwriteLocalSecrets`, {
+    DEV_VARS_PATH: 'secrets',
+    PROVIDERS: { eventuai: { secret: 'EVENTUAI_CLIENT_SECRET' } },
+    console: { log() {} },
+    readFile: async () => existing,
+    writeFile: async (_path, value) => { result = value; },
+    confirm: confirmAdmin,
+    ask: async (label) => label.includes('account subject') ? providerUserId : '',
+  });
+  await writeSecrets({ canonicalOrigin: 'http://localhost:8787', providers: ['eventuai'], clientIds: {} });
+  return result;
+}
+
+test('local setup writes a dotenv-safe first-admin grant only when enabled', async () => {
+  const existing = 'JWT_SECRET=test\n# INITIAL_USER_ROLES=\n';
+  const providerUserId = 'identity\'#"\\$USER';
+  const enabled = await configureLocalAdmin(existing, async () => true, providerUserId);
+  assert.deepEqual(JSON.parse(parseEnv(enabled).INITIAL_USER_ROLES), [
+    { provider: 'eventuai', providerUserId, roles: ['admin'] },
+  ]);
+  const declined = await configureLocalAdmin(existing, async () => false, providerUserId);
+  assert.equal(parseEnv(declined).INITIAL_USER_ROLES, undefined);
+});
+
+test('local setup preserves an existing initial role allowlist', async () => {
+  const existingGrant = '[\n  {"provider":"github","providerUserId":"123","roles":["editor"]}\n]';
+  const existing = `JWT_SECRET=test\nexport INITIAL_USER_ROLES = '${existingGrant}'\n`;
+  const result = await configureLocalAdmin(existing, async () => assert.fail('Prompted to replace existing grants'));
+  assert.equal(parseEnv(result).INITIAL_USER_ROLES, existingGrant);
 });

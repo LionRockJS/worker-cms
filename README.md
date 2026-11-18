@@ -28,7 +28,8 @@ Content management system on Workers
 npm install
 ```
 
-`npm run setup` runs every step below interactively. When the plugins feature is
+`npm run setup` interactively configures resources, migrations, and OAuth, and
+can grant the first administrator role on sign-in. When the plugins feature is
 enabled, it also offers an optional private R2 cache for plugin views
 (`PLUGIN_VIEWS_BUCKET`, named `<namespace>-plugin-views` by default). To do them by hand, start
 this clone's config from the template. `wrangler.toml` is gitignored, so each
@@ -298,13 +299,57 @@ not silently merge logged-out accounts just because their emails match.
    the lifetime at six months (`--expires-in-days`, default 180), so re-run this
    and re-upload the secret before it expires or Apple sign-in starts failing.
 
-> **Note:** New accounts start as `viewer`, regardless of the OAuth provider's
-> role claims. Promote the first account to `admin` (or another role) with the
-> SQL command in step 7.
+> **Note:** New accounts default to `viewer`, regardless of the OAuth provider's
+> role claims. Predefine initial roles as described below, or promote the first
+> account with the SQL command in step 7.
 
 ### 7. Set the first user's role
 
-After signing in for the first time, update your role to `admin` in the CMS database. Multiple roles can be stored as a comma-separated list, for example `admin,viewer`:
+`npm run setup` and `npm run setup -- --local` can grant `admin` on account
+creation. Choose an enabled OAuth provider and enter its stable account subject
+(`sub`), or the numeric user ID for GitHub. The wizard saves the grant in
+`.dev.vars` for local setup or uploads it after a Cloudflare deployment. Local
+setup keeps existing grants in `.dev.vars`. For Cloudflare, accepting the prompt
+replaces the existing `INITIAL_USER_ROLES` secret if one is set.
+
+To grant roles on first sign-in, set the optional `INITIAL_USER_ROLES` secret
+to a JSON array before the user creates their account:
+
+```json
+[
+  { "provider": "eventuai", "providerUserId": "your-provider-user-id", "roles": ["admin"] },
+  { "provider": "google", "email": "writer@example.com", "roles": ["editor", "moderator"] }
+]
+```
+
+Upload the JSON with `npx wrangler secret put INITIAL_USER_ROLES`. For local
+development, put the JSON on one line in the gitignored `.dev.vars` file (see
+`.dev.vars.example`). Keep personal identities out of committed configuration.
+
+Each entry requires a supported `provider`, exactly one of `providerUserId` or
+`email`, and a nonempty `roles` array. `providerUserId` is the exact, case-sensitive
+OAuth subject (`sub`), or GitHub numeric user ID represented as a string; it is
+not a username or the CMS user ID. Email matching trims whitespace, ignores case,
+and requires the provider's affirmative `email_verified` claim. Google and Apple
+support this claim; Eventuai currently reports it as false. GitHub's `/user`
+response and Microsoft profile email do not provide trusted verification for
+this purpose, so use `providerUserId` for them. Google email verification can
+reflect past ownership of a third-party mailbox; prefer a stable provider ID
+for privileged grants, especially outside Gmail or Google Workspace.
+
+Matching entries contribute the union of their roles. Built-in roles and existing
+custom role slugs are accepted. Malformed configuration or a missing matched
+custom role refuses new-account creation without issuing a session. Unset, empty,
+or unmatched configuration uses `viewer`. `ALLOWED_EMAIL_DOMAINS` still controls
+registration eligibility independently; initial roles do not bypass it.
+
+The configured roles and their audit evidence commit with account creation.
+Later sign-ins preserve the stored roles, including a demotion to `viewer`.
+Adding an existing user to this setting does not promote them; use Users
+administration for existing accounts. Removing an entry does not revoke a grant
+already applied. This works without the optional Users/Roles admin feature.
+
+To promote an account created without a grant, update its role to `admin` in the CMS database. Multiple roles can be stored as a comma-separated list, for example `admin,viewer`:
 
 ```bash
 npx wrangler d1 execute cms --remote \
@@ -1064,6 +1109,9 @@ Publishing is enabled by default. For an internal document management system,
 set `"publish": false` under `features` in `cms.features.json` and run
 `npm run build`. The setup wizard skips the published D1 database and
 disables both `PUBLISHED_DB` and `PUBLISH_BUCKET` in its Wrangler config.
+When publishing is re-enabled, rerun setup to restore the D1 binding and
+any R2 binding marked as disabled by setup. If an older setup commented out
+your `PUBLISH_BUCKET` binding, uncomment that block manually.
 If you manage Wrangler configuration directly, remove those bindings and
 the `PUBLISH_TARGETS` variable from the deployment configuration.
 `npm run db:migrate` applies only the private database migrations in this

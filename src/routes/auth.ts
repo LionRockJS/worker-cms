@@ -96,6 +96,7 @@ interface NormalizedUser {
   providerUserId: string;
   oauthId: string;
   email: string;
+  emailVerified: boolean;
   name: string;
   avatarUrl: string;
 }
@@ -265,6 +266,7 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `eventuai:${sub}`,
       email,
+      emailVerified: data['email_verified'] === true,
       name: String(data['preferred_username'] ?? sub),
       avatarUrl: '',
     };
@@ -279,6 +281,7 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `google:${sub}`,
       email,
+      emailVerified: data['email_verified'] === true,
       name: String(data['name'] ?? ''),
       avatarUrl: String(data['picture'] ?? ''),
     };
@@ -297,6 +300,8 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `microsoft:${sub}`,
       email,
+      // Microsoft email/preferred_username are mutable profile claims.
+      emailVerified: false,
       name: String(data['name'] ?? ''),
       avatarUrl: '',
     };
@@ -311,6 +316,7 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
       providerUserId: sub,
       oauthId: `apple:${sub}`,
       email,
+      emailVerified: data['email_verified'] === true || data['email_verified'] === 'true',
       name: String(data['name'] ?? email),
       avatarUrl: '',
     };
@@ -324,6 +330,8 @@ function normalizeUser(provider: string, data: Record<string, unknown>): Normali
     providerUserId: String(id),
     oauthId: `github:${id}`,
     email: String(data['email'] ?? `${data['login']}@github.noreply`),
+    // /user does not attest email verification. Use providerUserId grants.
+    emailVerified: false,
     name: String(data['name'] ?? data['login'] ?? ''),
     avatarUrl: String(data['avatar_url'] ?? ''),
   };
@@ -631,7 +639,7 @@ async function handleOAuthCallback(c: AppContext, params: OAuthCallbackParams): 
       return c.redirect('/auth/login?error=identity_not_linked');
     }
 
-    // New accounts always start as least-privilege viewers. Later logins only
+    // Initial role configuration applies only to new accounts. Later logins
     // refresh profile fields, so role changes made in the Users admin stick.
     try {
       dbUser = await registerOAuthUser(c, normalized);

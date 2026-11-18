@@ -158,7 +158,8 @@ console.log(`Generated ${configPath}. Run: node_modules/.bin/workerd serve --exp
 console.log(`Cron socket: POST http://127.0.0.1:${cronPort}/ (external scheduler required). Images transforms are disabled.`);
 if (args.has("--serve")) {
   const require = createRequire(import.meta.url);
-  const child = spawn(require("workerd"), ["serve", "--experimental", configPath], { stdio: "inherit" });
+  const workerd = require("workerd");
+  const child = spawn(workerd.default ?? workerd, ["serve", "--experimental", configPath], { stdio: "inherit" });
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
   child.on("error", (error) => { console.error(error); process.exitCode = 1; });
   child.on("exit", (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0); });

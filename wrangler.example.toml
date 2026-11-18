@@ -161,6 +161,8 @@ DEFAULT_TIMEZONE = "+0800"
 # Optional: restrict new sign-ups to these email domains (comma-separated).
 # Existing users always keep access. Unset = open registration (viewer role).
 # ALLOWED_EMAIL_DOMAINS = "cowise.co"
+# Optional first-sign-in role grants: set INITIAL_USER_ROLES as a JSON secret
+# with `wrangler secret put INITIAL_USER_ROLES`; see README and .dev.vars.example.
 
 # Secrets – set via: wrangler secret put JWT_SECRET
 # wrangler secret put EVENTUAI_CLIENT_SECRET

@@ -246,16 +246,16 @@ function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, reque
   return { write: statement(env, prepared, actor, request, requirePreviousChange, lookup), guard };
 }
 
-/** Batch with a newly created viewer and its provider identity, before issuing
+/** Batch with a newly created account and its provider identity, before issuing
  * any session. The validated provider authenticates the new account; there is
  * no CMS session yet. Do not use this for existing-account identity linking. */
 export function registrationAuditEvidence(c: AppContext, oauthId: string, provider: string,
-  dataClass: AuditRow['dataClass'], policy?: DataClassMap): MutationAuditEvidence {
-  const row = mutationRow({ action: 'user.create', entityType: 'user', detail: { provider, role_after: 'viewer' } });
+  dataClass: AuditRow['dataClass'], policy?: DataClassMap, initialRole = 'viewer'): MutationAuditEvidence {
+  const row = mutationRow({ action: 'user.create', entityType: 'user', detail: { provider, role_after: initialRole } });
   row.dataClass = dataClass;
   row.targetCount = 1;
   return preparedAuditEvidence(c.env, row,
-    { userId: null, roles: 'viewer', sessionSid: null, via: `oauth:${provider}` }, requestFrom(c), true, { newUserOAuthId: oauthId }, policy);
+    { userId: null, roles: initialRole, sessionSid: null, via: `oauth:${provider}` }, requestFrom(c), true, { newUserOAuthId: oauthId }, policy);
 }
 
 /** A verified provider authenticates an existing account. Identity linking
