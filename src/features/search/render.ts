@@ -11,20 +11,22 @@ import { advancedSearchPage, bulkReplacePreviewPage } from './template';
 import { num } from '../../core/http/forms';
 import { queryFingerprint, recordRead } from '../../core/http/access-log';
 import {
-  advancedSearchFormCriteria,
   advancedSearchOperator,
   advancedSearchOrder,
-  advancedSearchPageSize,
   advancedSearchPageTypes,
   advancedSearchPathOptionsByPageType,
-  advancedSearchQueryString,
   advancedSearchSelectedPageType,
   advancedSearchSort,
-  advancedSearchTagGroups,
   advancedSearchTargetPageTypes,
-  parseAdvancedSearchCriteria,
   performAdvancedSearch,
 } from '../../core/db/search';
+import {
+  advancedSearchFormCriteria,
+  advancedSearchPageSize,
+  advancedSearchQueryString,
+  advancedSearchTagGroups,
+  parseAdvancedSearchCriteria,
+} from './query';
 import { resolveCmsConfig } from '../../core/db/content-config';
 import { editorTaxonomy } from '../../core/db/admin-queries';
 import { publication } from '../services';

@@ -24,8 +24,8 @@ import {
   advancedSearchOperator,
   advancedSearchSelectedPageType,
   advancedSearchTargetPageTypes,
-  parseAdvancedSearchCriteria,
 } from '../../core/db/search';
+import { parseAdvancedSearchCriteria } from './query';
 
 export const searchRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 

@@ -21,9 +21,9 @@ import {
   advancedSearchOrder,
   advancedSearchSort,
   getPathValue,
-  parseAdvancedSearchCriteria,
   sqliteJsonPath,
 } from '../src/core/db/search';
+import { parseAdvancedSearchCriteria } from '../src/features/search/query';
 import { chineseSearchVariants, toSimplified, toTraditional } from '../src/core/db/chinese';
 
 describe('forms helpers', () => {
