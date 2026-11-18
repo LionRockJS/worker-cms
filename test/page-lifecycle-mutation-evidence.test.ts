@@ -5,7 +5,7 @@ import worker from '../src/index';
 import { signJWT } from './auth-fixtures';
 import { verifyJWT } from '../src/core/auth/jwt';
 import { applyBulkPageAction } from '../src/core/pages/bulk-action';
-import { mutatePageLifecycle } from '../src/core/pages/lifecycle-mutation-evidence';
+import { mutatePageLifecycle } from '../src/features/trash/lifecycle-mutation-evidence';
 import { createAdvancedSearchBulkActionJob } from '../src/features/jobs/queue';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
 import type { Env,JWTPayload } from '../src/types';

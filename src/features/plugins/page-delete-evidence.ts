@@ -10,12 +10,12 @@ import { recordAuditOutage } from '../../core/db/audit-outages';
 import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { classFor } from '../../core/db/data-classes';
-import { trashPagesAsService, PageLifecycleUnavailableError } from '../../core/pages/lifecycle-mutation-evidence';
+import { PageLifecycleUnavailableError } from '../../core/pages/trash-lifecycle';
 import { pageTypeScopeAllows } from './page-types';
 import { forbiddenPageTypeBody } from './api/auth';
 import { collectionWhere, asPositiveSafeInteger } from './api/serialize';
 import { emitPluginHooks } from './api/hooks';
-import { publication } from '../services';
+import { publication, trashLifecycle } from '../services';
 
 const FIELDS=['id','uuid','page_type'];
 type Mode='single'|'batch'|'children';
@@ -23,6 +23,8 @@ type Mode='single'|'batch'|'children';
  * a replay or an assertion that the unacknowledged chunk rolled back. */
 export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:PluginPageMutationAuthority,mode:Mode,input:unknown):Promise<Response> {
  assertRegulatedWritesAllowed(c.env);
+ const trash = trashLifecycle();
+ if (!trash) throw new ServiceMutationUnavailableError();
  const operationId=crypto.randomUUID();let acknowledged=0,chunkIndex=0,inFlight=false;let evidenceClass=authority.dataClass;
  const detail:Record<string,unknown>={operation_id:operationId,registry_id:authority.registryId,identity_fingerprint:authority.identityFingerprint,principal:'credential_authenticated_plugin',mode};
  const asserted=c.req.header('x-acting-user-id');
@@ -91,7 +93,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
   while(acknowledged<targets.length){
    const chunk=targets.slice(acknowledged,acknowledged+100),before=acknowledged,after=acknowledged+chunk.length;
    inFlight=true;
-   const result=await trashPagesAsService(c.env,{actor:authority.actor,check:()=>[...authority.check(),intent.guard],allows:type=>pageTypeScopeAllows(authority.allowed,type),dataClass:evidenceClass,request:c,
+   const result=await trash.trashPagesAsService(c.env,{actor:authority.actor,check:()=>[...authority.check(),intent.guard],allows:type=>pageTypeScopeAllows(authority.allowed,type),dataClass:evidenceClass,request:c,
     detail:{...detail,chunk_index:chunkIndex,acknowledged_before:before,acknowledged_after:after,request_complete:after===targets.length,done:after===total,withdrawal:mode==='children'?'not_requested':'separate_effect'},before:()=>selectionCheck(before),after:()=>selectionCheck(after)},chunk.map(p=>Number(p.id)));
    if(result.count!==chunk.length)throw new Error('Deletion result unavailable');inFlight=false;
    acknowledged=after;chunkIndex++;

@@ -1118,7 +1118,7 @@ A feature may own code, tables, or both.
 | `search` | The advanced-search screen and bulk actions (code only; the query builder is core) |
 | `users-roles` | The user and role admin screens (code only; the tables and permission resolver are core) |
 | `i18n` | The languages and translations screens (code only; see the note below) |
-| `trash` | `trash_pages`, `trash_page_tags`, `trash_page_versions` (+2 indexes, 2 triggers) |
+| `trash` | Soft-delete, restore, and purge. Disabling it preserves retained trash records and refuses page deletion across admin, bulk jobs, and plugin APIs. |
 | `runtime-content-types` | `page_types`, `block_types` (+1 trigger) |
 | `media` | R2 uploads, `/media` delivery, the Files browser — plus `media_files` |
 | `plugin-pointer-indexes` | the 4 `idx_pages_pointer_*` expression indexes (requires `plugins`) — schema only, in its own slice directory |

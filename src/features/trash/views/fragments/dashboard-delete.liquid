@@ -1,0 +1,10 @@
+<form method="POST" action="{{ page.deleteAction }}" class="inline shrink-0"
+      data-confirm="{{ "view_strings.sections_dashboard.move_this_page_to_trash" | t }}">
+  <button type="submit"
+          title="{{ "view_strings.sections_dashboard.trash" | t }}"
+          aria-label="Move {{ page.name }} to trash"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash-can"></use></svg>
+    <span class="sr-only">{{ "view_strings.sections_dashboard.trash" | t }}</span>
+  </button>
+</form>

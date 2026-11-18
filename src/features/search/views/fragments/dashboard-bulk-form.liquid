@@ -21,7 +21,7 @@
             {% else %}
               <option value="" selected disabled>—</option>
             {% endif %}
-            <option value="delete">{{ "view_strings.shared_bulk_actions.move_to_trash" | t }}</option>
+            {% feature_fragment trash/bulk-delete-option %}
             <option value="replace_text">{{ "view_strings.shared_bulk_actions.replace_text" | t }}</option>
             {% if hasBulkTagOptions %}
               <option value="add_tag">{{ "view_strings.shared_bulk_actions.add_tags" | t }}</option>

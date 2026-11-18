@@ -1,3 +1,4 @@
+import { requireTrashLifecycle } from '../services';
 import { pageAccessFilter } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
 import { abortIf } from '../../core/db/transaction-guard';
@@ -102,6 +103,8 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
       !effectivePermissions(await resolveRolePermissions(env, true), current.role).has(required)) {
     throw new Error('Job permission revoked');
   }
+
+  if (input.action === 'delete') requireTrashLifecycle();
 
   const access = pageAccessFilter(job.user, 'write', 'p.uuid', true);
   if (input.scope === 'all' && !input.resolvedAll) {

@@ -8,7 +8,7 @@ import { Hono } from 'hono';
 import { holdsPage, trashPage, type HoldRow, type TrashListPage } from './template';
 import type { Env, Variables } from '../../types';
 import type { AppContext } from '../../core/http/context';
-import { mutatePageLifecycle, RecordHeldError } from '../../core/pages/lifecycle-mutation-evidence';
+import { mutatePageLifecycle, RecordHeldError } from './lifecycle-mutation-evidence';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
 import { classFor, resolveDataClasses } from '../../core/db/data-classes';
 import { mutationAuditEvidence } from '../../core/db/audit';

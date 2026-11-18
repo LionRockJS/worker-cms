@@ -5,6 +5,7 @@
 // interfaces and dispatch helpers in this file. Core therefore never imports
 // a feature implementation or a feature-owned contract directly.
 
+import { PageLifecycleUnavailableError, type TrashLifecycleService } from '../core/pages/trash-lifecycle';
 import type { HostSettingWrite } from '../core/db/settings-mutation-evidence';
 import type { AppContext } from '../core/http/context';
 import type { PublicationService } from './publication';
@@ -45,6 +46,7 @@ export type FeatureReservation =
 export interface FeatureServiceEntry {
   readonly id: string;
   publication?: PublicationService;
+  trashLifecycle?: TrashLifecycleService;
   reservePageCreate?(c: AppContext, pageType: string): Promise<FeatureReservation>;
   reservePageCreates?(env: Env, input: PageCreateReservationInput): Promise<FeatureReservation>;
   adminScreenProps?(c: AppContext, target: AdminScreenTarget): Promise<Record<string, unknown>>;
@@ -61,6 +63,16 @@ const servicesById = new Map(featureServiceEntries.map((entry) => [entry.id, ent
 
 export function publication(): PublicationService | undefined {
   return servicesById.get('publish')?.publication;
+}
+
+export function trashLifecycle(): TrashLifecycleService | undefined {
+  return servicesById.get('trash')?.trashLifecycle;
+}
+
+export function requireTrashLifecycle(): TrashLifecycleService {
+  const lifecycle = trashLifecycle();
+  if (!lifecycle) throw new PageLifecycleUnavailableError(true);
+  return lifecycle;
 }
 
 export function freeReservation(): FeatureReservation {

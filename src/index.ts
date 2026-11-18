@@ -2,7 +2,7 @@ import { IpAccessUnavailableError } from './core/auth/ip-access';
 import { auditRequestFrom,ServiceMutationUnavailableError } from './core/db/audit';
 import { SettingsMutationUnavailableError } from './core/db/settings-mutation-evidence';
 import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
-import { PageLifecycleUnavailableError } from './core/pages/lifecycle-mutation-evidence';
+import { PageLifecycleUnavailableError } from './core/pages/trash-lifecycle';
 import { ContentBatchEvidenceUnavailableError } from './core/pages/batch-mutation-evidence';
 import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
 // ============================================================

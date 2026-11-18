@@ -1,5 +1,4 @@
 import { pageAccessFilter, type PageAccessFilter } from '../auth/page-access';
-import { mutatePageLifecycle } from './lifecycle-mutation-evidence';
 import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext } from './batch-mutation-evidence';
 // Applying one action to many pages: publish, unpublish, move to trash, change tags,
 // or replace text in draft content.
@@ -12,9 +11,9 @@ import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext }
 // log — so it carries no job or screen concepts of its own.
 
 import { coreExtensions, type PageEvent, type PageEventPage } from '../extensions';
-import { publication } from '../../features/services';
+import { publication, requireTrashLifecycle } from '../../features/services';
 import type { Env, JWTPayload, Page } from '../../types';
-import type { TrashedPageRef } from '../db/admin-queries';
+import type { TrashedPageRef } from './trash-lifecycle';
 import { advancedSearchMatchingPageIds, type AdvancedSearchCriterion, type AdvancedSearchOperator } from '../db/search';
 import { logAuditBatch, type AuditActor } from '../db/audit';
 import { publicationStatusForPage, withDraftMetadata } from '../db/page-logic';
@@ -151,7 +150,7 @@ export async function applyBulkPageAction(
   if (action === 'delete') {
     const deleted: TrashedPageRef[] = [];
     for (const chunk of [ids]) {
-      const local=await mutatePageLifecycle(env,user,'trash',{ids:chunk},context);
+      const local=await requireTrashLifecycle().mutatePageLifecycle(env,user,'trash',{ids:chunk},context);
       const trashed=local.pages;
       if (!trashed.length) continue;
       // Withdraw the whole committed slice with one batch per target.

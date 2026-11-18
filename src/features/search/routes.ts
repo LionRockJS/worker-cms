@@ -1,5 +1,6 @@
 import { pageAccessFilter } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
+import { requireTrashLifecycle } from '../services';
 // Advanced search pages and bulk actions. (CSV export moved to the
 // import-export plugin; renderAdvancedSearch links there when it's installed.)
 
@@ -96,6 +97,8 @@ async function bulkAdvancedSearch(
   if (!(await userCan(c, BULK_ACTIONS[action].permission))) {
     return c.text(`Forbidden: Insufficient permissions. Required permission: ${BULK_ACTIONS[action].permission}`, 403);
   }
+
+  if (action === 'delete') requireTrashLifecycle();
 
   const scope = str(form.get('scope')) === 'all' ? 'all' : 'selected';
   const ids = uniquePageIds(form.getAll('page_ids'));

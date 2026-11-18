@@ -86,3 +86,18 @@ test('credits owns wallet panels, sidebar balances, and the visibility control',
     assert.equal('shared' in catalog.shell, credits);
   }
 });
+
+test('trash controls follow the trash switch when search is installed', () => {
+  for (const trash of [false, true]) {
+    const views = assembleViews({ trash, search: true, publish: true });
+    const dashboard = views.get('sections/dashboard.liquid').toString();
+    const editor = views.get('sections/editor.liquid').toString();
+    const search = views.get('sections/advanced-search.liquid').toString();
+    assert.equal(dashboard.includes('action="{{ page.deleteAction }}"'), trash);
+    assert.equal(editor.includes('data-delete-button'), trash);
+    assert.equal(dashboard.includes('value="delete"'), trash);
+    assert.equal(search.includes('value="delete"'), trash);
+    assert.match(dashboard, /value="replace_text"/);
+    assert.match(editor, /data-editor-form/);
+  }
+});

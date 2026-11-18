@@ -1,16 +1,15 @@
-import { legacyPageFilter, pageAccessFilter, pageAccessGuard } from '../auth/page-access';
-import type { AppContext } from '../http/context';
+import { legacyPageFilter, pageAccessFilter, pageAccessGuard } from '../../core/auth/page-access';
 import type { Env,JWTPayload } from '../../types';
-import type { TrashedPageRef } from '../db/admin-queries';
-import type { ContentBatchContext } from './batch-mutation-evidence';
-import { captureAccessAuthorization,captureContentJobAuthorization } from '../auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../db/data-classes';
-import { serviceMutationAuditEvidence, type AuditActor, attributedMutationAuditEvidence } from '../db/audit';
-import { abortIf } from '../db/transaction-guard';
-import { auditBackgroundReads } from '../http/access-log';
-import { recordAuditOutage } from '../db/audit-outages';
-import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
-import { publication } from '../../features/services';
+import { PageLifecycleUnavailableError, type ServiceTrashAuthority, type TrashedPageRef } from '../../core/pages/trash-lifecycle';
+import type { ContentBatchContext } from '../../core/pages/batch-mutation-evidence';
+import { captureAccessAuthorization,captureContentJobAuthorization } from '../../core/auth/access-authorization';
+import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { serviceMutationAuditEvidence, type AuditActor, attributedMutationAuditEvidence } from '../../core/db/audit';
+import { abortIf } from '../../core/db/transaction-guard';
+import { auditBackgroundReads } from '../../core/http/access-log';
+import { recordAuditOutage } from '../../core/db/audit-outages';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
+import { publication } from '../services';
 
 const PAGE=['id','uuid','created_at','updated_at','name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'];
 const TRASH=[...PAGE,'source_page_id'];
@@ -21,18 +20,6 @@ type Row=Record<string,string|number|null>;
 type Bind=string|number|null;
 /** olderThanDays selects trash rows unchanged for that long (W12 retention). */
 export interface LifecycleSelection {ids?:number[];pageType?:string|null;withinLastHour?:boolean;olderThanDays?:number}
-/** Trusted service adapter, constructed by the credential-owning feature.
- * Core never resolves contributor credentials or manufactures a CMS user. */
-export interface ServiceTrashAuthority {
-  actor: AuditActor;
-  check: () => D1PreparedStatement[];
-  allows: (pageType: string) => boolean;
-  dataClass: 'none'|'pii'|'phi';
-  detail: Record<string,unknown>;
-  before?: () => D1PreparedStatement[];
-  after?: () => D1PreparedStatement[];
-  request: AppContext;
-}
 export async function trashPagesAsService(env:Env,service:ServiceTrashAuthority,ids:number[]) {
   assertRegulatedWritesAllowed(env);
   let attempted=false;
@@ -40,7 +27,6 @@ export async function trashPagesAsService(env:Env,service:ServiceTrashAuthority,
   catch(error) { await recordAuditOutage(env,'health',[],service.actor,undefined,{captureIncomplete:true});throw new PageLifecycleUnavailableError(!attempted||(error instanceof Error && /^D1_ERROR:.*SQLITE_/s.test(error.message))); }
 }
 export type LifecycleAction='trash'|'restore'|'purge';
-export class PageLifecycleUnavailableError extends Error {constructor(readonly rollbackKnown=false){super('Page lifecycle change unavailable');}}
 /** A purge reached a page under an active hold (W12). Nothing was changed. */
 export class RecordHeldError extends Error {constructor(readonly uuids:string[]){super('Record under hold');}}
 const ACTIVE_HOLDS='SELECT page_uuid FROM record_holds WHERE released_at IS NULL';
