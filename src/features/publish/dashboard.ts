@@ -1,13 +1,26 @@
 import { requestPageFilter } from '../../core/auth/page-access';
 import type { Page } from '../../types';
 import type { AppContext } from '../../core/http/context';
-import type { DashboardPageRow, DashboardPublicationQuery } from '../publication';
+import type { DashboardPageRow, DashboardPublicationQuery, DashboardStatusFilterLink } from '../publication';
 import { listDashboardDraftPagesByUuids, listDashboardDraftPageUuids } from '../../core/db/admin-queries';
 import { publicationStatusForPage, withLiveStatus } from './status';
 import { recordTagReads } from '../../core/http/access-log';
 import { readD1PageSource } from './d1';
 import { auditLiveReads } from './read-audit';
 import { draftLectProjector } from './projection';
+
+export function dashboardStatusFilterLinks(
+  routeBase: string,
+  active: DashboardPublicationQuery['statusFilter'] | '',
+): DashboardStatusFilterLink[] {
+  return [
+    { label: 'All', translationKey: 'pages.status.all', href: routeBase, isActive: active === '' },
+    { label: 'Draft', translationKey: 'pages.status.draft', href: `${routeBase}?status=draft`, isActive: active === 'draft' },
+    { label: 'Scheduled', translationKey: 'pages.status.scheduled', href: `${routeBase}?status=scheduled`, isActive: active === 'scheduled' },
+    { label: 'Live', translationKey: 'pages.status.live', href: `${routeBase}?status=live`, isActive: active === 'live' },
+    { label: 'Ended', translationKey: 'pages.status.ended', href: `${routeBase}?status=ended`, isActive: active === 'ended' },
+  ];
+}
 
 type DashboardPublishedPageTagRow = { page_id: number; tag_id: number };
 type DashboardTagNameRow = { id: number; name: string; taxonomy_slug: string | null };

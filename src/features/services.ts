@@ -13,7 +13,7 @@ import type { Env } from '../types';
 import { featureServiceEntries } from '../generated/services';
 import { regulatedWritesBlocked } from '../core/http/regulated-writes';
 
-export type { DashboardPageRow } from './publication';
+export type { DashboardPageRow, DashboardStatusFilterLink } from './publication';
 
 export type AdminScreenTarget =
   | { screen: 'system-settings' }

@@ -41,16 +41,6 @@ async function importExportLinks(
 
 type DashboardStatusFilter = ReturnType<typeof dashboardStatusFilter>;
 type DashboardPageTagNameRow = { page_id: number; id: number; name: string; taxonomy_slug: string | null };
-function statusFilterLinks(routeBase: string, active: DashboardStatusFilter) {
-  return [
-    { label: 'All', translationKey: 'pages.status.all', href: routeBase, isActive: active === '' },
-    { label: 'Draft', translationKey: 'pages.status.draft', href: `${routeBase}?status=draft`, isActive: active === 'draft' },
-    { label: 'Scheduled', translationKey: 'pages.status.scheduled', href: `${routeBase}?status=scheduled`, isActive: active === 'scheduled' },
-    { label: 'Live', translationKey: 'pages.status.live', href: `${routeBase}?status=live`, isActive: active === 'live' },
-    { label: 'Ended', translationKey: 'pages.status.ended', href: `${routeBase}?status=ended`, isActive: active === 'ended' },
-  ];
-}
-
 async function dashboardBulkTagGroups(
   env: Env,
   configTaxonomies: Record<string, string>,
@@ -197,7 +187,7 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     flash: flash || undefined,
     returnPath: dashboardPageHref(routeBase, draftPages.pagination.currentPage, pageSize, statusParams),
     statusFilter,
-    statusFilters: publication() ? statusFilterLinks(routeBase, statusFilter) : [],
+    statusFilters: publication()?.dashboardStatusFilterLinks(routeBase, statusFilter) ?? [],
     searchAction: '/admin/advanced-search',
     advancedSearchHref: '/admin/advanced-search',
     importHref,
@@ -270,7 +260,7 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     returnPath: dashboardPageHref(routeBase, draftPages.pagination.currentPage, pageSize, statusParams),
     pageTypeFilter: pageType,
     statusFilter,
-    statusFilters: publication() ? statusFilterLinks(routeBase, statusFilter) : [],
+    statusFilters: publication()?.dashboardStatusFilterLinks(routeBase, statusFilter) ?? [],
     searchAction: `/admin/advanced-search/${encodeURIComponent(pageType)}`,
     advancedSearchHref: `/admin/advanced-search/${encodeURIComponent(pageType)}`,
     importHref,

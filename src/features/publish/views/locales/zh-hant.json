@@ -1,5 +1,6 @@
 {
   "view_strings": {
+    "sections_editor.live": "已發佈",
     "sections_dashboard.draft": "草稿",
     "sections_dashboard.ingest_submission": "接收提交內容",
     "sections_dashboard.live_content_differs_from_draft": "已發佈內容與草稿不同",

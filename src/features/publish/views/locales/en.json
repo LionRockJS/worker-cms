@@ -1,5 +1,6 @@
 {
   "view_strings": {
+    "sections_editor.live": "Live",
     "sections_dashboard.draft": "Draft",
     "sections_dashboard.ingest_submission": "Ingest submission",
     "sections_dashboard.live_content_differs_from_draft": "Live content differs from draft",

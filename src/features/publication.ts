@@ -1,5 +1,6 @@
 import type { Env, Page, PageVersion } from '../types';
 import type { AuditActor } from '../core/db/audit';
+import type { UiTranslator } from '../core/i18n';
 import type { AppContext } from '../core/http/context';
 import type { LivePageSnapshot, PagePublicationStatus } from '../contracts/publish';
 
@@ -63,6 +64,13 @@ export interface BulkUnpublishOutcome {
 
 export type DashboardPageRow = Page & { isDraftMissing?: boolean; tagNames?: string[] };
 
+export interface DashboardStatusFilterLink {
+  label: string;
+  translationKey?: string;
+  href: string;
+  isActive: boolean;
+}
+
 export interface DashboardPublicationQuery {
   pageType?: string;
   requestedPage: number;
@@ -88,6 +96,8 @@ export interface PublicationService {
     results: Array<DashboardPageRow & DraftPublicationRow>;
     pagination: { total: number; currentPage: number; totalPages: number; limit: number };
   }>;
+  dashboardStatusFilterLinks(routeBase: string, status: PagePublicationStatus | ''): DashboardStatusFilterLink[];
+  renderLiveVersionBadge(t: UiTranslator): string;
   dashboardPublishedTags(c: AppContext, pageIds: number[]): Promise<Array<{ pageId: number; name: string }>>;
   submissionMirrorIds(db: D1DatabaseClient, pageIds: number[]): Promise<Set<number>>;
   ingestSubmissions(env: Env, actor?: AuditActor): Promise<{ scanned: number; created: number; more: boolean }>;

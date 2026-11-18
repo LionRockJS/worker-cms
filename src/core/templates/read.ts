@@ -4,6 +4,7 @@
 // client-side snippet loading, CRDT, or presence — so it is safe to show a page
 // without any risk of accidental edits.
 
+import { publication } from '../../features/services';
 import { adminLayout, escHtml, type BaseTemplateProps } from '../render/layout';
 import {
   renderStructuredEditor,
@@ -262,6 +263,7 @@ export async function readPage(
     : '';
 
   // Version history — links open each version read-only.
+  const liveBadge = liveVersionId === undefined ? '' : publication()?.renderLiveVersionBadge(t) ?? '';
   const versionsHtml = structured.versions
     .map((entry) => {
       const label = `${entry.created_at}${entry.action ? ` - ${entry.action}` : ''}`;
@@ -274,9 +276,7 @@ export async function readPage(
              ? 'border-amber-400 bg-amber-50 text-amber-800'
              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
          }">${escHtml(label)}${
-        live
-          ? ` <span class="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-green-700">${escHtml(t('view_strings.sections_editor.live', 'Live'))}</span>`
-          : ''
+        live ? liveBadge : ''
       }</a>`;
     })
     .join('');

@@ -10,8 +10,9 @@ import {
   unpublishPageFromTargets,
   unpublishPagesFromTargets,
 } from './index';
-import { dashboardPublishedTags, filteredDashboardPages } from './dashboard';
+import { dashboardPublishedTags, dashboardStatusFilterLinks, filteredDashboardPages } from './dashboard';
 import { annotateDraftPages, editorPublicationState, filterDraftIdsByStatus } from './status';
+import { renderLiveVersionBadge } from './version-badge';
 import { ingestSubmissions } from './submission-ingest';
 import { eraseSubmissionSources } from './submission-erasure';
 import { submissionMirrorIds } from './submission-mirrors';
@@ -29,6 +30,8 @@ export const publishServices: FeatureServiceEntry = {
     unpublishPageFromTargets,
     unpublishPagesFromTargets,
     dashboardPublishedTags,
+    dashboardStatusFilterLinks,
+    renderLiveVersionBadge,
     filteredDashboardPages,
     annotateDraftPages,
     editorPublicationState,

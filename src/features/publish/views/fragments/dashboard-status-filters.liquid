@@ -1,0 +1,11 @@
+{% if hasStatusFilters %}
+  <div class="inline-flex h-9 overflow-hidden rounded-lg border border-gray-300 bg-white text-sm font-semibold shadow-sm">
+    {% for filter in statusFilters %}
+      <a href="{{ filter.href }}"
+         {% if filter.isActive %}aria-current="page"{% endif %}
+         class="inline-flex items-center border-r border-gray-300 px-3 last:border-r-0 {% if filter.isActive %}bg-indigo-600 text-white{% else %}text-gray-700 hover:bg-gray-50{% endif %}">
+        {% if filter.translationKey %}{{ filter.translationKey | t }}{% else %}{{ filter.label }}{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}

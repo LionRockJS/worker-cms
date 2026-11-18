@@ -1,3 +1,4 @@
+import type { DashboardStatusFilterLink } from '../../features/services';
 import { adminLayout, type BaseTemplateProps } from '../render/layout';
 import { renderView } from '../render/liquid';
 import { maskPrivateValue } from '../render/privacy';
@@ -24,13 +25,6 @@ interface DashboardPagination {
   previousHref: string;
   nextHref: string;
   lastHref: string;
-}
-
-interface DashboardStatusFilterLink {
-  label: string;
-  translationKey?: string;
-  href: string;
-  isActive: boolean;
 }
 
 interface DashboardBulkTagGroup {

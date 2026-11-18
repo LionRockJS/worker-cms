@@ -9,9 +9,9 @@ test('publishing controls assemble only into publish-enabled shared screens', as
   const liquid = new browser.liquidjs.Liquid();
   liquid.registerFilter('t', (key) => key);
   const controls = {
-    dashboard: ['action="{{ page.publishAction }}"', 'action="{{ page.pullAction }}"', 'value="unpublish"', 'data-live-weight'],
+    dashboard: ['action="{{ page.publishAction }}"', 'action="{{ page.pullAction }}"', 'value="unpublish"', 'data-live-weight', 'for filter in statusFilters'],
     'advanced-search': ['Live weight is {{ page.liveWeight }}'],
-    editor: ['data-publish-schedule-toggle', 'view_strings.sections_editor.save_and_publish'],
+    editor: ['data-publish-schedule-toggle', 'view_strings.sections_editor.save_and_publish', 'view_strings.sections_editor.live'],
     tags: ['/admin/tags/sync-published'],
   };
   for (const publish of [false, true]) {
@@ -33,6 +33,7 @@ test('publishing controls assemble only into publish-enabled shared screens', as
     assert.equal(editor.includes('value="2030-01-02T12:05"'), publish);
     const strings = JSON.parse(views.get('locales/en.json')).view_strings;
     assert.equal('sections_editor.save_and_publish' in strings, publish);
+    assert.equal('sections_editor.live' in strings, publish);
     assert.ok(![...views.keys()].some(path => path.startsWith('fragments/')));
   }
 });
