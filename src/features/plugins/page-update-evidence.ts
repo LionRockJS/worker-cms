@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 import type { AppContext } from '../../core/http/context';
 import type { Page } from '../../types';
 import type { PluginAuth } from './api/types';
@@ -74,9 +75,9 @@ export function assertPluginPageAuthority(authority: Authority, purpose: 'create
 export async function readPluginPageUpdateSources(c: AppContext, authority: Authority, ids: number[]) {
   try {
     if (!authority?.[brand] || authority.purpose !== 'update' || ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) throw new Error('Invalid page source manifest');
-    const args = [json(ids)], where = 'id IN (SELECT value FROM json_each(?))';
+    const args = [json(ids)], where = `id IN (SELECT value FROM json_each(?)) AND ${legacyPageFilter('uuid')}`;
     const pages = await snapshot<Page>(c, 'pages', PAGE, where, args);
-    const selected = 'page_id IN (SELECT value FROM json_each(?))';
+    const selected = `page_id IN (SELECT id FROM pages WHERE ${where})`;
     const links = await snapshot<Row>(c, 'page_tags', LINK, selected, args);
     const versions = await snapshot<Row>(c, 'page_versions', HISTORY, selected, args);
     const tags = await snapshot<Row>(c, 'tags', TAG, 'id IN (SELECT value FROM json_each(?))', [json([...new Set(links.map(link => link.tag_id))])]);
@@ -135,7 +136,7 @@ export async function commitPluginPageUpdates(c: AppContext, authority: Authorit
       if (next.page_id !== before.page_id && next.page_id !== null) {
         if (!Number.isSafeInteger(next.page_id) || next.page_id <= 0) throw new Error('Invalid parent');
         // Existence, not an implicit grant to edit or read the parent's body.
-        const parentGuard = abortIf(c.env, 'NOT EXISTS(SELECT 1 FROM pages WHERE id=?)', [next.page_id]);
+        const parentGuard = abortIf(c.env, `NOT EXISTS(SELECT 1 FROM pages WHERE id=? AND ${legacyPageFilter('pages.uuid')})`, [next.page_id]);
         statements.push(parentGuard); relationshipGuards.push(parentGuard);
       }
       if (next.slug !== before.slug) { const slugGuard = abortIf(c.env, 'EXISTS(SELECT 1 FROM pages WHERE slug=? AND id<>?)', [next.slug, before.id]); statements.push(slugGuard); relationshipGuards.push(slugGuard); }

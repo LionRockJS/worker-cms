@@ -1,3 +1,4 @@
+import { requestPageFilter, type PageAccessFilter } from '../../../core/auth/page-access';
 // The Files browser: what is in the media bucket and which pages reference it.
 //
 // Extracted from routes/admin/settings.ts, which mixed it in with branding,
@@ -63,6 +64,7 @@ function pageReferencesMedia(lect: string | null, key: string): boolean {
 async function linkedPagesForMedia(
   db: D1DatabaseClient,
   keys: string[],
+  access: PageAccessFilter,
 ): Promise<Map<string, ContentListMediaItem['linkedPages']>> {
   const links = new Map<string, ContentListMediaItem['linkedPages']>(keys.map((key) => [key, []]));
   if (!keys.length) return links;
@@ -72,8 +74,8 @@ async function linkedPagesForMedia(
   // in memory. A dynamically generated OR-of-LIKE expression can exceed
   // SQLite's complexity limit when the bucket page contains many objects.
   const pages = await db.prepare(
-    "SELECT id, name, slug, lect, page_type FROM pages WHERE instr(lect, '/media/') > 0 ORDER BY name ASC, id ASC",
-  ).all<PageRow>();
+    `SELECT id, name, slug, lect, page_type FROM pages p WHERE instr(lect, '/media/') > 0 AND ${access.sql} ORDER BY name ASC, id ASC`,
+  ).bind(...access.args).all<PageRow>();
 
   const returned = new Map<number, PageRow>();
   for (const page of pages.results) {
@@ -100,7 +102,7 @@ mediaFilesRoutes.get('/settings/content', async (c) => {
   const listed = await c.env.MEDIA_BUCKET.list({ limit: MEDIA_LIST_PAGE_SIZE, cursor });
   const keys = listed.objects.map((object) => object.key);
   for (const key of keys) recordRead({ action: 'media.list', kind: 'media_prefix', key, targetType: 'media', ids: [key], count: 1 });
-  const linkedPages = await linkedPagesForMedia(c.env.DB, keys);
+  const linkedPages = await linkedPagesForMedia(c.env.DB, keys, await requestPageFilter(c, 'read', 'p.uuid'));
   // A withheld object 404s on /media/..., so the browser must point at the
   // authenticated route instead or every regulated row looks broken.
   const classify = await mediaClassifier(c.env);

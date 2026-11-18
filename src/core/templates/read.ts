@@ -155,6 +155,8 @@ export async function readPage(
     /** Server-side UI-string lookup (see uiTranslator); labels fall back to English. */
     t: UiTranslator;
     /** Resolved editor display names (see fetchEditorUsers); falls back to raw ids. */
+    pageAccessHref?: string;
+    canEdit?: boolean;
     editorUsers?: Array<{ id: number; name: string }>;
     structured: {
       config: CmsConfig;
@@ -300,11 +302,12 @@ export async function readPage(
       </a>
       <h2 class="min-w-0 break-words text-2xl font-bold text-gray-900">${escHtml(page.name)}</h2>
       <span class="ml-1 shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-gray-500">${escHtml(t('read.read_only', 'Read-only'))}</span>
-      <a href="${escHtml(editHref)}"
+      ${opts.canEdit !== false ? `<a href="${escHtml(editHref)}"
          class="ml-auto inline-flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700">
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="/assets/icons.svg#pencil-square"></use></svg>
         ${escHtml(t('common.edit', 'Edit'))}
-      </a>
+      </a>` : ''}
+      ${opts.pageAccessHref ? `<a class="text-indigo-600" href="${escHtml(opts.pageAccessHref)}">${escHtml(t('page_access.title', 'Page access'))}</a>` : ''}
     </div>
 
     ${versionBanner}
@@ -326,7 +329,7 @@ export async function readPage(
       ${versionsSection}
 
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <a href="${escHtml(editHref)}" class="w-full rounded-lg bg-indigo-600 px-6 py-2 text-center text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 sm:w-auto">${escHtml(t('common.edit', 'Edit'))}</a>
+        ${opts.canEdit !== false ? `<a href="${escHtml(editHref)}" class="w-full rounded-lg bg-indigo-600 px-6 py-2 text-center text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 sm:w-auto">${escHtml(t('common.edit', 'Edit'))}</a>` : ''}
         <a href="${escHtml(backHref)}" class="w-full rounded-lg border border-gray-300 bg-white px-6 py-2 text-center text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 sm:w-auto">${escHtml(t('common.back', 'Back'))}</a>
       </div>
     </div>

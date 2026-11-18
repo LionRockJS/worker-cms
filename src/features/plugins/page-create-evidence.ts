@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 import type { AppContext } from '../../core/http/context';
 import type { Page } from '../../types';
 import type { PreparedCreate } from './api/types';
@@ -189,7 +190,7 @@ export async function commitPluginPageCreates(c:AppContext,source:PluginPageCrea
       const classes=[classFor(source.authority.policy,'page_type',plan.pageType),...source.tags.filter(tag=>plan.tags.includes(Number(tag.id))).map(tag=>classFor(source.authority.policy,'taxonomy',String(tag.taxonomy_slug??'default')))];
       const level=Math.max(source.copy?.sources.find(s=>s.targetUuid===plan.uuid)?.floor??0,classes.includes('phi')?2:classes.includes('pii')?1:0);
       statements.push(abortIf(c.env,'COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)<>? OR (SELECT COUNT(*) FROM pages WHERE slug=?)<>1',[plan.uuid,level,plan.slug]));
-      if(plan.parentId!==null)statements.push(abortIf(c.env,'NOT EXISTS(SELECT 1 FROM pages WHERE id=?)',[plan.parentId]));
+      if(plan.parentId!==null)statements.push(abortIf(c.env,`NOT EXISTS(SELECT 1 FROM pages WHERE id=? AND ${legacyPageFilter('pages.uuid')})`,[plan.parentId]));
     }
     for(const quota of source.quotas)statements.push(abortIf(c.env,`(SELECT COUNT(*) FROM pages p WHERE ${quota.sql})>?`,[...quota.args,quota.limit]));
     for(const [type,previous] of source.typeFloors){const classes=source.plans.filter(p=>p.pageType===type).flatMap(p=>[classFor(source.authority.policy,'page_type',type),...source.tags.filter(t=>p.tags.includes(Number(t.id))).map(t=>classFor(source.authority.policy,'taxonomy',String(t.taxonomy_slug??'default')))]);const next=source.copy?previous:Math.max(previous,classes.includes('phi')?2:classes.includes('pii')?1:0);statements.push(abortIf(c.env,`(${source.typeFloorSql})<>?`,[...source.typeFloorArgs(type),next]));}

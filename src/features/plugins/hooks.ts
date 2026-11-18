@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 // ============================================================
 // Lifecycle hook dispatch — fans a CMS event out to every plugin
 // that subscribed to it in its manifest.
@@ -92,7 +93,13 @@ export async function deliverHooks(
   const tenantId = pluginTenantId(env);
 
   for (let start = 0; start < pages.length; start += HOOK_BATCH_SIZE) {
-    const chunk = pages.slice(start, start + HOOK_BATCH_SIZE);
+    const candidates = pages.slice(start, start + HOOK_BATCH_SIZE);
+    const visible = await env.DB.prepare(`SELECT target.key AS idx FROM json_each(?) target
+      LEFT JOIN pages p ON p.id = json_extract(target.value,'$.id')
+      WHERE ${legacyPageFilter("COALESCE(json_extract(target.value,'$.uuid'),p.uuid)")}`)
+      .bind(JSON.stringify(candidates.map(({ id, uuid }) => ({ id, uuid })))).all<{ idx: number }>();
+    const chunk = visible.results.map(row => candidates[row.idx]);
+    if (!chunk.length) continue;
     const body = JSON.stringify({ event, page: chunk[0], pages: chunk, user: userPayload });
 
     for (const candidate of plugins) {

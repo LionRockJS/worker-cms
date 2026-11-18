@@ -1,3 +1,4 @@
+import { pageAllowed, pagePolicy } from '../auth/page-access';
 import { resolveDataClasses } from '../db/data-classes';
 import { regulatedPages } from '../db/regulated-pages';
 import { sessionIdleTtl, validateAccessSession } from '../auth/sessions';
@@ -140,6 +141,11 @@ export class PageSyncDO implements DurableObject {
       this.sql.exec(`DELETE FROM lww_field_ops`);
       this.sql.exec(`DELETE FROM crdt_text_docs`);
       await this.broadcast(JSON.stringify({ type: 'saved' }));
+      return new Response('ok');
+    }
+
+    if (url.searchParams.get('action') === 'access-changed') {
+      for (const socket of this.state.getWebSockets()) await this.authorize(socket);
       return new Response('ok');
     }
 
@@ -390,8 +396,9 @@ export class PageSyncDO implements DurableObject {
     if (this.env.REGULATED_MODE && this.env.REGULATED_MODE !== 'false') return false;
     const classes = await resolveDataClasses(this.env);
     if (!classes.ok) return false;
+    let page: Page | null = null;
     if (attachment.pageId) {
-      const page = await this.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(attachment.pageId).first<Page>();
+      page = await this.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(attachment.pageId).first<Page>();
       if (!page) return false;
       const regulated = await regulatedPages(this.env, [page]);
       if (regulated.unavailable || regulated.ids.size) return false;
@@ -406,7 +413,11 @@ export class PageSyncDO implements DurableObject {
       type: 'access', iat: 0, name: '', email: '', role: '',
     }, sessionIdleTtl(this.env));
     if (!user) return false;
-    if (effectivePermissions(await resolveRolePermissions(this.env), user.role).has('content:write')) return true;
+    const legacy = effectivePermissions(await resolveRolePermissions(this.env), user.role).has('content:write');
+    if (page) {
+      if (await pageAllowed(this.env, user, page.id, 'write', legacy)) return true;
+      if ((await pagePolicy(this.env, page.uuid))?.enabled) return false;
+    } else if (legacy) return true;
     return !!attachment.grantExp && attachment.grantExp > Math.floor(Date.now() / 1000);
   }
 

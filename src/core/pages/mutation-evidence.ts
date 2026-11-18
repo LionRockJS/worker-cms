@@ -2,7 +2,8 @@ import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
 import { ContentBatchEvidenceUnavailableError } from './batch-mutation-evidence';
 import type { Page, PageVersion } from '../../types';
 import type { AppContext } from '../http/context';
-import { captureAccessAuthorization } from '../auth/access-authorization';
+import { pageAccessGuard, pageAllowed } from '../auth/page-access';
+import { captureAccessAuthorization, captureSelfAuthorization } from '../auth/access-authorization';
 import { recordPolicyDenial } from '../auth/denials';
 import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
 import { mutationAuditEvidence, contextActor } from '../db/audit';
@@ -29,8 +30,10 @@ function tagsGuard(c: AppContext, uuid: string, ids: number[]) {
  * service/delegation contract rather than manufacturing an HTTP actor. */
 async function prepare(c: AppContext, before: Page | undefined, next: DraftContent | undefined, submittedTags?: unknown[]) {
   assertRegulatedWritesAllowed(c.env);
-  const authority = await captureAccessAuthorization(c.env, c.get('user'), 'content:write');
-  if (!authority.allowed) { await recordPolicyDenial(c, 'management_permission_changed'); throw new Error('Content authority changed'); }
+  const actor = c.get('user');
+  const authority = before ? await captureSelfAuthorization(c.env, actor)
+    : await captureAccessAuthorization(c.env, actor, 'content:write');
+  if (!authority.allowed || (before && !await pageAllowed(c.env, actor, before.id, 'write', authority.permissions.has('content:write')))) { await recordPolicyDenial(c, 'management_permission_changed'); throw new Error('Content authority changed'); }
   const policy = await resolveDataClasses(c.env, true);
   if (!policy.ok) throw new Error('Content classification unavailable');
   const selected = submittedTags === undefined ? undefined : [...new Set(submittedTags.map(Number).filter(Number.isFinite))];
@@ -58,7 +61,7 @@ async function prepare(c: AppContext, before: Page | undefined, next: DraftConte
   if (before) recordPageReads('page.mutation-read',[before]);
   if (await flushReadAudit(c)) throw new Error('Content read evidence unavailable');
   const guards = [authority.guard(), classificationPolicyGuard(c.env,policy)];
-  if (before) guards.push(pageGuard(c,before),tagsGuard(c,before.uuid,oldTags),
+  if (before) guards.push(pageAccessGuard(c.env, actor, [before.uuid], authority.permissions.has('content:write')), pageGuard(c,before),tagsGuard(c,before.uuid,oldTags),
     abortIf(c.env,'(SELECT level FROM page_sensitivity_floors WHERE uuid = ?) IS NOT ?',[before.uuid,retained]));
   guards.push(abortIf(c.env, `EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM tags t
     WHERE t.id = json_extract(e.value,'$.id') AND t.taxonomy_slug IS json_extract(e.value,'$.taxonomy_slug')))`,[JSON.stringify(tagRows)]));
@@ -87,6 +90,9 @@ export async function saveDraftContent(c: AppContext, next: DraftContent, tags: 
   }
   statements.push(abortIf(c.env,'changes() <> 1'),
     c.env.DB.prepare('DELETE FROM page_tags WHERE page_id = (SELECT id FROM pages WHERE uuid = ?)').bind(uuid));
+  if (!before && next.creator) statements.push(c.env.DB.prepare(
+    'INSERT INTO page_access_policies (page_uuid,owner_id,mode) VALUES (?,?,600)',
+  ).bind(uuid, next.creator));
   for (const tag of prepared.targetTags) statements.push(c.env.DB.prepare(`INSERT INTO page_tags (id,page_id,tag_id) SELECT ${nextIdSql('page_tags')}, id, ? FROM pages WHERE uuid = ?`).bind(tag,uuid));
   const action = source ? 'restore' : before ? 'update' : 'create';
   const storedAction = versionAction ?? action;
@@ -95,7 +101,12 @@ export async function saveDraftContent(c: AppContext, next: DraftContent, tags: 
   const evidence = mutationAuditEvidence(c,{action:`page.${action}`,entityType:'page',entityId:uuid,
     detail:{fields:before ? contentFields.filter(f=>before[f]!==next[f]) : [...contentFields],version_uuid:versionUuid,
       ...(source ? {source_version_id:source.id}:{}), tag_count:prepared.targetTags.length}},prepared.dataClass,{requirePreviousChange:true,policy:prepared.policy});
-  statements.push(evidence.write,evidence.guard,
+  statements.push(evidence.write,evidence.guard);
+  if (!before && next.creator) statements.push(abortIf(c.env, `NOT EXISTS (SELECT 1 FROM page_access_policies
+    WHERE page_uuid = ? AND owner_id = ? AND enabled = 1 AND mode = 600 AND group_role IS NULL AND revision = 1)`,
+    [uuid, next.creator]));
+  if (before) statements.push(pageAccessGuard(c.env, c.get('user'), [uuid], prepared.authority.permissions.has('content:write')));
+  statements.push(
     abortIf(c.env,`NOT EXISTS (SELECT 1 FROM pages WHERE uuid = ? AND ${contentFields.map(f=>`${f} IS ?`).join(' AND ')})`,[uuid,...contentFields.map(f=>next[f])]),
     tagsGuard(c,uuid,prepared.targetTags),
     abortIf(c.env,`NOT EXISTS (SELECT 1 FROM page_versions v JOIN pages p ON p.id = v.page_id WHERE p.uuid = ? AND v.uuid = ? AND v.lect IS ? AND v.action = ? AND v.id BETWEEN 1 AND 9007199254740991)

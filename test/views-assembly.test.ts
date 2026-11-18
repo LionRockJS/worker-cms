@@ -201,7 +201,7 @@ describe('view assembly', () => {
     expect(editor).toContain('pages.status.draft');
   });
 
-  it('keeps the editor whitelist control beside the bottom page metadata', async () => {
+  it('keeps the legacy editor label control beside the bottom page metadata', async () => {
     const editor = await (await env.VIEWS.fetch('https://views.local/sections/editor.liquid')).text();
     expect(editor.indexOf('data-editors-combobox')).toBeGreaterThan(editor.indexOf('id="lect_json_details"'));
     expect(editor.indexOf('data-editors-combobox')).toBeGreaterThan(editor.indexOf('view_strings.sections_editor.created_by'));
@@ -330,7 +330,7 @@ describe('view assembly', () => {
     const footer = editor.slice(editor.indexOf('<div class="flex min-w-0 flex-col gap-3 sm:flex-row'));
     const save = footer.indexOf('view_strings.sections_editor.save_changes');
     const saveAndPublish = footer.indexOf('view_strings.sections_editor.save_and_publish');
-    expect(editor).toContain('{% if publishEnabled and isEdit and isPublished %}');
+    expect(editor).toContain('{% if publishEnabled and canPublishPage and isEdit and isPublished %}');
     expect(saveAndPublish).toBeGreaterThan(save);
     expect(footer).toContain('name="action" value="publish"');
   });

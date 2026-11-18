@@ -1,3 +1,4 @@
+import type { PageAccessFilter } from '../auth/page-access';
 // Centralized D1 access helpers used across the admin routes.
 // SQL stays raw here — this module just removes the duplication of issuing it.
 
@@ -385,17 +386,17 @@ export async function restoreTrashedPages(
 
 export async function listDashboardDraftPages(
   db: D1DatabaseClient,
-  options: { pageType?: string; page: number; limit: number },
+  options: { pageType?: string; page: number; limit: number; access?: PageAccessFilter },
 ): Promise<DashboardListResult> {
-  const whereSql = options.pageType ? 'WHERE page_type = ?' : '';
-  const baseParams = options.pageType ? [options.pageType] : [];
+  const whereSql = `WHERE ${options.pageType ? 'page_type = ? AND ' : ''}${options.access?.sql ?? '1'}`;
+  const baseParams = [...(options.pageType ? [options.pageType] : []), ...(options.access?.args ?? [])];
   const total = await countPageMetadata(db, whereSql.replace(/^WHERE\s+/, ''), baseParams, { types: options.pageType ? [options.pageType] : undefined });
   const totalPages = Math.max(1, Math.ceil(total / options.limit));
   const currentPage = Math.min(options.page, totalPages);
   const currentOffset = (currentPage - 1) * options.limit;
 
   const pages = await db.prepare(
-    `SELECT * FROM pages ${whereSql}
+    `SELECT p.* FROM pages p ${whereSql}
      ORDER BY weight ASC, name ASC, id ASC
      LIMIT ? OFFSET ?`,
   )
@@ -415,12 +416,12 @@ export async function listDashboardDraftPages(
 
 export async function listDashboardDraftPageUuids(
   db: D1DatabaseClient,
-  options: { pageType?: string } = {},
+  options: { pageType?: string; access?: PageAccessFilter } = {},
 ): Promise<string[]> {
-  const whereSql = options.pageType ? 'WHERE page_type = ?' : '';
-  const params = options.pageType ? [options.pageType] : [];
+  const whereSql = `WHERE ${options.pageType ? 'page_type = ? AND ' : ''}${options.access?.sql ?? '1'}`;
+  const params = [...(options.pageType ? [options.pageType] : []), ...(options.access?.args ?? [])];
   const pages = await db.prepare(
-    `SELECT uuid FROM pages ${whereSql}
+    `SELECT uuid FROM pages p ${whereSql}
      ORDER BY weight ASC, name ASC, id ASC`,
   )
     .bind(...params)
@@ -431,15 +432,15 @@ export async function listDashboardDraftPageUuids(
 export async function listDashboardDraftPagesByUuids(
   db: D1DatabaseClient,
   uuids: string[],
-  options: { pageType?: string } = {},
+  options: { pageType?: string; access?: PageAccessFilter } = {},
 ): Promise<Page[]> {
   if (!uuids.length) return [];
   const placeholders = uuids.map(() => '?').join(',');
   const pageTypeSql = options.pageType ? ' AND page_type = ?' : '';
-  const params = options.pageType ? [...uuids, options.pageType] : uuids;
+  const params = [...uuids, ...(options.pageType ? [options.pageType] : []), ...(options.access?.args ?? [])];
   const pages = await db.prepare(
-    `SELECT * FROM pages
-     WHERE uuid IN (${placeholders})${pageTypeSql}`,
+    `SELECT p.* FROM pages p
+     WHERE uuid IN (${placeholders})${pageTypeSql} AND ${options.access?.sql ?? '1'}`,
   )
     .bind(...params)
     .all<Page>();

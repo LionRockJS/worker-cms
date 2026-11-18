@@ -1,3 +1,4 @@
+import { pageAccessGuard } from '../auth/page-access';
 import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
@@ -53,7 +54,7 @@ async function prepare(env: Env, user: JWTPayload, pages: Array<Pick<Page,'id'|'
   const floorRows = floors.results as Array<{uuid:string;level:number}>;
   const versionRows = versions.results as Array<{id:number;page_id:number}>;
   if (floorRows.some(f=>f.level!==1&&f.level!==2)) throw new Error('Content floor invalid');
-  const guards = [authority.guard(),classificationPolicyGuard(env,policy)];
+  const guards = [authority.guard(),pageAccessGuard(env,user,pages.map(page => page.uuid),true),classificationPolicyGuard(env,policy)];
   if (job) guards.push(job.delegationGuard);
   const membershipGuard = () => abortIf(env, `(SELECT COUNT(*) FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?))) <> ?
     OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_tags t WHERE t.id=json_extract(e.value,'$.id')

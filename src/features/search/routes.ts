@@ -1,3 +1,4 @@
+import { pageAccessFilter } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
 // Advanced search pages and bulk actions. (CSV export moved to the
 // import-export plugin; renderAdvancedSearch links there when it's installed.)
@@ -215,7 +216,7 @@ async function bulkAdvancedSearchInline(
       criteria: input.criteria,
       operator: input.operator,
       status: input.status,
-    })
+    }, undefined, pageAccessFilter(c.get('user'), 'write', 'p.uuid', true))
     : input.ids;
 
   const slice = targetIds.slice(0, BULK_ACTION_PAGE_LIMIT);

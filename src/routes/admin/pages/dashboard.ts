@@ -1,3 +1,4 @@
+import { hasReadablePage, requestPageFilter } from '../../../core/auth/page-access';
 import { saveDraftContent, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // The dashboard and page listings: all pages, per-type lists, and the
@@ -22,7 +23,7 @@ import { dashboardPagination, renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { userCan } from '../../../core/auth/permissions';
 import { loadAdminHomeSettings } from '../../../core/db/settings';
-import { requirePermission } from '../../../core/auth/guards';
+import { requirePageListing, requirePermission } from '../../../core/auth/guards';
 import type { AppContext } from '../../../core/http/context';
 import type { DashboardPageRow } from '../../../core/publish/service';
 
@@ -128,6 +129,7 @@ async function dashboardPagesForRequest(
   } else {
     const draftPages = await listDashboardDraftPages(c.env.DB, {
       pageType,
+      access: await requestPageFilter(c, 'read', 'p.uuid'),
       page: requestedPage,
       limit: pageSize,
     });
@@ -220,6 +222,7 @@ pageDashboardRoutes.get('/', async (c) => {
   }
 
   if (!canReadContent) {
+    if (await hasReadablePage(c)) return c.redirect('/admin/pages/list');
     return renderPage(c, viewerHomePage, {});
   }
 
@@ -228,7 +231,7 @@ pageDashboardRoutes.get('/', async (c) => {
 
 // The configurable /admin home may point at a plugin dashboard. Keep this
 // permanent page-list URL available for navigation and deep links.
-pageDashboardRoutes.get('/pages/list', requirePermission('content:read'), (c) => renderAllPagesList(c, '/admin/pages/list'));
+pageDashboardRoutes.get('/pages/list', requirePageListing, (c) => renderAllPagesList(c, '/admin/pages/list'));
 
 pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read'), async (c) => {
   const pageType = c.req.param('pageType');

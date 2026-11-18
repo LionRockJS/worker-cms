@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 import type { AppContext } from '../../core/http/context';
 import type { PluginAuth } from './api/types';
 import type { PluginPageMutationAuthority } from './page-update-evidence';
@@ -47,6 +48,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
    if(raw.some(id=>(mode==='batch'&&typeof id!=='number')||asPositiveSafeInteger(id)===null))return c.json({error:'invalid_id'},400);
    const ids=[...new Set(raw.map(id=>asPositiveSafeInteger(id)!))];where='id IN (SELECT value FROM json_each(?))';args=[json(ids)];
   }
+  where = `(${where}) AND ${legacyPageFilter('uuid')}`;
   const count=await c.env.DB.prepare(`SELECT COUNT(*) n FROM pages WHERE ${where}`).bind(...args).first<{n:number}>();
   if(!count||!Number.isSafeInteger(count.n)||count.n<0)throw new Error('Deletion count unavailable');total=count.n;
   // Fixed trusted projection: no bodies or free-text selectors enter evidence.

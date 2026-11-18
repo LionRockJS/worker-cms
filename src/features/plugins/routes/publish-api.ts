@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../../core/auth/page-access';
 import { Hono } from 'hono';
 import type { Env, Page, Variables } from '../../../types';
 import { publication } from '../../services';
@@ -49,7 +50,7 @@ pluginPublishRoutes.post('/pages/publish', async (c) => {
   if (candidates.length) {
     const ids = candidates.map((candidate) => candidate.id);
     const pages = await c.env.DB.prepare(
-      `SELECT * FROM pages WHERE id IN (${ids.map(() => '?').join(',')})`,
+      `SELECT * FROM pages WHERE id IN (${ids.map(() => '?').join(',')}) AND ${legacyPageFilter('pages.uuid')}`,
     ).bind(...ids).all<Page>();
     for (const page of pages.results) pageById.set(page.id, page);
   }

@@ -1,6 +1,7 @@
+import { pageAccessGuard, pageAllowed } from '../auth/page-access';
 import type { Env } from '../../types';
 import type { AppContext } from '../http/context';
-import { captureAccessAuthorization } from '../auth/access-authorization';
+import { captureSelfAuthorization } from '../auth/access-authorization';
 import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
 import { attributedMutationAuditEvidence } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
@@ -50,7 +51,7 @@ async function mutate(c:AppContext,change:Change):Promise<{id:number;created:boo
   const env=c.env,user=c.get('user');
   const input=change.action==='add'?[change.pageId,change.tagId]:[change.id];
   if(input.some(id=>!Number.isSafeInteger(id)||id<=0))throw new Error('Invalid association selection');
-  const authority=await captureAccessAuthorization(env,user,'content:write');
+  const authority=await captureSelfAuthorization(env,user);
   if(!authority.allowed)throw new Error('Association authority unavailable');
   const policy=await resolveDataClasses(env,true);
   if(!policy.ok)throw new Error('Association classification unavailable');
@@ -69,6 +70,9 @@ async function mutate(c:AppContext,change:Change):Promise<{id:number;created:boo
     await env.DB.batch([...admission,guard(env,'pages',PAGE,'id=?',[pageId],[])]);
     return null;
   }
+  const legacy = authority.permissions.has('content:write');
+  if (!await pageAllowed(env, user, pageId, 'write', legacy)) return null;
+  admission.push(pageAccessGuard(env,user,[String(page.uuid)],legacy));
   const links=await snapshot(env,'page_tags',LINK,'page_id=?',[pageId]);
   if(links.some(l=>!Number.isSafeInteger(l.tag_id)||Number(l.tag_id)<=0||(l.weight!==null&&!Number.isFinite(l.weight))))throw new Error('Invalid association metadata');
   const tagIds=[...new Set([...links.map(l=>l.tag_id),...(change.action==='add'?[change.tagId]:[])])];

@@ -1,3 +1,4 @@
+import { requestPageAllowed, requestPageFilter } from '../../core/auth/page-access';
 import { Hono } from 'hono';
 import type { Env, Variables } from '../../types';
 import { announcePageEvent } from '../../core/page-events';
@@ -14,6 +15,7 @@ export const publishRoutes = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 publishRoutes.post('/pages/:id/publish', requirePermission('content:publish'), async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
+  if (!await requestPageAllowed(c, pageId, 'write', true)) return c.notFound();
   const backHref = safeAdminReturnPath(c.req.query('return_to'));
   const outcome = await publishPageToTargets(c.env, pageId, contextActor(c));
   if (!outcome) return c.notFound();
@@ -37,7 +39,10 @@ publishRoutes.post('/pages/:id/publish', requirePermission('content:publish'), a
 // ── Pull published page (PUBLISHED → DRAFT) ───────────────────────────────────
 
 publishRoutes.post('/pages/pull/:uuid', requirePermission('content:write'), async (c) => {
-  const result = await pullPublishedPageToDraft(c.env, c.req.param('uuid'), contextActor(c));
+  const uuid = c.req.param('uuid');
+  const access = await requestPageFilter(c, 'write', 'target.uuid');
+  if (!await c.env.DB.prepare(`SELECT 1 FROM (SELECT ? uuid) target WHERE ${access.sql}`).bind(uuid, ...access.args).first()) return c.notFound();
+  const result = await pullPublishedPageToDraft(c.env, uuid, contextActor(c));
   if (!result) return c.notFound();
 
   if (result.created) {
@@ -58,6 +63,7 @@ publishRoutes.post('/pages/pull/:uuid', requirePermission('content:write'), asyn
 
 publishRoutes.post('/pages/:id/unpublish', requirePermission('content:publish'), async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
+  if (!await requestPageAllowed(c, pageId, 'write', true)) return c.notFound();
   const backHref = safeAdminReturnPath(c.req.query('return_to'));
 
   const page = await c.env.DB.prepare('SELECT uuid, name, slug, page_type FROM pages WHERE id = ?')

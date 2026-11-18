@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 import type { AppContext } from '../../core/http/context';
 import type { Page } from '../../types';
 import type { DuplicateInput, PluginAuth } from './api/types';
@@ -34,7 +35,7 @@ function maximum(values:Array<Class|null|undefined>):Class{return values.include
  * recursively consume the newly inserted copies within the same call. */
 async function sources(c:AppContext,authority:Authority,selector:{sql:string;params:unknown[]},pageType:string,cursor:number,operationId:string){
   const args=selector.params.map(value=>{if(typeof value==='string'||typeof value==='number'||value===null)return value;throw new Error('Invalid selector binding');});
-  const where=`${selector.sql} AND page_type=? AND id>?`,bindings=[...args,pageType,cursor];
+  const where=`(${selector.sql}) AND page_type=? AND id>? AND ${legacyPageFilter('uuid')}`,bindings=[...args,pageType,cursor];
   const selectorFingerprint=await fingerprint(json({where,bindings}));
   const count=await countPageMetadata(c.env.DB,where,bindings,{types:[pageType],action:'page.duplicate-count'});
   if(!Number.isSafeInteger(count)||count<0)throw new Error('Unsafe source count');

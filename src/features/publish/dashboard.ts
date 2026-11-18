@@ -1,3 +1,4 @@
+import { requestPageFilter } from '../../core/auth/page-access';
 import type { Page } from '../../types';
 import type { AppContext } from '../../core/http/context';
 import type { DashboardPageRow, DashboardPublicationQuery } from '../../core/publish/service';
@@ -68,9 +69,11 @@ async function liveDashboardPagesForRequest(c: AppContext, options: DashboardPub
     publishedDb, 'schedule', whereSql, baseParams, 'ORDER BY p.weight ASC, p.name ASC, p.id ASC',
   );
   await auditLiveReads(c.env, { id: 'd1' }, source.provenance, undefined, 'page.live-status');
-  const matchingRows = source.rows.filter((page) => (
-    publicationStatusForPage(page, true, now) === statusFilter
-  ));
+  const access = await requestPageFilter(c, 'read', 'live.value');
+  const visible = new Set((await c.env.DB.prepare(`SELECT value FROM json_each(?) live WHERE ${access.sql}`)
+    .bind(JSON.stringify(source.rows.map(page => page.uuid)), ...access.args).all<{ value: string }>()).results.map(row => row.value));
+  const matchingRows = source.rows.filter(page => visible.has(page.uuid) &&
+    publicationStatusForPage(page, true, now) === statusFilter);
   const paginatedUuids = dashboardPaginationResult(matchingRows.map((page) => page.uuid), requestedPage, pageSize);
   const pageUuids = paginatedUuids.results;
   const liveRows = pageUuids.length
@@ -84,7 +87,7 @@ async function liveDashboardPagesForRequest(c: AppContext, options: DashboardPub
   const draftRows = await listDashboardDraftPagesByUuids(
     c.env.DB,
     paginated.results.map((page) => page.uuid),
-    { pageType },
+    { pageType, access: await requestPageFilter(c, 'read', 'p.uuid') },
   );
   const draftMap = new Map(draftRows.map((page) => [page.uuid, page]));
   const results: DashboardPageRow[] = paginated.results.map((page) => {
@@ -104,13 +107,14 @@ async function draftDashboardPagesForRequest(
   options: { pageType?: string; requestedPage: number; pageSize: number },
 ) {
   const { pageType, requestedPage, pageSize } = options;
+  const access = await requestPageFilter(c, 'read', 'p.uuid');
   const [draftUuids, liveUuids] = await Promise.all([
-    listDashboardDraftPageUuids(c.env.DB, { pageType }),
+    listDashboardDraftPageUuids(c.env.DB, { pageType, access }),
     liveDashboardUuids(c),
   ]);
   const draftOnlyUuids = draftUuids.filter((uuid) => !liveUuids.has(uuid));
   const paginated = dashboardPaginationResult(draftOnlyUuids, requestedPage, pageSize);
-  const draftRows = await listDashboardDraftPagesByUuids(c.env.DB, paginated.results);
+  const draftRows = await listDashboardDraftPagesByUuids(c.env.DB, paginated.results, { access });
   const draftMap = new Map(draftRows.map((page) => [page.uuid, page]));
   const results = paginated.results
     .map((uuid) => draftMap.get(uuid))

@@ -1,3 +1,4 @@
+import { requestPageAllowed } from '../../../core/auth/page-access';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 import { recordRead } from '../../../core/http/access-log';
 // Shared editor rendering: the props the structured editor needs, plugin
@@ -124,7 +125,7 @@ export async function editorPageData(
   requestedVersionId = NaN,
 ) {
   const [parentPages, taxonomy, version, versions, liveLect, pageTags, projectDraft] = await Promise.all([
-    parentPageOption(c.env.DB, parentId),
+    parentId && await requestPageAllowed(c, Number(parentId), 'read') ? parentPageOption(c.env.DB, parentId) : [],
     editorTaxonomy(c.env.DB),
     Number.isFinite(requestedVersionId)
       ? c.env.DB.prepare('SELECT * FROM page_versions WHERE page_id = ? AND id = ?')

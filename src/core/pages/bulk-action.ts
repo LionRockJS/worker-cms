@@ -1,3 +1,4 @@
+import { pageAccessFilter, type PageAccessFilter } from '../auth/page-access';
 import { mutatePageLifecycle } from './lifecycle-mutation-evidence';
 import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext } from './batch-mutation-evidence';
 // Applying one action to many pages: publish, unpublish, move to trash, change tags,
@@ -66,8 +67,8 @@ export interface BulkTargetQuery {
  * the criteria are evaluated against the draft table now, so a page edited
  * while the action runs cannot slip in or out of the set half way through.
  */
-export async function resolveBulkTargetIds(env: Env, query: BulkTargetQuery, actor?: AuditActor): Promise<number[]> {
-  const ids = await advancedSearchMatchingPageIds(env.DB, query.pageTypes, query.criteria, query.operator);
+export async function resolveBulkTargetIds(env: Env, query: BulkTargetQuery, actor?: AuditActor, access?: PageAccessFilter): Promise<number[]> {
+  const ids = await advancedSearchMatchingPageIds(env.DB, query.pageTypes, query.criteria, query.operator, access);
   if (!query.status) return ids;
 
   const livePages = await publication()?.listLiveByTypes(env, query.pageTypes, actor) ?? [];
@@ -99,9 +100,21 @@ export async function applyBulkPageAction(
   let refused = 0;
 
   if (!ids.length) return { updated, refused, failedTargets };
+  const access = pageAccessFilter(user, 'write', 'p.uuid', true);
+  if ((action === 'add_tag' || action === 'remove_tag' || action === 'replace_text') &&
+      (ids.length > BULK_ACTION_PAGE_LIMIT || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length)) {
+    throw new Error('Invalid bulk target manifest');
+  }
+  if (action === 'delete' && ids.length > BULK_ACTION_PAGE_LIMIT) throw new Error('Invalid lifecycle slice');
+  const requested = [...new Set(ids)];
+  const authorized = await env.DB.prepare(`SELECT id FROM pages p
+    WHERE id IN (SELECT value FROM json_each(?)) AND ${access.sql}`)
+    .bind(JSON.stringify(requested), ...access.args).all<{ id: number }>();
+  const allowed = new Set(authorized.results.map(page => page.id));
+  ids = requested.filter(id => allowed.has(id));
+  if (!ids.length) return { updated, refused, failedTargets };
 
   if (action === 'add_tag' || action === 'remove_tag' || action === 'replace_text') {
-    if (ids.length>BULK_ACTION_PAGE_LIMIT || ids.some(id=>!Number.isSafeInteger(id)||id<=0)) throw new Error('Invalid bulk target manifest');
     const pages = await draftPagesByIds(env.DB,[...new Set(ids)]);
     const changes: LocalPageChange[] = [];
     if (action === 'replace_text') {
@@ -136,7 +149,6 @@ export async function applyBulkPageAction(
   }
 
   if (action === 'delete') {
-    if(ids.length>BULK_ACTION_PAGE_LIMIT)throw new Error('Invalid lifecycle slice');
     const deleted: TrashedPageRef[] = [];
     for (const chunk of [ids]) {
       const local=await mutatePageLifecycle(env,user,'trash',{ids:chunk},context);
@@ -301,13 +313,13 @@ async function emitPageLifecycle(
 }
 
 /** Draft rows for `ids`, in the order given, skipping ids that no longer exist. */
-export async function draftPagesByIds(db: D1DatabaseClient, ids: number[]): Promise<Page[]> {
+export async function draftPagesByIds(db: D1DatabaseClient, ids: number[], access?: PageAccessFilter): Promise<Page[]> {
   const pages: Page[] = [];
   for (const chunk of chunks(ids)) {
     if (!chunk.length) continue;
     const placeholders = chunk.map(() => '?').join(',');
-    const rows = await db.prepare(`SELECT * FROM pages WHERE id IN (${placeholders})`)
-      .bind(...chunk)
+    const rows = await db.prepare(`SELECT p.* FROM pages p WHERE id IN (${placeholders}) AND ${access?.sql ?? '1'}`)
+      .bind(...chunk, ...(access?.args ?? []))
       .all<Page>();
     pages.push(...rows.results);
   }

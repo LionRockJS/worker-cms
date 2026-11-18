@@ -1,3 +1,4 @@
+import { requestPageAllowed } from '../../../core/auth/page-access';
 import { Hono } from 'hono';
 import { announcePageEvent } from '../../../core/page-events';
 import type { Env, Variables } from '../../../types';
@@ -12,6 +13,8 @@ export const pageLifecycleRoutes = new Hono<{ Bindings: Env; Variables: Variable
 
 pageLifecycleRoutes.post('/pages/:id/delete', requirePermission('content:delete'), async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
+
+  if (!await requestPageAllowed(c, pageId, 'write', true)) return c.notFound();
 
   // Commit the local transfer and exact receipt before external withdrawal.
   const result = await mutatePageLifecycle(c.env,c.get('user'),'trash',{ids:[pageId]},{request:c});

@@ -1,3 +1,4 @@
+import { legacyPageFilter, pageAccessFilter, pageAccessGuard } from '../auth/page-access';
 import type { AppContext } from '../http/context';
 import type { Env,JWTPayload } from '../../types';
 import type { TrashedPageRef } from '../db/admin-queries';
@@ -96,7 +97,9 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   const sf=src==='pages'?PAGE:TRASH;const df=dst==='pages'?PAGE:TRASH;
   const sv=src==='pages'?'page_versions':'trash_page_versions';const sl=src==='pages'?'page_tags':'trash_page_tags';
   const dv=dst==='pages'?'page_versions':'trash_page_versions';const dl=dst==='pages'?'page_tags':'trash_page_tags';
-  const conditions=['1'];const params:Bind[]=[];
+  const access = user ? pageAccessFilter(user, 'write', `${src}.uuid`, true)
+    : { sql: legacyPageFilter(`${src}.uuid`), args: [] };
+  const conditions=[access.sql];const params:Bind[]=[...access.args];
   if(selection.ids){conditions.push('id IN (SELECT value FROM json_each(?))');params.push(json(selection.ids));}
   if(selection.pageType){conditions.push('page_type=?');params.push(selection.pageType);}
   if(selection.withinLastHour){conditions.push('created_at>=?');params.push(clock.cutoff);}
@@ -120,6 +123,7 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   const base=[...checks(),...(service?.before?.()??[]),classificationPolicyGuard(env,policy),
     abortIf(env,"(SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('trash_pages','trash_page_versions','trash_page_tags'))<>3"),
     guard(env,src,['id'],selectedWhere,params,selected),guard(env,src,sf,sourceWhere,sourceParams,sources)];
+  if (user) base.push(pageAccessGuard(env, user, uuids.map(String), true));
   if(job)base.push(job.delegationGuard);
   // A hold placed after the read above still stops the batch.
   if(action==='purge')base.push(abortIf(env,`EXISTS (SELECT 1 FROM record_holds WHERE ${heldWhere})`,[uuidJson]));
@@ -226,6 +230,8 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
     receipt.write,receipt.guard,...perPage.flatMap(r=>[r.write,r.guard]),
     ...(erasures.length?[env.DB.prepare('INSERT INTO submission_erasures (uuid) SELECT value FROM json_each(?) WHERE true ON CONFLICT(uuid) DO NOTHING').bind(json(erasures))]:[]),
     guard(env,src,sf,'id IN (SELECT value FROM json_each(?))',[idJson],[]),guard(env,sv,VERSION,subWhere,[idJson],[]),guard(env,sl,LINK,subWhere,[idJson],[]));
+  if (action === 'purge') statements.push(env.DB.prepare(`DELETE FROM page_access_policies WHERE page_uuid IN (SELECT value FROM json_each(?))
+    AND NOT EXISTS (SELECT 1 FROM pages WHERE uuid = page_uuid)`).bind(uuidJson));
   if(action!=='purge')statements.push(guard(env,dst,df.filter(f=>f!=='updated_at'),'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson],expectedDest),
     guard(env,dv,VERSION,destSubWhere,versionArgs,expectedVersions),guard(env,dl,LINK,destSubWhere,linkArgs,expectedLinks),subset(env,dst,['id','uuid'],parentRefs));
   if(children.length)statements.push(subset(env,src,childFields.filter(f=>f!=='updated_at'),detached));

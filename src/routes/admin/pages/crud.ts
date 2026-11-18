@@ -1,3 +1,4 @@
+import { canManagePageAccess, pagePolicy, requestPageAllowed, requestPageFilter } from '../../../core/auth/page-access';
 import { updateDraftWeights } from '../../../core/pages/batch-mutation-evidence';
 import { saveDraftContent, removeDraftHistory, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
@@ -93,6 +94,8 @@ pageCrudRoutes.get('/pages/new', requirePermission('content:write'), async (c) =
 
 pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
   const form = await c.req.formData();
+  const pageIdVal = nullableStr(form.get('page_id'));
+  if (pageIdVal && !await requestPageAllowed(c, Number(pageIdVal), 'read')) return c.notFound();
   if (form.get('action') === 'publish' && !publication()) return c.notFound();
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, form, config);
@@ -153,7 +156,7 @@ pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
     if (pluginView) return pluginView;
 
     const [parentPages, taxonomy] = await Promise.all([
-      parentPageOption(c.env.DB, nullableStr(form.get('page_id'))),
+      parentPageOption(c.env.DB, pageIdVal),
       editorTaxonomy(c.env.DB),
     ]);
     recordTagReads('tag.editor-options', taxonomy.tags);
@@ -177,7 +180,6 @@ pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
   const startVal = nullableStr(form.get('start'));
   const endVal = nullableStr(form.get('end'));
   const timezoneVal = nullableStr(form.get('timezone')) ?? defaultTimezone(c);
-  const pageIdVal = nullableStr(form.get('page_id'));
   const weightVal = num(form.get('weight'));
   const creator = userIdFromContext(c);
   const editorsVal = editorsFromForm(form);
@@ -297,14 +299,16 @@ function pageIdList(value: unknown): number[] | null {
 // Same structured content as the editor, rendered as static text instead of
 // inputs. Always uses the built-in read view (plugin edit views are for editing).
 
-pageCrudRoutes.get('/pages/:id/read', requirePermission('content:read'), async (c) => {
+pageCrudRoutes.get('/pages/:id/read', async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, undefined, config);
   const requestedVersionId = parseInt(c.req.query('version') ?? '', 10);
   const backHref = safeAdminReturnPath(c.req.query('return_to'));
 
-  const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
+  const visibility = await requestPageFilter(c, 'read', 'p.uuid');
+  const page = await c.env.DB.prepare(`SELECT p.* FROM pages p WHERE p.id = ? AND ${visibility.sql}`)
+    .bind(pageId, ...visibility.args).first<Page>();
   if (!page) return c.notFound();
   recordPageReads('page.read', [page]);
 
@@ -313,7 +317,8 @@ pageCrudRoutes.get('/pages/:id/read', requirePermission('content:read'), async (
   const lect = lectForPage(config, pageType, data.version?.lect ?? page.lect);
 
   // A plugin that owns this page type's read view renders it (unless ?native=1).
-  const pluginView = await maybePluginReadView(c, {
+  const access = await pagePolicy(c.env, page.uuid);
+  const pluginView = !access?.enabled && await maybePluginReadView(c, {
     editHref: `/admin/pages/${pageId}/edit`,
     backHref,
     language,
@@ -336,11 +341,13 @@ pageCrudRoutes.get('/pages/:id/read', requirePermission('content:read'), async (
 
   const [modifierName, editorUsers] = await Promise.all([
     fetchUserName(c.env.DB, num(lect._modifier, 0)),
-    fetchEditorUsers(c.env.DB, page.editors),
+    access?.enabled ? [] : fetchEditorUsers(c.env.DB, page.editors),
   ]);
 
   return renderPage(c, readPage, {
-    page: { ...page, lect: stringifyLect(lect) },
+    page: { ...page, editors: access?.enabled ? null : page.editors, lect: stringifyLect(lect) },
+    pageAccessHref: canManagePageAccess(c.get('user'), access?.owner_id ?? page.creator) ? `/admin/pages/${pageId}/access` : '',
+    canEdit: await requestPageAllowed(c, pageId, 'write'),
     modifierName: modifierName ?? undefined,
     editorUsers,
     version: data.version ?? data.currentVersion ?? undefined,
@@ -358,16 +365,11 @@ pageCrudRoutes.get('/pages/:id/read', requirePermission('content:read'), async (
 
 // ── Edit page form ────────────────────────────────────────────────────────────
 
-pageCrudRoutes.get('/pages/:id/edit', requirePermission('content:read'), async (c) => {
+pageCrudRoutes.get('/pages/:id/edit', async (c) => {
   // Read-only users may follow edit links from shared URLs or plugin views, but
   // must never receive an editable form (or its collaboration client). Keep the
   // complete query string so language, version previews, native views, and the
   // caller's return path survive the redirect.
-  if (!(await userCan(c, 'content:write'))) {
-    const query = new URL(c.req.url).search;
-    return c.redirect(`/admin/pages/${encodeURIComponent(c.req.param('id'))}/read${query}`);
-  }
-
   const pageId = parseInt(c.req.param('id'), 10);
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, undefined, config);
@@ -375,15 +377,24 @@ pageCrudRoutes.get('/pages/:id/edit', requirePermission('content:read'), async (
   const flash = c.req.query('flash') ?? '';
   const backHref = safeAdminReturnPath(c.req.query('return_to'));
 
-  const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first<Page>();
+  const visibility = await requestPageFilter(c, 'read', 'p.uuid');
+  const page = await c.env.DB.prepare(`SELECT p.* FROM pages p WHERE p.id = ? AND ${visibility.sql}`)
+    .bind(pageId, ...visibility.args).first<Page>();
   if (!page) return c.notFound();
+  if (!await requestPageAllowed(c, pageId, 'write')) {
+    const query = new URL(c.req.url).search;
+    return c.redirect(`/admin/pages/${encodeURIComponent(c.req.param('id'))}/read${query}`);
+  }
+
   recordPageReads('page.read', [page]);
 
   const data = await editorPageData(c, page, page.page_id, requestedVersionId);
   const pageType = page.page_type ?? 'default';
   const lect = lectForPage(config, pageType, data.version?.lect ?? page.lect);
 
-  const pluginView = await maybePluginEditView(c, {
+  const access = await pagePolicy(c.env, page.uuid);
+  const manageAccess = canManagePageAccess(c.get('user'), access?.owner_id ?? page.creator);
+  const pluginView = !access?.enabled && await maybePluginEditView(c, {
     mode: 'edit',
     action: `/admin/pages/${pageId}`,
     backHref,
@@ -409,12 +420,16 @@ pageCrudRoutes.get('/pages/:id/edit', requirePermission('content:read'), async (
   const [creatorName, modifierName, editorUsers] = await Promise.all([
     fetchUserName(c.env.DB, page.creator),
     fetchUserName(c.env.DB, num(lect._modifier, 0)),
-    fetchEditorUsers(c.env.DB, page.editors),
+    access?.enabled ? [] : fetchEditorUsers(c.env.DB, page.editors),
   ]);
 
   return renderPage(c, editorPage, {
     page: { ...page, lect: stringifyLect(lect) },
     creatorName: creatorName ?? undefined,
+    pageAccessHref: manageAccess ? `/admin/pages/${pageId}/access` : '',
+    canPublishPage: await userCan(c, 'content:publish'),
+    canDeletePage: await userCan(c, 'content:delete'),
+    showLegacyEditors: !access?.enabled && await userCan(c, 'content:write'),
     modifierName: modifierName ?? undefined,
     editorUsers,
     version: data.version ?? data.currentVersion ?? undefined,
@@ -451,14 +466,17 @@ pageCrudRoutes.post('/pages/:id/weight', requirePermission('content:write'), asy
 
 // ── Update page ───────────────────────────────────────────────────────────────
 
-pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) => {
+pageCrudRoutes.post('/pages/:id', async (c) => {
   const pageId = parseInt(c.req.param('id'), 10);
+  if (!await requestPageAllowed(c, pageId, 'write')) return c.notFound();
   const form = await c.req.formData();
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, form, config);
   const action = str(form.get('action'));
   const publishing = publication();
   if (action === 'publish' && !publishing) return c.notFound();
+  const canPublish = await userCan(c, 'content:publish');
+  if (action === 'publish' && !canPublish) return c.text('Forbidden', 403);
   const backHref = safeAdminReturnPath(form.get('return_to'));
 
   const name = str(form.get('name'));
@@ -469,6 +487,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
     .bind(pageId)
     .first<Page>();
   if (!page) return c.notFound();
+  const access = await pagePolicy(c.env, page.uuid);
 
   if (action.startsWith('delete-version:')) {
     const versionId = parseInt(action.split(':')[1], 10);
@@ -511,7 +530,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
     const pageType = nullableStr(form.get('page_type')) ?? page.page_type ?? 'default';
     const lect = lectFromForm(config, pageType, lectForPage(config, pageType, page.lect), form, language);
 
-    const pluginView = await maybePluginEditView(c, {
+    const pluginView = !access?.enabled && await maybePluginEditView(c, {
       mode: 'edit',
       action: `/admin/pages/${pageId}`,
       backHref,
@@ -525,9 +544,12 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
 
     // Keep the editors the user picked in the form (not the stored row) so a
     // validation error doesn't silently revert their selection.
-    const formEditors = editorsFromForm(form);
+    const formEditors = access?.enabled ? page.editors : editorsFromForm(form);
     return renderPage(c, editorPage, {
       page: { ...page, editors: formEditors },
+      showLegacyEditors: !access?.enabled,
+      canPublishPage: canPublish,
+      canDeletePage: await userCan(c, 'content:delete'),
       editorUsers: await fetchEditorUsers(c.env.DB, formEditors),
       version: data.version ?? data.currentVersion ?? undefined,
       liveVersionId: data.liveVersionId,
@@ -547,12 +569,14 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   }
 
   const pageTypeVal = nullableStr(form.get('page_type')) ?? page.page_type ?? 'default';
-  const startVal = !publishing && !form.has('start') ? page.start : nullableStr(form.get('start'));
-  const endVal = !publishing && !form.has('end') ? page.end : nullableStr(form.get('end'));
-  const timezoneVal = !publishing && !form.has('timezone') ? page.timezone : nullableStr(form.get('timezone'));
-  const pageIdVal = nullableStr(form.get('page_id'));
+  const startVal = !canPublish || (!publishing && !form.has('start')) ? page.start : nullableStr(form.get('start'));
+  const endVal = !canPublish || (!publishing && !form.has('end')) ? page.end : nullableStr(form.get('end'));
+  const timezoneVal = !canPublish || (!publishing && !form.has('timezone')) ? page.timezone : nullableStr(form.get('timezone'));
+  const requestedParent = nullableStr(form.get('page_id'));
+  if (requestedParent && !await requestPageAllowed(c, Number(requestedParent), 'read')) return c.notFound();
+  const pageIdVal = requestedParent ?? (page.page_id && !await requestPageAllowed(c, page.page_id, 'read') ? page.page_id : null);
   const weightVal = num(form.get('weight'));
-  const editorsVal = editorsFromForm(form);
+  const editorsVal = access?.enabled ? page.editors : editorsFromForm(form);
   const lect = applyStructuredAction(
     config,
     lectFromForm(config, pageTypeVal, lectForPage(config, pageTypeVal, page.lect), form, language),
@@ -576,6 +600,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   const nativeParam = preferNativeEditor(c) ? '&native=1' : '';
 
   const autoRepublish = publishing && action !== 'publish'
+    && canPublish
     && await (coreExtensions().autoPublishesPageType?.(c.env, pageTypeVal) ?? false)
     && await publishing.isD1Live(c.env, page.uuid);
 
@@ -583,6 +608,7 @@ pageCrudRoutes.post('/pages/:id', requirePermission('content:write'), async (c) 
   // happen — a regulated page saved here is updated in draft and nowhere else.
   let republishRefused = false;
   if (publishing && (action === 'publish' || autoRepublish)) {
+    if (!await requestPageAllowed(c, pageId, 'write')) return c.notFound();
     const outcome = await publishing.publishPageToTargets(c.env, pageId, contextActor(c));
     if (!outcome) return c.notFound();
     republishRefused = !!outcome.refused;

@@ -159,7 +159,7 @@
         </div>
         </div>
 
-        {% if publishEnabled %}
+        {% if publishEnabled and canPublishPage %}
         <div class="relative w-full">
 
         <div class="rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm md:absolute md:left-0 md:right-0">
@@ -384,10 +384,14 @@
         </div>
       {% endif %}
 
+      {% if pageAccessHref %}
+      <a href="{{ pageAccessHref }}" class="text-xs font-semibold text-indigo-600">{{ "page_access.title" | t }}</a>
+      {% endif %}
+      {% if showLegacyEditors %}
       <div class="flex min-w-0 flex-1 items-center gap-2 sm:max-w-xl">
         <div class="flex shrink-0 items-center gap-2 text-gray-500">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#user-group"></use></svg>
-          <label for="editors_search" class="sr-only">{{ "view_strings.sections_editor.editors" | t }}</label>
+          <label for="editors_search" class="text-xs">{{ "page_access.legacy_labels" | t }}</label>
         </div>
         <div class="relative flex min-w-0 flex-1 flex-wrap items-center gap-1.5" data-editors-combobox>
           <input type="hidden" id="editors" name="editors" value="{{ page.editors }}">
@@ -424,6 +428,7 @@
         </div>
       </div>
 
+    {% endif %}
     {% if structuredModel %}
     <div class="flex min-w-0 flex-col gap-2 sm:shrink-0"
          data-fields-clipboard
@@ -466,7 +471,7 @@
     {% endif %}
     </div>
 
-    {% if isEdit %}
+    {% if isEdit and canDeletePage %}
     <div class="pb-8 absolute right-8">
       <button type="submit" formaction="{{ deleteAction }}" formnovalidate data-delete-button data-confirm-message="{% if publishEnabled %}{{ "view_strings.sections_editor.delete_page_confirm" | t }}{% else %}{{ "view_strings.sections_dashboard.move_this_page_to_trash" | t }}{% endif %}" title="{{ "view_strings.sections_editor.delete" | t }}" aria-label="{{ "view_strings.sections_editor.delete" | t }}"
               class="inline-flex h-10 w-10 shrink-0 self-end items-center justify-center rounded-lg bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 sm:ml-auto">
@@ -490,7 +495,7 @@
                 class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">
           {% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}
         </button>
-        {% if publishEnabled and isEdit and isPublished %}
+        {% if publishEnabled and canPublishPage and isEdit and isPublished %}
           <button type="submit" name="action" value="publish"
                   class="w-full px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm sm:w-auto">
             {{ "view_strings.sections_editor.save_and_publish" | t }}

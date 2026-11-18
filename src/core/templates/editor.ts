@@ -542,6 +542,10 @@ function renderLectDiff(draftJson: string, versionJson: string): string {
 export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   page?: Page;
   creatorName?: string;
+  pageAccessHref?: string;
+  canPublishPage?: boolean;
+  canDeletePage?: boolean;
+  showLegacyEditors?: boolean;
   modifierName?: string;
   /** Resolved display names for the page's `editors` ids (for the editors
    *  combobox chips); unresolved ids fall back to the raw id. */
@@ -649,6 +653,10 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   const body = await renderView(views, '/templates/editor.json', {
     publishEnabled: opts.publishEnabled !== false,
     pageTitle,
+    pageAccessHref: opts.pageAccessHref,
+    canPublishPage: opts.canPublishPage !== false,
+    canDeletePage: opts.canDeletePage !== false,
+    showLegacyEditors: !!opts.showLegacyEditors,
     action,
     backHref,
     deleteAction: page ? `/admin/pages/${page.id}/delete` : '',

@@ -356,6 +356,27 @@ npx wrangler d1 execute cms --remote \
   --command "UPDATE users SET role='admin,viewer' WHERE email='you@example.com'"
 ```
 
+#### Page access
+
+Open **Page access** from the built-in page editor. For pages with a custom
+editor, append `?native=1` to the edit URL to open the built-in editor.
+The creator starts as owner,
+and the owner or a site admin can transfer ownership. New pages created in the
+CMS editor start at `600`. Existing pages continue to use site-wide roles
+until the owner or a site admin selects **Enable page access**. Previous editor
+labels can be reviewed and converted during enrollment.
+
+The three digits represent the owner, members of one selected CMS role, and
+other signed-in users. Use `0` for no access, `4` for read, and `6` for read
+and edit. **Add user** grants read and edit on that page. Publishing and deleting
+also require their site-wide capability. The page policy applies to drafts and
+survives trash and restore. Published visibility follows the publish workflow.
+Pages with page access enabled use the built-in editor and are excluded from
+plugin service requests and lifecycle hooks.
+
+Apply `migrations/0008_page_access.sql` to the private CMS database before deploying
+this version. The published database schema is unchanged.
+
 ### 8. Run locally
 
 ```bash

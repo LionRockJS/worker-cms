@@ -37,6 +37,7 @@ describe('admin page route order', () => {
     ).map(({ method, path }) => `${method} ${path}`);
     expect([...new Set(mounted)].sort()).toEqual([
       'GET /',
+      'GET /pages/:id/access',
       'GET /pages/:id/edit',
       'GET /pages/:id/read',
       'GET /pages/create_by_type/:pageType',
@@ -46,6 +47,7 @@ describe('admin page route order', () => {
       'GET /pages/search/:pageType',
       'POST /pages',
       'POST /pages/:id',
+      'POST /pages/:id/access',
       'POST /pages/:id/delete',
       'POST /pages/:id/publish',
       'POST /pages/:id/unpublish',

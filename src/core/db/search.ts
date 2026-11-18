@@ -1,3 +1,4 @@
+import type { PageAccessFilter } from '../auth/page-access';
 // Advanced-search parsing, blueprint path-spec machinery, and SQL building.
 // Shared by the search route and (for path specs) the CSV import/export helpers.
 
@@ -273,9 +274,10 @@ export async function performAdvancedSearch(
     page: number;
     sort: string;
     order: 'ASC' | 'DESC';
+    access?: PageAccessFilter;
   },
 ): Promise<AdvancedSearchResult> {
-  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator);
+  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator, options.access);
   const total = await countPageMetadata(db, whereSql, baseParams, { types: pageTypes });
   const totalPages = Math.max(1, Math.ceil(total / options.limit));
   const currentPage = Math.min(options.page, totalPages);
@@ -305,6 +307,7 @@ export function advancedSearchWhere(
   pageTypes: string[],
   criteria: AdvancedSearchCriterion[],
   operator: AdvancedSearchOperator,
+  access?: PageAccessFilter,
 ): { whereSql: string; baseParams: unknown[] } {
   // Bulk actions from ordinary page lists intentionally have no search
   // criteria: in that context an empty query means every page of the selected
@@ -346,8 +349,8 @@ export function advancedSearchWhere(
     searchCondition = criterionConditions.length ? `(${criterionConditions.join(` ${operator} `)})` : '1=0';
   }
 
-  const whereSql = `p.page_type IN (${pageTypePlaceholders}) AND ${searchCondition}`;
-  const baseParams = [...pageTypes, ...searchParams];
+  const whereSql = `p.page_type IN (${pageTypePlaceholders}) AND ${searchCondition} AND ${access?.sql ?? '1'}`;
+  const baseParams = [...pageTypes, ...searchParams, ...(access?.args ?? [])];
 
   return { whereSql, baseParams };
 }
@@ -357,8 +360,9 @@ export async function advancedSearchMatchingPageIds(
   pageTypes: string[],
   criteria: AdvancedSearchCriterion[],
   operator: AdvancedSearchOperator,
+  access?: PageAccessFilter,
 ): Promise<number[]> {
-  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator);
+  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator, access);
   const rows = await db.prepare(
     `SELECT p.id FROM pages p
      WHERE ${whereSql}

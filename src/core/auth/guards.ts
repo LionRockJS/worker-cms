@@ -1,3 +1,4 @@
+import { hasReadablePage, pageAllowed, pagePolicy } from './page-access';
 import { adminReturnTo } from './return-to';
 import { accountIpAllowed, connectingIp } from './ip-access';
 // ============================================================
@@ -131,6 +132,14 @@ function isViewerSafeAdminRoute(path: string): boolean {
     || path.startsWith('/admin/views/');
 }
 
+function isPageAccessRoute(path: string): boolean {
+  return path === '/admin/pages/list'
+    || /^\/admin\/pages\/\d+(?:\/(?:read|edit|access))?$/.test(path)
+    || /^\/admin\/api\/(?:sync|presence)\/\d+$/.test(path)
+    || /^\/admin\/api\/(?:parent-pages|pages\/[^/]+)$/.test(path)
+    || /^\/admin\/api\/(?:page\/\d+\/tag|page\/remove\/page_tag|page_tag)\/\d+$/.test(path);
+}
+
 export const editorGuard = createMiddleware<{
   Bindings: Env;
   Variables: Variables;
@@ -138,7 +147,9 @@ export const editorGuard = createMiddleware<{
   const user = c.get('user');
   const map = await resolveRolePermissions(c.env);
   if (effectivePermissions(map, user.role).size === 0) {
-    if (isViewerSafeAdminRoute(c.req.path)) return next();
+    const path = c.req.path;
+    if (isViewerSafeAdminRoute(path) || /^\/admin\/pages\/\d+\/access$/.test(path)) return next();
+    if (isPageAccessRoute(path) && await hasReadablePage(c)) return next();
     await logDenial(c, { reason: 'editor_required' });
     if (wantsJsonResponse(c.req.raw)) {
       return jsonError({ success: false, error: 'Editor role required' }, 403, 'editor-role-required');
@@ -179,6 +190,14 @@ export function requirePermission(permission: Permission | string) {
   });
 }
 
+/** Preserve the legacy listing gate when the caller has no page access. */
+export const requirePageListing = createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
+  const user = c.get('user');
+  if (effectivePermissions(await resolveRolePermissions(c.env), user.role).has('content:read') ||
+      await hasReadablePage(c)) return next();
+  return requirePermission('content:read')(c, next);
+});
+
 /**
  * Guards the presence and live-sync routes of one page (`:pageId`). Passes with
  * the given permission, or with a sync grant the plugin proxy issued this
@@ -188,10 +207,13 @@ export function requirePermission(permission: Permission | string) {
 export function requirePageSync(permission: 'content:read' | 'content:write') {
   return createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
     const user = c.get('user');
-    if (splitRoles(user.role).includes('admin')) return next();
-    if (effectivePermissions(await resolveRolePermissions(c.env), user.role).has(permission)) return next();
     const pageId = Number(c.req.param('pageId'));
-    const grantExp = user.sid && Number.isSafeInteger(pageId) && pageId > 0
+    const legacy = effectivePermissions(await resolveRolePermissions(c.env), user.role).has(permission);
+    if (await pageAllowed(c.env, user, pageId, permission === 'content:write' ? 'write' : 'read', legacy)) return next();
+    const page = Number.isSafeInteger(pageId) && pageId > 0
+      ? await c.env.DB.prepare('SELECT uuid FROM pages WHERE id = ?').bind(pageId).first<{ uuid: string }>() : null;
+    if (!page && legacy) return next();
+    const grantExp = page && !(await pagePolicy(c.env, page.uuid))?.enabled && user.sid
       ? await readSyncGrant(c, c.env.JWT_SECRET, user.sid, pageId)
       : null;
     if (grantExp === null) {

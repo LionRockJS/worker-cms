@@ -1,3 +1,4 @@
+import { requestPageFilter } from '../../core/auth/page-access';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // The advanced-search page controller.
 //
@@ -61,6 +62,7 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
 
   const result = hasSearch
     ? await performAdvancedSearch(c.env.DB, pageTypes, criteria, operator, {
+        access: await requestPageFilter(c, 'read', 'p.uuid'),
         limit: pageSize,
         page: requestedPage,
         sort,
@@ -172,15 +174,16 @@ export async function renderBulkReplacePreview(c: AppContext, input: {
   replacementText: string;
   returnTo: string;
 }): Promise<Response> {
+  const access = await requestPageFilter(c, 'write', 'p.uuid');
   const targetIds = input.scope === 'all'
     ? await resolveBulkTargetIds(c.env, {
         pageTypes: input.pageTypes,
         criteria: input.criteria,
         operator: input.operator,
         status: input.status,
-      })
+      }, undefined, access)
     : input.ids;
-  const previewPages = await draftPagesByIds(c.env.DB, targetIds.slice(0, BULK_REPLACE_PREVIEW_PAGE_LIMIT));
+  const previewPages = await draftPagesByIds(c.env.DB, targetIds.slice(0, BULK_REPLACE_PREVIEW_PAGE_LIMIT), access);
   const changes: Array<{
     pageName: string;
     pageEditHref: string;

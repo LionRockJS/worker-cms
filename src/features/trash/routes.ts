@@ -1,3 +1,4 @@
+import { pageAccessFilter } from '../../core/auth/page-access';
 import { recordPageReads } from '../../core/http/access-log';
 import { countPageMetadata } from '../../core/db/count-metadata';
 import { countTrashMetadataByType } from './queries';
@@ -26,16 +27,17 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
   const requestedPage = dashboardPageNumber(c.req.query('page'));
   // Active type filter (the dropdown). Empty = all types.
   const filterType = c.req.query('type')?.trim() || '';
-  const typeWhere = filterType ? 'WHERE page_type = ?' : '';
-  const typeParams = filterType ? [filterType] : [];
+  const access = pageAccessFilter(c.get('user'), 'read', 'p.uuid', true);
+  const typeWhere = `${access.sql}${filterType ? ' AND p.page_type = ?' : ''}`;
+  const typeParams = [...access.args, ...(filterType ? [filterType] : [])];
 
   const countOptions = { source: 'trash_pages' as const, types: filterType ? [filterType] : undefined };
   const [total, typeRows, recentCount] = await Promise.all([
     // Listing total/recent are scoped to the filter; the type breakdown is not,
     // so the dropdown always lists every type with its full count.
-    countPageMetadata(c.env.DB, filterType ? 'p.page_type = ?' : '1', typeParams, countOptions),
-    countTrashMetadataByType(c.env.DB),
-    countPageMetadata(c.env.DB, `p.created_at >= datetime('now', '-1 hour') ${filterType ? 'AND p.page_type = ?' : ''}`,
+    countPageMetadata(c.env.DB, typeWhere, typeParams, countOptions),
+    countTrashMetadataByType(c.env.DB, access),
+    countPageMetadata(c.env.DB, `p.created_at >= datetime('now', '-1 hour') ${'AND ' + typeWhere}`,
       typeParams, { ...countOptions, action: 'page.trash-recent-count' }),
   ]);
 
@@ -44,7 +46,7 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
   const offset = (currentPage - 1) * pageSize;
 
   const trashedPages = await c.env.DB.prepare(
-    `SELECT id, uuid, name, slug, page_type, updated_at FROM trash_pages ${typeWhere} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+    `SELECT id, uuid, name, slug, page_type, updated_at FROM trash_pages p WHERE ${typeWhere} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
   ).bind(...typeParams, pageSize, offset).all<TrashListPage>();
 
   recordPageReads('page.trash-list', trashedPages.results);
