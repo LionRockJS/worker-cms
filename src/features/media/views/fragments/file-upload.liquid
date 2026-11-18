@@ -1,0 +1,8 @@
+<div class="flex min-w-0 flex-wrap items-center gap-2">
+  <label for="{{ field.id }}_file"
+         class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold leading-[1.2] text-gray-700 hover:bg-gray-50">
+    {{ "view_strings.snippets_pagefield_picture_basic.upload" | t }}
+  </label>
+  <input id="{{ field.id }}_file" data-picture-file type="file" {% if field.accept != blank %}accept="{{ field.accept }}"{% endif %} class="hidden">
+  <span data-picture-status class="min-w-0 text-xs text-gray-500"></span>
+</div>

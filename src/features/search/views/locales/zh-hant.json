@@ -1,5 +1,12 @@
 {
   "view_strings": {
+    "sections_dashboard.all_matching_pages": "所有相符頁面",
+    "sections_dashboard.bulk_all_matching_pages_subject": "所有相符頁面，包括分頁以外的頁面",
+    "sections_dashboard.bulk_confirm_template": "確認對{subject}執行「{action}」？",
+    "sections_dashboard.bulk_selected_page": "個已選頁面",
+    "sections_dashboard.bulk_selected_pages": "個已選頁面",
+    "sections_dashboard.search": "搜尋",
+    "sections_dashboard.search_pages": "搜尋頁面",
     "sections_advanced_search.actions": "操作",
     "sections_advanced_search.add_criterion": "Add Criterion",
     "sections_advanced_search.all_types": "所有類型",

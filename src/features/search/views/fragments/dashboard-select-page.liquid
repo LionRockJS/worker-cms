@@ -1,0 +1,5 @@
+{% if page.isSelectable %}
+  <input type="checkbox" name="page_ids" value="{{ page.id }}" form="dashboard-bulk-form"
+         data-dashboard-bulk-checkbox title="Select {{ page.name }}" aria-label="Select {{ page.name }}"
+         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+{% endif %}

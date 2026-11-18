@@ -28,6 +28,12 @@ import {
 
 export const searchRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+searchRoutes.get('/pages/search/:pageType', requirePermission('content:read'), async (c) => {
+  const pageType = c.req.param('pageType');
+  const search = c.req.query('search') ?? '';
+  return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
+});
+
 searchRoutes.get('/advanced-search', requirePermission('content:read'), (c) => renderAdvancedSearch(c));
 
 searchRoutes.post('/advanced-search/bulk', (c) => bulkAdvancedSearch(c));

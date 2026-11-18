@@ -1,5 +1,12 @@
 {
   "view_strings": {
+    "sections_dashboard.all_matching_pages": "所有匹配页面",
+    "sections_dashboard.bulk_all_matching_pages_subject": "所有匹配页面，包括分页之外的页面",
+    "sections_dashboard.bulk_confirm_template": "确认对{subject}执行“{action}”？",
+    "sections_dashboard.bulk_selected_page": "个已选页面",
+    "sections_dashboard.bulk_selected_pages": "个已选页面",
+    "sections_dashboard.search": "搜索",
+    "sections_dashboard.search_pages": "搜索页面",
     "sections_advanced_search.actions": "操作",
     "sections_advanced_search.add_criterion": "Add Criterion",
     "sections_advanced_search.all_types": "所有类型",

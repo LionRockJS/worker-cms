@@ -8,10 +8,11 @@ import { Hono } from 'hono';
 import { dashboardPage } from '../../../core/templates/dashboard';
 import { viewerHomePage } from '../../../core/templates/viewer-home';
 import { resolveCmsConfig } from '../../../core/db/content-config';
+import { featureInstalled } from '../../../features';
 import { advancedSearchPageTypes } from '../../../core/db/search';
 import { announcePageEvent } from '../../../core/page-events';
 import { blueprintToLect, stringifyLect } from '../../../core/db/lect';
-import type { Env, Variables, Page, Tag, Taxonomy } from '../../../types';
+import type { Env, Variables, Page } from '../../../types';
 import type { BlueprintEntry } from '../../../cms-config';
 import { dashboardPageHref, dashboardPageNumber, dashboardPageSize, dashboardStatusFilter, editorsFromForm, languageFromRequest, num, slugify, str, userIdFromContext } from '../../../core/http/forms';
 import { coreExtensions } from '../../../core/extensions';
@@ -50,11 +51,14 @@ function statusFilterLinks(routeBase: string, active: DashboardStatusFilter) {
   ];
 }
 
-function dashboardBulkTagGroups(
-  tags: Tag[],
-  dbTaxonomies: Taxonomy[],
+async function dashboardBulkTagGroups(
+  env: Env,
   configTaxonomies: Record<string, string>,
 ) {
+  if (!featureInstalled('search')) return undefined;
+  const { tags, taxonomies: dbTaxonomies } = await editorTaxonomy(env.DB);
+  recordTagReads('tag.filter-options', tags);
+  recordTaxonomyReads('taxonomy.filter-options', dbTaxonomies);
   const taxonomyNames = new Map(Object.entries(configTaxonomies));
   for (const taxonomy of dbTaxonomies) taxonomyNames.set(taxonomy.slug, taxonomy.name);
 
@@ -174,7 +178,7 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
   const requestedPage = dashboardPageNumber(c.req.query('page'));
   const statusFilter = publication() ? dashboardStatusFilter(c.req.query('status')) : '';
 
-  if (search) {
+  if (search && featureInstalled('search')) {
     return c.redirect(`/admin/advanced-search?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
   }
 
@@ -184,13 +188,10 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     pageSize,
   });
   const statusParams = statusFilter ? { status: statusFilter } : {};
-  const [{ importHref, exportHref }, config, taxonomy] = await Promise.all([
+  const [{ importHref, exportHref }, config] = await Promise.all([
     importExportLinks(c.env),
     resolveCmsConfig(c.env),
-    editorTaxonomy(c.env.DB),
   ]);
-  recordTagReads('tag.filter-options', taxonomy.tags);
-  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
   const t = await uiTranslator(c);
 
   return renderPage(c, dashboardPage, {
@@ -204,7 +205,7 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     importHref,
     exportHref,
     pageTypeChoices: advancedSearchPageTypes(config),
-    bulkTagGroups: dashboardBulkTagGroups(taxonomy.tags, taxonomy.taxonomies, config.taxonomies),
+    bulkTagGroups: await dashboardBulkTagGroups(c.env, config.taxonomies),
     pagination: dashboardPagination(routeBase, draftPages, statusParams),
     t,
   });
@@ -240,7 +241,7 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
   const requestedPage = dashboardPageNumber(c.req.query('page'));
   const statusFilter = publication() ? dashboardStatusFilter(c.req.query('status')) : '';
 
-  if (search) {
+  if (search && featureInstalled('search')) {
     return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
   }
 
@@ -252,14 +253,11 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
   });
   const routeBase = `/admin/pages/list/${encodeURIComponent(pageType)}`;
   const statusParams = statusFilter ? { status: statusFilter } : {};
-  const [config, taxonomy, { importHref, exportHref }, canWrite] = await Promise.all([
+  const [config, { importHref, exportHref }, canWrite] = await Promise.all([
     resolveCmsConfig(c.env),
-    editorTaxonomy(c.env.DB),
     importExportLinks(c.env, pageType),
     userCan(c, 'content:write'),
   ]);
-  recordTagReads('tag.filter-options', taxonomy.tags);
-  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
   // Serving these names in clear is its own disclosure, recorded separately
   // from the list read so the log distinguishes a masked view from a revealed
   // one. Without the capability the names never reach the response at all.
@@ -280,19 +278,13 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     importHref,
     exportHref,
     pageTypeChoices: advancedSearchPageTypes(config),
-    bulkTagGroups: dashboardBulkTagGroups(taxonomy.tags, taxonomy.taxonomies, config.taxonomies),
+    bulkTagGroups: await dashboardBulkTagGroups(c.env, config.taxonomies),
     pagination: dashboardPagination(routeBase, draftPages, statusParams),
     reorder: canWrite,
     privacyFields,
     canRevealPii,
     t,
   });
-});
-
-pageDashboardRoutes.get('/pages/search/:pageType', requirePermission('content:read'), async (c) => {
-  const pageType = c.req.param('pageType');
-  const search = c.req.query('search') ?? '';
-  return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
 });
 
 pageDashboardRoutes.get('/pages/create_by_type/:pageType', requirePermission('content:write'), async (c) => {

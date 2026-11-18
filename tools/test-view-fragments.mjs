@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { assembleViews } from './build-views.mjs';
 
 test('publishing controls assemble only into publish-enabled shared screens', () => {
@@ -9,7 +10,7 @@ test('publishing controls assemble only into publish-enabled shared screens', ()
     tags: ['/admin/tags/sync-published'],
   };
   for (const publish of [false, true]) {
-    const views = assembleViews({ publish });
+    const views = assembleViews({ publish, search: true });
     for (const [screen, markers] of Object.entries(controls)) {
       const section = views.get('sections/' + screen + '.liquid').toString();
       assert.ok(!section.includes('feature_fragment'));
@@ -18,5 +19,50 @@ test('publishing controls assemble only into publish-enabled shared screens', ()
     const strings = JSON.parse(views.get('locales/en.json')).view_strings;
     assert.equal('sections_editor.save_and_publish' in strings, publish);
     assert.ok(![...views.keys()].some(path => path.startsWith('fragments/')));
+  }
+});
+
+test('dashboard and editor controls follow the search and media switches independently', async () => {
+  const browser = {};
+  runInNewContext(assembleViews({}).get('assets/liquid.browser.min.js').toString(), browser);
+  const liquid = new browser.liquidjs.Liquid();
+  liquid.registerFilter('t', (key) => key);
+
+  for (const search of [false, true]) {
+    for (const media of [false, true]) {
+      const views = assembleViews({ search, media, publish: true });
+      const render = (path, data) => liquid.parseAndRender(views.get(path).toString(), data);
+      const dashboard = await render('sections/dashboard.liquid', {
+        hasPages: true,
+        hasRowControls: true,
+        canReorder: true,
+        hasSelectablePages: search,
+        publishEnabled: true,
+        searchAction: '/admin/advanced-search',
+        bulkAction: '/admin/advanced-search/bulk',
+        pages: [{ id: 1, name: 'Draft page', isSelectable: true, editHref: '/admin/pages/1/edit' }],
+      });
+      for (const marker of ['id="dashboard_search"', 'data-dashboard-bulk-form', 'data-dashboard-bulk-checkbox', 'value="publish"']) {
+        assert.equal(dashboard.includes(marker), search, marker);
+      }
+      assert.match(dashboard, /data-reorder-handle/);
+      assert.match(dashboard, /href="\/admin\/pages\/1\/edit"/);
+
+      const fields = await Promise.all(['picture', 'file'].map(kind => render(`snippets/pagefield/${kind}/basic.liquid`, {
+        field: { id: kind, inputName: kind, value: `https://example.com/${kind}` },
+      })));
+      const editor = await render('sections/editor.liquid', {
+        action: '/admin/pages/1',
+        isEdit: true,
+        structuredBlock: fields.join(''),
+      });
+      assert.match(editor, /action="\/admin\/pages\/1" data-editor-form/);
+      assert.match(editor, /data-picture-preview src="https:\/\/example.com\/picture"/);
+      assert.match(editor, /href="https:\/\/example.com\/file"/);
+      assert.equal((editor.match(/data-picture-url/g) ?? []).length, 2);
+      assert.equal((editor.match(/data-picture-file/g) ?? []).length, media ? 2 : 0);
+      assert.equal(views.has('assets/field-upload.js'), media);
+      assert.ok(views.has('assets/picture-field.js'));
+    }
   }
 });

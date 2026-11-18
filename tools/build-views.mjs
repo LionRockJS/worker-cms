@@ -214,18 +214,22 @@ export function assembleViews(features) {
   // Inline optional controls in their host Liquid scope. A disabled feature
   // contributes no markup and its source directory need not exist.
   const fragmentTag = /^( *)\{% feature_fragment ([a-z0-9-]+)\/([a-z0-9-]+) %\}$/gm;
-  for (const [rel, contents] of files) {
-    if (!rel.endsWith('.liquid')) continue;
-    const source = contents.toString();
-    if (!source.includes('{% feature_fragment')) continue;
+  function expandFragments(source, rel, ancestors = []) {
     const assembled = source.replace(fragmentTag, (_, indent, owner, name) => {
       if (features[owner] !== true) return '';
-      const fragment = fragments.get(owner + '/' + name + '.liquid');
-      if (fragment === undefined) throw new Error(`Missing feature fragment ${owner}/${name} in ${rel}`);
-      return fragment.trimEnd().replace(/^(.+)$/gm, indent + '$1');
+      const key = owner + '/' + name + '.liquid';
+      const fragment = fragments.get(key);
+      if (fragment === undefined) throw new Error(`Missing feature fragment ${key} in ${rel}`);
+      if (ancestors.includes(key)) throw new Error(`Circular feature fragment ${key} in ${rel}`);
+      return expandFragments(fragment, rel, [...ancestors, key]).trimEnd().replace(/^(.+)$/gm, indent + '$1');
     });
     if (assembled.includes('{% feature_fragment')) throw new Error(`Invalid feature fragment in ${rel}`);
-    files.set(rel, Buffer.from(assembled));
+    return assembled;
+  }
+  for (const [rel, contents] of files) {
+    if (rel.endsWith('.liquid') && contents.includes('{% feature_fragment')) {
+      files.set(rel, Buffer.from(expandFragments(contents.toString(), rel)));
+    }
   }
 
   for (const [lang, catalog] of catalogs) {
