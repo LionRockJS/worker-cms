@@ -30,7 +30,7 @@ describe('flattened migration contract', () => {
     // is hand-written and short-lived: `0002_published_tags.sql` created the tag
     // catalogue on databases that had already run the baseline, and was deleted
     // once they had it — the baseline (regenerated from
-    // src/core/publish/schema.sql) is what fresh installs get. A published
+    // src/features/publish/published.sql) is what fresh installs get. A published
     // database that has not applied that table needs it created by hand.
     expect(env.TEST_PUBLISHED_MIGRATIONS.map((migration) => migration.name))
       .toEqual(['0001_published_schema.sql']);

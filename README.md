@@ -1028,20 +1028,21 @@ files Wrangler applies:
 
 ```
 src/core/schema.sql + every enabled fragment  →  migrations/0001_initial_schema.sql
-src/core/publish/schema.sql                   →  migrations/published/0001_published_schema.sql
+src/features/publish/published.sql                   →  migrations/published/0001_published_schema.sql
 ```
 
 This exists because Wrangler allows exactly one `migrations_dir` per D1
 database and has no CLI override — features cannot each own a folder that
-Wrangler walks. It does **not** need extra databases: every feature shares the
-same two, owning tables rather than databases.
+Wrangler walks. Features share the private database. Publishing also owns the optional
+published database baseline.
 
-A feature may own code, tables, or both. Ten are switchable:
+A feature may own code, tables, or both.
 
 | Feature | Owns |
 |---|---|
 | `plugins` | The plugin platform: registry, hooks, proxy, manage UI, `/__cms` API — plus `plugins`, `plugin_asset_approvals`, `plugin_file_prefix_approvals`, `plugin_page_type_approvals`, `plugin_state` (+4 indexes) |
 | `credits` | Metered billing (credits and diamonds) and the credit summary screen — plus `credit_wallets`, `credit_ledger`, `shared_credits`, `shared_credit_ledger`, `credit_subscriptions` (+4 indexes) |
+| `publish` | Publish and withdraw pages, read live status, mirror tags, ingest public submissions, and retry source erasures. Owns the published D1 baseline and the private `submission_erasures` table. |
 | `search` | The advanced-search screen and bulk actions (code only; the query builder is core) |
 | `users-roles` | The user and role admin screens (code only; the tables and permission resolver are core) |
 | `i18n` | The languages and translations screens (code only; see the note below) |
@@ -1056,6 +1057,37 @@ After editing `cms.features.json`:
 ```bash
 npm run build
 ```
+
+#### Internal DMS build
+
+Publishing is enabled by default. For an internal document management system,
+set `"publish": false` under `features` in `cms.features.json` and run
+`npm run build`. The setup wizard skips the published D1 database and
+disables both `PUBLISHED_DB` and `PUBLISH_BUCKET` in its Wrangler config.
+If you manage Wrangler configuration directly, remove those bindings and
+the `PUBLISH_TARGETS` variable from the deployment configuration.
+`npm run db:migrate` applies only the private database migrations in this
+profile. The cron trigger remains available for session, audit, and other
+feature maintenance.
+
+The DMS build uses private records for editing, history, tags, and search.
+Publish and withdrawal, live status, pull-to-draft, public submission ingest,
+and the publication endpoints in `/__cms` are unavailable. Plugins can
+continue using the private content API.
+
+For an existing deployment, stop external submission writers, complete
+pending submission erasures, and withdraw any copies that should no longer be
+served before disabling the feature. Flipping the switch leaves existing D1
+and R2 data and external copies in place. A legacy submission mirror cannot
+be permanently purged in the DMS build because its public source may still
+need to be erased.
+
+To add publishing to a database first installed in DMS mode, generate and
+apply the private migration with `npm run build:migrations -- --enable publish`.
+Enable the feature, configure the publish bindings, and apply the published
+database baseline for a new published database. Run
+`npm run check:dms-profile` to verify the disabled build with isolated
+local bindings.
 
 No code feature depends directly on another. Feature-owned runtime behavior is
 composed through `src/features/services.ts`, whose concrete entries are
@@ -1185,7 +1217,7 @@ immediately, so a rename reaches readers without republishing every page that
 uses it, and **Admin → Tags → Sync published** backfills a database whose
 catalogue predates this table. Rows here are partitioned by writer: this Worker only
 upserts and deletes rows keyed by uuids it minted, while external submission
-Workers are INSERT-only. See [`src/core/publish/README.md`](src/core/publish/README.md).
+Workers are INSERT-only. See [`src/features/publish/README.md`](src/features/publish/README.md).
 
 Keeping public content in this separate database allows a public Worker to read
 published pages without receiving access to users, sessions, drafts, trash,
@@ -1247,7 +1279,7 @@ adapter.
 
 ## Publish targets
 
-Publishing is adapter-based (`src/core/publish/`). Built-in targets are selected with
+Publishing is adapter-based (`src/features/publish/`). Built-in targets are selected with
 the `PUBLISH_TARGETS` var (comma-separated, defaults to `"d1"`):
 
 | Target | Requires | What it does |

@@ -181,8 +181,12 @@
           <label class="block">
             <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.bulk_action" | t }}</span>
             <select name="bulk_action" data-bulk-action class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              {% if publishEnabled %}
               <option value="publish">{{ "view_strings.shared_bulk_actions.publish" | t }}</option>
               <option value="unpublish">{{ "view_strings.shared_bulk_actions.unpublish" | t }}</option>
+              {% else %}
+                <option value="" selected disabled>—</option>
+              {% endif %}
               <option value="delete">{{ "view_strings.shared_bulk_actions.move_to_trash" | t }}</option>
             </select>
           </label>
@@ -220,7 +224,9 @@
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.page" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.type" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.weight" | t }}</th>
+          {% if publishEnabled %}
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.status" | t }}</th>
+          {% endif %}
           <th class="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.actions" | t }}</th>
         </tr>
       </thead>
@@ -258,6 +264,7 @@
                   {% endif %}
                 </div>
               </td>
+              {% if publishEnabled %}
               <td class="px-6 py-4">
                 <div class="flex items-center gap-2">
                   {% if page.isPublished %}
@@ -287,6 +294,7 @@
                   {% endif %}
                 </div>
               </td>
+              {% endif %}
               <td class="px-6 py-4 text-right">
                 <div class="flex flex-wrap items-center justify-end gap-2">
                   <a href="{{ page.editHref }}" title="{{ "view_strings.sections_advanced_search.edit" | t }}" aria-label="Edit {{ page.name }}"
@@ -294,6 +302,7 @@
                     <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
                     <span class="sr-only">{{ "view_strings.sections_advanced_search.edit" | t }}</span>
                   </a>
+                  {% if publishEnabled %}
                   {% if page.isPublished %}
                     <form method="POST" action="{{ page.unpublishAction }}" class="inline shrink-0" data-confirm="{{ "view_strings.sections_advanced_search.unpublish_this_page" | t }}">
                       <button type="submit" title="{{ "view_strings.shared_bulk_actions.unpublish" | t }}" aria-label="Unpublish {{ page.name }}"
@@ -311,6 +320,7 @@
                       </button>
                     </form>
                   {% endif %}
+                  {% endif %}
                   <form method="POST" action="{{ page.deleteAction }}" class="inline shrink-0" data-confirm="{{ "view_strings.sections_advanced_search.move_this_page_to_trash" | t }}">
                     <button type="submit" title="{{ "view_strings.sections_advanced_search.trash" | t }}" aria-label="Move {{ page.name }} to trash"
                             class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-700">
@@ -324,7 +334,7 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="6" class="px-6 py-12 text-center text-gray-400">
+            <td colspan="{% if publishEnabled %}6{% else %}5{% endif %}" class="px-6 py-12 text-center text-gray-400">
               {% if hasSearch %}
                 No matching pages.
               {% else %}
@@ -435,7 +445,7 @@
 
     bulkForm?.addEventListener('submit', (event) => {
       const scope = bulkScope?.value || 'selected';
-      const action = bulkAction?.value || 'publish';
+      const action = bulkAction?.value || '';
       const selected = selectedBulkCount();
       if (scope === 'selected' && selected === 0) {
         event.preventDefault();

@@ -15,6 +15,8 @@ import { mediaUploadRoutes } from '../features/media/routes/upload';
 import { pluginAdminRoutes } from '../features/plugins/routes/admin-proxy';
 import { pluginApiRoutes, pluginTenantRoutes } from '../features/plugins/routes/cms-api';
 import { pluginsManageRoutes } from '../features/plugins/routes/manage';
+import { pluginPublishRoutes } from '../features/plugins/routes/publish-api';
+import { publishRoutes } from '../features/publish/routes';
 import { blockTypesRoutes, pageTypesRoutes } from '../features/runtime-content-types/routes';
 import { searchRoutes } from '../features/search/routes';
 import { trashRoutes } from '../features/trash/routes';
@@ -32,6 +34,7 @@ export const adminRouterEntries: readonly FeatureRouterEntry[] = [
   { id: 'media', router: mediaUploadRoutes },
   { id: 'plugins', router: pluginAdminRoutes },
   { id: 'plugins', router: pluginsManageRoutes },
+  { id: 'publish', router: publishRoutes },
   { id: 'runtime-content-types', router: blockTypesRoutes },
   { id: 'runtime-content-types', router: pageTypesRoutes },
   { id: 'search', router: searchRoutes },
@@ -47,4 +50,5 @@ export const publicRouterEntries: readonly FeatureRouterEntry[] = [
   { id: 'media', router: mediaPublicRoutes },
   { id: 'plugins', router: pluginApiRoutes, basePath: '/__cms' },
   { id: 'plugins', router: pluginTenantRoutes, basePath: '/__cms' },
+  { id: 'plugins', router: pluginPublishRoutes, basePath: '/__cms' },
 ];

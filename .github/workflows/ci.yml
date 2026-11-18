@@ -34,6 +34,7 @@ jobs:
       - run: npm run type-check
       # No .dev.vars in CI: test bindings come from vitest.config.mts.
       - run: npm test
+      - run: npm run check:dms-profile
 
   # An existing database upgraded through numbered and manual migrations must
   # end where a fresh install does. --from is the oldest revision still

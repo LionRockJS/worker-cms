@@ -12,6 +12,7 @@
 --   src/features/media/schema.sql
 --   src/features/plugins/schema.sql
 --   src/features/plugin-pointer-indexes/schema.sql
+--   src/features/publish/schema.sql
 --   src/features/runtime-content-types/schema.sql
 --   src/features/trash/schema.sql
 -- ============================================================
@@ -102,7 +103,7 @@ CREATE TABLE IF NOT EXISTS tags(
 -- database can be a publish target for one host and the working set of the
 -- next — publish A → B, B → C. Because the name no longer says which database
 -- it belongs to, comments and docs disambiguate by binding: `DB.pages` is this
--- table, `PUBLISHED_DB.pages` is the published one (src/core/publish/schema.sql).
+-- table, `PUBLISHED_DB.pages` is the published one (src/features/publish/published.sql).
 CREATE TABLE IF NOT EXISTS pages(
     id INTEGER UNIQUE DEFAULT ((( strftime('%s','now') - 1563741060 ) * 100000) + (RANDOM() & 65535)) NOT NULL,
     uuid TEXT UNIQUE DEFAULT (lower(hex( randomblob(4)) || '-' || hex( randomblob(2)) || '-' || '4' || substr( hex( randomblob(2)), 2)
@@ -550,18 +551,6 @@ CREATE TABLE IF NOT EXISTS record_holds (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_record_holds_active ON record_holds (page_uuid) WHERE released_at IS NULL;
 
--- Submission sources to erase from the published database (W12). Purging a
--- submission mirror records its uuid here in the same batch; the source row is
--- deleted after the purge commits and erased_at confirms it. A row with no
--- erased_at is retried by cron. Ingest never mirrors a uuid listed here, so a
--- restored published database cannot bring an erased submission back.
-CREATE TABLE IF NOT EXISTS submission_erasures (
-    uuid TEXT PRIMARY KEY,
-    requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    erased_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_submission_erasures_pending ON submission_erasures (requested_at) WHERE erased_at IS NULL;
-
 -- Feature: audit — the audit log reader, the archive and the retention sweep.
 -- feature: audit
 --
@@ -953,6 +942,20 @@ CREATE INDEX IF NOT EXISTS idx_pages_pointer_edm
     ON pages(json_extract(lect, '$._pointers.edm'), page_type, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_pages_pointer_contact
     ON pages(json_extract(lect, '$._pointers.contact'), page_type, updated_at DESC, id DESC);
+
+-- feature: publish
+
+-- Submission sources to erase from the published database (W12). Purging a
+-- submission mirror records its uuid here in the same batch; the source row is
+-- deleted after the purge commits and erased_at confirms it. A row with no
+-- erased_at is retried by cron. Ingest never mirrors a uuid listed here, so a
+-- restored published database cannot bring an erased submission back.
+CREATE TABLE IF NOT EXISTS submission_erasures (
+    uuid TEXT PRIMARY KEY,
+    requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    erased_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_submission_erasures_pending ON submission_erasures (requested_at) WHERE erased_at IS NULL;
 
 -- Feature: runtime-content-types — runtime-editable page and block types.
 -- feature: runtime-content-types

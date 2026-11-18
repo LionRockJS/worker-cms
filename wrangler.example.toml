@@ -33,6 +33,7 @@ database_name = "cms"
 database_id = "00000000-0000-0000-0000-000000000001"
 migrations_dir = "migrations"
 
+# Omit this block for a build with "publish": false in cms.features.json.
 [[d1_databases]]
 binding = "PUBLISHED_DB"
 database_name = "cms-published"
@@ -77,10 +78,8 @@ binding = "IMAGES"
 # binding = "PUBLISH_BUCKET"
 # bucket_name = "worker-cms-published"
 
-# Submission ingest: pulls every published page without a draft counterpart
-# into the draft DB as a submission mirror, firing submission hooks. Bounded
-# batch per tick; subscribed plugins can also trigger it on demand via
-# POST /__cms/ingest/submissions.
+# Scheduled maintenance includes sessions, audit, and enabled features.
+# With publishing enabled, this also ingests public submission mirrors.
 [triggers]
 crons = ["*/5 * * * *"]
 

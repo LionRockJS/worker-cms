@@ -12,15 +12,12 @@
 // ============================================================
 
 import type { Env } from '../../types';
-import { coreExtensions } from '../extensions';
-import { safeParseLect, stringifyLect } from '../db/lect';
+import { coreExtensions } from '../../core/extensions';
+import { safeParseLect, stringifyLect } from '../../core/db/lect';
 
 /** What survives publication for a page type: an allow-list, a deny-list, or
  *  neither (the whole lect is published). */
-export interface PublishLectRule {
-  keep?: string[];
-  drop?: string[];
-}
+import type { PublishLectRule } from '../../core/publish/adapter';
 
 /**
  * Effective projection rules by page type. A rule is honored only when the

@@ -8,6 +8,7 @@
     "media": true,
     "plugin-pointer-indexes": true,
     "plugins": true,
+    "publish": true,
     "runtime-content-types": true,
     "search": true,
     "trash": true,

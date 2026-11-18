@@ -1,5 +1,5 @@
 import { resolveDataClasses } from '../db/data-classes';
-import { regulatedPages } from '../publish/regulated';
+import { regulatedPages } from '../db/regulated-pages';
 import { sessionIdleTtl, validateAccessSession } from '../auth/sessions';
 import { effectivePermissions, resolveRolePermissions } from '../auth/roles';
 // Durable Object: one instance per page, handles hybrid WebSocket live sync.

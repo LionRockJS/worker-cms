@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { cmsApiRoutes } from '../src/features/plugins/api';
-import { creditApiRoutes } from '../src/features/credits/routes/contributor-api';
+import { publicRouters } from '../src/features/routers';
 
 const pathsOf = (router: { routes: Array<{ method: string; path: string }> }) =>
   router.routes.map((route) => `${route.method} ${route.path}`);
@@ -31,6 +31,7 @@ const EXPECTED = [
   'GET /credits/subscriptions',
   'GET /content-meta',
   'POST /tags/ensure',
+  'POST /tenant/claim',
   'GET /pages',
   'POST /pages/list-batch',
   'POST /pages/search',
@@ -63,7 +64,7 @@ describe('/__cms route table', () => {
     // request (say GET /credits vs DELETE /pages/:id) carries no meaning, and
     // pinning it would just make grouping routes by resource look like a
     // breaking change. The order that does matter is asserted below.
-    const table = [...pathsOf(cmsApiRoutes), ...pathsOf(creditApiRoutes)];
+    const table = publicRouters.filter((entry) => entry.basePath === '/__cms').flatMap((entry) => pathsOf(entry.router));
     expect(table.slice().sort()).toEqual(EXPECTED.slice().sort());
     expect(table).toHaveLength(EXPECTED.length);
   });

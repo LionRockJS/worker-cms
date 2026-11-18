@@ -12,8 +12,7 @@ import type { Page, PageVersion } from '../../../types';
 import { editorsFromForm, nullableStr, num } from '../../../core/http/forms';
 import { blockNamesFor, blockPropsByName, blueprintPropsFor, lectsMatch } from '../../../core/db/page-logic';
 import { editorTaxonomy, parentPageOption } from '../../../core/db/admin-queries';
-import { getLiveLect } from '../../../core/publish';
-import { draftLectProjector } from '../../../core/publish/projection';
+import { publication } from '../../../features/services';
 import type { AppContext } from '../../../core/http/context';
 
 
@@ -140,11 +139,11 @@ export async function editorPageData(
     c.env.DB.prepare('SELECT * FROM page_versions WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 20')
       .bind(page.id)
       .all<PageVersion>(),
-    getLiveLect(c.env, page.uuid),
+    publication()?.getLiveLect(c.env, page.uuid) ?? null,
     c.env.DB.prepare('SELECT tag_id FROM page_tags WHERE page_id = ?')
       .bind(page.id)
       .all<{ tag_id: number }>(),
-    draftLectProjector(c.env),
+    publication()?.draftLectProjector(c.env),
   ]);
 
   recordTagReads('tag.editor-options', taxonomy.tags);
@@ -166,12 +165,12 @@ export async function editorPageData(
     // The live copy is projected at publish time, so each candidate version
     // must be projected the same way before comparing (page-logic lectsMatch
     // semantics keep byte-equality for non-projected types).
-    liveVersionId: versions.results.find(
-      (candidate) => lectsMatch(projectDraft({ page_type: page.page_type, lect: candidate.lect }), liveLect),
-    )?.id,
+    liveVersionId: liveLect !== null ? versions.results.find(
+      (candidate) => lectsMatch(projectDraft?.({ page_type: page.page_type, lect: candidate.lect }), liveLect),
+    )?.id : undefined,
     isPublished: liveLect !== null,
     isLiveSynced: liveLect !== null
-      && lectsMatch(projectDraft({ page_type: page.page_type, lect: page.lect }), liveLect),
+      && lectsMatch(projectDraft?.(page), liveLect),
     selectedTagIds: pageTags.results.map((pt) => pt.tag_id),
   };
 }

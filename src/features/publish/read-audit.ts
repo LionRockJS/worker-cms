@@ -1,9 +1,9 @@
 import type { Env } from '../../types';
-import type { AuditActor } from '../db/audit';
-import { resolveDataClasses } from '../db/data-classes';
-import { auditBackgroundReads, recordRead, ReadAuditUnavailableError, type PendingRead } from '../http/access-log';
-import { requestContext } from '../http/request-context';
-import type { LivePageSnapshot, PublishAdapter } from './adapter';
+import type { AuditActor } from '../../core/db/audit';
+import { resolveDataClasses } from '../../core/db/data-classes';
+import { auditBackgroundReads, recordRead, ReadAuditUnavailableError, type PendingRead } from '../../core/http/access-log';
+import { requestContext } from '../../core/http/request-context';
+import type { LivePageSnapshot, PublishAdapter } from '../../core/publish/adapter';
 
 /** Prepare evidence from captured source provenance, without a later tag lookup.
  * Copy producers must persist the returned reads before materializing rows. */

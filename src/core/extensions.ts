@@ -17,8 +17,8 @@ import type { AuditActor } from './db/audit';
 import type { Env } from '../types';
 import type { JWTPayload } from '../types';
 import type { AppContext } from './http/context';
-import type { PublishAdapter } from './publish/adapter';
-import type { PublishLectRule } from './publish/projection';
+import type { PublishAdapter, PublishPluginTarget } from './publish/adapter';
+import type { PublishLectRule } from './publish/adapter';
 import type { BulkPageAction } from './pages/bulk-action';
 import type { AdvancedSearchCriterion, AdvancedSearchOperator } from './db/search';
 
@@ -216,6 +216,7 @@ export interface CoreExtensions {
    * contributes one per plugin whose manifest declares `publishTarget`.
    */
   publishAdapters?(env: Env): Promise<PublishAdapter[]>;
+  pluginPublishTargets?(env: Env): Promise<PublishPluginTarget[]>;
   /** Sidebar entries to append to the ones core declares. */
   sidebarNav?(env: Env): Promise<ContributedNavItem[]>;
   /**

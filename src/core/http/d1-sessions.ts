@@ -1,4 +1,5 @@
 import type { Env, WorkerEnv } from '../../types';
+import { featureInstalled } from '../../features';
 
 /**
  * Create one sequentially consistent D1 session per database binding for a
@@ -12,6 +13,6 @@ export function withD1Sessions(env: WorkerEnv): Env {
   return {
     ...env,
     DB: env.DB.withSession('first-primary'),
-    PUBLISHED_DB: env.PUBLISHED_DB.withSession('first-primary'),
+    PUBLISHED_DB: featureInstalled('publish') ? env.PUBLISHED_DB?.withSession('first-primary') : undefined,
   };
 }

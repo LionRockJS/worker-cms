@@ -8,6 +8,7 @@ import { auditServices } from '../features/audit/services';
 import { creditsServices } from '../features/credits/services';
 import { jobsServices } from '../features/jobs/services';
 import { pluginsServices } from '../features/plugins/services';
+import { publishServices } from '../features/publish/services';
 
 /** Runtime services contributed by installed features. */
 export const featureServiceEntries: readonly FeatureServiceEntry[] = [
@@ -15,4 +16,5 @@ export const featureServiceEntries: readonly FeatureServiceEntry[] = [
   creditsServices,
   jobsServices,
   pluginsServices,
+  publishServices,
 ];

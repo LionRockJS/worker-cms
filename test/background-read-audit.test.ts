@@ -3,7 +3,7 @@ import { beforeEach, afterEach, expect, it } from 'vitest';
 import { deliverHooks } from '../src/features/plugins/hooks';
 import { approvePageTypeAccess, revokePageTypeAccess } from '../src/features/plugins/page-types';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } from '../src/features/plugins/registry';
-import { ingestSubmissions } from '../src/core/db/submission-ingest';
+import { ingestSubmissions } from '../src/features/publish/submission-ingest';
 import { createAdvancedSearchBulkActionJob, createPluginAdminActionJob, getAdminJob } from '../src/features/jobs/queue';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
 import type { JWTPayload } from '../src/types';

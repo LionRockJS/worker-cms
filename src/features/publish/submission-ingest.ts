@@ -1,9 +1,9 @@
-import { auditBackgroundReads } from '../http/access-log';
-import { incomingSensitivityStatements } from './sensitivity';
-import type { AuditActor } from './audit';
-import { readD1PageSource } from '../publish/d1';
-import { liveSourceReads } from '../publish/read-audit';
-import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+import { auditBackgroundReads } from '../../core/http/access-log';
+import { incomingSensitivityStatements } from '../../core/db/sensitivity';
+import type { AuditActor } from '../../core/db/audit';
+import { readD1PageSource } from './d1';
+import { liveSourceReads } from './read-audit';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 // ============================================================
 // Generic submission ingest — published DB → draft pages.
 //
@@ -20,7 +20,7 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 // nothing; the full re-scan restarts once REPASS_MS after that pass ended.
 // Ingest never mutates or
 // deletes a published row; purging a mirror erases its source separately
-// (core/pages/submission-erasure.ts).
+// (submission-erasure.ts).
 //
 // Budget: creates per run are capped so one invocation (cron tick or
 // /__cms/ingest/submissions call) stays well inside the subrequest budget —
@@ -28,9 +28,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 // ============================================================
 
 import type { Env } from '../../types';
-import { coreExtensions } from '../extensions';
-import { getSetting, saveSetting } from './settings';
-import { savePageVersion } from './admin-queries';
+import { coreExtensions } from '../../core/extensions';
+import { getSetting, saveSetting } from '../../core/db/settings';
+import { savePageVersion } from '../../core/db/admin-queries';
 
 const CURSOR_SETTING_KEY = 'submissions.ingest.cursor';
 /** Rows scanned from the published DB per run. */
@@ -61,44 +61,6 @@ export interface IngestResult {
   created: number;
   /** True when the caller should run another batch (cap reached or scan restarted). */
   more: boolean;
-}
-
-/** Submission origin is recorded in existing version history, avoiding any
- * page-schema flag while remaining stable across later edits and restore. */
-export async function isSubmissionMirror(db: D1DatabaseClient, pageId: number): Promise<boolean> {
-  const row = await db.prepare(
-    `SELECT 1 FROM page_versions
-     WHERE page_id = ? AND action IN ('ingest-submission', 'pull-published')
-     LIMIT 1`,
-  ).bind(pageId).first();
-  return row !== null;
-}
-
-/** Page ids per read, bounded by D1's cap on bound parameters. */
-const MIRROR_ID_CHUNK = 90;
-
-/**
- * Which of `pageIds` are submission mirrors — the set-based form of
- * isSubmissionMirror, for callers holding a whole slice. One read per chunk
- * instead of one per page, which is what keeps a bulk publish/unpublish off
- * the subrequest budget.
- */
-export async function submissionMirrorIds(
-  db: D1DatabaseClient,
-  pageIds: number[],
-): Promise<Set<number>> {
-  const mirrors = new Set<number>();
-  const unique = [...new Set(pageIds)];
-  for (let index = 0; index < unique.length; index += MIRROR_ID_CHUNK) {
-    const chunk = unique.slice(index, index + MIRROR_ID_CHUNK);
-    const { results } = await db.prepare(
-      `SELECT DISTINCT page_id FROM page_versions
-       WHERE page_id IN (${chunk.map(() => '?').join(',')})
-         AND action IN ('ingest-submission', 'pull-published')`,
-    ).bind(...chunk).all<{ page_id: number }>();
-    for (const row of results) mirrors.add(row.page_id);
-  }
-  return mirrors;
 }
 
 interface Cursor {

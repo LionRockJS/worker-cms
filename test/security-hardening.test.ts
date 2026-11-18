@@ -7,7 +7,7 @@ import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } fr
 import { approveFilePrefix } from '../src/features/plugins/file-prefixes';
 import { createAuthSession, revokeRefreshSession, type AuthDbUser } from '../src/core/auth/sessions';
 import { approvePageTypeAccess, revokePageTypeAccess } from '../src/features/plugins/page-types';
-import { projectLect } from '../src/core/publish/projection';
+import { projectLect } from '../src/features/publish/projection';
 import { limitedBytes } from '../src/core/http/body-limit';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 

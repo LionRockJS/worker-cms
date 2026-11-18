@@ -22,6 +22,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { availableFeatures, buildCms, buildPublished } from './build-migrations.mjs';
 
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
 const read = (file) => readFileSync(path.join(rootDir, file), 'utf8');
@@ -71,8 +72,8 @@ function configNames(text, includeCommented) {
   return { bindings: new Set(bindings), vars: new Set(vars) };
 }
 
-function baselineTables(file) {
-  return new Set([...read(file).matchAll(/^CREATE TABLE IF NOT EXISTS ([a-z_][a-z0-9_]*)/gm)].map((m) => m[1]));
+function baselineTables(sql) {
+  return new Set([...sql.matchAll(/^CREATE TABLE IF NOT EXISTS ([a-z_][a-z0-9_]*)/gm)].map((m) => m[1]));
 }
 
 function checkInventory(errors) {
@@ -100,11 +101,14 @@ function checkInventory(errors) {
     if (!bindingAssets.has(name)) errors.push(`inventory: wrangler.example.toml declares ${name} with no inventory entry`);
   }
 
-  for (const [store, file] of [['DB', 'migrations/0001_initial_schema.sql'], ['PUBLISHED_DB', 'migrations/published/0001_published_schema.sql']]) {
-    const tables = baselineTables(file);
+  // The inventory describes everything the repository can build, even when
+  // this checkout selects a profile with fewer tables.
+  const fullProfile = Object.fromEntries(availableFeatures().map(id => [id, true]));
+  for (const [store, sql] of [['DB', buildCms(fullProfile)], ['PUBLISHED_DB', buildPublished()]]) {
+    const tables = baselineTables(sql);
     const listed = new Set(inventory.assets.filter((a) => a.kind === 'table' && a.store === store).map((a) => a.table));
     for (const table of tables) if (!listed.has(table)) errors.push(`inventory: ${store}.${table} has no inventory entry`);
-    for (const table of listed) if (!tables.has(table)) errors.push(`inventory: ${store}.${table} is inventoried but not in ${file}`);
+    for (const table of listed) if (!tables.has(table)) errors.push(`inventory: ${store}.${table} is inventoried but missing from the full schema`);
   }
   return { inventory, bindingAssets };
 }

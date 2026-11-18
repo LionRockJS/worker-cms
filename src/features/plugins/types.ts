@@ -6,7 +6,7 @@
 // screens needs them.
 
 import type { BlueprintEntry } from '../../cms-config';
-import type { PublishLectRule } from '../../core/publish/projection';
+import type { PublishLectRule } from '../../core/publish/adapter';
 export type { PublishLectRule };
 
 export type PluginTrustLevel = 'server-only' | 'sandboxed-ui' | 'trusted-ui';

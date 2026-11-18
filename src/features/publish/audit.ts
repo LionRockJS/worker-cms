@@ -1,9 +1,9 @@
 import type { Env, Page } from '../../types';
-import { writeBackgroundAuditRows, type AuditActor } from '../db/audit';
-import { prepareReadAudits, type PendingRead } from '../http/access-log';
-import type { PublishAdapter, PublishedTag } from './adapter';
-import { auditOutboundIntent } from '../http/outbound-audit';
-import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+import { writeBackgroundAuditRows, type AuditActor } from '../../core/db/audit';
+import { prepareReadAudits, type PendingRead } from '../../core/http/access-log';
+import type { PublishAdapter, PublishedTag } from '../../core/publish/adapter';
+import { auditOutboundIntent } from '../../core/http/outbound-audit';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 
 /** Await disclosure intent before a publish destination receives content.
  * This is the existing read evidence pipeline, with destination attribution. */

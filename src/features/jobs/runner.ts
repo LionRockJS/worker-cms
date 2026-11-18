@@ -1,3 +1,4 @@
+import { featureInstalled } from '../index';
 import { abortIf } from '../../core/db/transaction-guard';
 // Running a claimed job: replay a recorded admin request, or walk a bulk page
 // action one bounded slice at a time, re-queueing itself until the set is done.
@@ -89,6 +90,9 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
 async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Promise<void> {
   if (!job.user) throw new Error('Admin job is missing user data');
   let input = parseAdvancedSearchBulkActionJob(job.body);
+  if ((input.action === 'publish' || input.action === 'unpublish') && !featureInstalled('publish')) {
+    throw new Error('Publishing is unavailable in this build');
+  }
   const required: Permission = input.action === 'publish' || input.action === 'unpublish' ? 'content:publish'
     : input.action === 'delete' ? 'content:delete' : 'content:write';
   if (!effectivePermissions(await resolveRolePermissions(env, true), job.user.role).has(required)) throw new Error('Job permission revoked');

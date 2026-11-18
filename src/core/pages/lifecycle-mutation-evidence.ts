@@ -9,7 +9,7 @@ import { abortIf } from '../db/transaction-guard';
 import { auditBackgroundReads } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
-import { eraseSubmissionSources } from './submission-erasure';
+import { publication } from '../../features/services';
 
 const PAGE=['id','uuid','created_at','updated_at','name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'];
 const TRASH=[...PAGE,'source_page_id'];
@@ -174,6 +174,8 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   const mirror=(p:Row)=>versions.some(v=>v.page_id===p.id&&MIRROR_ACTIONS.includes(String(v.action)));
   // Purging a submission mirror erases its published source too (W12).
   const erasures=action==='purge'?sources.filter(mirror).map(p=>String(p.uuid)):[];
+  const publishing = publication();
+  if (erasures.length && !publishing) throw new PageLifecycleUnavailableError(true);
   const manifest=sources.map(p=>({id:p.id,uuid:p.uuid,parent_id:p.page_id,...(src==='trash_pages'?{source_parent_id:p.source_page_id}:{}),
     versions:versions.filter(v=>v.page_id===p.id).map(v=>({id:v.id,uuid:v.uuid})),links:links.filter(l=>l.page_id===p.id).map(l=>({id:l.id,uuid:l.uuid,tag_id:l.tag_id,weight:l.weight}))}));
   const detail={operation_id:crypto.randomUUID(),...(service?.detail??{}),sources:manifest,selected_ids:selectedIds,cascade_ids:ids.filter(id=>!selectedIds.includes(id)),detached_children:children.map(c=>({id:c.id,uuid:c.uuid,parent_id:c.page_id,source_parent_id:c.source_page_id,restored_parent_id:detached.find(d=>d.id===c.id)?.source_page_id})),
@@ -235,7 +237,7 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   onAttempt?.();
   await env.DB.batch(statements);
   // The purge has committed with the erasure recorded; a failure here leaves it pending for cron.
-  if(erasures.length)await eraseSubmissionSources(env).catch(()=>console.error(JSON.stringify({event:'submission.erasure-pending',count:erasures.length})));
+  if(erasures.length)await publishing?.eraseSubmissionSources(env).catch(()=>console.error(JSON.stringify({event:'submission.erasure-pending',count:erasures.length})));
   return {count:sources.length,pages:sources.map(p=>({id:Number(p.id),uuid:String(p.uuid),name:String(p.name),slug:String(p.slug),page_type:p.page_type as string|null,
     submission_origin:mirror(p)?1:0}))};
 }

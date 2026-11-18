@@ -8,8 +8,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../src/index';
 import { createAuthSession, type IssuedAuthTokens } from '../src/core/auth/sessions';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
-import { ingestSubmissions } from '../src/core/db/submission-ingest';
-import { eraseSubmissionSources } from '../src/core/pages/submission-erasure';
+import { ingestSubmissions } from '../src/features/publish/submission-ingest';
+import { eraseSubmissionSources } from '../src/features/publish/submission-erasure';
 import { jobsServices } from '../src/features/jobs/services';
 import type { Env } from '../src/types';
 

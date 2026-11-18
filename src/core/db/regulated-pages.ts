@@ -1,5 +1,5 @@
 // ============================================================
-// The publication gate for regulated containers.
+// Shared page classification for publication and collaborative editing.
 //
 // PHI is not published. Minimization (projection.ts) thins what a published
 // consumer receives, but it is declared by plugins and returns the whole lect
@@ -24,13 +24,11 @@
 
 import { inventoried } from '../http/regulated-profile';
 import type { Env, Page } from '../../types';
-import { classFor, resolveDataClasses, type DataClassMap } from '../db/data-classes';
-import { pageSensitivityFloors } from '../db/sensitivity';
+import { classFor, resolveDataClasses, type DataClassMap } from './data-classes';
+import { pageSensitivityFloors } from './sensitivity';
 
 /** Classification, structural and deployment-containment refusals share the
  * publication result contract; none is a successful target receipt. */
-export type PublishRefusal = 'submission' | 'regulated' | 'classification_unavailable' | 'writes_unavailable';
-
 /** The class that may never be published. */
 const REGULATED_CLASS = 'phi';
 

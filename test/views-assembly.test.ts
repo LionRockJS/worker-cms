@@ -25,6 +25,7 @@ const FEATURE_VIEWS: Record<string, string[]> = {
   'users-roles': ['sections/users.liquid', 'sections/roles.liquid', 'sections/user-form.liquid', 'sections/role-form.liquid'],
   'i18n': ['sections/languages.liquid', 'sections/translations.liquid'],
   'search': ['sections/advanced-search.liquid'],
+  'publish': ['assets/publish-editor.js'],
   'credits': ['sections/credit-summary.liquid'],
   'media': ['sections/content-list.liquid'],
   'runtime-content-types': ['sections/type-list.liquid', 'sections/page-type-form.liquid', 'sections/block-type-form.liquid'],
@@ -301,7 +302,7 @@ describe('view assembly', () => {
   it('keeps publish actions inside the publish schedule card', async () => {
     const [editor, editorScript] = await Promise.all([
       env.VIEWS.fetch('https://views.local/sections/editor.liquid').then((response) => response.text()),
-      env.VIEWS.fetch('https://views.local/assets/editor.js').then((response) => response.text()),
+      env.VIEWS.fetch('https://views.local/assets/publish-editor.js').then((response) => response.text()),
     ]);
     const schedule = editor.indexOf('view_strings.sections_editor.publish_schedule');
     const publish = editor.indexOf('name="action" value="publish"');
@@ -329,7 +330,7 @@ describe('view assembly', () => {
     const footer = editor.slice(editor.indexOf('<div class="flex min-w-0 flex-col gap-3 sm:flex-row'));
     const save = footer.indexOf('view_strings.sections_editor.save_changes');
     const saveAndPublish = footer.indexOf('view_strings.sections_editor.save_and_publish');
-    expect(editor).toContain('{% if isEdit and isPublished %}');
+    expect(editor).toContain('{% if publishEnabled and isEdit and isPublished %}');
     expect(saveAndPublish).toBeGreaterThan(save);
     expect(footer).toContain('name="action" value="publish"');
   });

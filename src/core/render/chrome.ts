@@ -203,6 +203,7 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     catalogHref: `/admin/i18n/catalog/${encodeURIComponent(uiLocale.code)}`,
     systemTimezone,
     clientAssets: [...CORE_CLIENT_ASSETS, ...features.flatMap((feature) => feature.clientAssets ?? [])],
+    publishEnabled: featureInstalled('publish'),
     canManageUsers: permissions.has('users:manage'),
     canManageRoles: permissions.has('roles:manage'),
     canManagePlugins: permissions.has('plugin:manage'),

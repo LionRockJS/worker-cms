@@ -191,7 +191,7 @@ export function publicationStatusForPage(
 export function withLiveStatus<T extends { uuid: string; weight: number; lect: string | null | undefined } & PageScheduleFields>(
   pages: T[],
   liveMap: ReadonlyMap<string, LiveStatusPage>,
-  // Publish-time lect projection (publish/projection.ts). The live copy is
+  // Publish-time lect projection. The live copy is
   // projected, so the draft must be projected the same way before diffing or
   // projected types would show permanent lect drift.
   projectDraftLect: (page: T) => string | null | undefined = (page) => page.lect,

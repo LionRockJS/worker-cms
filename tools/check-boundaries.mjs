@@ -31,8 +31,8 @@ const SERVICES = 'src/features/services.ts';
 const FORBIDDEN_IN_CHROME = [
   'src/core/db/search.ts',
   'src/core/db/chinese.ts',
-  'src/core/publish/index.ts',
-  'src/core/publish/projection.ts',
+  'src/features/publish/index.ts',
+  'src/features/publish/projection.ts',
   'src/features/search/template.ts',
   'dictionary/chinese-chars.ts',
 ];

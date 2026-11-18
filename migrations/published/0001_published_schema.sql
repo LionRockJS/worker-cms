@@ -5,7 +5,7 @@
 -- the code they belong to and run `npm run build:migrations`.
 --
 -- Assembled from:
---   src/core/publish/schema.sql
+--   src/features/publish/published.sql
 -- ============================================================
 
 -- ============================================================

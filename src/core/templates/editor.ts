@@ -647,6 +647,7 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   })) ?? [];
 
   const body = await renderView(views, '/templates/editor.json', {
+    publishEnabled: opts.publishEnabled !== false,
     pageTitle,
     action,
     backHref,

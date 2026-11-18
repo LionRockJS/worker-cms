@@ -21,38 +21,21 @@ import type {
   PublishSnapshot,
   PublishSnapshotTag,
   PublishedTag,
-} from './adapter';
+} from '../../core/publish/adapter';
+import type { PublishOutcome, BulkPublishOutcome, BulkUnpublishOutcome, PublishRefusal } from '../../core/publish/service';
 import { d1Adapter } from './d1';
-import { coreExtensions } from '../extensions';
+import { coreExtensions } from '../../core/extensions';
+import { pluginAdapter } from './plugin-adapter';
 import { r2Adapter } from './r2';
-import { isSubmissionMirror, submissionMirrorIds } from '../db/submission-ingest';
+import { isSubmissionMirror, submissionMirrorIds } from './submission-mirrors';
 import { projectLect, publishLectRules } from './projection';
-import { regulatedPages, type PublishRefusal } from './regulated';
+import { regulatedPages } from '../../core/db/regulated-pages';
 import { auditPublishTransfer, auditWithdrawal, withdrawalReads, type WithdrawalRead } from './audit';
-import type { AuditActor } from '../db/audit';
-import { classFor, resolveDataClasses } from '../db/data-classes';
-import { inventoried } from '../http/regulated-profile';
+import type { AuditActor } from '../../core/db/audit';
+import { classFor, resolveDataClasses } from '../../core/db/data-classes';
+import { inventoried } from '../../core/http/regulated-profile';
 import { auditLiveReads } from './read-audit';
-import { regulatedWritesBlocked } from '../http/regulated-writes';
-
-export interface PublishOutcome {
-  /** Targets that were attempted, in order. */
-  targets: string[];
-  /** Target ids whose publish/unpublish threw. */
-  failures: string[];
-  /** Containment proceeded with incomplete audit evidence for these targets. */
-  auditFailures?: string[];
-  /**
-   * Set when the page never reached an adapter. Either it is a submission
-   * mirror — publishing one would upsert the original live row it shares a uuid
-   * with, and unpublishing/trashing one would DELETE that live row — or it holds
-   * regulated data, which is never published, or deployment write containment
-   * prevents any publication.
-   */
-  refused?: boolean;
-  /** Which refusal it was, for the message the admin sees. */
-  refusedReason?: PublishRefusal;
-}
+import { regulatedWritesBlocked } from '../../core/http/regulated-writes';
 
 const refusal = (reason: PublishRefusal): PublishOutcome => (
   { targets: [], failures: [], refused: true, refusedReason: reason }
@@ -82,7 +65,10 @@ export async function getPublishAdapters(env: Env): Promise<PublishAdapter[]> {
 
   // Plugin publish targets, when the plugin platform is installed. Without it
   // this contributes nothing and publishing falls back to the built-ins.
-  const contributed = await coreExtensions().publishAdapters?.(env);
+  const extensions = coreExtensions();
+  const plugins = await extensions.pluginPublishTargets?.(env) ?? [];
+  adapters.push(...plugins.map(pluginAdapter));
+  const contributed = await extensions.publishAdapters?.(env);
   if (contributed) adapters.push(...contributed);
 
   return adapters;
@@ -261,20 +247,6 @@ export async function publishPageToTargets(env: Env, pageId: number, actor?: Aud
  *  by whether they reached the targets, so callers can attribute per-page
  *  outcomes without re-reading anything. `failures` is per-target for the whole
  *  slice, matching how unpublishPagesFromTargets reports. */
-export interface BulkPublishOutcome {
-  targets: string[];
-  failures: string[];
-  /** Pages handed to the targets, in input order. */
-  published: Page[];
-  /** Pages skipped before an adapter: all input under deployment containment;
-   * otherwise submission mirrors first, then regulated pages. */
-  refused: Page[];
-  /** The regulated subset of `refused`. A policy refusal, not a structural one,
-   *  so a caller that reports per-page outcomes can say which it was. */
-  refusedRegulated: Page[];
-  /** Whole-deployment containment; separate from record-level PHI refusals. */
-  refusedReason?: 'writes_unavailable';
-}
 
 /**
  * Publishes many draft pages to every target in as few round-trips as possible.
@@ -357,12 +329,6 @@ export async function unpublishPageFromTargets(env: Env, uuid: string, isSubmiss
 
 /** Result of a bulk unpublish: `refusedCount` is how many pages were submission
  *  mirrors (skipped, never deleted), so callers can fold it into their metrics. */
-export interface BulkUnpublishOutcome {
-  targets: string[];
-  failures: string[];
-  auditFailures?: string[];
-  refusedCount: number;
-}
 
 /**
  * Removes many pages from every target in as few round-trips as possible.
@@ -555,4 +521,21 @@ export async function listLiveByTypes(env: Env, pageTypes: string[], actor?: Aud
 export function describeFailures(outcome: PublishOutcome): string | null {
   if (!outcome.failures.length) return null;
   return outcome.failures.join(', ');
+}
+
+/** Flash after an individual publish request. */
+export function publishFlash(outcome: PublishOutcome): string {
+  if (outcome.refusedReason === 'writes_unavailable') {
+    return encodeURIComponent('Publication is unavailable while regulated writes are contained');
+  }
+  if (outcome.refusedReason === 'regulated') {
+    return encodeURIComponent('This page holds regulated data and cannot be published');
+  }
+  if (outcome.refusedReason === 'classification_unavailable') {
+    return encodeURIComponent('Not published: the data classification could not be read, so regulated data cannot be ruled out');
+  }
+  if (outcome.refused) return encodeURIComponent('Submission pages cannot be published — they mirror source data from the published database');
+  const failed = describeFailures(outcome);
+  if (!failed) return 'Page+published+successfully';
+  return encodeURIComponent(`Page published, but these targets failed: ${failed}`);
 }

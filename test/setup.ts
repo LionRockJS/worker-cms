@@ -4,7 +4,7 @@ import { beforeAll, beforeEach } from 'vitest';
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
-  await applyD1Migrations(env.PUBLISHED_DB, env.TEST_PUBLISHED_MIGRATIONS);
+  if (env.PUBLISHED_DB) await applyD1Migrations(env.PUBLISHED_DB, env.TEST_PUBLISHED_MIGRATIONS);
 });
 
 // Privileged fixture reset, never an application declassification path.

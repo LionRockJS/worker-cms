@@ -115,6 +115,7 @@ export interface BaseTemplateProps extends NavFlags {
   sidebarWallets?: SidebarWallet[];
   /** Whether the installed credits feature's interface is visible. */
   showCredits?: boolean;
+  publishEnabled?: boolean;
   currentUserId: string;
   /** Navigation entries contributed by active plugins, filtered to the user's roles. */
   pluginNav: Array<{ label: string; href: string }>;

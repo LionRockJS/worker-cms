@@ -201,7 +201,7 @@ export interface Env {
   /** JSON array of {kind,key,class: public|pii|phi}; must match live classification. */
   REGULATED_INVENTORY?: string;
   DB: D1DatabaseClient;
-  PUBLISHED_DB: D1DatabaseClient;
+  PUBLISHED_DB?: D1DatabaseClient;
   VIEWS: Fetcher;
   /** Cloudflare Worker version metadata; changes on every deploy. */
   CF_VERSION_METADATA?: WorkerVersionMetadata;
@@ -295,7 +295,7 @@ export interface Env {
 /** Raw bindings supplied by Cloudflare before request/job-scoped sessions are created. */
 export type WorkerEnv = Omit<Env, 'DB' | 'PUBLISHED_DB'> & {
   DB: D1Database;
-  PUBLISHED_DB: D1Database;
+  PUBLISHED_DB?: D1Database;
 };
 
 /** Shape of a Workers Rate Limiting binding. */

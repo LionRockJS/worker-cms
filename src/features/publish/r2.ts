@@ -11,9 +11,9 @@
 // index.json, which self-heals on the next publish/unpublish.
 // ============================================================
 
-import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from './adapter';
-import { safeParseLect } from '../db/lect';
-import { ReadAuditUnavailableError } from '../http/access-log';
+import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from '../../core/publish/adapter';
+import { safeParseLect } from '../../core/db/lect';
+import { ReadAuditUnavailableError } from '../../core/http/access-log';
 
 interface IndexEntry {
   uuid: string;

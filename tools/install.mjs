@@ -60,7 +60,7 @@ Usage:
 The wizard asks for one namespace and derives every resource name from it
 (<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit,
 <ns>-plugin-views); each can still be overridden. It creates or reuses D1, R2, and Queue resources, updates
-wrangler.toml and the audit switch in cms.features.json, applies migrations,
+wrangler.toml and the feature switches in cms.features.json, applies migrations,
 optionally provisions the plugin view cache, configures OAuth secrets, and does
 a first bootstrap deploy that bypasses the release gate. Later releases go through "npm run deploy".
 
@@ -224,12 +224,16 @@ function sectionRanges(lines, section) {
   return ranges;
 }
 
-function setBindingValues(lines, section, binding, values) {
-  const range = sectionRanges(lines, section).find(({ start, end }) =>
+function bindingRange(lines, section, binding) {
+  return sectionRanges(lines, section).find(({ start, end }) =>
     lines.slice(start, end).some((line) =>
       new RegExp(`^\\s*binding\\s*=\\s*["']${binding}["']`).test(line),
     ),
   );
+}
+
+function setBindingValues(lines, section, binding, values) {
+  const range = bindingRange(lines, section, binding);
   if (!range) throw new Error(`Could not find ${binding} in [[${section}]].`);
 
   for (const [key, value] of Object.entries(values)) {
@@ -263,8 +267,8 @@ function uncommentBinding(lines, section, binding) {
   uncomment(headerIndex);
   uncomment(bindingIndex);
   for (let index = bindingIndex + 1; index < lines.length; index += 1) {
-    if (!/^#\s*[a-z_]+\s*=/.test(lines[index])) break;
-    uncomment(index);
+    if (!/^#(?!\s*\[)/.test(lines[index])) break;
+    if (/^#\s*[a-z_]+\s*=/.test(lines[index])) uncomment(index);
   }
   return true;
 }
@@ -278,6 +282,14 @@ function ensureR2Binding(lines, binding, bucketName) {
     lines.push('', '[[r2_buckets]]', `binding = ${JSON.stringify(binding)}`, `bucket_name = ${JSON.stringify(bucketName)}`);
   }
   setBindingValues(lines, 'r2_buckets', binding, { bucket_name: bucketName });
+}
+
+function disableBinding(lines, section, binding) {
+  const range = bindingRange(lines, section, binding);
+  if (!range) return;
+  for (let index = range.start; index < range.end; index += 1) {
+    if (index === range.start || /^\s*[a-z_]+\s*=/.test(lines[index])) lines[index] = `# ${lines[index]}`;
+  }
 }
 
 function setFirstSectionValue(lines, section, key, value) {
@@ -319,10 +331,20 @@ async function updateConfig(settings) {
     database_name: settings.databaseName,
     ...(settings.databaseId ? { database_id: settings.databaseId } : {}),
   });
-  setBindingValues(lines, 'd1_databases', 'PUBLISHED_DB', {
-    database_name: settings.publishedDatabaseName,
-    ...(settings.publishedDatabaseId ? { database_id: settings.publishedDatabaseId } : {}),
-  });
+  if (settings.publishedDatabaseName) {
+    if (!bindingRange(lines, 'd1_databases', 'PUBLISHED_DB')
+      && !uncommentBinding(lines, 'd1_databases', 'PUBLISHED_DB')) {
+      lines.push('', '[[d1_databases]]', 'binding = "PUBLISHED_DB"', 'database_name = ""',
+        'database_id = "00000000-0000-0000-0000-000000000000"', 'migrations_dir = "migrations/published"');
+    }
+    setBindingValues(lines, 'd1_databases', 'PUBLISHED_DB', {
+      database_name: settings.publishedDatabaseName,
+      ...(settings.publishedDatabaseId ? { database_id: settings.publishedDatabaseId } : {}),
+    });
+  } else {
+    disableBinding(lines, 'd1_databases', 'PUBLISHED_DB');
+    disableBinding(lines, 'r2_buckets', 'PUBLISH_BUCKET');
+  }
   setBindingValues(lines, 'r2_buckets', 'MEDIA_BUCKET', {
     bucket_name: settings.bucketName,
   });
@@ -505,6 +527,7 @@ async function main() {
     'cms',
     (value) => resourceName(value) && value.length <= 50,
   );
+  const publishEnabled = await featureEnabled('publish');
   const derived = {
     workerName: namespace,
     databaseName: namespace,
@@ -517,7 +540,7 @@ async function main() {
   console.log(`
   Worker              ${derived.workerName}
   Private D1          ${derived.databaseName}
-  Published D1        ${derived.publishedDatabaseName}
+  Published D1        ${publishEnabled ? derived.publishedDatabaseName : 'disabled'}
   Media R2 bucket     ${derived.bucketName}
   Plugin views R2     ${derived.pluginViewsBucketName} (if enabled)
   Admin job Queue     ${derived.queueName}
@@ -529,11 +552,11 @@ async function main() {
 
   const workerName = await name('Worker name', derived.workerName);
   const databaseName = await name('Private D1 database name', derived.databaseName);
-  const publishedDatabaseName = await name(
+  const publishedDatabaseName = publishEnabled ? await name(
     'Published D1 database name',
     derived.publishedDatabaseName,
     (value) => resourceName(value) && value !== databaseName,
-  );
+  ) : null;
   const bucketName = await name('Private R2 media bucket name', derived.bucketName);
   const queueName = await name('Admin job Queue name', derived.queueName);
   const pluginViewsBucketName = await featureEnabled('plugins')
@@ -589,7 +612,7 @@ async function main() {
   } else {
     console.log('\nCreating or reusing Cloudflare resources...');
     ({ id: databaseId, reused: databaseReused } = await ensureD1(databaseName));
-    ({ id: publishedDatabaseId } = await ensureD1(publishedDatabaseName));
+    if (publishedDatabaseName) ({ id: publishedDatabaseId } = await ensureD1(publishedDatabaseName));
     ensureR2(bucketName);
     if (pluginViewsBucketName) ensureR2(pluginViewsBucketName);
     if (auditBucketName) ensureR2(auditBucketName);
@@ -611,17 +634,14 @@ async function main() {
     clientIds,
     microsoftTenant,
   });
-  if (await setFeature('audit', auditEnabled)) {
-    // Regenerate the feature registries and baseline so the migrations applied
-    // below match the profile; deploy rebuilds everything again anyway.
-    runNpm(['run', 'build:features']);
-    runNpm(['run', 'build:migrations']);
-  }
+  await setFeature('audit', auditEnabled);
+  runNpm(['run', 'build:features']);
+  runNpm(['run', 'build:migrations']);
 
   if (await confirm(local ? 'Apply D1 migrations to the local databases now?' : 'Apply production D1 migrations now?')) {
     const target = local ? '--local' : '--remote';
     run(['d1', 'migrations', 'apply', databaseName, target]);
-    run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
+    if (publishedDatabaseName) run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
   }
 
   // A fresh database gets the audit/classification tables from the baseline.

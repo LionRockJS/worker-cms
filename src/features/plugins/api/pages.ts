@@ -38,7 +38,6 @@ import {
   versionAction,
 } from './serialize';
 import { createPages } from './create';
-import type { HookPage } from '../hooks';
 import { emitPluginHooks } from './hooks';
 import { chineseSearchVariants } from '../../../core/db/chinese';
 import { advancedSearchOperator, advancedSearchOrder, advancedSearchSort, performAdvancedSearch } from '../../../core/db/search';
@@ -48,7 +47,7 @@ import { withDraftMetadata } from '../../../core/db/page-logic';
 import { ensureUniqueDraftSlug } from '../../../core/db/admin-queries';
 import { slugify } from '../../../core/http/forms';
 import { pageTypeScopeAllows } from '../page-types';
-import { liveMapForDraftPages, publishPagesToTargets } from '../../../core/publish';
+import { publication } from '../../services';
 import { deletePluginPages } from '../page-delete-evidence';
 import { duplicatePluginPages } from '../page-duplicate-evidence';
 import { notifyPageSaved } from '../../../core/db/page-store';
@@ -307,7 +306,7 @@ pagesApiRoutes.get('/pages', async (c) => {
 
   // Checking live state needs a full draft row (its UUID is the stable
   // draft/live join key), so keep fields= projections lean and predictable.
-  const liveMap = includeLiveStatus && !fields ? await liveMapForDraftPages(c.env, rows.results, apiActor(c, auth.pluginId)) : null;
+  const liveMap = includeLiveStatus && !fields ? await publication()?.liveMapForDraftPages(c.env, rows.results, apiActor(c, auth.pluginId)) ?? null : null;
   const liveRefusal = liveSourceRefusal(c, auth, liveMap);
   if (liveRefusal) return liveRefusal;
   const tagsMap = c.req.query('include_tags') === '1' && !fields
@@ -609,116 +608,6 @@ pagesApiRoutes.post('/pages/search', async (c) => {
   });
 });
 
-// Publish draft pages to every configured target. This is intentionally a
-// bounded, id-only operation: the caller cannot supply a page type or snapshot
-// to smuggle content across its manifest scope, and every id is resolved from
-// this tenant's draft DB before the existing publish pipeline builds the live
-// snapshot. Registered before /pages/:id so "publish" is never parsed as an id.
-pagesApiRoutes.post('/pages/publish', async (c) => {
-  const auth = await authenticatePlugin(c);
-  if (auth instanceof Response) return auth;
-
-  const body = await c.req.json().catch(() => null) as { ids?: unknown } | null;
-  const rawIds = body && Array.isArray(body.ids) ? body.ids : null;
-  if (!rawIds) return c.json({ error: 'invalid_body' }, 400);
-  if (rawIds.length > MAX_BATCH) return c.json({ error: 'batch_too_large', max: MAX_BATCH }, 413);
-
-  const candidates: Array<{ index: number; id: number }> = [];
-  const errors: Array<{ index: number; id?: number; error: string; page_type?: string; failed_targets?: string[] }> = [];
-  const seenIds = new Set<number>();
-  for (let index = 0; index < rawIds.length; index++) {
-    const id = asPositiveSafeInteger(rawIds[index]);
-    if (id === null) {
-      errors.push({ index, error: 'invalid_id' });
-      continue;
-    }
-    if (seenIds.has(id)) {
-      errors.push({ index, id, error: 'duplicate_id' });
-      continue;
-    }
-    seenIds.add(id);
-    candidates.push({ index, id });
-  }
-
-  const pageById = new Map<number, Page>();
-  if (candidates.length) {
-    const ids = candidates.map((candidate) => candidate.id);
-    const pages = await c.env.DB.prepare(
-      `SELECT * FROM pages WHERE id IN (${ids.map(() => '?').join(',')})`,
-    ).bind(...ids).all<Page>();
-    for (const page of pages.results) pageById.set(page.id, page);
-  }
-
-  const publishable: Array<{ index: number; page: Page }> = [];
-  for (const candidate of candidates) {
-    const page = pageById.get(candidate.id);
-    if (!page) {
-      errors.push({ index: candidate.index, id: candidate.id, error: 'not_found' });
-      continue;
-    }
-    const pageType = page.page_type ?? '';
-    if (!pageTypeScopeAllows(auth.allowedTypes, pageType)) {
-      errors.push({ index: candidate.index, id: candidate.id, error: 'forbidden_page_type', page_type: pageType });
-      continue;
-    }
-    publishable.push({ index: candidate.index, page });
-  }
-
-  // One batched fan-out for the whole request rather than a publish per id: the
-  // per-page helper costs about six round trips each, which a MAX_BATCH request
-  // multiplies straight into the subrequest budget. Per-id outcomes are still
-  // reported — the batched call hands back which pages it refused, and target
-  // failures apply to the slice.
-  const outcome = await publishPagesToTargets(c.env, publishable.map((item) => item.page), apiActor(c, auth.pluginId));
-  if (outcome.refusedReason === 'writes_unavailable') {
-    return c.json({ error: 'regulated_writes_unavailable' }, 503, { 'Cache-Control': 'no-store' });
-  }
-  const refusedIds = new Set(outcome.refused.map((page) => page.id));
-  const regulatedIds = new Set(outcome.refusedRegulated.map((page) => page.id));
-
-  const published: number[] = [];
-  const hookPages: HookPage[] = [];
-  for (const item of publishable) {
-    if (refusedIds.has(item.page.id)) {
-      errors.push({
-        index: item.index,
-        id: item.page.id,
-        error: regulatedIds.has(item.page.id) ? 'regulated_publish_refused' : 'submission_publish_refused',
-      });
-      continue;
-    }
-    if (!outcome.targets.length) {
-      errors.push({ index: item.index, id: item.page.id, error: 'no_publish_targets' });
-      continue;
-    }
-
-    // Mirror the admin publish route: a partial target failure is observable
-    // through the publish hook/audit, but is still returned as an error so a
-    // caller such as EDM delivery cannot mint a link to incomplete live data.
-    hookPages.push({
-      id: item.page.id,
-      uuid: item.page.uuid,
-      page_type: item.page.page_type,
-      name: item.page.name,
-      slug: item.page.slug,
-    });
-    if (outcome.failures.length) {
-      errors.push({
-        index: item.index,
-        id: item.page.id,
-        error: 'publish_failed',
-        failed_targets: outcome.failures,
-      });
-      continue;
-    }
-    published.push(item.page.id);
-  }
-
-  emitPluginHooks(c, 'publish', hookPages, auth.pluginId);
-  errors.sort((a, b) => a.index - b.index);
-  return c.json({ published, errors, count: published.length });
-});
-
 // Read a single page (scoped to the plugin's content types).
 pagesApiRoutes.get('/pages/:id', async (c) => {
   const auth = await authenticatePlugin(c);
@@ -736,7 +625,7 @@ pagesApiRoutes.get('/pages/:id', async (c) => {
     .bind(id)
     .all<{ tag_id: number }>();
   const includeLiveStatus = c.req.query('include_live_status') === '1';
-  const liveMap = includeLiveStatus ? await liveMapForDraftPages(c.env, [page], apiActor(c, auth.pluginId)) : null;
+  const liveMap = includeLiveStatus ? await publication()?.liveMapForDraftPages(c.env, [page], apiActor(c, auth.pluginId)) ?? null : null;
   const liveRefusal = liveSourceRefusal(c, auth, liveMap);
   if (liveRefusal) return liveRefusal;
 
@@ -925,10 +814,6 @@ for (const mode of ['batch','children'] as const) {
     return deletePluginPages(c,auth,authority,mode,body);
   });
 }
-
-// Pull live-only pages (published DB → draft pages) now instead of waiting
-// for the next cron tick. A caller opts into this generic contract by declaring
-// the `submission` hook in its manifest; no wildcard page-write scope is
 
 pagesApiRoutes.delete('/pages/:id', async c => {
   const auth=await authenticatePlugin(c);if(auth instanceof Response)return auth;

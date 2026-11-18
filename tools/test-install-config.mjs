@@ -13,7 +13,7 @@ const configFunctions = source.slice(source.indexOf('function setRootValue('), s
 const example = readFileSync(new URL('../wrangler.example.toml',import.meta.url),'utf8');
 const optionalBlock = /# \[\[r2_buckets\]\]\n# binding = "PLUGIN_VIEWS_BUCKET"\n# bucket_name = "cms-plugin-views"\n?/;
 
-async function transform(existing, pluginViewsBucketName) {
+async function transform(existing, pluginViewsBucketName, publishedDatabaseName = 'fixture-published') {
   let result;
   const context = {
     CONFIG_PATH:'config', EXAMPLE_CONFIG_PATH:'example',
@@ -27,7 +27,7 @@ async function transform(existing, pluginViewsBucketName) {
     writeFile:async(_path,value)=>{result=value;},
   };
   const update = runInNewContext(`${configFunctions}\nupdateConfig`,context);
-  await update({workerName:'fixture',databaseName:'fixture',publishedDatabaseName:'fixture-published',
+  await update({workerName:'fixture',databaseName:'fixture',publishedDatabaseName,
     bucketName:'fixture-media',queueName:'fixture-admin-jobs',pluginViewsBucketName,
     canonicalOrigin:'https://cms.example.com',providers:['github'],clientIds:{github:'fixture-client'}});
   const directory = mkdtempSync(join(tmpdir(),'cms-install-config-'));
@@ -58,4 +58,15 @@ test('declining the optional cache leaves fresh config unbound and preserves exi
   const enabled = await transform(null,'existing-private-views');
   const declined = await transform(enabled.text,null);
   assert.equal(declined.config.r2_buckets.find(item=>item.binding==='PLUGIN_VIEWS_BUCKET').bucket_name,'existing-private-views');
+});
+
+test('DMS setup omits both publish bindings and can restore the D1 binding', async () => {
+  const active = example.replace('# [[r2_buckets]]\n# binding = "PUBLISH_BUCKET"\n# bucket_name = "worker-cms-published"', '[[r2_buckets]]\nbinding = "PUBLISH_BUCKET"\nbucket_name = "worker-cms-published"');
+  const disabled = await transform(active, null, null);
+  assert.deepEqual(disabled.config.d1_databases.map(({ binding }) => binding), ['DB']);
+  assert.equal(disabled.config.r2_buckets.some(({ binding }) => binding === 'PUBLISH_BUCKET'), false);
+  assert.equal((await transform(disabled.text, null, null)).text, disabled.text);
+
+  const restored = await transform(disabled.text, null);
+  assert.equal(restored.config.d1_databases.find(({ binding }) => binding === 'PUBLISHED_DB').database_name, 'fixture-published');
 });

@@ -15,6 +15,7 @@
 @source "../src/features/media";
 @source "../src/features/plugin-pointer-indexes";
 @source "../src/features/plugins";
+@source "../src/features/publish";
 @source "../src/features/runtime-content-types";
 @source "../src/features/search";
 @source "../src/features/trash";

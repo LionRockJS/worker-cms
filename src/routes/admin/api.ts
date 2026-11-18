@@ -4,7 +4,7 @@ import { rejectCrossSiteRequest } from '../../core/http/headers';
 
 import { Hono } from 'hono';
 import { recordRead, recordPageReads, recordTagReads, queryFingerprint } from '../../core/http/access-log';
-import { regulatedPages } from '../../core/publish/regulated';
+import { regulatedPages } from '../../core/db/regulated-pages';
 import { getLectLocalizedValue, safeParseLect } from '../../core/db/lect';
 import type { Env, Variables, Tag, Taxonomy, Page } from '../../types';
 import { num } from '../../core/http/forms';
