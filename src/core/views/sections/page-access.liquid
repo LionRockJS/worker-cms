@@ -1,61 +1,98 @@
-<div class="mx-auto max-w-3xl space-y-4 px-4 py-5">
-  <a class="text-indigo-600" href="/admin/pages/{{ pageId }}/edit?native=1">{{ "page_access.back" | t }}</a>
-  <h1 class="text-xl font-semibold">{{ title }} · {{ pageName }}</h1>
-  <p>{{ "page_access.owner" | t }} <strong>{{ owner }}</strong></p>
-  <form method="post" action="{{ action }}" class="space-y-3 rounded border border-gray-200 bg-white p-4">
+<div class="min-w-0 max-w-2xl my-4 space-y-6 px-4 sm:px-6 lg:px-8">
+  <form method="post" action="{{ action }}" class="min-w-0 space-y-4 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
     <input type="hidden" name="revision" value="{{ revision }}">
-    <p>{% if enabled %}<code>{{ mode }}</code>{% else %}{{ "page_access.legacy" | t }}{% endif %}</p>
-    <div class="flex flex-wrap gap-3">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <p class="min-w-0 text-sm text-gray-500">{{ "page_access.owner" | t }} <span class="font-semibold text-gray-900">{{ owner }}</span></p>
+      {% if enabled %}<span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-700">{{ mode }}</span>{% endif %}
+    </div>
+    {% unless enabled %}
+      <div class="px-4 py-2 rounded-lg bg-amber-50 text-amber-800 text-sm">{{ "page_access.legacy" | t }}</div>
+    {% endunless %}
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {% for permission in permissions %}
         {% assign labelKey = "page_access." | append: permission.key %}
-        <label>{{ labelKey | t }}
-          <select class="rounded border border-gray-300 bg-white px-2 py-1" name="{{ permission.key }}">
+        <label class="block min-w-0">
+          <span class="block text-sm font-medium text-gray-700 mb-1">{{ labelKey | t }}</span>
+          <select class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white" name="{{ permission.key }}">
             <option value="0"{% if permission.digit == "0" %} selected{% endif %}>{{ "page_access.none" | t }}</option>
             <option value="4"{% if permission.digit == "4" %} selected{% endif %}>{{ "page_access.read" | t }}</option>
             <option value="6"{% if permission.digit == "6" %} selected{% endif %}>{{ "page_access.edit" | t }}</option>
-          </select></label>
+          </select>
+        </label>
       {% endfor %}
-      <label>{{ "page_access.role" | t }} <select class="rounded border border-gray-300 bg-white px-2 py-1" name="group_role">
-        <option value="">{{ "page_access.no_group" | t }}</option>
-        {% for role in roles %}<option{% if group == role %} selected{% endif %}>{{ role }}</option>{% endfor %}
-      </select></label>
+      <label class="block min-w-0">
+        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "page_access.role" | t }}</span>
+        <select class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white" name="group_role">
+          <option value="">{{ "page_access.no_group" | t }}</option>
+          {% for role in roles %}<option{% if group == role %} selected{% endif %}>{{ role }}</option>{% endfor %}
+        </select>
+      </label>
     </div>
     {% if enabled == false and legacyEditors.size > 0 %}
-      <fieldset><legend>{{ "page_access.review" | t }}</legend>
-        {% for user in legacyEditors %}<label class="block"><input type="checkbox" name="legacy_user" value="{{ user.id }}"> {{ user.name }}</label>{% endfor %}
+      <fieldset class="min-w-0">
+        <legend class="block text-sm font-medium text-gray-700 mb-1">{{ "page_access.review" | t }}</legend>
+        <div class="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          {% for user in legacyEditors %}
+            <label class="inline-flex items-center gap-2 rounded-md bg-white border border-gray-200 px-3 py-1.5 text-sm">
+              <input type="checkbox" name="legacy_user" value="{{ user.id }}" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+              <span>{{ user.name }}</span>
+            </label>
+          {% endfor %}
+        </div>
       </fieldset>
     {% endif %}
-    <button class="rounded bg-indigo-600 px-3 py-1.5 text-white" name="action" value="mode">{% if enabled %}{{ "page_access.save" | t }}{% else %}{{ "page_access.enable" | t }}{% endif %}</button>
+    <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+      <button class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto" name="action" value="mode">{% if enabled %}{{ "page_access.save" | t }}{% else %}{{ "page_access.enable" | t }}{% endif %}</button>
+    </div>
   </form>
+
   {% if enabled %}
-    <section class="space-y-3 rounded border border-gray-200 bg-white p-4">
-      <h2 class="font-semibold">{{ "page_access.sharing" | t }}</h2>
-      {% for user in grants %}
-        <form method="post" action="{{ action }}" class="flex items-center gap-3">
-          <input type="hidden" name="revision" value="{{ revision }}">
-          <input type="hidden" name="user_id" value="{{ user.id }}"><span>{{ user.name }}</span>
-          <button class="text-indigo-600" name="action" value="remove">{{ "page_access.remove" | t }}</button>
-        </form>
-      {% endfor %}
+    <section class="min-w-0 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
+      <h3 class="text-lg font-bold text-gray-900">{{ "page_access.sharing" | t }}</h3>
+      {% if grants.size > 0 %}
+        <ul class="mt-3 divide-y divide-gray-100">
+          {% for user in grants %}
+            <li>
+              <form method="post" action="{{ action }}" class="flex items-center justify-between gap-3 py-2">
+                <input type="hidden" name="revision" value="{{ revision }}">
+                <input type="hidden" name="user_id" value="{{ user.id }}">
+                <span class="min-w-0 truncate text-sm text-gray-900">{{ user.name }}</span>
+                <button class="shrink-0 text-sm font-semibold text-red-600 hover:text-red-700" name="action" value="remove">{{ "page_access.remove" | t }}</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
     </section>
   {% endif %}
-  <section class="space-y-3 rounded border border-gray-200 bg-white p-4">
-    <form method="get" action="{{ action }}" class="flex flex-wrap items-end gap-2">
-      <label>{{ "page_access.search_users" | t }} <input name="q" class="rounded border border-gray-300 bg-white px-2 py-1" value="{{ query }}"></label>
-      <button class="rounded bg-indigo-600 px-3 py-1.5 text-white">{{ "page_access.search" | t }}</button>
+
+  <section class="min-w-0 space-y-4 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
+    <form method="get" action="{{ action }}" class="min-w-0">
+      <label for="page-access-q" class="block text-sm font-medium text-gray-700 mb-1">{{ "page_access.search_users" | t }}</label>
+      <div class="flex gap-2">
+        <input id="page-access-q" name="q" class="block w-full min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm" value="{{ query }}">
+        <button title="{{ "page_access.search" | t }}" aria-label="{{ "page_access.search" | t }}" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#search"></use></svg>
+        </button>
+      </div>
     </form>
     {% if accounts.size > 0 %}
-      <form method="post" action="{{ action }}" class="flex flex-wrap items-end gap-2">
+      <form method="post" action="{{ action }}" class="min-w-0 space-y-3 border-t border-gray-100 pt-4">
         <input type="hidden" name="revision" value="{{ revision }}">
-        <label>{{ "page_access.user" | t }} <select name="user_id" class="rounded border border-gray-300 bg-white px-2 py-1" required>
-          <option value="">{{ "page_access.choose_user" | t }}</option>
-          {% for user in accounts %}<option value="{{ user.id }}">{% if user.name == user.email %}{{ user.name }}{% else %}{{ user.name }} ({{ user.email }}){% endif %}</option>{% endfor %}
-        </select></label>
-        {% if enabled %}<button class="rounded bg-indigo-600 px-3 py-1.5 text-white" name="action" value="add">{{ "page_access.add" | t }}</button>{% endif %}
-        <button class="rounded bg-indigo-600 px-3 py-1.5 text-white" name="action" value="transfer">{{ "page_access.transfer" | t }}</button>
+        <label class="block min-w-0">
+          <span class="block text-sm font-medium text-gray-700 mb-1">{{ "page_access.user" | t }}</span>
+          <select name="user_id" class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white" required>
+            <option value="">{{ "page_access.choose_user" | t }}</option>
+            {% for user in accounts %}<option value="{{ user.id }}">{% if user.name == user.email %}{{ user.name }}{% else %}{{ user.name }} ({{ user.email }}){% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+          {% if enabled %}<button class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto" name="action" value="add">{{ "page_access.add" | t }}</button>{% endif %}
+          <button class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto" name="action" value="transfer">{{ "page_access.transfer" | t }}</button>
+        </div>
       </form>
     {% elsif query != blank %}
-      <p>{{ "page_access.no_matching_users" | t }}</p>
+      <p class="text-sm text-gray-500">{{ "page_access.no_matching_users" | t }}</p>
     {% endif %}
   </section>
 </div>

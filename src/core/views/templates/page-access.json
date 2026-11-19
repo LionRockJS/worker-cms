@@ -1,10 +1,21 @@
 {
   "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "width": "2xl",
+        "title": "{{ title }}",
+        "description": "{{ pageName }}",
+        "backHref": "/admin/pages/{{ pageId }}/edit?native=1",
+        "backLabel": "{{ 'page_access.back' | t }}"
+      }
+    },
     "content": {
       "type": "page-access"
     }
   },
   "order": [
+    "header",
     "content"
   ]
 }
