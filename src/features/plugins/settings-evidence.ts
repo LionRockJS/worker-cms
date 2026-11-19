@@ -1,5 +1,5 @@
 import type { AppContext } from '../../core/http/context';
-import { classFor } from '../../core/db/data-classes';
+import { classFor,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { json,snapshot,guard,resultGuard,fingerprint,type Row } from '../../core/db/bounded-mutation';
@@ -9,7 +9,8 @@ import { recordAuditOutage } from '../../core/db/audit-outages';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import { cmsConfig } from '../../cms-config';
 import { callFeatureService } from '../services';
-import { capturePluginMutationContext,REGISTRY,IDENTITY,OWNED,invalidate } from './registration-evidence';
+import { capturePluginMutationContext,OWNED,invalidate } from './registration-evidence';
+import { REGISTRY,IDENTITY } from './evidence-common';
 import { inspectPluginManifest } from './registry';
 import { declaredLimits,limitsSettingKey } from './limits';
 
@@ -31,7 +32,7 @@ async function mutate(c:AppContext,id:number,kind:'limits'|'pricing',form:FormDa
   for(const type of manifest.contentTypes?.writeTypes??[])if(write.has(type))types.add(type);
   const classes=[base.dataClass(['settings',spec.table]),classFor(base.policy,'plugin',manifest.id),...([...types].map(t=>classFor(base.policy,'page_type',t)))];
   if(types.has('*'))for(const [target,value] of base.policy.exact)if(target.startsWith('page_type:'))classes.push(value);
-  const dataClass=classes.includes('phi')?'phi' as const:classes.includes('pii')?'pii' as const:'none' as const;
+  const dataClass=strongestClass(classes);
   await auditBackgroundReads(c.env,[{action:'plugin.configuration-source-read',kind:'table',key:spec.table,targetType:spec.table,ids:approvals.map(r=>String(r.id)),count:approvals.length,minimumClass:dataClass==='none'?undefined:dataClass}],contextActor(c));
   let values:Record<string,number|null>=Object.create(null);
   let key=limitsSettingKey(manifest.id);

@@ -2,7 +2,7 @@ import type { AppContext } from '../../core/http/context';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import type { PermissionDenialReason } from '../../core/auth/denial-contract';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
@@ -51,7 +51,7 @@ async function mutate(c:AppContext,change:Change):Promise<string> {
     snapshot<MessageRow>(c,'locale_messages',MESSAGE,'locale_code=?',[code],'message_key'),
     snapshot<SettingRow>(c,'settings',SETTING,'key=?',[CONTENT_DEFAULT_LANGUAGE_SETTING_KEY],'key'),
   ]);
-  const classes=['locales','locale_messages','settings'].map(t=>classFor(policy,'table',t));const dataClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  const classes=['locales','locale_messages','settings'].map(t=>classFor(policy,'table',t));const dataClass=strongestClass(classes);
   const messageIds=await Promise.all(messages.map(async row=>`${code}:message:${await fingerprint(row.message_key)}`));
   await auditBackgroundReads(c.env,[{action:'locale.mutation-read',kind:'table' as const,key:'locales',targetType:'locale',ids:locales.map(l=>l.code),count:locales.length},
     {action:'locale.messages-mutation-read',kind:'table' as const,key:'locale_messages',targetType:'locale_message',ids:messageIds,count:messages.length},

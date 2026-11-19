@@ -160,27 +160,27 @@ describe('advanced search parsing', () => {
 });
 
 describe('Chinese Simplified/Traditional search variants', () => {
-  it('converts between scripts character by character', () => {
-    expect(toTraditional('苏玮')).toBe('蘇瑋');
-    expect(toSimplified('蘇瑋')).toBe('苏玮');
+  it('converts between scripts character by character', async () => {
+    expect(await toTraditional('苏玮')).toBe('蘇瑋');
+    expect(await toSimplified('蘇瑋')).toBe('苏玮');
     // Unmapped (shared) characters are left untouched.
-    expect(toTraditional('中文')).toBe('中文');
+    expect(await toTraditional('中文')).toBe('中文');
   });
 
-  it('adds the opposite-script variant for a Chinese term', () => {
-    expect(chineseSearchVariants('苏玮').sort()).toEqual(['苏玮', '蘇瑋'].sort());
-    expect(chineseSearchVariants('蘇瑋').sort()).toEqual(['苏玮', '蘇瑋'].sort());
+  it('adds the opposite-script variant for a Chinese term', async () => {
+    expect((await chineseSearchVariants('苏玮')).sort()).toEqual(['苏玮', '蘇瑋'].sort());
+    expect((await chineseSearchVariants('蘇瑋')).sort()).toEqual(['苏玮', '蘇瑋'].sort());
   });
 
-  it('returns a single variant for non-Chinese or shared-character terms', () => {
-    expect(chineseSearchVariants('hello')).toEqual(['hello']);
-    expect(chineseSearchVariants('')).toEqual(['']);
+  it('returns a single variant for non-Chinese or shared-character terms', async () => {
+    expect(await chineseSearchVariants('hello')).toEqual(['hello']);
+    expect(await chineseSearchVariants('')).toEqual(['']);
     // 中文 is identical in both scripts, so no extra variant is produced.
-    expect(chineseSearchVariants('中文')).toEqual(['中文']);
+    expect(await chineseSearchVariants('中文')).toEqual(['中文']);
   });
 
-  it('ORs a LIKE per variant in the SQL condition for a Chinese term', () => {
-    const { conditions, params } = advancedSearchCondition(
+  it('ORs a LIKE per variant in the SQL condition for a Chinese term', async () => {
+    const { conditions, params } = await advancedSearchCondition(
       { index: 1, term: '苏玮', path: '', tags: [] },
       'p',
     );
@@ -188,8 +188,8 @@ describe('Chinese Simplified/Traditional search variants', () => {
     expect(params).toEqual(['%苏玮%', '%苏玮%', '%蘇瑋%', '%蘇瑋%']);
   });
 
-  it('matches the name or content for a non-Chinese term', () => {
-    const { conditions, params } = advancedSearchCondition(
+  it('matches the name or content for a non-Chinese term', async () => {
+    const { conditions, params } = await advancedSearchCondition(
       { index: 1, term: 'hello world', path: '', tags: [] },
       'p',
     );
@@ -197,8 +197,8 @@ describe('Chinese Simplified/Traditional search variants', () => {
     expect(params).toEqual(['%hello%world%', '%hello%world%']);
   });
 
-  it('ORs variants within a json path condition', () => {
-    const { conditions, params } = advancedSearchCondition(
+  it('ORs variants within a json path condition', async () => {
+    const { conditions, params } = await advancedSearchCondition(
       { index: 1, term: '苏玮', path: 'name', tags: [] },
       'p',
     );

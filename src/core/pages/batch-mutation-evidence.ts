@@ -3,7 +3,7 @@ import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization, captureContentJobAuthorization } from '../auth/access-authorization';
-import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass } from '../db/data-classes';
 import { attributedMutationAuditEvidence, type AuditActor } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { auditBackgroundReads } from '../http/access-log';
@@ -109,7 +109,7 @@ async function updateWeights(env: Env,user: JWTPayload, updates: PageWeight[], c
   const manifest = changed.map(p=>({id:p.id,uuid:p.uuid,weight_before:p.weight,weight_after:byId.get(p.id)!}));
   const finalRows = rows.results.map(p=>({...p,weight:byId.get(p.id)!}));
   const classes = changed.map(prepared.dataClass);
-  const dataClass = classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  const dataClass = strongestClass(classes);
   const receipt = prepared.evidence({action:sequence?'page.reorder':updates.length===1?'page.weight':'page.weights',entityType:'page',detail:{targets:manifest}},dataClass,changed.map(p=>p.uuid));
   await env.DB.batch([...guards,
     env.DB.prepare(`UPDATE pages SET weight=json_extract(e.value,'$.weight_after') FROM json_each(?) e

@@ -35,7 +35,6 @@ const FORBIDDEN_IN_CHROME = [
   'src/features/publish/index.ts',
   'src/features/publish/projection.ts',
   'src/features/search/template.ts',
-  'dictionary/chinese-chars.ts',
 ];
 
 // Paths in FORBIDDEN_IN_CHROME must exist, or the rule silently passes forever.

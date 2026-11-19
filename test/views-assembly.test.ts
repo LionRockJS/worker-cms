@@ -340,7 +340,7 @@ describe('view assembly', () => {
     // and the client engine's root list must keep working unchanged.
     for (const path of full) {
       expect(path).not.toContain('features/');
-      expect(path).toMatch(/^(layout|sections|templates|snippets|assets|locales)\//);
+      expect(path).toMatch(/^(layout|sections|templates|snippets|assets|locales|data)\//);
     }
   });
 

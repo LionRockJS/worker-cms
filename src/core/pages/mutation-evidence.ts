@@ -5,7 +5,7 @@ import type { AppContext } from '../http/context';
 import { pageAccessGuard, pageAllowed } from '../auth/page-access';
 import { captureAccessAuthorization, captureSelfAuthorization } from '../auth/access-authorization';
 import { recordPolicyDenial } from '../auth/denials';
-import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass } from '../db/data-classes';
 import { mutationAuditEvidence, contextActor } from '../db/audit';
 import { recordAuditOutage } from '../db/audit-outages';
 import { abortIf } from '../db/transaction-guard';
@@ -57,7 +57,7 @@ async function prepare(c: AppContext, before: Page | undefined, next: DraftConte
   for (const type of [before?.page_type, next?.page_type]) classes.push(classFor(policy,'page_type',type ?? 'default'));
   for (const tag of tagRows) classes.push(classFor(policy,'taxonomy',tag.taxonomy_slug ?? 'default'));
   if (retained) classes.push(retained === 2 ? 'phi' : 'pii');
-  const dataClass = classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none';
+  const dataClass = strongestClass(classes);
   if (before) recordPageReads('page.mutation-read',[before]);
   if (await flushReadAudit(c)) throw new Error('Content read evidence unavailable');
   const guards = [authority.guard(), classificationPolicyGuard(c.env,policy)];

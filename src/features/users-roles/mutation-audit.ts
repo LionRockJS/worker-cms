@@ -1,6 +1,6 @@
 import type { Env } from '../../types';
 import type { AppContext } from '../../core/http/context';
-import { classFor, resolveDataClasses } from '../../core/db/data-classes';
+import { classFor, resolveDataClasses, strongestClass } from '../../core/db/data-classes';
 import { contextActor, mutationAuditSelect, type AuditActor, type AuditRequest, type AuditRow } from '../../core/db/audit';
 import { USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../../core/auth/role-mutation-sql';
 import { recordAuditOutage } from '../../core/db/audit-outages';
@@ -26,7 +26,7 @@ export async function accessMutationClass(env: Env, tables: readonly string[]): 
   const policy = await resolveDataClasses(env, true);
   if (!policy.ok) return null;
   const classes = tables.map(table => classFor(policy, 'table', table));
-  return { policy, dataClass: classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none' };
+  return { policy, dataClass: strongestClass(classes) };
 }
 
 /** The failed statement and commit outcome can be unknown after a transport

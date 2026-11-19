@@ -1,7 +1,7 @@
 import type { AppContext } from '../http/context';
 import type { AuthDbUser } from './sessions';
 import { registrationAuditEvidence } from '../db/audit';
-import { classFor, resolveDataClasses } from '../db/data-classes';
+import { classFor, resolveDataClasses, strongestClass } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
 import { initialUserRoles, type InitialRoleIdentity } from './initial-user-roles';
 import { USER_ROLES } from '../../types';
@@ -21,7 +21,7 @@ export async function registerOAuthUser(c: AppContext, identity: RegistrationIde
   if (!policy.ok) throw new Error('Registration classification unavailable');
   const classes = ['users', 'user_oauth_identities', 'roles', 'role_permissions']
     .map(table => classFor(policy, 'table', table));
-  const dataClass = classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none';
+  const dataClass = strongestClass(classes);
   const audit = registrationAuditEvidence(c, identity.oauthId, identity.provider, dataClass, policy, role);
   const db = c.env.DB;
   // Validate custom grants inside the creation transaction, including after

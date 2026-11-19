@@ -3,7 +3,7 @@ import type { Env,JWTPayload } from '../../types';
 import { PageLifecycleUnavailableError, type ServiceTrashAuthority, type TrashedPageRef } from '../../core/pages/trash-lifecycle';
 import type { ContentBatchContext } from '../../core/pages/batch-mutation-evidence';
 import { captureAccessAuthorization,captureContentJobAuthorization } from '../../core/auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { serviceMutationAuditEvidence, type AuditActor, attributedMutationAuditEvidence } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { auditBackgroundReads } from '../../core/http/access-log';
@@ -145,7 +145,7 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   for(const tag of tags)classes.push(classFor(policy,'taxonomy',String(tag.taxonomy_slug??'default')));
   for(const floor of floors)classes.push(floor.level===2?'phi':'pii');
   if(service&&service.dataClass!=='none')classes.push(service.dataClass);
-  const dataClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  const dataClass=strongestClass(classes);
   const actor:AuditActor=service?.actor??{userId:user!.sub,roles:user!.role,sessionSid:user!.sid??null,via:context.job?`job:${context.job.id}`:null};
   for(const [table,rows] of [[src,sources],[dst,destinations]] as Array<[string,Row[]]>) {
     const types=[...new Set(rows.map(p=>String(p.page_type??'default')))];

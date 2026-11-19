@@ -7,7 +7,7 @@ import { assertPluginPageAuthority } from './page-update-evidence';
 import { PluginPageCreateUnavailableError, preparePluginPageCreates, commitPluginPageCreates, recordPluginCreateReservationRefusal, recordPluginCreateFailure, type PluginPageCopyEvidence } from './page-create-evidence';
 import { snapshot, guard, fingerprint, json, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
-import { classFor } from '../../core/db/data-classes';
+import { classFor,strongestClass } from '../../core/db/data-classes';
 import { auditBackgroundReads, auditReads, flushReadAudit } from '../../core/http/access-log';
 import { countPageMetadata } from '../../core/db/count-metadata';
 import { recordAuditOutage } from '../../core/db/audit-outages';
@@ -27,8 +27,6 @@ const BATCH=100,MAX_COPIES=1000;
 const PAGE=['id','uuid','created_at','updated_at','name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'];
 const LINK=['id','uuid','created_at','updated_at','page_id','tag_id','weight'];
 const TAG=['id','uuid','taxonomy_slug'];
-type Class='none'|'pii'|'phi';
-function maximum(values:Array<Class|null|undefined>):Class{return values.includes('phi')?'phi':values.includes('pii')?'pii':'none';}
 
 /** A single bounded read set includes the 1,001st look-ahead row. Guards
  * exclude this operation's own clone UUIDs, so inherited selectors cannot
@@ -49,11 +47,11 @@ async function sources(c:AppContext,authority:Authority,selector:{sql:string;par
   if(tags.length!==new Set(links.map(link=>link.tag_id)).size)throw new Error('Source association unavailable');
   const floors=await snapshot<Row>(c,'page_sensitivity_floors',['uuid','level'],'uuid IN (SELECT value FROM json_each(?))',uuids);
   if(floors.some(floor=>floor.level!==1&&floor.level!==2))throw new Error('Source floor invalid');
-  const bodyClass=(page:Page)=>maximum([
+  const bodyClass=(page:Page)=>strongestClass([
     ...['pages','page_tags','tags','taxonomies'].map(table=>classFor(authority.policy,'table',table)),classFor(authority.policy,'page_type',pageType),
     ...tags.filter(tag=>links.some(link=>link.page_id===page.id&&link.tag_id===tag.id)).map(tag=>classFor(authority.policy,'taxonomy',String(tag.taxonomy_slug??'default'))),
     floors.find(floor=>floor.uuid===page.uuid)?.level===2?'phi':floors.find(floor=>floor.uuid===page.uuid)?.level===1?'pii':undefined]);
-  const dataClass=maximum([authority.dataClass,...pages.map(bodyClass)]),minimum=dataClass==='none'?undefined:dataClass;
+  const dataClass=strongestClass([authority.dataClass,...pages.map(bodyClass)]),minimum=dataClass==='none'?undefined:dataClass;
   await auditBackgroundReads(c.env,[{action:'plugin.page-duplicate-source-read',kind:'page_type',key:pageType,targetType:'page',ids:pages.map(page=>String(page.id)),uuidById:Object.fromEntries(pages.map(page=>[String(page.id),page.uuid])),count:pages.length,minimumClass:minimum,detail:{operation:'duplicate',operation_id:operationId,phase:'source_capture',selector_fingerprint:selectorFingerprint}},
     ...['page_tags','tags','page_sensitivity_floors'].map(table=>({action:'plugin.page-duplicate-metadata-read',kind:'table' as const,key:table,targetType:table,ids:table==='page_tags'?links.map(row=>String(row.id)):table==='tags'?tags.map(row=>String(row.id)):floors.map(row=>String(row.uuid)),count:table==='page_tags'?links.length:table==='tags'?tags.length:floors.length,minimumClass:minimum}))],authority.actor);
   if(await flushReadAudit(c))throw new Error('Source evidence unavailable');

@@ -2,9 +2,10 @@ import { json,fingerprint,snapshot,guard,type Row } from '../../core/db/bounded-
 export { json,fingerprint,snapshot,guard,type Row } from '../../core/db/bounded-mutation';
 import type { AppContext } from '../../core/http/context';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
+import { nextIdSql } from '../../core/pages/snapshot-id';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
@@ -12,9 +13,8 @@ import { clearConfigCache } from '../../core/db/content-config';
 import { clearManifestCache } from './registry';
 import { generatePluginSecret,type PluginInput } from './store';
 import type { PluginRecord,PluginIdentityApproval } from './types';
+import { REGISTRY,IDENTITY } from './evidence-common';
 
-export const REGISTRY=['id','uuid','created_at','updated_at','label','url','enabled','config','sort_order','secret'];
-export const IDENTITY=['plugin_row_id','manifest_id','created_at','updated_at','approved_by'];
 const MUTABLE=['label','url','enabled','config','sort_order','secret'] as const;
 export const OWNED=[
   {table:'plugin_asset_approvals',fields:['id','plugin_id','path','integrity','approved_by','created_at','updated_at']},
@@ -38,7 +38,7 @@ export async function capturePluginMutationContext(c:AppContext){
   const policy=await resolveDataClasses(c.env,true);if(!policy.ok)throw new Error('Plugin classification unavailable');
   const [plugins,identities]=await Promise.all([snapshot<PluginRecord>(c,'plugins',REGISTRY),snapshot<PluginIdentityApproval>(c,'plugin_identity_approvals',IDENTITY)]);
   const baseClasses=['plugins','plugin_identity_approvals'].map(t=>classFor(policy,'table',t));for(const pin of identities)baseClasses.push(classFor(policy,'plugin',pin.manifest_id));
-  const dataClass=(tables:string[]=[])=>{const classes=[...baseClasses,...tables.map(t=>classFor(policy,'table',t))];return classes.includes('phi')?'phi' as const:classes.includes('pii')?'pii' as const:'none' as const;};
+  const dataClass=(tables:string[]=[])=>{const classes=[...baseClasses,...tables.map(t=>classFor(policy,'table',t))];return strongestClass(classes);};
   const initialClass=dataClass();
   await auditBackgroundReads(c.env,[{action:'plugin.registration-read',kind:'table' as const,key:'plugins',targetType:'plugin',ids:plugins.map(r=>String(r.id)),count:plugins.length},
     {action:'plugin.registration-identity-read',kind:'table' as const,key:'plugin_identity_approvals',targetType:'plugin_identity',ids:identities.map(r=>String(r.plugin_row_id)),count:identities.length}].map(read=>({...read,minimumClass:initialClass==='none'?undefined:initialClass})),contextActor(c));
@@ -53,7 +53,7 @@ async function prepare(c:AppContext){
   async function save(action:'plugin.create'|'plugin.update'|'plugin.toggle'|'plugin.rotate_secret',input:PluginInput|undefined,id?:number):Promise<PluginRecord>{return run(async()=>{
     const before=id===undefined?undefined:row(id);if(id!==undefined&&!before)throw new Error('Plugin disappeared');
     if(input&&plugins.some(p=>p.url===input.url&&p.id!==id))throw new PluginRegistrationConflictError();
-    const clock=await c.env.DB.prepare(`SELECT CURRENT_TIMESTAMP now,MAX(COALESCE(MAX(id),0),(CAST(strftime('%s','now') AS INTEGER)-1563741060)*100000+(RANDOM() & 65535))+1 next_id FROM plugins`).first<{now:string;next_id:number}>();
+    const clock=await c.env.DB.prepare(`SELECT CURRENT_TIMESTAMP now,${nextIdSql('plugins')} next_id`).first<{now:string;next_id:number}>();
     if(!clock||(!before&&(!Number.isSafeInteger(clock.next_id)||clock.next_id<=0)))throw new Error('Unsafe plugin identity');
     const next:PluginRecord=before?{...before}:{id:clock.next_id,uuid:crypto.randomUUID(),created_at:clock.now,updated_at:clock.now,label:'',url:'',enabled:0,config:null,sort_order:0,secret:generatePluginSecret()};
     if(input){next.label=input.label;next.url=input.url;next.enabled=input.enabled?1:0;next.config=input.config??null;next.sort_order=input.sort_order??0;if(next.config!==null)JSON.parse(next.config);

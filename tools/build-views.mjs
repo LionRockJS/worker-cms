@@ -53,6 +53,7 @@ const coreViewsDir = path.join(rootDir, 'src', 'core', 'views');
 const distDir = path.join(rootDir, 'dist', 'views');
 const tailwindSources = path.join(rootDir, 'assets-source', 'tailwind-sources.css');
 const LOCALES = 'locales';
+const CHINESE_DICTIONARY = 'data/chinese-chars.json';
 
 /**
  * Build outputs that land in dist/views without passing through here:
@@ -176,6 +177,10 @@ export function assembleViews(features) {
   }
 
   if (catalogs.size === 0) throw new Error('src/core/views/locales holds no catalogs; the core catalog defines the supported languages');
+
+  // Simplified/Traditional tables for search (src/core/db/chinese.ts): an
+  // asset, not a module, so the 44 kB stays out of the Worker bundle.
+  add(CHINESE_DICTIONARY, readFileSync(path.join(rootDir, 'dictionary', 'chinese-chars.json')), 'dictionary');
 
   for (const id of enabled) {
     const dir = path.join(featuresDir, id, 'views');

@@ -2,7 +2,7 @@ import type { Env,Tag,Taxonomy } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization } from '../auth/access-authorization';
 import { mutationAuditEvidence,attributedMutationAuditEvidence } from '../db/audit';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../db/data-classes';
+import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
 import { recordTagReads,recordTaxonomyReads,flushReadAudit } from '../http/access-log';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
@@ -54,7 +54,7 @@ async function snapshot(c:AppContext,scope:Scope,capability:'tag:write'|'taxonom
   for(const key of slugKeys)classes.push(classFor(policy,'taxonomy',key));
   for(const page of [...pageRows,...trashRows])classes.push(classFor(policy,'page_type',page.page_type??'default'));
   for(const floor of retained)classes.push(floor.level===2?'phi':'pii');
-  const dataClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  const dataClass=strongestClass(classes);
   recordTagReads('tag.mutation-read',tagRows);recordTaxonomyReads('taxonomy.mutation-read',taxRows);
   if(await flushReadAudit(c))throw new Error('Taxonomy read evidence unavailable');
   const linkWhere='tag_id IN (SELECT value FROM json_each(?))';const linkBind=[json(ids)];

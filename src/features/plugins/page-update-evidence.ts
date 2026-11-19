@@ -3,20 +3,18 @@ import type { AppContext } from '../../core/http/context';
 import type { Page } from '../../types';
 import type { PluginAuth } from './api/types';
 import { cmsConfig } from '../../cms-config';
-import { serviceMutationAuditEvidence, ServiceMutationUnavailableError, type AuditActor } from '../../core/db/audit';
-import { resolveDataClasses, classFor, classificationPolicyGuard } from '../../core/db/data-classes';
+import { serviceMutationAuditEvidence, type AuditActor } from '../../core/db/audit';
+import { resolveDataClasses, classFor, classificationPolicyGuard, strongestClass } from '../../core/db/data-classes';
 import { snapshot, guard, resultGuard, fingerprint, json, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
 import { timingSafeEqualStr } from '../../core/http/crypto';
 import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
-import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { requestContext } from '../../core/http/request-context';
-import { NEXT_SNAPSHOT_ID_SQL } from '../../core/pages/snapshot-id';
+import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../../core/pages/snapshot-id';
 import { pageTypeScopeAllows } from './page-types';
+import { REGISTRY, IDENTITY, unavailable, noteActingUser } from './evidence-common';
 
-const REGISTRY = ['id','uuid','created_at','updated_at','label','url','enabled','config','sort_order','secret'];
-const IDENTITY = ['plugin_row_id','manifest_id','created_at','updated_at','approved_by'];
 const APPROVAL = ['id','created_at','updated_at','plugin_id','page_type','access','approved_by'];
 const PAGE = ['id','uuid','created_at','updated_at','name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'];
 const CONTENT = ['name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'] as const;
@@ -25,12 +23,6 @@ const HISTORY = ['id','uuid','created_at','updated_at','page_id','action'];
 const TAG = ['id','uuid','taxonomy_slug'];
 const FLOOR = ['uuid','level'];
 const brand = Symbol('plugin-page-mutation-authority');
-type Class = 'none'|'pii'|'phi';
-function maximum(classes: Array<Class | undefined | null>): Class { return classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none'; }
-async function unavailable(c: AppContext, actor?: AuditActor): Promise<never> {
-  await recordAuditOutage(c.env, 'health', [], actor, undefined, { captureIncomplete: true });
-  throw new ServiceMutationUnavailableError();
-}
 /** Capture before reading the body. Blueprint declarations and wildcard
  * delegation remain requests: current exact write approvals are required. */
 export async function capturePluginPageMutationAuthority(c: AppContext, auth: PluginAuth, purpose: 'create'|'update'|'duplicate'|'delete'|'tag-ensure' = 'update') {
@@ -58,7 +50,7 @@ export async function capturePluginPageMutationAuthority(c: AppContext, auth: Pl
     if (allowed.size !== auth.allowedTypes.size || [...allowed].some(type => !auth.allowedTypes.has(type))) throw new Error('Page scope changed');
     const actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: `plugin:${registration.uuid}` };
     const context = requestContext.getStore(); if (context) context.readActor = actor;
-    const dataClass = maximum(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events',...(purpose==='delete'?['trash_pages','trash_page_versions','trash_page_tags']:[])].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
+    const dataClass = strongestClass(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events',...(purpose==='delete'?['trash_pages','trash_page_versions','trash_page_tags']:[])].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
     await auditBackgroundReads(c.env, ['plugins','plugin_identity_approvals','plugin_page_type_approvals','audit_events'].map(table => ({ action: `plugin.page-${purpose}-authority-read`, kind: 'table' as const, key: table, targetType: table === 'audit_events' ? 'plugin_registry_journal' : table, ids: table === 'plugin_page_type_approvals' ? approvals.map(row => String(row.id)) : [table === 'audit_events' ? registration.uuid : String(registration.id)], count: table === 'plugin_page_type_approvals' ? approvals.length : 1, minimumClass: dataClass === 'none' ? undefined : dataClass })), actor);
     const check = () => [guard(c, 'plugins', REGISTRY, rows, 'id=?', [registration.id]), guard(c, 'plugin_identity_approvals', IDENTITY, pins, 'plugin_row_id=?', [registration.id]), guard(c, 'plugin_page_type_approvals', APPROVAL, approvals, 'plugin_id=?', [auth.pluginId]), classificationPolicyGuard(c.env, policy), abortIf(c.env, "(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin' AND target_id=?)<>?", [registration.uuid, journal.generation])];
     return { [brand]: true as const, purpose, actor, policy, dataClass, check, allowed, registryId: registration.id, identityFingerprint: await fingerprint(auth.pluginId) };
@@ -84,7 +76,7 @@ export async function readPluginPageUpdateSources(c: AppContext, authority: Auth
     const floorArgs = [json(pages.map(page => page.uuid))];
     const floors = await snapshot<Row>(c, 'page_sensitivity_floors', FLOOR, 'uuid IN (SELECT value FROM json_each(?))', floorArgs);
     if (floors.some(row => row.level !== 1 && row.level !== 2)) throw new Error('Invalid page floor');
-    const classification = (page: Page, extraTags: Row[] = []) => maximum([authority.dataClass, classFor(authority.policy, 'page_type', page.page_type ?? 'default'),
+    const classification = (page: Page, extraTags: Row[] = []) => strongestClass([authority.dataClass, classFor(authority.policy, 'page_type', page.page_type ?? 'default'),
       floors.find(row => row.uuid === page.uuid)?.level === 2 ? 'phi' : floors.find(row => row.uuid === page.uuid)?.level === 1 ? 'pii' : undefined,
       ...[...tags.filter(tag => links.some(link => link.page_id === page.id && link.tag_id === tag.id)), ...extraTags].map(tag => classFor(authority.policy, 'taxonomy', String(tag.taxonomy_slug ?? 'default')))]);
     await auditBackgroundReads(c.env, pages.map(page => ({ action: 'plugin.page-update-source-read', kind: 'page_type' as const, key: page.page_type ?? 'default', targetType: 'page', ids: [String(page.id)], count: 1, uuidById: { [String(page.id)]: page.uuid }, minimumClass: classification(page) === 'none' ? undefined : classification(page) as 'pii'|'phi' })), authority.actor);
@@ -113,15 +105,14 @@ export async function commitPluginPageUpdates(c: AppContext, authority: Authorit
     for (const denial of denied) {
       if (!source.pages.some(page => json(page) === json(denial.page)) || (denial.reason === 'forbidden_page_type' && pageTypeScopeAllows(authority.allowed, denial.page.page_type ?? ''))) throw new Error('Invalid page refusal');
     }
-    const minimum = maximum([...changes.map(change => source.classification(change.before, extraTags)), ...denied.map(row => source.classification(row.page))]);
+    const minimum = strongestClass([...changes.map(change => source.classification(change.before, extraTags)), ...denied.map(row => source.classification(row.page))]);
     await auditBackgroundReads(c.env, ['page_versions','page_tags','tags','page_sensitivity_floors','audit_events'].map(table => ({ action: 'plugin.page-update-metadata-read', kind: 'table' as const, key: table, targetType: table, ids: table === 'page_versions' ? source.versions.map(row => String(row.id)) : table === 'page_tags' ? source.links.map(row => String(row.id)) : table === 'tags' ? [...new Set([...source.tags, ...extraTags].map(row => String(row.id)))] : source.floors.map(row => String(row.uuid)), count: table === 'page_versions' ? source.versions.length : table === 'page_tags' ? source.links.length : table === 'tags' ? source.tags.length + extraTags.length : source.floors.length, minimumClass: minimum === 'none' ? undefined : minimum })), authority.actor);
     if (await flushReadAudit(c)) throw new Error('Page source evidence unavailable');
     const clock = await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP now').first<{ now: string }>();
     if (!clock) throw new Error('Clock unavailable');
     const operationId = crypto.randomUUID();
     const detail: Record<string,unknown> = { operation_id: operationId, registry_id: authority.registryId, identity_fingerprint: authority.identityFingerprint, principal: 'credential_authenticated_plugin' };
-    const asserted = c.req.header('x-acting-user-id');
-    if (asserted !== undefined) { const id = Number(asserted); detail.acting_user_verified = false; if (/^\d+$/.test(asserted) && Number.isSafeInteger(id) && id > 0) detail.asserted_user_id = id; else detail.acting_user_unrecordable = true; }
+    noteActingUser(c, detail);
     const statements = [...source.check(), guard(c, 'tags', TAG, extraTags, extraWhere, extraArgs)];
     const expectedLinks = source.links.filter(link => !changes.some(change => change.before.id === link.page_id && change.tags !== undefined));
     const newVersions: Array<{uuid:string;page_id:number;lect:string|null;action:string}> = [];
@@ -146,7 +137,7 @@ export async function commitPluginPageUpdates(c: AppContext, authority: Authorit
         for (const tagId of [...new Set(change.tags)]) {
           const uuid = crypto.randomUUID();
           expectedLinks.push({ uuid, page_id: before.id, tag_id: tagId, weight: 5, created_at: null, updated_at: null });
-          statements.push(c.env.DB.prepare(`INSERT INTO page_tags(id,uuid,page_id,tag_id) SELECT (SELECT MAX(COALESCE(MAX(id),0),(CAST(strftime('%s','now') AS INTEGER)-1563741060)*100000+(RANDOM() & 65535))+1 FROM page_tags),?,?,?`).bind(uuid, before.id, tagId), abortIf(c.env, 'changes()<>1'));
+          statements.push(c.env.DB.prepare(`INSERT INTO page_tags(id,uuid,page_id,tag_id) SELECT ${nextIdSql('page_tags')},?,?,?`).bind(uuid, before.id, tagId), abortIf(c.env, 'changes()<>1'));
         }
       }
       const version = { uuid: crypto.randomUUID(), page_id: before.id, lect: next.lect, action: change.action }; newVersions.push(version);

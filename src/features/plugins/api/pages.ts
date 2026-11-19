@@ -286,7 +286,7 @@ pagesApiRoutes.get('/pages', async (c) => {
     }
   }
   if (q) {
-    const terms = chineseSearchVariants(q).map((variant) => `%${variant.replaceAll(' ', '%')}%`);
+    const terms = (await chineseSearchVariants(q)).map((variant) => `%${variant.replaceAll(' ', '%')}%`);
     where += ` AND (${terms.map(() => '(name LIKE ? OR slug LIKE ? OR lect LIKE ?)').join(' OR ')})`;
     for (const term of terms) params.push(term, term, term);
   }

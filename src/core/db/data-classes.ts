@@ -126,6 +126,11 @@ export function classFor(map: DataClassMap, kind: ContainerKind, key: string): D
   return map.exact.get(`${kind}:${key}`) ?? null;
 }
 
+/** The strictest of several classes: phi over pii over none. */
+export function strongestClass(classes: ReadonlyArray<DataClass | 'none' | null | undefined>): DataClass | 'none' {
+  return classes.includes('phi') ? 'phi' : classes.includes('pii') ? 'pii' : 'none';
+}
+
 /** Retention bucket a recorded read belongs to. */
 export function retentionClassFor(dataClass: DataClass): string {
   return dataClass === 'phi' ? 'phi_access' : 'pii_access';

@@ -1,8 +1,9 @@
 import type { AppContext } from '../../core/http/context';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
+import { nextIdSql } from '../../core/pages/snapshot-id';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
@@ -59,7 +60,7 @@ async function prepare(c:AppContext,table:Table) {
     const classes=['page_types','block_types','taxonomies','settings'].map(t=>classFor(policy,'table',t));
     for(const slug of [...pages.map(r=>String(r.slug)),...slugs])classes.push(classFor(policy,'page_type',slug));
     for(const tax of [...taxonomies.map(r=>String(r.slug)),...taxa])classes.push(classFor(policy,'taxonomy',tax));
-    return classes.includes('phi')?'phi' as const:classes.includes('pii')?'pii' as const:'none' as const;
+    return strongestClass(classes);
   };
   const readClass=protection([],[]);
   await auditBackgroundReads(c.env,[{action:'schema.mutation-read',kind:'table',key:'page_types',targetType:'page_type',ids:pages.map(r=>String(r.id)),count:pages.length},
@@ -80,7 +81,7 @@ async function prepare(c:AppContext,table:Table) {
       if(columns.some(f=>values[f]===undefined)||!values.slug||!values.name||!Number.isFinite(values.weight)||!Array.isArray(JSON.parse(String(values.blueprint))))throw new Error('Invalid schema values');
       const taxa=table==='page_types'?[...array(before?.taxonomy_lists),...array(values.taxonomy_lists)]:[];if(table==='page_types'){array(values.block_lists);array(before?.block_lists);}json(values);
       const changed=columns.filter(f=>!before||before[f]!==values[f]);if(!changed.length){await c.env.DB.batch(admission());return Number(before!.id);}
-      const clock=await c.env.DB.prepare(`SELECT CURRENT_TIMESTAMP now,MAX(COALESCE(MAX(id),0),(CAST(strftime('%s','now') AS INTEGER)-1563741060)*100000+(RANDOM() & 65535))+1 next_id FROM ${table}`).first<{now:string;next_id:number}>();
+      const clock=await c.env.DB.prepare(`SELECT CURRENT_TIMESTAMP now,${nextIdSql(table)} next_id`).first<{now:string;next_id:number}>();
       if(!clock||(!before&&(!Number.isSafeInteger(clock.next_id)||clock.next_id<=0)))throw new Error('Unsafe schema identity');
       const targetId=before?.id??clock.next_id,uuid=before?.uuid??crypto.randomUUID();const next:Row={...before,id:targetId,uuid,created_at:before?.created_at??clock.now,updated_at:clock.now};for(const f of columns)next[f]=values[f];
       const expected=before?source.map(r=>r.id===id?next:r):[...source,next];if(expected.length>5000)throw new Error('Schema catalogue requires review');json(expected);

@@ -142,7 +142,7 @@ footer { margin-top: 40px; font-size: 14px; color: var(--dim); line-height: 1.5;
 
       <!-- arrows: inputs → dist -->
       <g fill="none" stroke-width="2" marker-end="url(#ah)">
-        <path data-f="dictionary" d="M290 112 C 362 112, 352 302, 378 310" stroke="#ffc93c"/>
+        <path data-f="dictionary" d="M290 112 C 362 112, 352 372, 378 380" stroke="#ffc93c"/>
         <path data-f="src" d="M290 230 C 335 230, 335 330, 378 334" stroke="#7ce7f9"/>
         <path data-f="views" d="M290 364 C 335 364, 340 386, 378 388" stroke="#a97cf9"/>
         <path data-f="assets" d="M290 498 C 345 498, 340 414, 378 410" stroke="#fda602"/>
@@ -156,7 +156,7 @@ footer { margin-top: 40px; font-size: 14px; color: var(--dim); line-height: 1.5;
       </g>
       <!-- arrow labels -->
       <g font-size="13" fill="#8f8f9b">
-        <text data-f="dictionary" x="316" y="104" text-anchor="middle">bundled</text>
+        <text data-f="dictionary" x="316" y="104" text-anchor="middle">copied</text>
         <text data-f="src" x="296" y="222">compiled</text>
         <text data-f="views" x="314" y="356" text-anchor="middle">views</text>
         <text data-f="assets" x="314" y="490" text-anchor="middle">assets</text>
@@ -335,8 +335,8 @@ footer { margin-top: 40px; font-size: 14px; color: var(--dim); line-height: 1.5;
           <h3>The compiled Worker</h3>
           <p>What actually runs on Cloudflare. It is <b>generated</b> by the build, not committed, and rebuilt every time, so any change made here is lost.</p>
           <ul>
-            <li><code>worker/index.js</code><span>the Worker code: <code>src/</code> and <code>dictionary/</code> bundled into one file</span></li>
-            <li><code>views/</code><span>layout, sections, snippets, templates and locales, served by the Worker</span></li>
+            <li><code>worker/index.js</code><span>the Worker code: <code>src/</code> bundled into one file</span></li>
+            <li><code>views/</code><span>layout, sections, snippets, templates, locales and the Chinese search tables, served by the Worker</span></li>
             <li><code>views/assets/</code><span>CSS, JS and icons the browser downloads</span></li>
           </ul>
           <span class="when">Output · do not edit</span>
@@ -381,7 +381,7 @@ footer { margin-top: 40px; font-size: 14px; color: var(--dim); line-height: 1.5;
           <div class="path">dictionary/</div>
           <h3>Search matching data</h3>
           <p>Lookup tables for search, so a search in Simplified Chinese also finds Traditional text and the other way round. Generated from the OpenCC dictionaries and read by <code>src/core/db/chinese.ts</code>.</p>
-          <div class="cmd">→ bundled into <code>dist/worker/index.js</code></div>
+          <div class="cmd">→ copied to <code>dist/views/data/</code> · <code>npm run build:views</code></div>
         </article>
       </div>
     </div>

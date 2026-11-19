@@ -1,35 +1,40 @@
 // Simplified/Traditional Chinese conversion, used to widen advanced-search
 // queries: a search for 苏玮 should also match 蘇瑋 and vice versa. The maps are
-// character-level 1:1 conversions generated from the OpenCC dictionaries (see
-// scripts/gen-chinese-chars.mjs); that is enough for substring LIKE matching.
+// character-level 1:1 conversions from the OpenCC dictionaries; that is enough
+// for substring LIKE matching.
+//
+// The tables ship as a VIEWS asset (dictionary/chinese-chars.json, copied by
+// build-views) rather than a module, keeping 44 kB out of the Worker bundle.
+// They are fetched once per isolate, and only for a term containing Han
+// characters — any other search never loads them.
 
-import { S2T_KEYS, S2T_VALS, T2S_KEYS, T2S_VALS } from '../../../dictionary/chinese-chars';
+import { env } from 'cloudflare:workers';
+import type { Env } from '../../types';
 
-/**
- * The tables ship as base64 of UTF-16LE code units, not literal CJK text:
- * wrangler's bundler escapes every non-ASCII character in a string literal to
- * \uXXXX — six bytes for what UTF-8 stores in three — and offers no charset
- * option. Decoding runs once at module load, over ~14k code points.
- */
-function decodeTable(encoded: string): string {
-  const binary = atob(encoded);
-  const units = new Array<string>(binary.length / 2);
-  for (let i = 0; i < units.length; i++) {
-    units[i] = String.fromCharCode(binary.charCodeAt(i * 2) | (binary.charCodeAt(i * 2 + 1) << 8));
-  }
-  return units.join('');
+interface ChineseMaps { s2t: Map<string, string>; t2s: Map<string, string> }
+
+let maps: Promise<ChineseMaps> | undefined;
+
+const HAN = /\p{Script=Han}/u;
+
+function buildMap([keys, vals]: [string, string]): Map<string, string> {
+  const k = [...keys];
+  const v = [...vals];
+  return new Map(k.map((char, i) => [char, v[i]]));
 }
 
-function buildMap(keys: string, vals: string): Map<string, string> {
-  const map = new Map<string, string>();
-  const k = [...decodeTable(keys)];
-  const v = [...decodeTable(vals)];
-  for (let i = 0; i < k.length; i++) map.set(k[i], v[i]);
-  return map;
+function loadMaps(): Promise<ChineseMaps> {
+  maps ??= (async () => {
+    const response = await (env as unknown as Env).VIEWS.fetch('https://views.local/data/chinese-chars.json');
+    if (!response.ok) throw new Error(`Chinese dictionary unavailable (${response.status})`);
+    const tables = await response.json<{ s2t: [string, string]; t2s: [string, string] }>();
+    return { s2t: buildMap(tables.s2t), t2s: buildMap(tables.t2s) };
+  })().catch((error) => {
+    maps = undefined;
+    throw error;
+  });
+  return maps;
 }
-
-const S2T = buildMap(S2T_KEYS, S2T_VALS);
-const T2S = buildMap(T2S_KEYS, T2S_VALS);
 
 /** Convert each character through `map`, leaving unmapped characters as-is. */
 function convert(value: string, map: Map<string, string>): string {
@@ -38,12 +43,12 @@ function convert(value: string, map: Map<string, string>): string {
   return out;
 }
 
-export function toTraditional(value: string): string {
-  return convert(value, S2T);
+export async function toTraditional(value: string): Promise<string> {
+  return HAN.test(value) ? convert(value, (await loadMaps()).s2t) : value;
 }
 
-export function toSimplified(value: string): string {
-  return convert(value, T2S);
+export async function toSimplified(value: string): Promise<string> {
+  return HAN.test(value) ? convert(value, (await loadMaps()).t2s) : value;
 }
 
 /**
@@ -52,10 +57,8 @@ export function toSimplified(value: string): string {
  * input it adds the fully-simplified and fully-traditional forms so a query in
  * either script matches content stored in the other.
  */
-export function chineseSearchVariants(term: string): string[] {
-  if (!term) return [term];
-  const simplified = toSimplified(term);
-  const traditional = toTraditional(term);
-  const variants = new Set<string>([term, simplified, traditional]);
-  return [...variants];
+export async function chineseSearchVariants(term: string): Promise<string[]> {
+  if (!HAN.test(term)) return [term];
+  const { s2t, t2s } = await loadMaps();
+  return [...new Set([term, convert(term, t2s), convert(term, s2t)])];
 }

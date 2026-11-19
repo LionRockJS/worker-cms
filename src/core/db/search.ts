@@ -156,17 +156,17 @@ export function getPathValue(source: unknown, path: string): unknown {
   return current;
 }
 
-export function advancedSearchCondition(
+export async function advancedSearchCondition(
   criterion: AdvancedSearchCriterion,
   pageAlias: string,
-): { conditions: string[]; params: unknown[] } {
+): Promise<{ conditions: string[]; params: unknown[] }> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
   if (criterion.term) {
     // A Chinese term also matches its Simplified/Traditional variants, so we OR
     // a LIKE per variant. Non-Chinese terms yield a single variant.
-    const searchTerms = chineseSearchVariants(criterion.term)
+    const searchTerms = (await chineseSearchVariants(criterion.term))
       .map((variant) => `%${variant.replaceAll(' ', '%')}%`);
     const orGroup = (clause: string) =>
       searchTerms.length > 1 ? `(${searchTerms.map(() => clause).join(' OR ')})` : clause;
@@ -219,7 +219,7 @@ export async function performAdvancedSearch(
     access?: PageAccessFilter;
   },
 ): Promise<AdvancedSearchResult> {
-  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator, options.access);
+  const { whereSql, baseParams } = await advancedSearchWhere(pageTypes, criteria, operator, options.access);
   const total = await countPageMetadata(db, whereSql, baseParams, { types: pageTypes });
   const totalPages = Math.max(1, Math.ceil(total / options.limit));
   const currentPage = Math.min(options.page, totalPages);
@@ -245,12 +245,12 @@ export async function performAdvancedSearch(
   };
 }
 
-export function advancedSearchWhere(
+export async function advancedSearchWhere(
   pageTypes: string[],
   criteria: AdvancedSearchCriterion[],
   operator: AdvancedSearchOperator,
   access?: PageAccessFilter,
-): { whereSql: string; baseParams: unknown[] } {
+): Promise<{ whereSql: string; baseParams: unknown[] }> {
   // Bulk actions from ordinary page lists intentionally have no search
   // criteria: in that context an empty query means every page of the selected
   // type(s), including records outside the current pagination page.
@@ -259,13 +259,13 @@ export function advancedSearchWhere(
   const pageTypePlaceholders = pageTypes.map(() => '?').join(',');
 
   if (criteria.length > 0 && operator === 'NOT') {
-    const base = advancedSearchCondition(criteria[0], 'p');
+    const base = await advancedSearchCondition(criteria[0], 'p');
     const baseCondition = base.conditions.length ? `(${base.conditions.join(' AND ')})` : '1=1';
     const excludeConditions: string[] = [];
     const excludeParams: unknown[] = [];
 
     for (const criterion of criteria.slice(1)) {
-      const exclusion = advancedSearchCondition(criterion, 'excluded');
+      const exclusion = await advancedSearchCondition(criterion, 'excluded');
       if (!exclusion.conditions.length) continue;
       excludeConditions.push(`(${exclusion.conditions.join(' AND ')})`);
       excludeParams.push(...exclusion.params);
@@ -283,7 +283,7 @@ export function advancedSearchWhere(
   } else if (criteria.length > 0) {
     const criterionConditions: string[] = [];
     for (const criterion of criteria) {
-      const condition = advancedSearchCondition(criterion, 'p');
+      const condition = await advancedSearchCondition(criterion, 'p');
       if (!condition.conditions.length) continue;
       criterionConditions.push(`(${condition.conditions.join(' AND ')})`);
       searchParams.push(...condition.params);
@@ -304,7 +304,7 @@ export async function advancedSearchMatchingPageIds(
   operator: AdvancedSearchOperator,
   access?: PageAccessFilter,
 ): Promise<number[]> {
-  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator, access);
+  const { whereSql, baseParams } = await advancedSearchWhere(pageTypes, criteria, operator, access);
   const rows = await db.prepare(
     `SELECT p.id FROM pages p
      WHERE ${whereSql}

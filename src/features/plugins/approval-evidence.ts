@@ -1,7 +1,7 @@
 import type { AppContext } from '../../core/http/context';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import type { PermissionDenialReason } from '../../core/auth/denial-contract';
-import { classFor } from '../../core/db/data-classes';
+import { classFor,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
@@ -12,7 +12,8 @@ import { computeIntegrity } from './assets';
 import { filePrefixesOverlap } from './file-prefixes';
 import { auditPluginManagement } from './disclosure-audit';
 import { inspectPluginManifest,PLUGIN_ORIGIN } from './registry';
-import { capturePluginMutationContext,REGISTRY,IDENTITY,OWNED,snapshot,guard,json,fingerprint,invalidate,type Row } from './registration-evidence';
+import { REGISTRY,IDENTITY } from './evidence-common';
+import { capturePluginMutationContext,OWNED,snapshot,guard,json,fingerprint,invalidate,type Row } from './registration-evidence';
 
 type Action='plugin.identity.approve'|'plugin.asset.approve'|'plugin.asset.revoke'|'plugin.file_prefix.approve'|'plugin.file_prefix.revoke'|'plugin.page_type.approve'|'plugin.page_type.revoke'|'plugin.page_type.approve_all';
 export interface PluginApprovalChange {id:number;action:Action;key?:string;access?:string}
@@ -71,7 +72,7 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
   for(const prefix of [...plans[2].before.map(r=>String(r.prefix)),...(manifest.filePrefixes??[])]){
     for(const entry of base.policy.prefixes)if(filePrefixesOverlap(entry.key,prefix))classes.push(entry.class);
   }
-  const dataClass=classes.includes('phi')?'phi' as const:classes.includes('pii')?'pii' as const:'none' as const;
+  const dataClass=strongestClass(classes);
   await auditBackgroundReads(c.env,await Promise.all(plans.map(async p=>({action:'plugin.approval-source-read',kind:'table' as const,key:p.table,targetType:p.table,
     ids:await Promise.all(p.before.map(r=>p.keys[0]==='id'?String(r.id):fingerprint(json([r.plugin_id,r.key])))),count:p.before.length,minimumClass:dataClass==='none'?undefined:dataClass}))),contextActor(c));
   const now=await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP now').first<{now:string}>();if(!now)throw new Error('Clock unavailable');
