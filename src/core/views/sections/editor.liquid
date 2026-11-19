@@ -160,12 +160,18 @@
     {% endif %}
 
     {% if hasTagGroups %}
-      <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-        <p class="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
-          <svg class="h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#tag"></use></svg>
-          <span>{{ "view_strings.sections_editor.tags" | t }}</span>
-        </p>
-        <div class="space-y-4">
+      {% assign selectedTagCount = 0 %}
+      {% for group in tagGroups %}{% for tag in group.tags %}{% if tag.checked %}{% assign selectedTagCount = selectedTagCount | plus: 1 %}{% endif %}{% endfor %}{% endfor %}
+      <details class="group min-w-0 rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 py-2 text-sm font-bold text-gray-900 [&::-webkit-details-marker]:hidden">
+          <span class="flex min-w-0 items-center gap-2">
+            <svg class="h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#tag"></use></svg>
+            <span>{{ "view_strings.sections_editor.tags" | t }}</span>
+            {% if selectedTagCount > 0 %}<span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{{ selectedTagCount }}</span>{% endif %}
+          </span>
+          <svg class="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+        </summary>
+        <div class="space-y-4 pb-3 pt-2">
           {% for group in tagGroups %}
             <div class="min-w-0 space-y-2">
               <p class="min-w-0 break-words text-xs font-semibold uppercase tracking-wide text-gray-400">{{ group.name }}</p>
@@ -220,29 +226,33 @@
             </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
     {% endif %}
 
     {% if hasVersions %}
-      <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-        <div class="mb-3 flex min-w-0 items-center justify-between gap-3">
-          <p class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+      <details class="group min-w-0 rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm"{% if isVersionPreview %} open{% endif %}>
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 py-2 text-sm font-bold text-gray-900 [&::-webkit-details-marker]:hidden">
+          <span class="flex min-w-0 items-center gap-2">
             <svg class="h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
             <span>{{ "view_strings.sections_editor.versions" | t }}</span>
-          </p>
+            <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{{ versions.size }}</span>
+          </span>
+          <svg class="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+        </summary>
+        <div class="flex justify-end pb-2 pt-2">
           <button type="submit" name="action" value="delete-versions" formnovalidate data-clean-versions-button data-confirm-message="{{ "view_strings.sections_editor.clean_versions_confirm" | t }}" title="{{ "view_strings.sections_editor.clean_all_versions_2" | t }}" aria-label="{{ "view_strings.sections_editor.clean_all_versions_2" | t }}"
                   class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50">
             {{ "view_strings.sections_editor.clean_all_versions" | t }}
           </button>
         </div>
-        <div class="space-y-2">
+        <div class="space-y-2 pb-3">
           {% for version in versions %}
             <div class="flex min-w-0 items-start gap-2">
               <a href="{{ version.href }}"
-                 class="flex min-h-10 min-w-0 flex-1 items-center break-words rounded-lg border px-3 py-1.5 text-xs {% if version.active %}border-amber-400 bg-amber-50 text-amber-800{% else %}border-gray-300 bg-white text-gray-700 hover:bg-gray-50{% endif %}">
+                 class="flex min-h-10 min-w-0 flex-1 flex-wrap items-center gap-x-1 break-words rounded-lg border px-3 py-1.5 text-xs {% if version.active %}border-amber-400 bg-amber-50 text-amber-800{% else %}border-gray-300 bg-white text-gray-700 hover:bg-gray-50{% endif %}">
                 <span>{{ version.createdAt | l10n_date }}</span>
                 {% if version.description %}
-                  <span class="text-gray-500"> - {{ version.description }}</span>
+                  <span class="text-gray-500">- {{ version.description }}</span>
                 {% endif %}
                 {% feature_fragment publish/editor-live-version-badge %}
               </a>
@@ -254,7 +264,7 @@
             </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
     {% endif %}
       </div>
     </div>
