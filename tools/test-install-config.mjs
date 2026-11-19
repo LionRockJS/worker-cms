@@ -175,6 +175,7 @@ async function configureLocalSecrets(existing, confirmAdmin, providerUserId, pro
     randomBytes,
     confirm: confirmAdmin,
     ask: async (label) => label.includes('account subject') ? providerUserId : '',
+    askSecret: async () => '',
   });
   await writeSecrets({ canonicalOrigin: 'http://localhost:8787', providers });
   return result;

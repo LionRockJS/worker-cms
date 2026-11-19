@@ -29,12 +29,23 @@ npm install
 ```
 
 For a local Wrangler instance, run `npm run setup` and accept **Set up this
-clone for local development with Wrangler?** The wizard creates `wrangler.toml`
-from the example when needed, sets the localhost origin and callback in the
+clone for local development with Wrangler?** on a fresh setup. The wizard
+creates `wrangler.toml` from the example, sets the localhost origin and callback in the
 gitignored `.dev.vars`, generates a signing key if needed, and applies the D1
 migrations for the enabled databases. Then run `npm run dev` and open
 **http://localhost:8787**. To sign in, configure your OAuth client for
 `http://localhost:8787/auth/callback` and put its secret in `.dev.vars`.
+
+If you already have `wrangler.toml`, choose **continue** to create or complete
+`.dev.vars` with your existing settings. The wizard keeps `wrangler.toml`,
+generates a local signing key if needed, and offers to collect local secrets for
+configured OAuth providers. Standard Wrangler development defaults to
+`http://localhost:8787` when the existing config has a public origin. Use
+`npm run setup -- --local` to reuse that public origin for local hosting.
+
+Choose **start over** to save the previous config files under
+`.wrangler/setup-backup-*/` and open the fresh setup wizard. Local database
+files and Cloudflare resources are preserved.
 
 Decline the Wrangler development option to open the full hosting wizard.
 It interactively configures resources, migrations, OAuth, and the

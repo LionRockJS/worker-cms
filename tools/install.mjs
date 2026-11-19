@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
-import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
@@ -24,6 +25,7 @@ const EXAMPLE_CONFIG_PATH = new URL('../wrangler.example.toml', import.meta.url)
 const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
 const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
 const DEV_VARS_PATH = new URL('../.dev.vars', import.meta.url);
+const WRANGLER_STATE_PATH = new URL('../.wrangler/', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const LOCAL_ORIGIN = 'http://localhost:8787';
@@ -76,6 +78,9 @@ For Wrangler development, setup creates wrangler.toml if needed, configures
 .dev.vars for localhost:8787, and applies the local D1 migrations. OAuth
 credentials can be configured separately when you need to sign in.
 
+With an existing wrangler.toml, continue to configure .dev.vars or start over
+with a fresh setup. Starting over saves the old config files under .wrangler/.
+
 The wizard asks for one namespace and derives every resource name from it
 (<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit,
 <ns>-plugin-views); each can still be overridden. It creates or reuses D1, R2, and Queue resources, updates
@@ -105,17 +110,17 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 }
 
 let hiddenInput = false;
-const promptOutput = upgradeMode ? new Writable({
+const promptOutput = new Writable({
   write(chunk, encoding, done) {
     if (hiddenInput) done();
     else process.stdout.write(chunk, encoding, done);
   },
-}) : process.stdout;
+});
 const rl = createInterface({
   input: process.stdin,
   output: promptOutput,
   terminal: true,
-  ...(upgradeMode ? { historySize: 0 } : {}),
+  historySize: 0,
 });
 
 function command(args, { capture = false, input } = {}) {
@@ -171,13 +176,13 @@ async function confirm(label, defaultValue = true) {
   return answer === 'y' || answer === 'yes';
 }
 
-async function askSecret(label) {
+async function askSecret(label, optional = false) {
   while (true) {
     process.stdout.write(`${label}: `);
     hiddenInput = true;
     try {
       const value = await rl.question('');
-      if (value.trim()) return value;
+      if (optional || value.trim()) return value;
     } finally {
       hiddenInput = false;
       process.stdout.write('\n');
@@ -518,7 +523,7 @@ async function writeLocalSecrets({ canonicalOrigin, providers = [], clientIds = 
     if (vars[key] && !await confirm(`Replace the existing ${key} in .dev.vars?`, false)) continue;
     const secret = provider === 'apple'
       ? await appleClientSecret(clientIds.apple)
-      : await ask(`${provider} client secret (blank to add later)`, undefined, () => true);
+      : (await askSecret(`${provider} client secret (input hidden, blank to add later)`, true)).trim();
     if (secret) setDevVar(lines, key, secret);
     else console.log(`Add ${key} to .dev.vars before signing in with ${provider}.`);
   }
@@ -760,10 +765,71 @@ async function setupLocalDevelopment() {
   console.log(`For sign-in, configure an OAuth client with callback ${LOCAL_ORIGIN}/auth/callback.`);
 }
 
+async function continueLocalSetup(localHosting) {
+  const { unstable_readConfig } = await import('wrangler');
+  const { vars } = unstable_readConfig({ config: fileURLToPath(CONFIG_PATH) });
+  const localVars = parseEnv(await readFile(DEV_VARS_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  }));
+  const canonicalOrigin = origin(localVars.CANONICAL_ORIGIN)
+    ? new URL(localVars.CANONICAL_ORIGIN).origin
+    : origin(vars.CANONICAL_ORIGIN) && (localHosting || isLocalOrigin(vars.CANONICAL_ORIGIN))
+      ? new URL(vars.CANONICAL_ORIGIN).origin
+      : LOCAL_ORIGIN;
+
+  console.log(`Keeping wrangler.toml. Local OAuth callback is ${canonicalOrigin}/auth/callback.`);
+  const clientIds = {};
+  for (const name of oauthProviders(localVars.ENABLED_PROVIDERS ?? vars.ENABLED_PROVIDERS)) {
+    const provider = name.toLowerCase();
+    if (!Object.hasOwn(PROVIDERS, provider)) continue;
+    const { clientId } = PROVIDERS[provider];
+    const value = localVars[clientId] ?? vars[clientId];
+    if (typeof value === 'string' && value.trim()) clientIds[provider] = value;
+  }
+  const configured = Object.keys(clientIds);
+  const providers = configured.length && await confirm(`Configure local OAuth secrets for ${configured.join(', ')}?`, false)
+    ? configured
+    : [];
+  await writeLocalSecrets({ canonicalOrigin, providers, clientIds });
+  const port = new URL(canonicalOrigin).port;
+  const portOption = isLocalOrigin(canonicalOrigin) && port && port !== '8787' ? ` -- --port ${port}` : '';
+  console.log(`\nLocal settings are ready. Start with npm run dev${portOption}.`);
+}
+
+async function backUpSetup() {
+  await mkdir(WRANGLER_STATE_PATH, { recursive: true });
+  const directory = await mkdtemp(fileURLToPath(new URL('setup-backup-', WRANGLER_STATE_PATH)));
+  console.log(`Saving previous setup files in ${directory}.`);
+  await rename(CONFIG_PATH, join(directory, 'wrangler.toml'));
+  try {
+    await rename(DEV_VARS_PATH, join(directory, '.dev.vars'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      await rename(join(directory, 'wrangler.toml'), CONFIG_PATH);
+      throw error;
+    }
+  }
+}
+
 async function main() {
   console.log('\n0xCMS setup\n');
 
   const localHosting = process.argv.includes('--local');
+  const existingConfig = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (existingConfig !== null) {
+    console.log('Found wrangler.toml. Continue to configure .dev.vars, or start over with a backup.');
+    const mode = await ask('Setup mode (continue/start over)', 'continue', (value) =>
+      ['continue', 'start over'].includes(value.toLowerCase()));
+    if (mode.toLowerCase() === 'continue') {
+      await continueLocalSetup(localHosting);
+      return;
+    }
+    await backUpSetup();
+  }
   if (!localHosting && await confirm('Set up this clone for local development with Wrangler?')) {
     await setupLocalDevelopment();
     return;
