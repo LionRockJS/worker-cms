@@ -2027,6 +2027,14 @@ describe('plugin admin proxy', () => {
 
     const mainPluginKey = 'plugin:events:main:/admin/plugins/events/dashboard';
     const settingsPluginKey = 'plugin:events:settings:/admin/plugins/events/mail-settings';
+    const iconFile = new FormData();
+    iconFile.set('icon_sprite', new File(['<svg><symbol id="ticket"><rect width="24" height="24"/></symbol></svg>'], 'icons.svg'));
+    const uploadResponse = await worker.fetch(new Request('http://localhost/admin/settings/system/icon-sprite', {
+      method: 'POST', redirect: 'manual', body: iconFile,
+      headers: { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' },
+    }));
+    expect(uploadResponse.status).toBe(303);
+    expect(uploadResponse.headers.get('Location')).toBe('/admin/settings/system?flash=icon-sprite-uploaded');
     const saveResponse = await worker.fetch(new Request('http://localhost/admin/settings/system', {
       method: 'POST',
       redirect: 'manual',
@@ -2043,7 +2051,7 @@ describe('plugin admin proxy', () => {
         ['settings_group_weight', '5'],
         [`plugin_weight_${encodeURIComponent(mainPluginKey)}`, '1'],
         [`plugin_weight_${encodeURIComponent(settingsPluginKey)}`, '1'],
-        [`plugin_icon_${encodeURIComponent(mainPluginKey)}`, 'document'],
+        [`plugin_icon_${encodeURIComponent(mainPluginKey)}`, 'custom-ticket'],
         [`sidebar_label_${encodeURIComponent(mainPluginKey)}_en`, 'Ticketing'],
         [`sidebar_label_${encodeURIComponent(mainPluginKey)}_zh-hant`, '票務'],
         ['plugin_visible_items', mainPluginKey],
@@ -2056,7 +2064,7 @@ describe('plugin admin proxy', () => {
     }));
     const afterPayload = renderPayload(await afterHide.text());
     expect(afterPayload.layoutData.sidebarNav).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: 'Ticketing', href: '/admin/plugins/events/dashboard', icon: 'document' }),
+      expect.objectContaining({ label: 'Ticketing', href: '/admin/plugins/events/dashboard', icon: 'custom-ticket', iconHref: '/assets/custom-icons.svg#custom-ticket' }),
     ]));
     const renamed = (afterPayload.layoutData.sidebarNav as Array<{ label: string; translationKey?: string }>).find((item) => item.label === 'Ticketing');
     expect(renamed?.translationKey).toBeUndefined();
@@ -2097,12 +2105,12 @@ describe('plugin admin proxy', () => {
     expect(restoredPayload.bodyView?.data).toMatchObject({
       appName: 'Renamed CMS',
       pluginOptions: expect.arrayContaining([
-        expect.objectContaining({ checked: true, weight: 1, icon: 'document', key: mainPluginKey }),
+        expect.objectContaining({ checked: true, weight: 1, icon: 'custom-ticket', key: mainPluginKey }),
         expect.objectContaining({ checked: false, weight: 1, key: settingsPluginKey }),
       ]),
     });
     expect(restoredPayload.layoutData.sidebarNav).toEqual(expect.arrayContaining([
-      expect.objectContaining({ href: '/admin/plugins/events/dashboard', icon: 'document' }),
+      expect.objectContaining({ href: '/admin/plugins/events/dashboard', icon: 'custom-ticket' }),
     ]));
     expect(restoredPayload.layoutData.sidebarSettingsNav).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ href: '/admin/plugins/events/mail-settings' }),

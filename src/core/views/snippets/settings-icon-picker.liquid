@@ -1,0 +1,10 @@
+<span class="flex min-w-0 items-center gap-2" data-icon-picker>
+  <svg class="h-5 w-5 shrink-0 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <use href="{% if selectedHref != blank %}{{ selectedHref }}{% else %}{{ iconHrefPrefix }}#{{ selectedIcon }}{% endif %}"></use>
+  </svg>
+  <select name="{{ name }}" aria-label="{{ label }}" class="block min-w-0 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" data-icon-select>
+    {% for icon in iconOptions %}
+      <option value="{{ icon.value }}" data-icon-href="{% if icon.href != blank %}{{ icon.href }}{% else %}{{ iconHrefPrefix }}#{{ icon.value }}{% endif %}"{% if selectedIcon == icon.value %} selected{% endif %}>{% if icon.labelKey != blank %}{{ icon.labelKey | t }}{% else %}{{ icon.label }}{% endif %}</option>
+    {% endfor %}
+  </select>
+</span>

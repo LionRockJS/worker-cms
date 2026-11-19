@@ -39,6 +39,8 @@ import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
 import { maintainSessionHygiene } from './core/auth/sessions';
 import { coreExtensions } from './core/extensions';
 import { withD1Sessions } from './core/http/d1-sessions';
+import { loadCustomIconSprite } from './core/db/settings';
+import { CUSTOM_ICON_SPRITE_PATH } from './core/render/icon-sprite';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -152,6 +154,16 @@ function isLocalHost(hostname: string): boolean {
 }
 
 // ── Static assets (compiled CSS) from the VIEWS binding ──────────────────────
+app.get(CUSTOM_ICON_SPRITE_PATH, async (c) => {
+  const sprite = await loadCustomIconSprite(c.env);
+  if (!sprite) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  return new Response(sprite.svg, { headers: {
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+  } });
+});
+
 app.get('/assets/*', async (c) => {
   const assetPath = new URL(c.req.url).pathname;
   const response = await c.env.VIEWS.fetch(`https://views.local${assetPath}`);

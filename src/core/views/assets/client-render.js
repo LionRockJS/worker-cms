@@ -234,6 +234,7 @@
       assetRevisionQueries,
       pluginAssetRevisionQueries: assetRevisionQueries,
       iconHrefPrefix: '/assets/icons.svg' + cmsRevisionQuery,
+      appIconHref: payload.layoutData?.appIconHref || '/assets/icons.svg' + cmsRevisionQuery + '#' + (payload.layoutData?.appIcon || 'document'),
     };
   }
 

@@ -1,5 +1,6 @@
 import { currentCspNonce } from '../http/request-context';
 import { appearanceStyleSheet } from './theme';
+import { customIconHref } from './icon-sprite';
 import { builtinRoleTranslationKey } from '../auth/roles';
 import { isClientView, type RenderedView } from './liquid';
 
@@ -8,6 +9,7 @@ export interface SidebarNavItem {
   translationKey?: string;
   href: string;
   icon: string;
+  iconHref?: string;
   isSettingsGroup?: boolean;
   isActive?: boolean;
 }
@@ -250,6 +252,8 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   const nonce = currentCspNonce();
   const revision = opts.viewRevision || 'dev';
   const revisionQuery = assetRevisionQuery(revision);
+  const iconHrefPrefix = `/assets/icons.svg${revisionQuery}`;
+  const appIcon = opts.appIcon || 'document';
   // The bootstrap shell only needs general chrome assets. Collaboration assets
   // belong exclusively to the rendered editor document: loading Yjs in both
   // phases creates two module copies and breaks Yjs constructor identity.
@@ -269,7 +273,8 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
     userRoleItems,
     sidebarWallets: opts.sidebarWallets ?? [],
     userInitial: userName.trim().charAt(0).toUpperCase() || '?',
-    appIcon: opts.appIcon || 'document',
+    appIcon,
+    appIconHref: customIconHref(appIcon) || `${iconHrefPrefix}#${appIcon}`,
     contentClass: admin ? 'md:ml-64' : '',
     canManageUsers: opts.canManageUsers ?? false,
     canManageRoles: opts.canManageRoles ?? false,
@@ -291,7 +296,7 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
     pluginSettingsNav: opts.pluginSettingsNav ?? [],
     viewRevision: revision,
     assetRevisionQuery: revisionQuery,
-    iconHrefPrefix: `/assets/icons.svg${revisionQuery}`,
+    iconHrefPrefix,
     nonce,
     uiLocale: opts.uiLocale || 'en',
     uiDirection: opts.uiDirection || 'ltr',

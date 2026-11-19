@@ -694,7 +694,7 @@
   {% if admin %}
     <header class="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-4 py-3 text-white shadow-xl md:hidden" data-admin-mobile-bar>
       <a href="/admin" aria-label="{{ "shell.go_to_dashboard" | t }}" class="flex min-w-0 items-center gap-3">
-        <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+        <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ appIconHref }}"></use></svg>
         <span class="min-w-0 truncate text-lg font-bold tracking-tight">{{ siteTitle }}</span>
       </a>
       <button type="button"
@@ -716,7 +716,7 @@
            class="flex min-w-0 items-center gap-3"
            data-sidebar-tooltip
            data-sidebar-label="{{ "shell.go_to_dashboard" | t }}">
-          <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+          <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ appIconHref }}"></use></svg>
           <span class="min-w-0 truncate text-lg font-bold tracking-tight" data-sidebar-text>{{ siteTitle }}</span>
         </a>
         <button type="button"
@@ -735,7 +735,7 @@
                        data-sidebar-tooltip
                        data-sidebar-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}"
                        aria-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}">
-                <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ item.icon }}"></use></svg>
+                <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{% if item.iconHref %}{{ item.iconHref }}{% else %}{{ iconHrefPrefix }}#{{ item.icon }}{% endif %}"></use></svg>
                 <span data-sidebar-text>{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}</span>
                 <svg class="ml-auto h-4 w-4 transition-transform group-open:rotate-90" data-sidebar-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
               </summary>
@@ -745,7 +745,7 @@
                      {% if settingItem.isActive %}aria-current="page"{% endif %}
                      aria-label="{% if settingItem.translationKey %}{{ settingItem.translationKey | t: settingItem.label }}{% else %}{{ settingItem.label }}{% endif %}"
                      class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors {% if settingItem.isActive %}bg-indigo-600 font-semibold text-white shadow-sm hover:bg-indigo-700{% else %}text-gray-300 hover:bg-gray-700 hover:text-white{% endif %}">
-                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ settingItem.icon }}"></use></svg>
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{% if settingItem.iconHref %}{{ settingItem.iconHref }}{% else %}{{ iconHrefPrefix }}#{{ settingItem.icon }}{% endif %}"></use></svg>
                     {% if settingItem.translationKey %}{{ settingItem.translationKey | t: settingItem.label }}{% else %}{{ settingItem.label }}{% endif %}
                   </a>
                 {% endfor %}
@@ -758,7 +758,7 @@
                data-sidebar-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}"
                aria-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}"
                class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors {% if item.isActive %}bg-indigo-600 font-semibold text-white shadow-sm hover:bg-indigo-700{% else %}text-gray-300 hover:bg-gray-700 hover:text-white{% endif %}">
-              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ item.icon }}"></use></svg>
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{% if item.iconHref %}{{ item.iconHref }}{% else %}{{ iconHrefPrefix }}#{{ item.icon }}{% endif %}"></use></svg>
               <span data-sidebar-text>{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}</span>
             </a>
           {% endif %}

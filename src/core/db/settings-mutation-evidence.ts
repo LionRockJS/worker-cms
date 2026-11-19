@@ -6,10 +6,11 @@ import { abortIf } from './transaction-guard';
 import { auditBackgroundReads,flushReadAudit } from '../http/access-log';
 import { recordAuditOutage } from './audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
-import { APP_BRANDING_SETTING_KEY,ADMIN_HOME_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY } from './settings';
+import { APP_BRANDING_SETTING_KEY,ADMIN_HOME_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY,CUSTOM_ICON_SPRITE_SETTING_KEY } from './settings';
 
 export const HOST_SETTINGS_KEYS=[APP_BRANDING_SETTING_KEY,ADMIN_HOME_SETTING_KEY,SYSTEM_TIMEZONE_SETTING_KEY,SHOW_CREDITS_SETTING_KEY,SIDEBAR_MENU_SETTING_KEY] as const;
-export type HostSettingWrite = { key: typeof HOST_SETTINGS_KEYS[number]; value: string };
+type HostSettingKey = typeof HOST_SETTINGS_KEYS[number] | typeof CUSTOM_ICON_SPRITE_SETTING_KEY;
+export type HostSettingWrite = { key: HostSettingKey; value: string };
 
 type Row={key:string;value:string;created_at:string;updated_at:string};
 export class SettingsMutationUnavailableError extends Error {constructor(){super('Settings change unavailable');}}
@@ -24,17 +25,17 @@ async function unavailable(c:AppContext):Promise<never> {
 }
 /** Host system preferences only; generic saveSetting and feature writers keep
  * their own authorization/evidence contracts. Raw values never enter detail. */
-export async function prepareHostSettingsMutation(c:AppContext) {
+export async function prepareHostSettingsMutation(c:AppContext, scope: readonly HostSettingKey[] = HOST_SETTINGS_KEYS) {
   assertRegulatedWritesAllowed(c.env);
-  try {return await prepare(c);}catch {return unavailable(c);}
+  try {return await prepare(c,scope);}catch {return unavailable(c);}
 }
-async function prepare(c:AppContext) {
+async function prepare(c:AppContext,scope: readonly HostSettingKey[]) {
   const env=c.env,user=c.get('user');
   const authority=await captureAccessAuthorization(env,user,'menu:manage');
   if(!authority.allowed)throw new Error('Settings authority unavailable');
   const policy=await resolveDataClasses(env,true);
   if(!policy.ok)throw new Error('Settings classification unavailable');
-  const keys=json(HOST_SETTINGS_KEYS);
+  const keys=json(scope);
   const captured=await env.DB.prepare(`WITH scoped AS (SELECT key,value,created_at,updated_at FROM settings WHERE key IN (SELECT value FROM json_each(?))),
     budget AS (SELECT COALESCE(SUM(length(CAST(json_object('key',key,'value',value,'created_at',created_at,'updated_at',updated_at) AS BLOB))),0)+COUNT(*)+2 bytes FROM scoped)
     SELECT CASE WHEN bytes>1000000 THEN json('{') ELSE (SELECT json_group_array(json_object('key',key,'value',value,'created_at',created_at,'updated_at',updated_at)) FROM scoped) END snapshot FROM budget`).bind(keys).first<{snapshot:string}>();
@@ -46,11 +47,11 @@ async function prepare(c:AppContext) {
     OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM settings s WHERE s.key=json_extract(e.value,'$.key')
       AND s.value IS json_extract(e.value,'$.value') AND s.created_at IS json_extract(e.value,'$.created_at') AND s.updated_at IS json_extract(e.value,'$.updated_at')))`,[keys,rows.length,json(rows)]);
   return {
-    value(key:typeof HOST_SETTINGS_KEYS[number]):string|null {return rows.find(r=>r.key===key)?.value??null;},
+    value(key:HostSettingKey):string|null {return rows.find(r=>r.key===key)?.value??null;},
     async commit(writes: HostSettingWrite[]):Promise<void> {
       try {
         assertRegulatedWritesAllowed(env);
-        if(writes.length>HOST_SETTINGS_KEYS.length||new Set(writes.map(w=>w.key)).size!==writes.length||writes.some(w=>!HOST_SETTINGS_KEYS.includes(w.key)||typeof w.value!=='string'))throw new Error('Invalid settings scope');
+        if(writes.length>scope.length||new Set(writes.map(w=>w.key)).size!==writes.length||writes.some(w=>!scope.includes(w.key)||typeof w.value!=='string'))throw new Error('Invalid settings scope');
         json(writes);
         if(await flushReadAudit(c))throw new Error('Settings read evidence unavailable');
         const changed=writes.filter(w=>rows.find(r=>r.key===w.key)?.value!==w.value);

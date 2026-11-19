@@ -3349,7 +3349,7 @@ describe('permission-aware admin UI', () => {
       method: 'POST',
       body: new URLSearchParams([
         ['app_name', 'Control Room'],
-        ['app_icon', 'settings'],
+        ['app_icon', 'info-circle'],
         ['admin_home_path', '/admin/plugins/events/dashboard'],
         ['system_timezone', '+0800'],
         ['visible_items', 'pages'],
@@ -3374,7 +3374,7 @@ describe('permission-aware admin UI', () => {
     expect(dashboardPayload.layoutData.showSidebarMenu).toBe(true);
     expect(dashboardPayload.layoutData.siteTitle).toBe('Control Room');
     expect(pageTypeDashboard.layoutData.siteTitle).toBe('Control Room');
-    expect(dashboardPayload.layoutData.appIcon).toBe('settings');
+    expect(dashboardPayload.layoutData.appIcon).toBe('info-circle');
     expect(dashboardPayload.layoutData.systemTimezone).toBe('+0800');
     expect((dashboardPayload.layoutData.sidebarNav as Array<{ label: string }>).map((item) => item.label)).toEqual([
       'Trash',
@@ -3384,26 +3384,25 @@ describe('permission-aware admin UI', () => {
 
     const loginPayload = renderPayload(await (await fetchWorker('/auth/login')).text());
     expect(loginPayload.layoutData.siteTitle).toBe('Control Room');
-    expect(loginPayload.layoutData.appIcon).toBe('settings');
+    expect(loginPayload.layoutData.appIcon).toBe('info-circle');
     expect(loginPayload.bodyView?.data.siteTitle).toBe('Control Room');
-    expect(loginPayload.bodyView?.data.appIcon).toBe('settings');
+    expect(loginPayload.bodyView?.data.appIcon).toBe('info-circle');
 
     const settingsData = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: await authCookie() } })).text());
     expect(settingsData.appName).toBe('Control Room');
-    expect(settingsData.appIcon).toBe('settings');
+    expect(settingsData.appIcon).toBe('info-circle');
     expect(settingsData.adminHomePath).toBe('/admin/plugins/events/dashboard');
     expect(settingsData.systemTimezone).toBe('+0800');
     expect(settingsData.timezoneOptions).toEqual(expect.arrayContaining([
       { value: '+0800', label: 'UTC+08:00 (+0800)', selected: true },
       expect.objectContaining({ value: '+0000', selected: false }),
     ]));
-    expect(settingsData.iconOptions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ value: 'settings', selected: true }),
-      expect.objectContaining({ value: 'calendar' }),
-      expect.objectContaining({ value: 'contact-card' }),
-      expect.objectContaining({ value: 'mail-check' }),
-    ]));
-    expect(settingsData.iconOptions).toHaveLength(48);
+    const sprite = await (await env.VIEWS.fetch('https://views.local/assets/icons.svg')).text();
+    const spriteIconIds = [...sprite.matchAll(/<symbol\s+id="([^"]+)"/g)].map((match) => match[1]);
+    expect(settingsData.iconOptions).toEqual(expect.arrayContaining(spriteIconIds.map((value) =>
+      expect.objectContaining({ value, labelKey: `settings.icons.${value}`, selected: value === 'info-circle' }),
+    )));
+    expect(settingsData.iconOptions).toHaveLength(spriteIconIds.length);
     expect(settingsData.options).toEqual(expect.arrayContaining([
       expect.objectContaining({ value: 'pages', checked: true, weight: 50 }),
       expect.objectContaining({ value: 'tags', checked: false }),
@@ -3416,6 +3415,60 @@ describe('permission-aware admin UI', () => {
       'settings_group_weight',
       'weight_pages',
     ]);
+  });
+
+  it('publishes sanitized icon sprites, exposes their previews, and falls back when an icon is replaced', async () => {
+    const headers = { Cookie: await authCookie() };
+    const upload = (source: string, requestHeaders = headers) => {
+      const body = new FormData();
+      body.set('icon_sprite', new File([source], 'icons.svg', { type: 'image/svg+xml' }));
+      return fetchWorker('/admin/settings/system/icon-sprite', { method: 'POST', headers: requestHeaders, body });
+    };
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><defs><symbol id="info-circle" viewBox="0 0 24 24">'
+      + '<circle cx="12" cy="12" r="9" data-private="ignored" onload="ignored"/></symbol></defs></svg>';
+    expect((await fetchWorker('/assets/custom-icons.svg')).status).toBe(404);
+    const editor = await signTestToken({ sub: '2', email: 'editor@example.com', role: 'editor' });
+    expect((await upload(svg, { Cookie: `access_token=${editor}` })).status).toBe(403);
+    const uploaded = await upload(svg);
+    expect(uploaded.status).toBe(303);
+    expect(uploaded.headers.get('Location')).toBe('/admin/settings/system?flash=icon-sprite-uploaded');
+
+    const iconHref = '/assets/custom-icons.svg#custom-info-circle';
+    const settings = bodyData(await (await fetchWorker('/admin/settings/system', { headers })).text());
+    expect(settings.uploadedIcons).toEqual([expect.objectContaining({ value: 'custom-info-circle', href: iconHref })]);
+    expect(settings.iconOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'info-circle' }),
+      expect.objectContaining({ value: 'custom-info-circle', label: 'info circle', href: iconHref }),
+    ]));
+
+    const asset = await fetchWorker('/assets/custom-icons.svg');
+    expect(asset.headers.get('Content-Type')).toContain('image/svg+xml');
+    expect(asset.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+    const sanitized = await asset.text();
+    expect(sanitized).toContain('<symbol id="custom-info-circle" viewBox="0 0 24 24"');
+    expect(sanitized).toContain('<circle cx="12" cy="12" r="9">');
+    expect(sanitized).not.toMatch(/onload|data-private/);
+
+    for (const invalid of [
+      '<svg><symbol id="a"><script/></symbol></svg>',
+      '<svg><symbol id="a"><rect fill="url(#paint)"/></symbol></svg>',
+      '<svg><symbol id="a"><rect/></symbol><symbol id="a"><rect/></symbol></svg>',
+      '<!DOCTYPE svg><svg><symbol id="a"><rect/></symbol></svg>',
+      '<svg><symbol id="a"><rect></symbol></svg>',
+    ]) {
+      expect((await upload(invalid)).headers.get('Location')).toBe('/admin/settings/system?error=invalid-icon-sprite');
+    }
+    expect((await upload(' '.repeat(64 * 1024 + 1))).headers.get('Location')).toBe('/admin/settings/system?error=icon-sprite-too-large');
+    expect(await (await fetchWorker('/assets/custom-icons.svg')).text()).toBe(sanitized);
+
+    const saved = await fetchWorker('/admin/settings/system', {
+      method: 'POST', headers, body: new URLSearchParams({ app_icon: 'custom-info-circle' }),
+    });
+    expect(saved.status).toBe(302);
+    const loginIcon = async () => renderPayload(await (await fetchWorker('/auth/login')).text()).layoutData.appIconHref;
+    expect(await loginIcon()).toBe(iconHref);
+    expect((await upload('<svg><symbol id="other"><rect width="24" height="24"/></symbol></svg>')).status).toBe(303);
+    expect(await loginIcon()).toMatch(/^\/assets\/icons\.svg\?.*#document$/);
   });
 
   it('renames sidebar links per interface language and restores defaults when cleared', async () => {

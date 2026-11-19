@@ -1,5 +1,6 @@
 import { adminLayout, type BaseTemplateProps } from '../render/layout';
 import { renderView } from '../render/liquid';
+import { MAX_ICON_SPRITE_BYTES } from '../render/icon-sprite';
 
 export interface SystemSettingsMenuOption {
   value: string;
@@ -39,6 +40,7 @@ export interface SystemSettingsSidebarOption {
   weight: number;
   icon: string;
   iconName: string;
+  iconHref?: string;
 }
 
 export interface SystemSettingsFontOption {
@@ -53,6 +55,7 @@ export interface SystemSettingsIconOption {
   value: string;
   label: string;
   labelKey: string;
+  href: string;
   selected: boolean;
 }
 
@@ -68,6 +71,7 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
   systemTimezone: string;
   timezoneOptions: Array<{ value: string; label: string; selected: boolean }>;
   iconOptions: SystemSettingsIconOption[];
+  uploadedIcons: Array<Omit<SystemSettingsIconOption, 'selected'>>;
   settingsGroupWeight: number;
   mainOptions: SystemSettingsMenuOption[];
   settingsOptions: SystemSettingsMenuOption[];
@@ -90,6 +94,8 @@ export async function systemSettingsPage(views: Fetcher, opts: BaseTemplateProps
     systemTimezone: opts.systemTimezone,
     timezoneOptions: opts.timezoneOptions,
     iconOptions: opts.iconOptions,
+    uploadedIcons: opts.uploadedIcons,
+    iconSpriteMaxBytes: MAX_ICON_SPRITE_BYTES,
     settingsGroupWeight: opts.settingsGroupWeight,
     mainOptions: opts.mainOptions,
     hasMainOptions: opts.mainOptions.length > 0,

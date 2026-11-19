@@ -1,8 +1,10 @@
 import type { Env } from '../../types';
 import { recordMetadataReads } from '../http/access-log';
+import { isCustomIconId, type CustomIconId, type CustomIconSprite } from '../render/icon-sprite';
 
 export const SIDEBAR_MENU_SETTING_KEY = 'admin.sidebar_menu.hidden_items';
 export const APP_BRANDING_SETTING_KEY = 'admin.app_branding';
+export const CUSTOM_ICON_SPRITE_SETTING_KEY = 'admin.custom_icon_sprite';
 export const ADMIN_HOME_SETTING_KEY = 'admin.home';
 export const SYSTEM_TIMEZONE_SETTING_KEY = 'admin.system_timezone';
 export const SHOW_CREDITS_SETTING_KEY = 'admin.show_credits';
@@ -61,9 +63,11 @@ export const APP_ICON_OPTIONS = [
   { value: 'cloud-upload', label: 'Cloud upload' },
   { value: 'code', label: 'Code' },
   { value: 'copy', label: 'Copy' },
+  { value: 'paste', label: 'Paste' },
   { value: 'duplicate', label: 'Duplicate' },
   { value: 'document', label: 'Document' },
   { value: 'coins', label: 'Coins' },
+  { value: 'diamond', label: 'Diamond' },
   { value: 'document-plus', label: 'Document plus' },
   { value: 'download', label: 'Download' },
   { value: 'edit-square', label: 'Edit square' },
@@ -77,10 +81,14 @@ export const APP_ICON_OPTIONS = [
   { value: 'apple', label: 'Apple' },
   { value: 'trash-can', label: 'Trash can' },
   { value: 'settings', label: 'Settings' },
+  { value: 'info-circle', label: 'Info circle' },
+  { value: 'sidebar', label: 'Sidebar' },
   { value: 'check-circle', label: 'Check circle' },
   { value: 'key', label: 'Key' },
   { value: 'list', label: 'List' },
   { value: 'list-filter', label: 'Filtered list' },
+  { value: 'link', label: 'Link' },
+  { value: 'lock-closed', label: 'Closed lock' },
   { value: 'logout', label: 'Log out' },
   { value: 'menu', label: 'Menu' },
   { value: 'mail-check', label: 'Email checked' },
@@ -88,8 +96,10 @@ export const APP_ICON_OPTIONS = [
   { value: 'pencil-square', label: 'Pencil square' },
   { value: 'plus', label: 'Plus' },
   { value: 'search', label: 'Search' },
+  { value: 'save', label: 'Save' },
   { value: 'shield-check', label: 'Shield' },
   { value: 'sun', label: 'Sun' },
+  { value: 'sync', label: 'Sync' },
   { value: 'tag', label: 'Tag' },
   { value: 'trash', label: 'Trash' },
   { value: 'upload', label: 'Upload' },
@@ -123,7 +133,7 @@ export function installedMenuItems(
 ): readonly SidebarMenuItem[] {
   return SIDEBAR_MENU_ITEMS.filter((item) => isInstalled(menuItemFeature(item)));
 }
-export type AppIcon = typeof APP_ICON_OPTIONS[number]['value'];
+export type AppIcon = typeof APP_ICON_OPTIONS[number]['value'] | CustomIconId;
 
 /**
  * Interface font choices. Every stack is composed of faces the operating
@@ -220,6 +230,27 @@ export interface SidebarChromeSettings {
 const SIDEBAR_MENU_KEYS = new Set<string>(SIDEBAR_MENU_ITEMS.map((item) => item.key));
 const APP_ICON_VALUES = new Set<string>(APP_ICON_OPTIONS.map((option) => option.value));
 
+function isAppIcon(value: unknown, customIcons?: ReadonlySet<string>): value is AppIcon {
+  return typeof value === 'string'
+    && (APP_ICON_VALUES.has(value) || (isCustomIconId(value) && customIcons?.has(value) === true));
+}
+
+export function customIconSpriteFromRaw(raw: string | null): CustomIconSprite | null {
+  if (!raw) return null;
+  try {
+    const sprite = JSON.parse(raw);
+    if (typeof sprite?.svg === 'string' && Array.isArray(sprite.icons)
+      && sprite.icons.every((id: unknown) => typeof id === 'string' && isCustomIconId(id))) return sprite;
+  } catch {
+    // Invalid saved values behave like an empty sprite.
+  }
+  return null;
+}
+
+export async function loadCustomIconSprite(env: Env): Promise<CustomIconSprite | null> {
+  return customIconSpriteFromRaw(await getSetting(env, CUSTOM_ICON_SPRITE_SETTING_KEY));
+}
+
 export function defaultSidebarMenuSettings(): SidebarMenuSettings {
   return Object.fromEntries(SIDEBAR_MENU_ITEMS.map((item) => [item.key, {
     visible: true,
@@ -241,7 +272,7 @@ export async function saveSetting(env: Env, key: string, value: string): Promise
   ).bind(key, value).run();
 }
 
-export async function loadAppBrandingSettings(env: Env, fallbackName = '0xCMS'): Promise<AppBrandingSettings> {
+export async function loadAppBrandingSettings(env: Env, fallbackName = '0xCMS', customIcons?: Promise<ReadonlySet<string>>): Promise<AppBrandingSettings> {
   const defaults = defaultAppBrandingSettings(fallbackName);
   const raw = await getSetting(env, APP_BRANDING_SETTING_KEY);
   if (!raw) return defaults;
@@ -251,9 +282,11 @@ export async function loadAppBrandingSettings(env: Env, fallbackName = '0xCMS'):
     const appName = typeof saved?.appName === 'string' && saved.appName.trim()
       ? saved.appName.trim()
       : defaults.appName;
-    const appIcon = typeof saved?.appIcon === 'string' && APP_ICON_VALUES.has(saved.appIcon)
-      ? saved.appIcon as AppIcon
-      : defaults.appIcon;
+    const value = saved?.appIcon;
+    const uploaded = typeof value === 'string' && isCustomIconId(value)
+      ? await (customIcons ?? loadCustomIconSprite(env).then((sprite) => new Set(sprite?.icons)))
+      : undefined;
+    const appIcon = isAppIcon(value, uploaded) ? value : defaults.appIcon;
     const primaryColor = normalizeHexColor(saved?.primaryColor) ?? defaults.primaryColor;
     const appFont = typeof saved?.appFont === 'string' && APP_FONT_VALUES.has(saved.appFont)
       ? saved.appFont as AppFont
@@ -265,19 +298,18 @@ export async function loadAppBrandingSettings(env: Env, fallbackName = '0xCMS'):
 }
 
 export async function saveAppBrandingSettings(env: Env, input: { appName: unknown; appIcon: unknown; primaryColor?: unknown; appFont?: unknown }, fallbackName = '0xCMS'): Promise<AppBrandingSettings> {
-  const settings = normalizeAppBrandingSettings(input, fallbackName);
+  const sprite = await loadCustomIconSprite(env);
+  const settings = normalizeAppBrandingSettings(input, fallbackName, new Set(sprite?.icons));
   await saveSetting(env, APP_BRANDING_SETTING_KEY, JSON.stringify(settings));
   return settings;
 }
 
-export function normalizeAppBrandingSettings(input: { appName: unknown; appIcon: unknown; primaryColor?: unknown; appFont?: unknown }, fallbackName = '0xCMS'): AppBrandingSettings {
+export function normalizeAppBrandingSettings(input: { appName: unknown; appIcon: unknown; primaryColor?: unknown; appFont?: unknown }, fallbackName = '0xCMS', customIcons?: ReadonlySet<string>): AppBrandingSettings {
   const defaults = defaultAppBrandingSettings(fallbackName);
   const appName = typeof input.appName === 'string' && input.appName.trim()
     ? input.appName.trim().slice(0, 80)
     : defaults.appName;
-  const appIcon = typeof input.appIcon === 'string' && APP_ICON_VALUES.has(input.appIcon)
-    ? input.appIcon as AppIcon
-    : defaults.appIcon;
+  const appIcon = isAppIcon(input.appIcon, customIcons) ? input.appIcon : defaults.appIcon;
   const primaryColor = normalizeHexColor(input.primaryColor) ?? defaults.primaryColor;
   const appFont = typeof input.appFont === 'string' && APP_FONT_VALUES.has(input.appFont)
     ? input.appFont as AppFont
@@ -307,11 +339,15 @@ export function normalizeAdminHomeSettings(input: { href: unknown }): AdminHomeS
   return { href: adminHomePath(input.href) };
 }
 
-export async function loadSidebarChromeSettings(env: Env): Promise<SidebarChromeSettings> {
-  return sidebarChromeSettingsFromRaw(await getSetting(env, SIDEBAR_MENU_SETTING_KEY));
+export async function loadSidebarChromeSettings(env: Env, customIcons?: Promise<ReadonlySet<string>>): Promise<SidebarChromeSettings> {
+  const [raw, uploaded] = await Promise.all([
+    getSetting(env, SIDEBAR_MENU_SETTING_KEY),
+    customIcons ?? loadCustomIconSprite(env).then((sprite) => new Set(sprite?.icons)),
+  ]);
+  return sidebarChromeSettingsFromRaw(raw, uploaded);
 }
 
-export function sidebarChromeSettingsFromRaw(raw: string | null): SidebarChromeSettings {
+export function sidebarChromeSettingsFromRaw(raw: string | null, customIcons?: ReadonlySet<string>): SidebarChromeSettings {
   const settings = defaultSidebarMenuSettings();
   let settingsGroupWeight = DEFAULT_SETTINGS_GROUP_WEIGHT;
   let pluginWeights: Record<string, number> = {};
@@ -349,7 +385,7 @@ export function sidebarChromeSettingsFromRaw(raw: string | null): SidebarChromeS
       }
       if (saved.pluginIcons && typeof saved.pluginIcons === 'object') {
         pluginIcons = Object.fromEntries(Object.entries(saved.pluginIcons)
-          .filter((entry): entry is [string, AppIcon] => typeof entry[1] === 'string' && APP_ICON_VALUES.has(entry[1])));
+          .filter((entry): entry is [string, AppIcon] => isAppIcon(entry[1], customIcons)));
       }
       if (Array.isArray(saved.hiddenPlugins)) {
         hiddenPluginKeys = new Set(saved.hiddenPlugins.filter((key: unknown): key is string => typeof key === 'string'));
@@ -369,8 +405,10 @@ export async function saveSidebarMenuSettings(
   weights: Record<string, unknown> = {},
   options: { labels?: SidebarLabels; settingsGroupWeight?: unknown; pluginWeights?: Record<string, unknown>; pluginIcons?: Record<string, unknown>; pluginVisibleKeys?: string[] } = {},
 ): Promise<SidebarChromeSettings> {
+  const customIcons = loadCustomIconSprite(env).then((sprite) => new Set(sprite?.icons));
   const built = buildSidebarMenuSettings(visibleKeys, weights, {
-    ...options, labels: options.labels ?? (await loadSidebarChromeSettings(env)).labels,
+    ...options, labels: options.labels ?? (await loadSidebarChromeSettings(env, customIcons)).labels,
+    customIcons: await customIcons,
   });
   await saveSetting(env, SIDEBAR_MENU_SETTING_KEY, built.value);
   return built.settings;
@@ -385,6 +423,7 @@ export function buildSidebarMenuSettings(
     pluginIcons?: Record<string, unknown>;
     pluginVisibleKeys?: string[];
     savedPluginMenu?: Pick<SidebarChromeSettings, 'pluginWeights' | 'pluginIcons' | 'hiddenPluginKeys'>;
+    customIcons?: ReadonlySet<string>;
   } = {},
 ): { value: string; settings: SidebarChromeSettings } {
   const labels = normalizeSidebarLabels(options.labels ?? {});
@@ -417,8 +456,8 @@ export function buildSidebarMenuSettings(
     else hiddenPluginKeys.add(key);
   }
   for (const [key, value] of Object.entries(options.pluginIcons ?? {})) {
-    if (typeof value === 'string' && APP_ICON_VALUES.has(value) && value !== 'beaker') {
-      pluginIcons[key] = value as AppIcon;
+    if (isAppIcon(value, options.customIcons) && value !== 'beaker') {
+      pluginIcons[key] = value;
     } else {
       delete pluginIcons[key];
     }

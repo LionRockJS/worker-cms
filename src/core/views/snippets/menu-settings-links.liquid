@@ -80,12 +80,9 @@
             </td>
             <td class="px-3 py-3">
               {% if option.iconName != blank %}
-                <select name="{{ option.iconName }}" aria-label="{{ "settings.fields.item_icon" | t }}"
-                        class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-                  {% for icon in iconOptions %}
-                    <option value="{{ icon.value }}"{% if option.icon == icon.value %} selected{% endif %}>{{ icon.labelKey | t }}</option>
-                  {% endfor %}
-                </select>
+                {% assign iconLabel = "settings.fields.item_icon" | t %}
+                {% render "snippets/settings-icon-picker.liquid", name: option.iconName, label: iconLabel,
+                  selectedIcon: option.icon, selectedHref: option.iconHref, iconOptions: iconOptions, iconHrefPrefix: iconHrefPrefix %}
               {% else %}
                 <svg class="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ option.icon }}"></use></svg>
               {% endif %}

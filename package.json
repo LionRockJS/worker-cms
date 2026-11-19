@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "hono": "^4.13.19",
+    "saxes": "^6.0.0",
     "yjs": "^13.6.33"
   },
   "devDependencies": {

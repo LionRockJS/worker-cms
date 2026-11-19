@@ -8,6 +8,27 @@
   {% endif %}
 
   {% feature_fragment i18n/login-label-settings %}
+  <section class="mb-6 min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+    <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.icon_sprite.title" | t }}</h3>
+    <p class="mt-2 text-sm text-gray-500">{{ "settings.icon_sprite.help" | t }}</p>
+    <form method="POST" action="/admin/settings/system/icon-sprite" enctype="multipart/form-data" class="mt-3 flex min-w-0 flex-wrap items-center gap-3">
+      <label for="icon_sprite" class="sr-only">{{ "settings.icon_sprite.file" | t }}</label>
+      <input id="icon_sprite" name="icon_sprite" type="file" accept=".svg,image/svg+xml" required
+             data-max-bytes="{{ iconSpriteMaxBytes }}" data-size-error="{{ "settings.icon_sprite.too_large" | t }}"
+             class="block min-w-0 max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+      <button type="submit" class="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "settings.icon_sprite.upload" | t }}</button>
+    </form>
+    {% if uploadedIcons.size > 0 %}
+      <ul class="mt-4 flex flex-wrap gap-2" aria-label="{{ "settings.icon_sprite.previews" | t }}">
+        {% for icon in uploadedIcons %}
+          <li class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+            <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ icon.href }}"></use></svg>
+            <span class="min-w-0 break-words">{{ icon.label }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
   <form id="menu-settings-form" method="POST" action="/admin/settings/system" class="min-w-0 space-y-6">
     <section class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
       <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_menu_settings.app_branding" | t }}</h3>
@@ -21,12 +42,10 @@
                  class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
         </label>
         <label class="block min-w-0">
-          <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_menu_settings.app_icon" | t }}</span>
-          <select name="app_icon" class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-            {% for option in iconOptions %}
-              <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.labelKey | t }}</option>
-            {% endfor %}
-          </select>
+          {% assign appIconLabel = "view_strings.sections_menu_settings.app_icon" | t %}
+          <span class="block text-sm font-medium text-gray-700 mb-1">{{ appIconLabel }}</span>
+          {% render "snippets/settings-icon-picker.liquid", name: 'app_icon', label: appIconLabel,
+            selectedIcon: appIcon, selectedHref: appIconHref, iconOptions: iconOptions, iconHrefPrefix: iconHrefPrefix %}
         </label>
       </div>
     </section>
@@ -101,3 +120,16 @@
   </form>
 
 </div>
+
+<script nonce="{{ nonce }}">
+  document.getElementById('icon_sprite')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    input.setCustomValidity(input.files[0]?.size > Number(input.dataset.maxBytes) ? input.dataset.sizeError : '');
+  });
+  document.getElementById('menu-settings-form')?.addEventListener('change', (event) => {
+    const select = event.target;
+    if (!(select instanceof HTMLSelectElement) || !select.hasAttribute('data-icon-select')) return;
+    const href = select.selectedOptions[0]?.dataset.iconHref;
+    if (href) select.closest('[data-icon-picker]')?.querySelector('use')?.setAttribute('href', href);
+  });
+</script>

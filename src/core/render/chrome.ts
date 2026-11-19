@@ -22,6 +22,7 @@ import {
   menuItemFeature,
   defaultPluginNavWeight,
   loadAppBrandingSettings,
+  loadCustomIconSprite,
   loadSystemTimezone,
   loadSidebarChromeSettings,
   pluginSidebarKey,
@@ -29,6 +30,7 @@ import {
 } from '../db/settings';
 
 import { CORE_CLIENT_ASSETS } from './layout';
+import { customIconHref } from './icon-sprite';
 import type { BaseTemplateProps, SidebarNavItem } from './layout';
 import { withActiveSidebarItems } from './sidebar';
 import { localeRegistry, resolveUiLocale } from '../i18n';
@@ -46,11 +48,12 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   const userRoles = user.role.split(',').map((role) => role.trim()).filter(Boolean);
   const fallbackSiteTitle = c.env.SITE_TITLE ?? '0xCMS';
   const requestUrl = new URL(c.req.url);
-  const [userAvatar, navItems, permissions, branding, cmsOnce, uiLocale, systemTimezone, localeState, contributed] = await Promise.all([
+  const customIcons = loadCustomIconSprite(c.env).then((sprite) => new Set(sprite?.icons));
+  const [userAvatar, navItems, permissions, branding, cmsOnce, uiLocale, systemTimezone, localeState, contributed, sidebarSettings] = await Promise.all([
     fetchUserAvatar(c.env.DB, userIdFromContext(c)),
     coreExtensions().sidebarNav?.(c.env) ?? [],
     userPermissions(c),
-    loadAppBrandingSettings(c.env, fallbackSiteTitle),
+    loadAppBrandingSettings(c.env, fallbackSiteTitle, customIcons),
     mintFormOnceToken(c.env.JWT_SECRET),
     resolveUiLocale(c),
     loadSystemTimezone(c.env),
@@ -59,8 +62,8 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
     // installed feature costs no extra round trip.
     Promise.all(features.map((feature) => feature.baseProps?.(c) ?? {}))
       .then((parts) => Object.assign({}, ...parts) as Partial<BaseTemplateProps>),
+    loadSidebarChromeSettings(c.env, customIcons),
   ]);
-  const sidebarSettings = await loadSidebarChromeSettings(c.env);
   const menuSettings = sidebarSettings.items;
   const sidebarLabel = (key: string, label: string, translationKey?: string) => {
     const customLabel = sidebarSettings.labels[key]?.[uiLocale.code];
@@ -142,11 +145,13 @@ export async function buildBaseProps(c: AppContext): Promise<BaseTemplateProps> 
   visible.forEach((item, index) => {
     const key = pluginSidebarKey(item);
     if (sidebarSettings.hiddenPluginKeys.has(key)) return;
+    const icon = sidebarSettings.pluginIcons[key] ?? 'beaker';
     const entry = {
       item: {
         ...sidebarLabel(key, item.label, pluginTranslationKey(item)),
         href: item.href,
-        icon: sidebarSettings.pluginIcons[key] ?? 'beaker',
+        icon,
+        iconHref: customIconHref(icon) || undefined,
       },
       weight: sidebarSettings.pluginWeights[key] ?? defaultPluginNavWeight(item.group),
       index: SIDEBAR_MENU_ITEMS.length + index,
