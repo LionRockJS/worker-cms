@@ -14,7 +14,7 @@ const configFunctions = source.slice(source.indexOf('function setRootValue('), s
 const example = readFileSync(new URL('../wrangler.example.toml',import.meta.url),'utf8');
 const optionalBlock = /# \[\[r2_buckets\]\]\n# binding = "PLUGIN_VIEWS_BUCKET"\n# bucket_name = "cms-plugin-views"\n?/;
 
-async function transform(existing, pluginViewsBucketName, publishedDatabaseName = 'fixture-published') {
+async function transform(existing, pluginViewsBucketName, publishedDatabaseName = 'fixture-published', defaultTimezone) {
   let result;
   const context = {
     CONFIG_PATH:'config', EXAMPLE_CONFIG_PATH:'example',
@@ -30,7 +30,7 @@ async function transform(existing, pluginViewsBucketName, publishedDatabaseName 
   const update = runInNewContext(`${configFunctions}\nupdateConfig`,context);
   await update({workerName:'fixture',databaseName:'fixture',publishedDatabaseName,
     bucketName:'fixture-media',queueName:'fixture-admin-jobs',pluginViewsBucketName,
-    canonicalOrigin:'https://cms.example.com',providers:['github'],clientIds:{github:'fixture-client'}});
+    canonicalOrigin:'https://cms.example.com',providers:['github'],clientIds:{github:'fixture-client'},defaultTimezone});
   const directory = mkdtempSync(join(tmpdir(),'cms-install-config-'));
   try {
     const file = join(directory,'wrangler.toml');
@@ -38,6 +38,22 @@ async function transform(existing, pluginViewsBucketName, publishedDatabaseName 
     return {text:result,config:unstable_readConfig({config:file})};
   } finally {rmSync(directory,{recursive:true,force:true});}
 }
+
+test('setup validates, writes and reuses the page schedule timezone', async () => {
+  const { configuredDefaultTimezone, isDefaultTimezone } = runInNewContext(
+    `${configFunctions}\n({ configuredDefaultTimezone, isDefaultTimezone })`,
+  );
+  for (const value of ['+0800', '-05:30', 'UTC', 'Asia/Hong_Kong']) assert.equal(isDefaultTimezone(value), true);
+  for (const value of ['+2400', '+0860', 'Not/A_Timezone']) assert.equal(isDefaultTimezone(value), false);
+  assert.equal(configuredDefaultTimezone(example), '+0800');
+
+  const existing = example.replace('DEFAULT_TIMEZONE = "+0800"', '# DEFAULT_TIMEZONE = "+0800"\nDEFAULT_TIMEZONE = \'America/Toronto\' # existing');
+  assert.equal(configuredDefaultTimezone(existing), 'America/Toronto');
+  const first = await transform(existing, null, 'fixture-published', '+0530');
+  assert.equal(first.config.vars.DEFAULT_TIMEZONE, '+0530');
+  assert.equal(configuredDefaultTimezone(first.text), '+0530');
+  assert.equal((await transform(first.text, null, 'fixture-published', '+0530')).text, first.text);
+});
 
 for(const [label,input] of [
   ['fresh configuration',null],

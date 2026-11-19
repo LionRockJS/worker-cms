@@ -28,9 +28,10 @@ Content management system on Workers
 npm install
 ```
 
-`npm run setup` interactively configures resources, migrations, and OAuth, and
-can grant the first administrator role on sign-in. When the plugins feature is
-enabled, it also offers an optional private R2 cache for plugin views
+`npm run setup` interactively configures resources, migrations, OAuth, and the
+default timezone for new page schedules. It can also grant the first
+administrator role on sign-in. When the plugins feature is enabled, setup
+offers an optional private R2 cache for plugin views
 (`PLUGIN_VIEWS_BUCKET`, named `<namespace>-plugin-views` by default). To do them by hand, start
 this clone's config from the template. `wrangler.toml` is gitignored, so each
 clone keeps its own and a pull never overwrites it:

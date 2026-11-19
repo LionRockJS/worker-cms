@@ -62,7 +62,8 @@ The wizard asks for one namespace and derives every resource name from it
 <ns>-plugin-views); each can still be overridden. It creates or reuses D1, R2, and Queue resources, updates
 wrangler.toml and the feature switches in cms.features.json, applies migrations,
 optionally provisions the plugin view cache, and configures OAuth secrets and
-the first admin. The first bootstrap deploy bypasses the release gate. Later
+the first admin. It also sets the default timezone for new page schedules.
+The first bootstrap deploy bypasses the release gate. Later
 releases go through "npm run deploy".
 
 A local setup runs the CMS on this machine instead of Cloudflare Workers:
@@ -308,17 +309,44 @@ function setFirstSectionValue(lines, section, key, value) {
   lines[range.start + index] = `${key} = ${JSON.stringify(value)}`;
 }
 
-function setVar(lines, key, value) {
+function varsRange(lines) {
   const start = lines.findIndex((line) => line.trim() === '[vars]');
   if (start === -1) throw new Error('Could not find [vars] in wrangler.toml.');
   let end = start + 1;
   while (end < lines.length && !lines[end].trim().startsWith('[')) end += 1;
+  return { start, end };
+}
 
+function setVar(lines, key, value) {
+  const { start, end } = varsRange(lines);
   const matcher = new RegExp(`^\\s*#?\\s*${key}\\s*=`);
-  const index = lines.slice(start + 1, end).findIndex((line) => matcher.test(line));
+  const entries = lines.slice(start + 1, end);
+  const active = entries.findIndex((line) => matcher.test(line) && !line.trimStart().startsWith('#'));
+  const index = active === -1 ? entries.findIndex((line) => matcher.test(line)) : active;
   const replacement = `${key} = ${JSON.stringify(value)}`;
   if (index === -1) lines.splice(end, 0, replacement);
   else lines[start + 1 + index] = replacement;
+}
+
+function isDefaultTimezone(value) {
+  if (/^[+-]/.test(value)) return /^[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?$/.test(value);
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function configuredDefaultTimezone(config) {
+  const lines = config.split('\n');
+  const { start, end } = varsRange(lines);
+  for (const line of lines.slice(start + 1, end)) {
+    const match = /^\s*DEFAULT_TIMEZONE\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/.exec(line);
+    const value = (match?.[1] ?? match?.[2])?.trim();
+    if (value && isDefaultTimezone(value)) return value;
+  }
+  return '+0800';
 }
 
 async function updateConfig(settings) {
@@ -374,6 +402,7 @@ async function updateConfig(settings) {
   setVar(lines, 'ENABLED_PROVIDERS', settings.providers.join(','));
   setVar(lines, 'OAUTH_REDIRECT_URI', `${settings.canonicalOrigin}/auth/callback`);
   setVar(lines, 'CANONICAL_ORIGIN', settings.canonicalOrigin);
+  if (settings.defaultTimezone) setVar(lines, 'DEFAULT_TIMEZONE', settings.defaultTimezone);
 
   for (const provider of settings.providers) {
     setVar(lines, PROVIDERS[provider].clientId, settings.clientIds[provider]);
@@ -556,6 +585,16 @@ async function main() {
     }
   }
 
+  const config = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return readFile(EXAMPLE_CONFIG_PATH, 'utf8');
+    throw error;
+  });
+  const defaultTimezone = await ask(
+    'Default timezone for new page schedules (for example +0800 or Asia/Hong_Kong)',
+    configuredDefaultTimezone(config),
+    isDefaultTimezone,
+  );
+
   // Every resource name derives from one namespace. The longest suffix is
   // "-plugin-views" (13 chars), and R2/Queue names stop at 63.
   const namespace = await ask(
@@ -666,6 +705,7 @@ async function main() {
     auditBucketName,
     queueName,
     canonicalOrigin,
+    defaultTimezone,
     providers,
     clientIds,
     microsoftTenant,
