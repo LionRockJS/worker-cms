@@ -319,6 +319,16 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(opts.title)} - ${escHtml(opts.siteTitle)}</title>
+  <script nonce="${escHtml(nonce)}">
+    // Apply the saved theme before the loading screen is painted.
+    try {
+      if (window.localStorage.getItem('worker-cms-theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch (error) {
+      // The stylesheet defaults to dark when storage is unavailable.
+    }
+  </script>
   <link rel="stylesheet" href="/assets/admin.css${escHtml(revisionQuery)}">
   <style nonce="${escHtml(nonce)}">${appearanceStyleSheet(opts.appPrimaryColor, opts.appFont)}</style>
 </head>
