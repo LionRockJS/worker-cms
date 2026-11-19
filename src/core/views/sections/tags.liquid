@@ -26,7 +26,13 @@
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#search"></use></svg>
         </button>
         {% if search != blank %}
-          <a href="{{ clearSearchHref }}" class="shrink-0 text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_tags.clear_search" | t }}</a>
+          <a href="{{ clearSearchHref }}"
+             title="{{ "view_strings.sections_tags.clear_search" | t }}"
+             aria-label="{{ "view_strings.sections_tags.clear_search" | t }}"
+             class="inline-flex shrink-0 text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center gap-2 h-8 min-w-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_tags.clear_search" | t }}</span>
+          </a>
         {% endif %}
       </div>
     </form>

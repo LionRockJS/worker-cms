@@ -35,7 +35,13 @@
       <input name="note" type="text" maxlength="300" placeholder="{{ "profile.transfer_note_placeholder" | t }}"
              class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
     </label>
-    <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700">{{ "credits.wallet.send_title" | t }}</button>
+    <button type="submit"
+            title="{{ "credits.wallet.send_title" | t }}"
+            aria-label="{{ "credits.wallet.send_title" | t }}"
+            class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-8">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#coins"></use></svg>
+      <span class="hidden lg:inline">{{ "credits.wallet.send_title" | t }}</span>
+    </button>
   </form>
 
   <form method="POST" action="{{ wallet.donateAction }}"
@@ -57,7 +63,13 @@
       <input name="note" type="text" maxlength="300" placeholder="{{ "profile.donation_note_placeholder" | t }}"
              class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
     </label>
-    <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700">{{ "profile.donate_to_pool" | t }}</button>
+    <button type="submit"
+            title="{{ "profile.donate_to_pool" | t }}"
+            aria-label="{{ "profile.donate_to_pool" | t }}"
+            class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-8">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#coins"></use></svg>
+      <span class="hidden lg:inline">{{ "profile.donate_to_pool" | t }}</span>
+    </button>
   </form>
   {% endif %}
 
@@ -95,26 +107,30 @@
         <div class="flex items-center gap-2">
           {% if wallet.pagination.hasPrevious %}
             <a href="{{ wallet.pagination.previousHref }}"
-               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+               title="{{ "common.previous" | t }}"
+               aria-label="{{ "common.previous" | t }}"
+               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-              {{ "common.previous" | t }}
+              <span class="hidden lg:inline">{{ "common.previous" | t }}</span>
             </a>
           {% else %}
             <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-              {{ "common.previous" | t }}
+              <span class="sr-only lg:not-sr-only">{{ "common.previous" | t }}</span>
             </span>
           {% endif %}
           <span class="text-xs font-medium text-gray-500">{{ "profile.pagination_page" | t }} {{ wallet.pagination.page }} {{ "profile.pagination_of" | t }} {{ wallet.pagination.pageCount }}</span>
           {% if wallet.pagination.hasNext %}
             <a href="{{ wallet.pagination.nextHref }}"
-               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-              {{ "common.next" | t }}
+               title="{{ "common.next" | t }}"
+               aria-label="{{ "common.next" | t }}"
+               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
+              <span class="hidden lg:inline">{{ "common.next" | t }}</span>
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
             </a>
           {% else %}
             <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
-              {{ "common.next" | t }}
+              <span class="sr-only lg:not-sr-only">{{ "common.next" | t }}</span>
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
             </span>
           {% endif %}

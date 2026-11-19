@@ -2,8 +2,20 @@
   <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
     <p data-explanation class="text-sm text-gray-500">{{ "audit.review_help" | t }}</p>
     <div class="flex items-center gap-4">
-      <a href="{{ classesHref }}" class="text-sm text-indigo-600 hover:underline">{{ "audit.classification" | t }}</a>
-      <a href="{{ auditHref }}" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_audit.audit_log" | t }}</a>
+      <a href="{{ classesHref }}"
+         title="{{ "audit.classification" | t }}"
+         aria-label="{{ "audit.classification" | t }}"
+         class="inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#tag"></use></svg>
+        <span class="hidden lg:inline">{{ "audit.classification" | t }}</span>
+      </a>
+      <a href="{{ auditHref }}"
+         title="{{ "view_strings.sections_audit.audit_log" | t }}"
+         aria-label="{{ "view_strings.sections_audit.audit_log" | t }}"
+         class="inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_audit.audit_log" | t }}</span>
+      </a>
     </div>
   </div>
 
@@ -132,12 +144,24 @@
                 </label>
                 <label class="text-sm text-gray-700">{{ "audit.outage.reference" | t }}<input name="evidence_ref" required maxlength="80" class="border border-gray-300 rounded-lg px-3 py-2 text-sm"></label>
                 <label class="text-sm text-gray-700">{{ "audit.outage.digest" | t }}<input name="evidence_sha256" required minlength="64" maxlength="64" pattern="[a-f0-9]{64}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono"></label>
-                <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">{{ "audit.outage.save" | t }}</button>
+                <button type="submit"
+                        title="{{ "audit.outage.save" | t }}"
+                        aria-label="{{ "audit.outage.save" | t }}"
+                        class="inline-flex rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-10">
+                  <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+                  <span class="hidden lg:inline">{{ "audit.outage.save" | t }}</span>
+                </button>
               </form>
             {% endif %}
           </div>
         {% endfor %}
-        {% if outageNextHref %}<a class="mt-4 inline-flex text-sm text-indigo-600 hover:underline" href="{{ outageNextHref }}">{{ "common.next" | t }}</a>{% endif %}
+        {% if outageNextHref %}<a
+           class="mt-4 inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8" href="{{ outageNextHref }}"
+           title="{{ "common.next" | t }}"
+           aria-label="{{ "common.next" | t }}">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+          <span class="hidden lg:inline">{{ "common.next" | t }}</span>
+        </a>{% endif %}
       {% else %}<p class="mt-2 text-sm text-red-700">{{ "audit.outage.unavailable" | t }}</p>{% endif %}
     {% else %}<p class="mt-2 text-sm text-gray-500">{{ "audit.outage.disabled" | t }}</p>{% endif %}
   </div>
@@ -197,7 +221,13 @@
         </select>
       </label>
       <label class="text-sm text-gray-700">{{ "audit.signal_review.reference" | t }}<input name="reference" maxlength="120" pattern="[A-Za-z0-9._:/#-]+" class="border border-gray-300 rounded-lg px-3 py-2 text-sm"></label>
-      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">{{ "audit.signal_review.save" | t }}</button>
+      <button type="submit"
+              title="{{ "audit.signal_review.save" | t }}"
+              aria-label="{{ "audit.signal_review.save" | t }}"
+              class="inline-flex rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+        <span class="hidden lg:inline">{{ "audit.signal_review.save" | t }}</span>
+      </button>
     </form>
   </div>
 </div>

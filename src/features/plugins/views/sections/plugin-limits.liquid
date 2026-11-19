@@ -54,7 +54,13 @@
       </div>
       {% if hasLimits %}
         <div class="mt-4">
-          <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "view_strings.sections_plugin_limits.save_limits" | t }}</button>
+          <button type="submit"
+                  title="{{ "view_strings.sections_plugin_limits.save_limits" | t }}"
+                  aria-label="{{ "view_strings.sections_plugin_limits.save_limits" | t }}"
+                  class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_plugin_limits.save_limits" | t }}</span>
+          </button>
         </div>
       {% endif %}
     </form>

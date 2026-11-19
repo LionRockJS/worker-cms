@@ -183,7 +183,7 @@
     button.type = 'button';
     button.setAttribute('data-privacy-toggle', '');
     button.className = 'inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50';
-    button.innerHTML = '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="' + ICON_HREF_PREFIX + '#eye-off"></use></svg><span data-privacy-toggle-label></span>';
+    button.innerHTML = '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="' + ICON_HREF_PREFIX + '#eye-off"></use></svg><span class="hidden lg:inline" data-privacy-toggle-label></span>';
     row.appendChild(button);
 
     host.insertBefore(row, scrollContainer);

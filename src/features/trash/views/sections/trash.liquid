@@ -13,27 +13,69 @@
         {% if hasPages %}
           <form id="restore-trash-form" method="POST" action="{{ restoreAllAction }}" class="flex flex-wrap items-center gap-2">
             <input type="hidden" name="type" value="{{ filterType }}">
-            <button type="submit" name="action" value="now" class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "view_strings.sections_trash.restore_all" | t }}</button>
+            <button type="submit" name="action" value="now"
+                    title="{{ "view_strings.sections_trash.restore_all" | t }}"
+                    aria-label="{{ "view_strings.sections_trash.restore_all" | t }}"
+                    class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 justify-center shrink-0 gap-2">
+              <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+              <span class="hidden lg:inline">{{ "view_strings.sections_trash.restore_all" | t }}</span>
+            </button>
             {% if hasRecent %}
-              <button type="submit" name="action" value="1h" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "trash.restore_last_hour" | t }} ({{ recentCount }})</button>
+              <button type="submit" name="action" value="1h"
+                      title="{{ "trash.restore_last_hour" | t }} ({{ recentCount }})"
+                      aria-label="{{ "trash.restore_last_hour" | t }} ({{ recentCount }})"
+                      class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+                <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
+                <span class="hidden lg:inline">{{ "trash.restore_last_hour" | t }} ({{ recentCount }})</span>
+              </button>
             {% endif %}
           </form>
           {% if canPurgeTrash %}
             <form id="empty-trash-form" method="POST" action="{{ emptyTrashAction }}" class="flex flex-wrap items-center gap-2">
               <input type="hidden" name="type" value="{{ filterType }}">
-              <button type="submit" name="action" value="now" class="inline-flex h-9 items-center rounded-lg border border-transparent bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700">{{ "view_strings.sections_trash.empty_all" | t }}</button>
+              <button type="submit" name="action" value="now"
+                      title="{{ "view_strings.sections_trash.empty_all" | t }}"
+                      aria-label="{{ "view_strings.sections_trash.empty_all" | t }}"
+                      class="inline-flex h-9 items-center rounded-lg border border-transparent bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 justify-center shrink-0 gap-2">
+                <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+                <span class="hidden lg:inline">{{ "view_strings.sections_trash.empty_all" | t }}</span>
+              </button>
               {% if hasRecent %}
-                <button type="submit" name="action" value="1h" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "trash.last_hour" | t }} ({{ recentCount }})</button>
+                <button type="submit" name="action" value="1h"
+                        title="{{ "trash.last_hour" | t }} ({{ recentCount }})"
+                        aria-label="{{ "trash.last_hour" | t }} ({{ recentCount }})"
+                        class="inline-flex h-9 items-center rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50 justify-center shrink-0 gap-2">
+                  <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
+                  <span class="hidden lg:inline">{{ "trash.last_hour" | t }} ({{ recentCount }})</span>
+                </button>
               {% endif %}
               {% if hasRetention %}
-                <button type="submit" name="action" value="expired" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "trash.purge_expired" | t }} ({{ retentionDays }}d)</button>
+                <button type="submit" name="action" value="expired"
+                        title="{{ "trash.purge_expired" | t }} ({{ retentionDays }}d)"
+                        aria-label="{{ "trash.purge_expired" | t }} ({{ retentionDays }}d)"
+                        class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+                  <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#calendar"></use></svg>
+                  <span class="hidden lg:inline">{{ "trash.purge_expired" | t }} ({{ retentionDays }}d)</span>
+                </button>
               {% endif %}
             </form>
           {% endif %}
         {% endif %}
       {% endif %}
-      <a href="/admin" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_trash.back_to_pages" | t }}</a>
-      {% if canHold %}<a href="/admin/holds" class="text-sm text-indigo-600 hover:underline">{{ "trash.holds" | t }}</a>{% endif %}
+      <a href="/admin"
+         title="{{ "view_strings.sections_trash.back_to_pages" | t }}"
+         aria-label="{{ "view_strings.sections_trash.back_to_pages" | t }}"
+         class="inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_trash.back_to_pages" | t }}</span>
+      </a>
+      {% if canHold %}<a href="/admin/holds"
+         title="{{ "trash.holds" | t }}"
+         aria-label="{{ "trash.holds" | t }}"
+         class="inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#lock-closed"></use></svg>
+        <span class="hidden lg:inline">{{ "trash.holds" | t }}</span>
+      </a>{% endif %}
     </div>
   </div>
 
@@ -72,21 +114,37 @@
                 <div class="flex flex-wrap items-center gap-2">
                   <form method="POST" action="{{ page.restoreAction }}" class="inline">
                     <button type="submit"
-                            class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">{{ "view_strings.sections_trash.restore" | t }}</button>
+                            title="{{ "view_strings.sections_trash.restore" | t }}"
+                            aria-label="{{ "view_strings.sections_trash.restore" | t }}"
+                            class="inline-flex text-indigo-600 hover:text-indigo-800 text-sm font-medium items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+                      <span class="hidden lg:inline">{{ "view_strings.sections_trash.restore" | t }}</span>
+                    </button>
                   </form>
                   {% if canHold and page.held == false %}
                     <form method="POST" action="{{ holdAction }}" class="inline-flex items-center gap-2">
                       <input type="hidden" name="uuid" value="{{ page.uuid }}">
                       <input type="hidden" name="back" value="trash">
                       <input type="text" name="reason" required maxlength="500" aria-label="{{ "trash.hold_reason" | t }}" placeholder="{{ "trash.hold_reason" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
-                      <button type="submit" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">{{ "trash.hold" | t }}</button>
+                      <button type="submit"
+                              title="{{ "trash.hold" | t }}"
+                              aria-label="{{ "trash.hold" | t }}"
+                              class="inline-flex text-indigo-600 hover:text-indigo-800 text-sm font-medium items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#lock-closed"></use></svg>
+                        <span class="hidden lg:inline">{{ "trash.hold" | t }}</span>
+                      </button>
                     </form>
                   {% endif %}
                   {% if canPurgeTrash and page.held == false %}
                     <form method="POST" action="{{ page.deleteAction }}" class="inline"
                           data-confirm="{{ "view_strings.sections_trash.permanently_delete_this_page_this_cannot_be_undone" | t }}">
                       <button type="submit"
-                              class="text-red-500 hover:text-red-700 text-sm font-medium">{{ "view_strings.sections_trash.delete_forever" | t }}</button>
+                              title="{{ "view_strings.sections_trash.delete_forever" | t }}"
+                              aria-label="{{ "view_strings.sections_trash.delete_forever" | t }}"
+                              class="inline-flex text-red-500 hover:text-red-700 text-sm font-medium items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+                        <span class="hidden lg:inline">{{ "view_strings.sections_trash.delete_forever" | t }}</span>
+                      </button>
                     </form>
                   {% endif %}
                 </div>
@@ -106,10 +164,34 @@
     <div class="mt-4 flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
       <div class="text-gray-500">Page {{ currentPage }} of {{ totalPages }}</div>
       <div class="flex flex-wrap gap-2">
-        {% if hasFirstPage %}<a href="{{ firstHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_trash.first" | t }}</a>{% endif %}
-        {% if hasPreviousPage %}<a href="{{ previousHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_trash.previous" | t }}</a>{% endif %}
-        {% if hasNextPage %}<a href="{{ nextHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_trash.next" | t }}</a>{% endif %}
-        {% if hasLastPage %}<a href="{{ lastHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_trash.last" | t }}</a>{% endif %}
+        {% if hasFirstPage %}<a href="{{ firstHref }}"
+           title="{{ "view_strings.sections_trash.first" | t }}"
+           aria-label="{{ "view_strings.sections_trash.first" | t }}"
+           class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-double-left"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_trash.first" | t }}</span>
+        </a>{% endif %}
+        {% if hasPreviousPage %}<a href="{{ previousHref }}"
+           title="{{ "view_strings.sections_trash.previous" | t }}"
+           aria-label="{{ "view_strings.sections_trash.previous" | t }}"
+           class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_trash.previous" | t }}</span>
+        </a>{% endif %}
+        {% if hasNextPage %}<a href="{{ nextHref }}"
+           title="{{ "view_strings.sections_trash.next" | t }}"
+           aria-label="{{ "view_strings.sections_trash.next" | t }}"
+           class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_trash.next" | t }}</span>
+        </a>{% endif %}
+        {% if hasLastPage %}<a href="{{ lastHref }}"
+           title="{{ "view_strings.sections_trash.last" | t }}"
+           aria-label="{{ "view_strings.sections_trash.last" | t }}"
+           class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-double-right"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_trash.last" | t }}</span>
+        </a>{% endif %}
       </div>
     </div>
   {% endif %}

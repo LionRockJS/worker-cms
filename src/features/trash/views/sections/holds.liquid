@@ -3,9 +3,21 @@
     <form method="POST" action="{{ placeAction }}" class="flex flex-wrap items-center gap-2">
       <input type="text" name="uuid" required maxlength="64" aria-label="{{ "trash.page_uuid" | t }}" placeholder="{{ "trash.page_uuid" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-mono">
       <input type="text" name="reason" required maxlength="500" aria-label="{{ "trash.hold_reason" | t }}" placeholder="{{ "trash.hold_reason" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
-      <button type="submit" class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "trash.place_hold" | t }}</button>
+      <button type="submit"
+              title="{{ "trash.place_hold" | t }}"
+              aria-label="{{ "trash.place_hold" | t }}"
+              class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 justify-center shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#lock-closed"></use></svg>
+        <span class="hidden lg:inline">{{ "trash.place_hold" | t }}</span>
+      </button>
     </form>
-    <a href="/admin/trash" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_trash.trash" | t }}</a>
+    <a href="/admin/trash"
+       title="{{ "view_strings.sections_trash.trash" | t }}"
+       aria-label="{{ "view_strings.sections_trash.trash" | t }}"
+       class="inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_trash.trash" | t }}</span>
+    </a>
   </div>
 
   {% if hasFlash %}
@@ -33,7 +45,13 @@
                 {% if hold.active %}
                   <form method="POST" action="{{ hold.releaseAction }}" class="inline"
                         data-confirm="{{ "trash.release_confirm" | t }}">
-                    <button type="submit" class="text-red-500 hover:text-red-700 text-sm font-medium">{{ "trash.release" | t }}</button>
+                    <button type="submit"
+                            title="{{ "trash.release" | t }}"
+                            aria-label="{{ "trash.release" | t }}"
+                            class="inline-flex text-red-500 hover:text-red-700 text-sm font-medium items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#key"></use></svg>
+                      <span class="hidden lg:inline">{{ "trash.release" | t }}</span>
+                    </button>
                   </form>
                 {% else %}
                   <span class="text-sm text-gray-400">{{ "trash.released" | t }} {{ hold.releasedAt | l10n_date }} · #{{ hold.releasedBy }}</span>

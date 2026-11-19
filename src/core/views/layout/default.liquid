@@ -764,10 +764,11 @@
                   data-theme-switch-light="{{ "shell.theme.switch_to_light" | t }}"
                   data-theme-switch-dark="{{ "shell.theme.switch_to_dark" | t }}"
                   aria-pressed="false"
+                  title="{{ "shell.theme.switch_to_light" | t }}"
                   aria-label="{{ "shell.theme.switch_to_light" | t }}">
-            <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="light"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="dark"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
-            <span data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
+            <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="light" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="dark" aria-hidden="true"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
+            <span class="hidden lg:inline" data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
           </button>
         </div>
 
@@ -777,9 +778,10 @@
                     class="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
                     data-sidebar-tooltip
                     data-sidebar-label="{{ "shell.sign_out" | t }}"
+                    title="{{ "shell.sign_out" | t }}"
                     aria-label="{{ "shell.sign_out" | t }}">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
-              <span data-sidebar-text>{{ "shell.sign_out" | t }}</span>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
+              <span class="hidden lg:inline" data-sidebar-text>{{ "shell.sign_out" | t }}</span>
             </button>
           </form>
           <div class="flex items-center gap-1">

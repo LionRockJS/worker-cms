@@ -58,6 +58,8 @@ export const APP_ICON_OPTIONS = [
   { value: 'calendar', label: 'Calendar' },
   { value: 'contact-card', label: 'Contact card' },
   { value: 'chevron-down', label: 'Chevron down' },
+  { value: 'chevron-double-left', label: 'Double chevron left' },
+  { value: 'chevron-double-right', label: 'Double chevron right' },
   { value: 'chevron-right', label: 'Chevron right' },
   { value: 'clock', label: 'Clock' },
   { value: 'cloud-upload', label: 'Cloud upload' },

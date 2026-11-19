@@ -185,26 +185,30 @@
       <div class="flex items-center gap-2">
         {% if hasPreviousPage %}
           <a href="{{ previousHref }}"
-             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+             title="{{ "common.previous" | t }}"
+             aria-label="{{ "common.previous" | t }}"
+             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-            {{ "common.previous" | t }}
+            <span class="hidden lg:inline">{{ "common.previous" | t }}</span>
           </a>
         {% else %}
           <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-            {{ "common.previous" | t }}
+            <span class="sr-only lg:not-sr-only">{{ "common.previous" | t }}</span>
           </span>
         {% endif %}
         <span class="text-xs font-medium text-gray-500">{{ "profile.pagination_page" | t }} {{ currentPage }} {{ "profile.pagination_of" | t }} {{ totalPages }}</span>
         {% if hasNextPage %}
           <a href="{{ nextHref }}"
-             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            {{ "common.next" | t }}
+             title="{{ "common.next" | t }}"
+             aria-label="{{ "common.next" | t }}"
+             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
+            <span class="hidden lg:inline">{{ "common.next" | t }}</span>
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
           </a>
         {% else %}
           <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
-            {{ "common.next" | t }}
+            <span class="sr-only lg:not-sr-only">{{ "common.next" | t }}</span>
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
           </span>
         {% endif %}

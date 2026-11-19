@@ -1,15 +1,16 @@
 <div class="my-4 px-4 sm:px-6 lg:px-8">
   <div class="flex items-center gap-3 mb-6">
-    <a href="{{ backHref }}" class="inline-flex shrink-0 items-center gap-1 text-xs text-gray-500 transition-colors hover:text-indigo-700">
-      <span aria-hidden="true">&larr;</span>
-      {{ "common.back" | t }}
+    <a href="{{ backHref }}" title="{{ "common.back" | t }}" aria-label="{{ "common.back" | t }}" class="inline-flex shrink-0 items-center gap-1 text-xs text-gray-500 transition-colors hover:text-indigo-700 justify-center h-8 min-w-8">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+      <span class="hidden lg:inline">{{ "common.back" | t }}</span>
     </a>
     {% if isEdit %}
       <a href="{{ readHref }}"
          title="{{ "view_strings.sections_editor.read_only_view" | t }}"
-         class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+         aria-label="{{ "view_strings.sections_editor.view" | t }}"
+         class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 justify-center h-8">
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye"></use></svg>
-        {{ "view_strings.sections_editor.view" | t }}
+        <span class="hidden lg:inline">{{ "view_strings.sections_editor.view" | t }}</span>
       </a>
       <div id="presence-bar"
            class="flex items-center gap-1.5 shrink-0"
@@ -241,8 +242,9 @@
         </summary>
         <div class="flex justify-end pb-2 pt-2">
           <button type="submit" name="action" value="delete-versions" formnovalidate data-clean-versions-button data-confirm-message="{{ "view_strings.sections_editor.clean_versions_confirm" | t }}" title="{{ "view_strings.sections_editor.clean_all_versions_2" | t }}" aria-label="{{ "view_strings.sections_editor.clean_all_versions_2" | t }}"
-                  class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50">
-            {{ "view_strings.sections_editor.clean_all_versions" | t }}
+                  class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_editor.clean_all_versions" | t }}</span>
           </button>
         </div>
         <div class="space-y-2 pb-3">
@@ -314,7 +316,13 @@
       {% endif %}
 
       {% if pageAccessHref %}
-      <a href="{{ pageAccessHref }}" class="text-xs font-semibold text-indigo-600">{{ "page_access.title" | t }}</a>
+      <a href="{{ pageAccessHref }}"
+         title="{{ "page_access.title" | t }}"
+         aria-label="{{ "page_access.title" | t }}"
+         class="inline-flex text-xs font-semibold text-indigo-600 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#shield-check"></use></svg>
+        <span class="hidden lg:inline">{{ "page_access.title" | t }}</span>
+      </a>
       {% endif %}
       {% if showLegacyEditors %}
       <div class="flex min-w-0 flex-1 items-center gap-2 sm:max-w-xl">
@@ -371,16 +379,18 @@
       <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
         <button type="button" data-fields-copy
                 title="{{ "view_strings.snippets_structured_editor.copy_fields_hint" | t }}"
-                class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+                aria-label="{{ "view_strings.snippets_structured_editor.copy_fields" | t }}"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 justify-center h-8">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#copy"></use></svg>
-          {{ "view_strings.snippets_structured_editor.copy_fields" | t }}
+          <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.copy_fields" | t }}</span>
         </button>
         {%- comment -%}Hidden until something copied is available to paste — the editor script reveals it.{%- endcomment -%}
         <button type="button" data-fields-paste
                 title="{{ "view_strings.snippets_structured_editor.paste_fields_hint" | t }}"
-                class="hidden shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+                aria-label="{{ "view_strings.snippets_structured_editor.paste_fields" | t }}"
+                class="hidden shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 justify-center h-8">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#paste"></use></svg>
-          {{ "view_strings.snippets_structured_editor.paste_fields" | t }}
+          <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.paste_fields" | t }}</span>
         </button>
       </div>
       <div data-fields-clipboard-panel class="hidden min-w-0 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -390,9 +400,19 @@
                   class="block min-w-0 w-full max-w-full rounded border border-gray-300 bg-white px-3 py-2 text-xs font-mono text-gray-800 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"></textarea>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" data-fields-panel-apply
-                  class="hidden shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white">{{ "view_strings.snippets_structured_editor.apply" | t }}</button>
+                  title="{{ "view_strings.snippets_structured_editor.apply" | t }}"
+                  aria-label="{{ "view_strings.snippets_structured_editor.apply" | t }}"
+                  class="hidden shrink-0 rounded-lg bg-gray-900 px-3 text-xs font-semibold text-white items-center justify-center gap-2 h-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.apply" | t }}</span>
+          </button>
           <button type="button" data-fields-panel-close
-                  class="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.snippets_structured_editor.close" | t }}</button>
+                  title="{{ "view_strings.snippets_structured_editor.close" | t }}"
+                  aria-label="{{ "view_strings.snippets_structured_editor.close" | t }}"
+                  class="inline-flex shrink-0 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 items-center justify-center gap-2 h-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.close" | t }}</span>
+          </button>
         </div>
       </div>
       <p data-fields-status role="status" class="hidden text-xs text-gray-500"></p>
@@ -402,24 +422,32 @@
 
     {% feature_fragment trash/editor-delete %}
 
-    <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sticky bottom-4">
+    <div data-editor-actions class="sticky bottom-4 flex min-w-0 flex-wrap items-center gap-3">
       {% if isVersionPreview %}
         <button type="submit" name="action" value="{{ selectedVersion.restoreAction }}"
-                class="w-full px-6 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors shadow-sm sm:w-auto">
-          {{ "view_strings.sections_editor.restore_version" | t }}
+                title="{{ "view_strings.sections_editor.restore_version" | t }}"
+                aria-label="{{ "view_strings.sections_editor.restore_version" | t }}"
+                class="inline-flex px-6 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_editor.restore_version" | t }}</span>
         </button>
-        <a href="{{ selectedVersion.currentHref }}" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">
-          {{ "view_strings.sections_editor.edit_current" | t }}
+        <a href="{{ selectedVersion.currentHref }}" title="{{ "view_strings.sections_editor.edit_current" | t }}" aria-label="{{ "view_strings.sections_editor.edit_current" | t }}" class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_editor.edit_current" | t }}</span>
         </a>
       {% else %}
         <button type="submit"
-                class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">
-          {% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}
+                title="{% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}"
+                aria-label="{% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}"
+                class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if isEdit %}save{% else %}document-plus{% endif %}"></use></svg>
+          <span class="hidden lg:inline">{% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}</span>
         </button>
         {% feature_fragment publish/editor-save-and-publish %}
       {% endif %}
-      <a href="{{ backHref }}" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">
-        {{ "view_strings.sections_editor.cancel" | t }}
+      <a href="{{ backHref }}" title="{{ "view_strings.sections_editor.cancel" | t }}" aria-label="{{ "view_strings.sections_editor.cancel" | t }}" class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_editor.cancel" | t }}</span>
       </a>
     </div>
   </form>

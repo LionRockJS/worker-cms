@@ -25,12 +25,13 @@
       <div class="flex shrink-0 flex-row gap-2 sm:items-center">
         {% for action in section.blocks %}
           {% if action.settings.show != 'no' %}
+            {% assign actionIcon = action.settings.icon | default: 'link' %}
             {% if action.settings.variant == 'primary' %}
               <a href="{{ action.settings.href }}"
                  title="{{ action.settings.label }}"
                  aria-label="{{ action.settings.label }}"
                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
-                {% if action.settings.icon and action.settings.icon != '' %}<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ action.settings.icon }}"></use></svg>{% endif %}
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ actionIcon }}"></use></svg>
                 <span class="hidden lg:inline">{{ action.settings.label }}</span>
               </a>
             {% else %}
@@ -38,7 +39,7 @@
                  title="{{ action.settings.label }}"
                  aria-label="{{ action.settings.label }}"
                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-                {% if action.settings.icon and action.settings.icon != '' %}<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ action.settings.icon }}"></use></svg>{% endif %}
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ actionIcon }}"></use></svg>
                 <span class="hidden lg:inline">{{ action.settings.label }}</span>
               </a>
             {% endif %}

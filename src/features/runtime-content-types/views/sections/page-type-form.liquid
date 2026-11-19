@@ -67,11 +67,29 @@
   {% if isEdit %}
     <form id="page-type-delete-form" method="POST" action="{{ deleteAction }}" data-confirm="{{ "view_strings.sections_page_type_form.delete_this_page_type_existing_pages_keep_their_type_string" | t }}"></form>
   {% endif %}
-  <div class="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-    {% if canSave %}<button form="page-type-form" type="submit" class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">{{ "view_strings.sections_page_type_form.save" | t }}</button>{% endif %}
-    <a href="/admin/page_types" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">{% if readOnly %}Back{% else %}Cancel{% endif %}</a>
+  <div class="mt-4 flex min-w-0 flex-wrap items-center gap-3">
+    {% if canSave %}<button form="page-type-form" type="submit"
+            title="{{ "view_strings.sections_page_type_form.save" | t }}"
+            aria-label="{{ "view_strings.sections_page_type_form.save" | t }}"
+            class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_page_type_form.save" | t }}</span>
+    </button>{% endif %}
+    <a href="/admin/page_types"
+       title="{% if readOnly %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}"
+       aria-label="{% if readOnly %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}"
+       class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if readOnly %}arrow-left{% else %}x{% endif %}"></use></svg>
+      <span class="hidden lg:inline">{% if readOnly %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}</span>
+    </a>
     {% if isEdit %}{% unless readOnly %}
-      <button form="page-type-delete-form" type="submit" class="w-full px-6 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto sm:w-auto">{{ "view_strings.sections_page_type_form.delete" | t }}</button>
+      <button form="page-type-delete-form" type="submit"
+              title="{{ "view_strings.sections_page_type_form.delete" | t }}"
+              aria-label="{{ "view_strings.sections_page_type_form.delete" | t }}"
+              class="inline-flex px-6 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_page_type_form.delete" | t }}</span>
+      </button>
     {% endunless %}{% endif %}
   </div>
 </div>

@@ -143,7 +143,7 @@
       </div>
     </template>
 
-    <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-between">
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
       <button type="button" id="advanced-search-add-criterion"
               title="{{ "view_strings.sections_advanced_search.add_criterion" | t }}"
               aria-label="{{ "view_strings.sections_advanced_search.add_criterion" | t }}"
@@ -151,10 +151,13 @@
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg>
         <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.add_criterion" | t }}</span>
       </button>
-      <div class="flex flex-col gap-2 sm:flex-row">
+      <div class="flex items-center gap-2">
       <a href="{{ resetHref }}"
-         class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-        {{ "view_strings.sections_advanced_search.reset" | t }}
+         title="{{ "view_strings.sections_advanced_search.reset" | t }}"
+         aria-label="{{ "view_strings.sections_advanced_search.reset" | t }}"
+         class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.reset" | t }}</span>
       </a>
       <button type="submit"
               title="{{ "view_strings.sections_advanced_search.search" | t }}"
@@ -203,8 +206,9 @@
           <button type="submit"
                   title="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
                   aria-label="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
-                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700">
-            {{ "view_strings.shared_bulk_actions.apply" | t }}
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 shrink-0">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.shared_bulk_actions.apply" | t }}</span>
           </button>
         </div>
       </div>
@@ -354,10 +358,22 @@
       <div class="text-gray-500">Page {{ currentPage }} of {{ totalPages }}</div>
       <div class="flex gap-2">
         {% if hasPreviousPage %}
-          <a href="{{ previousHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_advanced_search.previous" | t }}</a>
+          <a href="{{ previousHref }}"
+             title="{{ "view_strings.sections_advanced_search.previous" | t }}"
+             aria-label="{{ "view_strings.sections_advanced_search.previous" | t }}"
+             class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.previous" | t }}</span>
+          </a>
         {% endif %}
         {% if hasNextPage %}
-          <a href="{{ nextHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_advanced_search.next" | t }}</a>
+          <a href="{{ nextHref }}"
+             title="{{ "view_strings.sections_advanced_search.next" | t }}"
+             aria-label="{{ "view_strings.sections_advanced_search.next" | t }}"
+             class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.next" | t }}</span>
+          </a>
         {% endif %}
       </div>
     </div>

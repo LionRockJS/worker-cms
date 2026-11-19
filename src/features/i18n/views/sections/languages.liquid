@@ -10,7 +10,13 @@
       </div>
       <div class="flex items-end gap-3">
         <label class="text-sm font-medium text-gray-700">{{ "i18n.fields.default_language" | t }}<select name="default_language" class="mt-1 block w-full min-w-[10rem] rounded-lg border border-gray-300 px-3 py-2">{% for option in defaultLanguageOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.code }})</option>{% endfor %}</select></label>
-        <button class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.save" | t }}</button>
+        <button
+                title="{{ "common.save" | t }}"
+                aria-label="{{ "common.save" | t }}"
+                class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 justify-center shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+          <span class="hidden lg:inline">{{ "common.save" | t }}</span>
+        </button>
       </div>
     </div>
   </form>
@@ -24,7 +30,7 @@
       <label class="text-sm font-medium text-gray-700">{{ "i18n.fields.weight" | t }}<input name="weight" type="number" value="100" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2"></label>
       <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="content_enabled" checked> {{ "i18n.fields.content_enabled" | t }}</label>
       <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="ui_enabled"> {{ "i18n.fields.ui_enabled" | t }}</label>
-      <div class="sm:col-span-2 lg:col-span-4"><button class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.add" | t }}</button></div>
+      <div class="sm:col-span-2 lg:col-span-4"><button title="{{ "common.add" | t }}" aria-label="{{ "common.add" | t }}" class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 justify-center shrink-0 gap-2"><svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg><span class="hidden lg:inline">{{ "common.add" | t }}</span></button></div>
     </form>
   </details>
 
@@ -43,9 +49,27 @@
           <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="content_enabled" {% if locale.contentEnabled %}checked{% endif %} {% if locale.isDefault %}disabled{% endif %}> {{ "i18n.fields.content_enabled" | t }}</label>
           <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="ui_enabled" {% if locale.uiEnabled %}checked{% endif %} {% if locale.protected %}disabled{% endif %}> {{ "i18n.fields.ui_enabled" | t }}</label>
           <span class="flex-1"></span>
-          <a href="{{ locale.translationsHref }}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-800">{{ "i18n.translations.manage" | t }}</a>
-          <button class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.save" | t }}</button>
-          {% unless locale.builtin %}<button form="delete-{{ locale.code }}" class="inline-flex h-10 items-center rounded-lg border border-red-300 px-4 text-sm font-semibold text-red-700 hover:bg-red-50">{{ "common.delete" | t }}</button>{% endunless %}
+          <a href="{{ locale.translationsHref }}"
+             title="{{ "i18n.translations.manage" | t }}"
+             aria-label="{{ "i18n.translations.manage" | t }}"
+             class="inline-flex text-sm font-semibold text-indigo-600 hover:text-indigo-800 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#globe"></use></svg>
+            <span class="hidden lg:inline">{{ "i18n.translations.manage" | t }}</span>
+          </a>
+          <button
+                  title="{{ "common.save" | t }}"
+                  aria-label="{{ "common.save" | t }}"
+                  class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 justify-center shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+            <span class="hidden lg:inline">{{ "common.save" | t }}</span>
+          </button>
+          {% unless locale.builtin %}<button form="delete-{{ locale.code }}"
+                  title="{{ "common.delete" | t }}"
+                  aria-label="{{ "common.delete" | t }}"
+                  class="inline-flex h-10 items-center rounded-lg border border-red-300 px-4 text-sm font-semibold text-red-700 hover:bg-red-50 justify-center shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+            <span class="hidden lg:inline">{{ "common.delete" | t }}</span>
+          </button>{% endunless %}
         </div>
       </form>
       {% unless locale.builtin %}<form id="delete-{{ locale.code }}" action="{{ locale.deleteAction }}" method="post" data-confirm="Delete this locale and its database translations?"></form>{% endunless %}

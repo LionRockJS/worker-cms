@@ -37,18 +37,36 @@
                   {% if asset.approved %}
                     <form method="post" action="{{ asset.revokeAction }}" class="inline" data-confirm="{{ "view_strings.sections_plugin_assets.revoke_confirmation" | t }}">
                       <input type="hidden" name="path" value="{{ asset.path }}">
-                      <button type="submit" class="px-3 py-1 rounded-lg border border-red-300 text-xs font-semibold text-red-700">{{ "view_strings.sections_plugin_assets.revoke" | t }}</button>
+                      <button type="submit"
+                              title="{{ "view_strings.sections_plugin_assets.revoke" | t }}"
+                              aria-label="{{ "view_strings.sections_plugin_assets.revoke" | t }}"
+                              class="inline-flex px-3 rounded-lg border border-red-300 text-xs font-semibold text-red-700 items-center justify-center shrink-0 gap-2 h-8">
+                        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+                        <span class="hidden lg:inline">{{ "view_strings.sections_plugin_assets.revoke" | t }}</span>
+                      </button>
                     </form>
                     {% if asset.drifted %}
                       <form method="post" action="{{ asset.approveAction }}" class="inline">
                         <input type="hidden" name="path" value="{{ asset.path }}">
-                        <button type="submit" class="ml-1 px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "view_strings.sections_plugin_assets.re_approve" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_assets.re_approve" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_assets.re_approve" | t }}"
+                                class="inline-flex ml-1 px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_assets.re_approve" | t }}</span>
+                        </button>
                       </form>
                     {% endif %}
                   {% else %}
                     <form method="post" action="{{ asset.approveAction }}" class="inline">
                       <input type="hidden" name="path" value="{{ asset.path }}">
-                      <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "view_strings.sections_plugin_assets.approve" | t }}</button>
+                      <button type="submit"
+                              title="{{ "view_strings.sections_plugin_assets.approve" | t }}"
+                              aria-label="{{ "view_strings.sections_plugin_assets.approve" | t }}"
+                              class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+                        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+                        <span class="hidden lg:inline">{{ "view_strings.sections_plugin_assets.approve" | t }}</span>
+                      </button>
                     </form>
                   {% endif %}
                 </td>

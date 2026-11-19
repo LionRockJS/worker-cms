@@ -18,9 +18,21 @@
       </div>
       <span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_user_form.a_user_with_no_roles_selected_becomes_a_viewer_no_admin_access" | t }}</span>
     </fieldset>
-    <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-      <button type="submit" class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">{{ "view_strings.sections_user_form.save" | t }}</button>
-      <a href="/admin/users" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">{{ "view_strings.sections_user_form.cancel" | t }}</a>
+    <div class="flex min-w-0 flex-wrap items-center gap-3">
+      <button type="submit"
+              title="{{ "view_strings.sections_user_form.save" | t }}"
+              aria-label="{{ "view_strings.sections_user_form.save" | t }}"
+              class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_user_form.save" | t }}</span>
+      </button>
+      <a href="/admin/users"
+         title="{{ "view_strings.sections_user_form.cancel" | t }}"
+         aria-label="{{ "view_strings.sections_user_form.cancel" | t }}"
+         class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_user_form.cancel" | t }}</span>
+      </a>
     </div>
   </form>
 
@@ -42,7 +54,13 @@
         <input name="note" type="text" required maxlength="300" placeholder="{{ "view_strings.sections_user_form.why_this_adjustment_is_made" | t }}"
                class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
       </label>
-      <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "view_strings.sections_user_form.apply_adjustment" | t }}</button>
+      <button type="submit"
+              title="{{ "view_strings.sections_user_form.apply_adjustment" | t }}"
+              aria-label="{{ "view_strings.sections_user_form.apply_adjustment" | t }}"
+              class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#coins"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_user_form.apply_adjustment" | t }}</span>
+      </button>
     </form>
 
     {% if canShareCredits %}
@@ -65,7 +83,13 @@
           <input name="note" type="text" maxlength="300" placeholder="{{ "view_strings.sections_user_form.what_this_grant_is_for" | t }}"
                  class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
         </label>
-        <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "credits.wallet.grant_submit" | t }}</button>
+        <button type="submit"
+                title="{{ "credits.wallet.grant_submit" | t }}"
+                aria-label="{{ "credits.wallet.grant_submit" | t }}"
+                class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg>
+          <span class="hidden lg:inline">{{ "credits.wallet.grant_submit" | t }}</span>
+        </button>
       </form>
     {% endif %}
 
@@ -109,7 +133,13 @@
         {{ "ip_access.unrestricted" | t }}
       </label>
       <p class="text-xs text-gray-500">{{ "ip_access.exemption" | t }}</p>
-      <button type="submit" class="px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700">{{ "ip_access.save" | t }}</button>
+      <button type="submit"
+              title="{{ "ip_access.save" | t }}"
+              aria-label="{{ "ip_access.save" | t }}"
+              class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+        <span class="hidden lg:inline">{{ "ip_access.save" | t }}</span>
+      </button>
     </form>
   {% endif %}
 </div>

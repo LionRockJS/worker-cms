@@ -1,6 +1,9 @@
 {% if publishEnabled and canPublishPage and isEdit and isPublished %}
   <button type="submit" name="action" value="publish"
-          class="w-full px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm sm:w-auto">
-    {{ "view_strings.sections_editor.save_and_publish" | t }}
+          title="{{ "view_strings.sections_editor.save_and_publish" | t }}"
+          aria-label="{{ "view_strings.sections_editor.save_and_publish" | t }}"
+          class="inline-flex px-6 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+    <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#cloud-upload"></use></svg>
+    <span class="hidden lg:inline">{{ "view_strings.sections_editor.save_and_publish" | t }}</span>
   </button>
 {% endif %}

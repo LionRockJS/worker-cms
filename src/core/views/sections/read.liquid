@@ -7,19 +7,33 @@
     <span class="ml-1 shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-gray-500">{{ "read.read_only" | t }}</span>
     {% if editHref != blank %}
       <a href="{{ editHref }}"
-         class="ml-auto inline-flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700">
+         title="{{ "common.edit" | t }}"
+         aria-label="{{ "common.edit" | t }}"
+         class="ml-auto inline-flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 justify-center h-10">
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
-        {{ "common.edit" | t }}
+        <span class="hidden lg:inline">{{ "common.edit" | t }}</span>
       </a>
     {% endif %}
-    {% if pageAccessHref != blank %}<a class="text-indigo-600" href="{{ pageAccessHref }}">{{ "page_access.title" | t }}</a>{% endif %}
+    {% if pageAccessHref != blank %}<a
+       class="inline-flex text-indigo-600 items-center justify-center shrink-0 gap-2 h-8 min-w-8" href="{{ pageAccessHref }}"
+       title="{{ "page_access.title" | t }}"
+       aria-label="{{ "page_access.title" | t }}">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#shield-check"></use></svg>
+      <span class="hidden lg:inline">{{ "page_access.title" | t }}</span>
+    </a>{% endif %}
   </div>
 
   {% if versionCreatedAt != blank %}
     <div class="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
       <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
       {{ "read.viewing_version_prefix" | t }} {{ versionCreatedAt }} {{ "read.viewing_version_suffix" | t }}
-      <a href="{{ readBase }}" class="font-semibold underline">{{ "read.view_current" | t }}</a>
+      <a href="{{ readBase }}"
+         title="{{ "read.view_current" | t }}"
+         aria-label="{{ "read.view_current" | t }}"
+         class="inline-flex font-semibold underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye"></use></svg>
+        <span class="hidden lg:inline">{{ "read.view_current" | t }}</span>
+      </a>
     </div>
   {% endif %}
 
@@ -112,9 +126,21 @@
       </div>
     {% endif %}
 
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
-      {% if editHref != blank %}<a href="{{ editHref }}" class="w-full rounded-lg bg-indigo-600 px-6 py-2 text-center text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 sm:w-auto">{{ "common.edit" | t }}</a>{% endif %}
-      <a href="{{ backHref }}" class="w-full rounded-lg border border-gray-300 bg-white px-6 py-2 text-center text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 sm:w-auto">{{ "common.back" | t }}</a>
+    <div class="flex flex-wrap items-center gap-3">
+      {% if editHref != blank %}<a href="{{ editHref }}"
+         title="{{ "common.edit" | t }}"
+         aria-label="{{ "common.edit" | t }}"
+         class="inline-flex rounded-lg bg-indigo-600 px-6 text-center text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
+        <span class="hidden lg:inline">{{ "common.edit" | t }}</span>
+      </a>{% endif %}
+      <a href="{{ backHref }}"
+         title="{{ "common.back" | t }}"
+         aria-label="{{ "common.back" | t }}"
+         class="inline-flex rounded-lg border border-gray-300 bg-white px-6 text-center text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+        <span class="hidden lg:inline">{{ "common.back" | t }}</span>
+      </a>
     </div>
   </div>
 </div>

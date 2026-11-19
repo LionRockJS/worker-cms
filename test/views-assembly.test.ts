@@ -327,10 +327,13 @@ describe('view assembly', () => {
 
   it('offers save and publish beside save for published pages', async () => {
     const editor = await (await env.VIEWS.fetch('https://views.local/sections/editor.liquid')).text();
-    const footer = editor.slice(editor.indexOf('<div class="flex min-w-0 flex-col gap-3 sm:flex-row'));
+    const footerStart = editor.indexOf('<div data-editor-actions');
+    expect(footerStart).toBeGreaterThanOrEqual(0);
+    const footer = editor.slice(footerStart);
     const save = footer.indexOf('view_strings.sections_editor.save_changes');
     const saveAndPublish = footer.indexOf('view_strings.sections_editor.save_and_publish');
     expect(editor).toContain('{% if publishEnabled and canPublishPage and isEdit and isPublished %}');
+    expect(save).toBeGreaterThanOrEqual(0);
     expect(saveAndPublish).toBeGreaterThan(save);
     expect(footer).toContain('name="action" value="publish"');
   });

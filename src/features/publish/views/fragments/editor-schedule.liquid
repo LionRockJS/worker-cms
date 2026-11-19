@@ -43,15 +43,30 @@
   {% if isEdit %}
     {% unless isPublished %}
     <button type="submit" name="action" value="publish"
-            class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.publish" | t }}</button>
+            title="{{ "view_strings.sections_editor.publish" | t }}"
+            aria-label="{{ "view_strings.sections_editor.publish" | t }}"
+            class="inline-flex mt-4 px-4 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10 lg:w-full">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#cloud-upload"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_editor.publish" | t }}</span>
+    </button>
     {% endunless %}
     {% if isPublished and isLiveSynced == false %}
     <button type="submit" name="action" value="publish"
-            class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.re_publish" | t }}</button>
+            title="{{ "view_strings.sections_editor.re_publish" | t }}"
+            aria-label="{{ "view_strings.sections_editor.re_publish" | t }}"
+            class="inline-flex mt-4 px-4 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10 lg:w-full">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_editor.re_publish" | t }}</span>
+    </button>
     {% endif %}
     {% if isPublished %}
     <button type="submit" formaction="{{ unpublishAction }}" formnovalidate data-unpublish-button data-confirm-message="{{ "view_strings.sections_editor.unpublish_page_confirm" | t }}"
-            class="mt-4 w-full px-4 py-2 bg-yellow-600 text-white text-sm font-semibold rounded-lg hover:bg-yellow-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.un_publish" | t }}</button>
+            title="{{ "view_strings.sections_editor.un_publish" | t }}"
+            aria-label="{{ "view_strings.sections_editor.un_publish" | t }}"
+            class="inline-flex mt-4 px-4 bg-yellow-600 text-white text-sm font-semibold rounded-lg hover:bg-yellow-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10 lg:w-full">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye-off"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_editor.un_publish" | t }}</span>
+    </button>
     {% endif %}
   {% endif %}
 {% endunless %}

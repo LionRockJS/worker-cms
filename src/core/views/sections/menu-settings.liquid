@@ -16,7 +16,13 @@
       <input id="icon_sprite" name="icon_sprite" type="file" accept=".svg,image/svg+xml" required
              data-max-bytes="{{ iconSpriteMaxBytes }}" data-size-error="{{ "settings.icon_sprite.too_large" | t }}"
              class="block min-w-0 max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-      <button type="submit" class="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "settings.icon_sprite.upload" | t }}</button>
+      <button type="submit"
+              title="{{ "settings.icon_sprite.upload" | t }}"
+              aria-label="{{ "settings.icon_sprite.upload" | t }}"
+              class="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+        <span class="hidden lg:inline">{{ "settings.icon_sprite.upload" | t }}</span>
+      </button>
     </form>
     {% if uploadedIcons.size > 0 %}
       <ul class="mt-4 flex flex-wrap gap-2" aria-label="{{ "settings.icon_sprite.previews" | t }}">

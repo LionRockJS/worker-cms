@@ -92,8 +92,9 @@
         <button type="submit"
                 title="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
                 aria-label="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
-                class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700">
-          {{ "view_strings.shared_bulk_actions.apply" | t }}
+                class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.shared_bulk_actions.apply" | t }}</span>
         </button>
       </div>
     </div>

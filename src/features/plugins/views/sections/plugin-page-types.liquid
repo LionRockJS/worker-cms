@@ -31,7 +31,13 @@
                 <td class="px-4 py-3 font-medium text-gray-900 font-mono">{{ pageType.slug }}</td>
                 <td class="px-4 py-3 text-gray-500">{{ pageType.fieldCount }}</td>
                 <td class="px-4 py-3 text-right">
-                  <a href="{{ pageType.viewHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_plugin_page_types.view" | t }}</a>
+                  <a href="{{ pageType.viewHref }}"
+                     title="{{ "view_strings.sections_plugin_page_types.view" | t }}"
+                     aria-label="{{ "view_strings.sections_plugin_page_types.view" | t }}"
+                     class="inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                    <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye"></use></svg>
+                    <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.view" | t }}</span>
+                  </a>
                 </td>
               </tr>
             {% endfor %}
@@ -64,7 +70,13 @@
                 <td class="px-4 py-3 font-medium text-gray-900">{{ taxonomy.name }}</td>
                 <td class="px-4 py-3 text-gray-500 font-mono">{{ taxonomy.slug }}</td>
                 <td class="px-4 py-3 text-right">
-                  <a href="{{ taxonomy.viewHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_plugin_page_types.view" | t }}</a>
+                  <a href="{{ taxonomy.viewHref }}"
+                     title="{{ "view_strings.sections_plugin_page_types.view" | t }}"
+                     aria-label="{{ "view_strings.sections_plugin_page_types.view" | t }}"
+                     class="inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                    <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye"></use></svg>
+                    <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.view" | t }}</span>
+                  </a>
                 </td>
               </tr>
             {% endfor %}
@@ -83,7 +95,13 @@
         </div>
         {% if hasPendingApprovals %}
           <form method="post" action="{{ approveAllAction }}" class="shrink-0">
-            <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "view_strings.sections_plugin_page_types.approve_all" | t }}</button>
+            <button type="submit"
+                    title="{{ "view_strings.sections_plugin_page_types.approve_all" | t }}"
+                    aria-label="{{ "view_strings.sections_plugin_page_types.approve_all" | t }}"
+                    class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 shrink-0 gap-2">
+              <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+              <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.approve_all" | t }}</span>
+            </button>
           </form>
         {% endif %}
       </div>
@@ -113,13 +131,25 @@
                       <form method="post" action="{{ pageType.revokeReadAction }}" class="mt-2 inline" data-confirm="{{ "view_strings.sections_plugin_page_types.revoke_read_confirmation" | t }}">
                         <input type="hidden" name="page_type" value="{{ pageType.pageType }}">
                         <input type="hidden" name="access" value="read">
-                        <button type="submit" class="px-3 py-1 rounded-lg border border-red-300 text-xs font-semibold text-red-700">{{ "view_strings.sections_plugin_page_types.revoke" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_page_types.revoke" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_page_types.revoke" | t }}"
+                                class="inline-flex px-3 rounded-lg border border-red-300 text-xs font-semibold text-red-700 items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.revoke" | t }}</span>
+                        </button>
                       </form>
                     {% else %}
                       <form method="post" action="{{ pageType.approveReadAction }}" class="mt-2 inline">
                         <input type="hidden" name="page_type" value="{{ pageType.pageType }}">
                         <input type="hidden" name="access" value="read">
-                        <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "view_strings.sections_plugin_page_types.approve" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_page_types.approve" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_page_types.approve" | t }}"
+                                class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.approve" | t }}</span>
+                        </button>
                       </form>
                     {% endif %}
                   {% else %}
@@ -134,13 +164,25 @@
                       <form method="post" action="{{ pageType.revokeWriteAction }}" class="mt-2 inline" data-confirm="{{ "view_strings.sections_plugin_page_types.revoke_write_confirmation" | t }}">
                         <input type="hidden" name="page_type" value="{{ pageType.pageType }}">
                         <input type="hidden" name="access" value="write">
-                        <button type="submit" class="px-3 py-1 rounded-lg border border-red-300 text-xs font-semibold text-red-700">{{ "view_strings.sections_plugin_page_types.revoke" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_page_types.revoke" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_page_types.revoke" | t }}"
+                                class="inline-flex px-3 rounded-lg border border-red-300 text-xs font-semibold text-red-700 items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.revoke" | t }}</span>
+                        </button>
                       </form>
                     {% else %}
                       <form method="post" action="{{ pageType.approveWriteAction }}" class="mt-2 inline">
                         <input type="hidden" name="page_type" value="{{ pageType.pageType }}">
                         <input type="hidden" name="access" value="write">
-                        <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white">{{ "view_strings.sections_plugin_page_types.approve" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_page_types.approve" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_page_types.approve" | t }}"
+                                class="inline-flex px-3 rounded-lg bg-indigo-600 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_page_types.approve" | t }}</span>
+                        </button>
                       </form>
                     {% endif %}
                   {% else %}

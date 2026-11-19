@@ -527,6 +527,7 @@
       panelHint.textContent = hint;
       panelText.value = value;
       panelApply.classList.toggle('hidden', !withApply);
+      panelApply.classList.toggle('inline-flex', withApply);
       fieldsPanel.classList.remove('hidden');
       panelText.focus();
       if (!withApply) panelText.select();

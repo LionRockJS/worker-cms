@@ -26,9 +26,21 @@
               </td>
               <td class="px-6 py-3 text-right">
                 {% if type.isDb %}
-                  <a href="{{ type.editHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{% if canWrite %}{{ "common.edit" | t }}{% else %}{{ "common.view" | t }}{% endif %}</a>
+                  <a href="{{ type.editHref }}"
+                     title="{% if canWrite %}{{ "common.edit" | t }}{% else %}{{ "common.view" | t }}{% endif %}"
+                     aria-label="{% if canWrite %}{{ "common.edit" | t }}{% else %}{{ "common.view" | t }}{% endif %}"
+                     class="inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                    <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if canWrite %}pencil-square{% else %}eye{% endif %}"></use></svg>
+                    <span class="hidden lg:inline">{% if canWrite %}{{ "common.edit" | t }}{% else %}{{ "common.view" | t }}{% endif %}</span>
+                  </a>
                 {% else %}
-                  <a href="{{ type.viewHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_type_list.view" | t }}</a>
+                  <a href="{{ type.viewHref }}"
+                     title="{{ "view_strings.sections_type_list.view" | t }}"
+                     aria-label="{{ "view_strings.sections_type_list.view" | t }}"
+                     class="inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                    <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye"></use></svg>
+                    <span class="hidden lg:inline">{{ "view_strings.sections_type_list.view" | t }}</span>
+                  </a>
                 {% endif %}
               </td>
             </tr>
