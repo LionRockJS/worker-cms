@@ -1,3 +1,6 @@
+// Page permissions live in page_access_policies / page_edit_grants, never in
+// lect: version restores and content writers must not change access. See
+// docs/page-access.md.
 import type { Env, JWTPayload } from '../../types';
 import { abortIf } from '../db/transaction-guard';
 import type { AppContext } from '../http/context';

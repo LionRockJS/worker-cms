@@ -375,6 +375,9 @@ survives trash and restore. Published visibility follows the publish workflow.
 Pages with page access enabled use the built-in editor and are excluded from
 plugin service requests and lifecycle hooks.
 
+Permissions are stored in their own tables, not in the page's `lect`; see
+[docs/page-access.md](docs/page-access.md) for why.
+
 Apply `migrations/0008_page_access.sql` to the private CMS database before deploying
 this version. The published database schema is unchanged.
 
