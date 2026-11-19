@@ -217,12 +217,15 @@ Create a `.dev.vars` file for local development (see `.dev.vars.example`).
 ### 6. Enable OAuth providers
 
 For an existing Cloudflare Worker, run `npm run upgrade` from the checkout
-whose `wrangler.toml` matches that deployment. The wizard shows the existing
-callback URL to register with the new provider and prompts for its credentials.
-It appends the provider to the login options and redeploys the checkout with
-the client ID and secret together. It uses the regular release gate, so run it from a clean,
-pushed revision with Wrangler signed into the Worker's Cloudflare account.
-The wizard writes the updated `wrangler.toml` after the deploy succeeds.
+whose `wrangler.toml` names that Worker. The wizard reads the deployed callback
+URL and provider list, then prompts for the new provider's credentials.
+It applies the OAuth variables and secret together through the
+[Worker settings API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/methods/edit/)
+without building or uploading Worker code. After Cloudflare accepts the update,
+the wizard saves the provider list and public settings in `wrangler.toml`.
+Sign in with `npx wrangler login` or use a Cloudflare API token with Workers
+Scripts Write permission. If the credentials can access multiple accounts,
+select one with `account_id` in `wrangler.toml` or `CLOUDFLARE_ACCOUNT_ID`.
 
 Set `ENABLED_PROVIDERS` in `wrangler.toml` to a comma-separated list of the
 providers you want to offer on the login page when configuring them manually:

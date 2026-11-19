@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
@@ -67,7 +65,7 @@ Usage:
   npm run upgrade
 
 Add one OAuth provider to the Worker configured in this clone's wrangler.toml.
-The wizard uses the existing callback URL and deploys through npm run deploy.
+The wizard uses the deployed callback URL and updates the Worker's settings.
 ` : `0xCMS interactive setup
 
 Usage:
@@ -603,13 +601,85 @@ the .p8 key you download once from
   return token;
 }
 
-function oauthUpgradeConfig(original, providers, provider, clientId, microsoftTenant) {
+function oauthUpgradeConfig(original, vars) {
   const newline = original.includes('\r\n') ? '\r\n' : '\n';
   const lines = original.split(newline);
-  setVar(lines, 'ENABLED_PROVIDERS', [...providers, provider].join(','));
-  setVar(lines, PROVIDERS[provider].clientId, clientId);
-  if (provider === 'microsoft') setVar(lines, 'MICROSOFT_TENANT', microsoftTenant);
+  for (const [name, value] of Object.entries(vars)) setVar(lines, name, value);
   return lines.join(newline);
+}
+
+function oauthProviders(value) {
+  return typeof value === 'string' ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function workerVariable(bindings, name) {
+  return bindings.find((binding) => binding.name === name && binding.type === 'plain_text')?.text;
+}
+
+function oauthUpgradeVars(bindings, provider, clientId, microsoftTenant) {
+  const enabledBinding = bindings.find(({ name }) => name === 'ENABLED_PROVIDERS');
+  if (enabledBinding && enabledBinding.type !== 'plain_text') {
+    throw new Error('The deployed ENABLED_PROVIDERS binding must be a text variable.');
+  }
+  const providers = oauthProviders(workerVariable(bindings, 'ENABLED_PROVIDERS'));
+  if (!providers.some((name) => name.toLowerCase() === provider)) providers.push(provider);
+  return {
+    ENABLED_PROVIDERS: providers.join(','),
+    [PROVIDERS[provider].clientId]: clientId,
+    ...(provider === 'microsoft' ? { MICROSOFT_TENANT: microsoftTenant } : {}),
+  };
+}
+
+function oauthSettingsForm(bindings, vars, secretName, secret) {
+  const changes = [
+    ...Object.entries(vars).map(([name, text]) => ({ name, type: 'plain_text', text })),
+    { name: secretName, type: 'secret_text', text: secret },
+  ];
+  const changedNames = new Set(changes.map(({ name }) => name));
+  // The settings API replaces the binding list. Name and type alone inherit an
+  // existing binding, including secrets whose values are omitted on reads.
+  const retained = bindings.filter(({ name }) => !changedNames.has(name))
+    .map(({ name, type }) => ({ name, type }));
+  const form = new FormData();
+  form.set('settings', JSON.stringify({ bindings: [...retained, ...changes] }));
+  return form;
+}
+
+async function workerSettings(accountId, workerName, headers, body) {
+  const method = body ? 'PATCH' : 'GET';
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}/settings`;
+  const response = await fetch(url, { method, headers, body, redirect: 'error', signal: AbortSignal.timeout(30_000) });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.success !== true) {
+    // The API can report fields from the submitted bindings. Log only codes.
+    const codes = payload?.errors?.map(({ code }) => code).filter(Number.isInteger).join(', ');
+    throw new Error(`Cloudflare could not ${body ? 'update' : 'read'} the settings for ${workerName} (HTTP ${response.status}${codes ? `, codes ${codes}` : ''}).`);
+  }
+  if (!body && !Array.isArray(payload.result?.bindings)) throw new Error('Cloudflare did not return the Worker bindings.');
+  return payload.result;
+}
+
+function cloudflareCredentials(config) {
+  const authResult = command(['auth', 'token', '--json', '--config', 'wrangler.toml'], { capture: true });
+  if (authResult.status !== 0) throw new Error('Run npx wrangler login or set CLOUDFLARE_API_TOKEN.');
+  let auth;
+  try {
+    auth = JSON.parse(authResult.stdout);
+  } catch {
+    throw new Error('Could not read credentials from Wrangler.');
+  }
+  const headers = auth.type === 'api_key'
+    ? { 'X-Auth-Key': auth.key, 'X-Auth-Email': auth.email }
+    : { Authorization: `Bearer ${auth.token}` };
+  let accountId = config.account_id || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+  if (!accountId) {
+    const { accounts } = JSON.parse(run(['whoami', '--json', '--config', 'wrangler.toml'], { capture: true }).stdout);
+    if (accounts?.length === 1) accountId = accounts[0].id;
+  }
+  if (!/^[a-f0-9]{32}$/i.test(accountId ?? '')) {
+    throw new Error('Set account_id in wrangler.toml or set CLOUDFLARE_ACCOUNT_ID to select the Worker account.');
+  }
+  return { accountId, headers };
 }
 
 async function upgrade() {
@@ -620,55 +690,55 @@ async function upgrade() {
   const { unstable_readConfig } = await import('wrangler');
   const config = unstable_readConfig({ config: fileURLToPath(CONFIG_PATH) });
   const { name, vars } = config;
-  const callback = vars.OAUTH_REDIRECT_URI;
-  if (!name || typeof callback !== 'string' || URL.parse(callback)?.protocol !== 'https:') {
-    throw new Error('Set the deployed Worker name and HTTPS OAUTH_REDIRECT_URI in wrangler.toml.');
+  if (!name) throw new Error('Set the deployed Worker name in wrangler.toml.');
+  const { accountId, headers } = cloudflareCredentials(config);
+  const { bindings } = await workerSettings(accountId, name, headers);
+  const callback = workerVariable(bindings, 'OAUTH_REDIRECT_URI');
+  if (!callback || URL.parse(callback)?.protocol !== 'https:') {
+    throw new Error('Set an HTTPS OAUTH_REDIRECT_URI on the deployed Worker.');
   }
-  if (typeof vars.ENABLED_PROVIDERS !== 'string') {
-    throw new Error('Set ENABLED_PROVIDERS in wrangler.toml to match the deployed Worker.');
-  }
-  const providers = vars.ENABLED_PROVIDERS.split(',').map((value) => value.trim()).filter(Boolean);
-  const available = Object.keys(PROVIDERS).filter((provider) =>
-    !providers.some((enabled) => enabled.toLowerCase() === provider));
+  const enabled = workerVariable(bindings, 'ENABLED_PROVIDERS');
+  const providers = oauthProviders(enabled);
+  const localProviders = oauthProviders(vars.ENABLED_PROVIDERS);
+  const available = Object.keys(PROVIDERS).filter((provider) => [providers, localProviders]
+    .some((list) => !list.some((entry) => entry.toLowerCase() === provider)));
   if (!available.length) {
     console.log('All supported OAuth providers are already enabled.');
     return;
   }
 
-  console.log(`\nWorker: ${name}\nCurrent OAuth providers: ${providers.join(', ') || '(none)'}\nCallback: ${callback}\n`);
+  console.log(`\nWorker: ${name} (account ${accountId})\nCurrent OAuth providers: ${providers.join(', ') || '(none)'}\nCallback: ${callback}\n`);
   const provider = await ask(
     `OAuth provider to add (${available.join(', ')})`, undefined,
     (value) => available.includes(value.toLowerCase()),
   ).then((value) => value.toLowerCase());
   console.log(`Register ${callback} with ${provider}.\n${PROVIDERS[provider].instructions}`);
-  const clientId = await ask(`${provider} client ID`, vars[PROVIDERS[provider].clientId] || undefined);
+  const clientIdName = PROVIDERS[provider].clientId;
+  const clientId = await ask(`${provider} client ID`, workerVariable(bindings, clientIdName) || vars[clientIdName] || undefined);
   const microsoftTenant = provider === 'microsoft'
-    ? await ask('Microsoft tenant', vars.MICROSOFT_TENANT || 'common')
+    ? await ask('Microsoft tenant', workerVariable(bindings, 'MICROSOFT_TENANT') || vars.MICROSOFT_TENANT || 'common')
     : undefined;
-  if (!await confirm(`Add ${provider} and deploy to ${name}?`, false)) return;
-
-  // Confirm that the configured Worker already exists before invoking deploy.
-  run(['secret', 'list', '--config', 'wrangler.toml'], { capture: true });
   const secret = provider === 'apple'
     ? await appleClientSecret(clientId)
     : await askSecret(`${provider} client secret (input hidden)`);
-
-  const updated = oauthUpgradeConfig(original, providers, provider, clientId, microsoftTenant);
-  // Keep the candidate next to wrangler.toml so relative binding and asset paths
-  // resolve the same way. An exclusive create also guards concurrent upgrades.
-  await writeFile(UPGRADE_CONFIG_PATH, updated, { flag: 'wx', mode: 0o600 });
-  let secretsDirectory;
+  if (!await confirm(`Apply ${provider} settings to ${name}?`, false)) return;
+  const changes = oauthUpgradeVars(bindings, provider, clientId, microsoftTenant);
+  await writeFile(UPGRADE_CONFIG_PATH, oauthUpgradeConfig(original, changes), { flag: 'wx', mode: 0o600 });
   try {
     if (await readFile(CONFIG_PATH, 'utf8') !== original) {
       throw new Error('wrangler.toml changed during the upgrade. Rerun npm run upgrade.');
     }
-    secretsDirectory = await mkdtemp(join(tmpdir(), 'cms-oauth-upgrade-'));
-    const secretsFile = join(secretsDirectory, 'secrets.json');
-    await writeFile(secretsFile, JSON.stringify({ [PROVIDERS[provider].secret]: secret }), { mode: 0o600 });
-    runNpm(['run', 'deploy', '--', '--config', '.wrangler-upgrade.toml', '--keep-vars', '--secrets-file', secretsFile]);
+    const latest = (await workerSettings(accountId, name, headers)).bindings;
+    if (workerVariable(latest, 'OAUTH_REDIRECT_URI') !== callback || workerVariable(latest, 'ENABLED_PROVIDERS') !== enabled) {
+      throw new Error('The deployed OAuth settings changed during the upgrade. Rerun npm run upgrade.');
+    }
+    const body = oauthSettingsForm(latest, changes, PROVIDERS[provider].secret, secret);
+    await workerSettings(accountId, name, headers, body);
+    if (await readFile(CONFIG_PATH, 'utf8') !== original) {
+      throw new Error(`Cloudflare enabled ${provider}, but wrangler.toml changed during the update. Rerun npm run upgrade to sync it.`);
+    }
     await rename(UPGRADE_CONFIG_PATH, CONFIG_PATH);
   } finally {
-    if (secretsDirectory) await rm(secretsDirectory, { recursive: true, force: true });
     await rm(UPGRADE_CONFIG_PATH, { force: true });
   }
   console.log(`\nEnabled ${provider} on ${name} and updated wrangler.toml.`);

@@ -15,18 +15,66 @@ const configFunctions = source.slice(source.indexOf('function setRootValue('), s
 const example = readFileSync(new URL('../wrangler.example.toml',import.meta.url),'utf8');
 const optionalBlock = /# \[\[r2_buckets\]\]\n# binding = "PLUGIN_VIEWS_BUCKET"\n# bucket_name = "cms-plugin-views"\n?/;
 
-test('OAuth upgrade appends the new provider and changes only its configuration', () => {
-  const start = source.indexOf('function oauthUpgradeConfig(');
-  const end = source.indexOf('async function upgrade(');
-  const update = runInNewContext(`${configFunctions}\n${source.slice(start, end)}\noauthUpgradeConfig`, {
-    PROVIDERS: { microsoft: { clientId: 'MICROSOFT_CLIENT_ID' } },
-  });
-  const original = example.replace('ENABLED_PROVIDERS = "github"', 'ENABLED_PROVIDERS = "eventuai,github"');
-  const updated = update(original, ['eventuai', 'github'], 'microsoft', 'fixture-app', 'organizations');
-  assert.equal(updated, original
-    .replace('ENABLED_PROVIDERS = "eventuai,github"', 'ENABLED_PROVIDERS = "eventuai,github,microsoft"')
+const oauthFunctions = source.slice(source.indexOf('function oauthUpgradeConfig('), source.indexOf('async function setupLocalDevelopment('));
+
+test('OAuth upgrade uses the deployed provider list and submits vars and secret together', () => {
+  const { oauthUpgradeConfig, oauthUpgradeVars, oauthSettingsForm } = runInNewContext(
+    `${configFunctions}\n${oauthFunctions}\n({ oauthUpgradeConfig, oauthUpgradeVars, oauthSettingsForm })`,
+    { FormData, PROVIDERS: { microsoft: { clientId: 'MICROSOFT_CLIENT_ID' } } },
+  );
+  const bindings = [
+    { name: 'DB', type: 'd1', id: 'deployed-database' },
+    { name: 'JWT_SECRET', type: 'secret_text' },
+    { name: 'GITHUB_CLIENT_ID', type: 'plain_text', text: 'deployed-github' },
+    { name: 'ENABLED_PROVIDERS', type: 'plain_text', text: 'eventuai,github' },
+    { name: 'MICROSOFT_CLIENT_SECRET', type: 'secret_text' },
+  ];
+  const changes = oauthUpgradeVars(bindings, 'microsoft', 'fixture-app', 'organizations');
+  const updated = oauthUpgradeConfig(example, changes);
+  assert.equal(updated, example
+    .replace('ENABLED_PROVIDERS = "github"', 'ENABLED_PROVIDERS = "eventuai,github,microsoft"')
     .replace('# MICROSOFT_CLIENT_ID = ""', 'MICROSOFT_CLIENT_ID = "fixture-app"')
     .replace('# MICROSOFT_TENANT = "common"', 'MICROSOFT_TENANT = "organizations"'));
+  const form = oauthSettingsForm(bindings, changes, 'MICROSOFT_CLIENT_SECRET', 'fixture-secret');
+  assert.deepEqual(JSON.parse(form.get('settings')).bindings, [
+    { name: 'DB', type: 'd1' },
+    { name: 'JWT_SECRET', type: 'secret_text' },
+    { name: 'GITHUB_CLIENT_ID', type: 'plain_text' },
+    { name: 'ENABLED_PROVIDERS', type: 'plain_text', text: 'eventuai,github,microsoft' },
+    { name: 'MICROSOFT_CLIENT_ID', type: 'plain_text', text: 'fixture-app' },
+    { name: 'MICROSOFT_TENANT', type: 'plain_text', text: 'organizations' },
+    { name: 'MICROSOFT_CLIENT_SECRET', type: 'secret_text', text: 'fixture-secret' },
+  ]);
+  assert.equal(updated.includes('fixture-secret'), false);
+  bindings[3].text += ',Microsoft';
+  assert.equal(oauthUpgradeVars(bindings, 'microsoft', 'fixture-app', 'organizations').ENABLED_PROVIDERS, bindings[3].text);
+});
+
+test('OAuth upgrade sends settings to the existing Worker and keeps secrets out of API errors', async () => {
+  const requests = [];
+  const update = runInNewContext(`${oauthFunctions}\nworkerSettings`, {
+    AbortSignal,
+    fetch: async (url, options) => {
+      requests.push({ url, ...options });
+      if (options.method === 'GET') return Response.json({ success: true, result: { bindings: [] } });
+      return Response.json({
+        success: false,
+        errors: [{ code: 10021, message: 'Error in fixture-secret' }],
+      }, { status: 400 });
+    },
+  });
+  const account = 'a'.repeat(32);
+  const headers = { Authorization: 'Bearer fixture-token' };
+  assert.deepEqual(await update(account, 'fixture-worker', headers), { bindings: [] });
+  const form = new FormData();
+  form.set('settings', 'fixture-secret');
+  await assert.rejects(update(account, 'fixture-worker', headers, form), {
+    message: 'Cloudflare could not update the settings for fixture-worker (HTTP 400, codes 10021).',
+  });
+  assert.deepEqual(requests.map(({ method, url, body }) => [method, url, body]), [
+    ['GET', `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/fixture-worker/settings`, undefined],
+    ['PATCH', `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/fixture-worker/settings`, form],
+  ]);
 });
 
 async function transform(existing, pluginViewsBucketName, publishedDatabaseName = 'fixture-published', defaultTimezone) {
