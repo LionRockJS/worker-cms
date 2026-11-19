@@ -75,3 +75,24 @@
     {% endunless %}{% endif %}
   </div>
 </div>
+
+{% unless isEdit or readOnly %}
+<script nonce="{{ nonce }}">
+  // New page type: the slug follows the name until the slug is typed in directly.
+  (() => {
+    const nameInput = document.getElementById('page_type_name');
+    const slugInput = document.getElementById('page_type_slug');
+    if (!nameInput || !slugInput) return;
+    const slugForName = (name) => name.toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    let slugEdited = slugInput.value.trim() !== '' && slugInput.value.trim() !== slugForName(nameInput.value);
+    slugInput.addEventListener('input', () => { slugEdited = slugInput.value.trim() !== ''; });
+    nameInput.addEventListener('input', () => {
+      if (!slugEdited) slugInput.value = slugForName(nameInput.value);
+    });
+  })();
+</script>
+{% endunless %}
