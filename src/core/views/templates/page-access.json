@@ -1,0 +1,10 @@
+{
+  "sections": {
+    "content": {
+      "type": "page-access"
+    }
+  },
+  "order": [
+    "content"
+  ]
+}

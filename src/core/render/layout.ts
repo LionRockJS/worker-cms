@@ -36,6 +36,12 @@ const EDITOR_SYNC_CLIENT_ASSETS: readonly string[] = [
 ];
 
 /** The bootstrap starts the renderer once. It loads engines on demand. */
+/**
+ * Admin pages only. layout/default.liquid loads it too; the script binds once
+ * per page, so the bootstrap and the rendered layout cannot double its timer.
+ */
+const ADMIN_KEEPALIVE_ASSET = '/assets/session-keepalive.js';
+
 const BOOTSTRAP_CLIENT_ASSETS: readonly string[] = [
   '/assets/client-render.js',
 ];
@@ -340,8 +346,7 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
 <body class="h-full overflow-x-hidden">
   <div id="cms-client-root" class="min-h-full">${loadingMarkup('100vh')}</div>
   <script id="cms-render-payload" type="application/json" nonce="${escHtml(nonce)}">${jsonScript(payload)}</script>
-  ${admin ? `<script nonce="${escHtml(nonce)}">${adminSessionKeepaliveScript()}</script>` : ''}
-  ${[...BOOTSTRAP_CLIENT_ASSETS, ...installedAssets]
+  ${[...BOOTSTRAP_CLIENT_ASSETS, ...(admin ? [ADMIN_KEEPALIVE_ASSET] : []), ...installedAssets]
     .map((src) => `<script src="${escHtml(src)}${escHtml(revisionQuery)}" nonce="${escHtml(nonce)}" defer></script>`)
     .join('\n  ')}
 </body>
@@ -381,65 +386,4 @@ function loadingMarkup(minHeight: string): string {
       </path>
     </svg>
   </div>`;
-}
-
-function adminSessionKeepaliveScript(): string {
-  return `(function() {
-      if (window.__cmsSessionKeepaliveBound) return;
-      window.__cmsSessionKeepaliveBound = true;
-      var INTERVAL = 5 * 60 * 1000;
-      // Interaction after this long without a report is sent at once, so the
-      // server's view of activity lags the person by at most this much.
-      var REPORT_AFTER = 5 * 60 * 1000;
-      var RETRY_AFTER = 30 * 1000;
-      var inFlight = false;
-      // Loading the page was itself a request the server counted.
-      var lastInteraction = Date.now();
-      var lastReported = lastInteraction;
-      var lastAttempt = 0;
-
-      // A visible page counts as reading, even when its window is inactive.
-      // Hidden tabs only report actual interaction, so they still go idle.
-      async function refresh() {
-        if (inFlight) return;
-        inFlight = true;
-        lastAttempt = Date.now();
-        if (document.visibilityState === 'visible') {
-          lastInteraction = Date.now();
-        }
-        var interaction = lastInteraction;
-        var headers = { Accept: 'application/json' };
-        if (interaction > lastReported) {
-          headers['X-CMS-Idle-For'] = String(Math.max(0, Math.floor((Date.now() - interaction) / 1000)));
-        } else {
-          headers['X-CMS-Background'] = '1';
-        }
-        try {
-          var res = await fetch('/auth/refresh', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: headers
-          });
-          if (res.status === 401) window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
-          else if (res.ok) lastReported = Math.max(lastReported, interaction);
-        } catch (error) {
-          /* retry on the next tick */
-        } finally {
-          inFlight = false;
-        }
-      }
-
-      function noteInteraction() {
-        lastInteraction = Date.now();
-        if (lastInteraction - lastReported > REPORT_AFTER && lastInteraction - lastAttempt > RETRY_AFTER) refresh();
-      }
-
-      ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function(type) {
-        window.addEventListener(type, noteInteraction, { capture: true, passive: true });
-      });
-      window.setInterval(refresh, INTERVAL);
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') refresh();
-      });
-    })();`;
 }

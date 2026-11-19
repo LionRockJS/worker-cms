@@ -10,7 +10,8 @@ import { rejectCrossSiteRequest } from '../../../core/http/headers';
 import { renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import type { AppContext } from '../../../core/http/context';
-import { adminLayout, escHtml, type BaseTemplateProps } from '../../../core/render/layout';
+import { adminLayout, type BaseTemplateProps } from '../../../core/render/layout';
+import { renderView } from '../../../core/render/liquid';
 import { fetchEditorUsers } from '../../../core/db/admin-queries';
 import { recordPageReads, recordTableReads } from '../../../core/http/access-log';
 
@@ -30,59 +31,19 @@ async function loadPage(c: AppContext) {
   return { page, policy, owner };
 }
 
-function renderAccess(views: Fetcher, opts: BaseTemplateProps & {
+async function renderAccess(views: Fetcher, opts: BaseTemplateProps & {
   pageId: number; title: string; pageName: string; revision: number; enabled: boolean; mode: string;
   owner: string; group: string | null; roles: string[]; grants: Account[];
   legacyEditors: Account[]; accounts: SearchAccount[]; query: string;
-  t: Awaited<ReturnType<typeof uiTranslator>>;
 }) {
-  const { pageId, title, mode, revision, enabled, group, roles, grants, legacyEditors, accounts, query, t } = opts;
-  const h = escHtml;
-  const url = `/admin/pages/${pageId}/access`;
-  const label = (key: string, fallback: string) => h(t(`page_access.${key}`, fallback));
-  const input = 'rounded border border-gray-300 bg-white px-2 py-1';
-  const button = 'rounded bg-indigo-600 px-3 py-1.5 text-white';
-  const version = `<input type="hidden" name="revision" value="${revision}">`;
-  const users = accounts.map(user => `<option value="${user.id}">${h(user.name === user.email ? user.name : `${user.name} (${user.email})`)}</option>`).join('');
-  const options = (digit: string) => [['0', label('none', 'No access')], ['4', label('read', 'Read')], ['6', label('edit', 'Read and edit')]]
-    .map(([value, name]) => `<option value="${value}"${digit === value ? ' selected' : ''}>${name}</option>`).join('');
-  const body = `<div class="mx-auto max-w-3xl space-y-4 px-4 py-5">
-    <a class="text-indigo-600" href="/admin/pages/${pageId}/edit?native=1">${label('back', 'Back to editor')}</a>
-    <h1 class="text-xl font-semibold">${h(title)} · ${h(opts.pageName)}</h1>
-    <p>${label('owner', 'Owner')} <strong>${h(opts.owner)}</strong></p>
-    <form method="post" action="${url}" class="space-y-3 rounded border border-gray-200 bg-white p-4">
-      ${version}
-      <p>${enabled ? `<code>${mode}</code>` : label('legacy', 'This page uses site-wide role permissions until you enable page access.')}</p>
-      <div class="flex flex-wrap gap-3">
-        ${['owner', 'group', 'others'].map((key, i) => `<label>${label(key, ['Owner', 'Group', 'Others'][i])}
-          <select class="${input}" name="${key}">${options(mode[i])}</select></label>`).join('')}
-        <label>${label('role', 'Group role')} <select class="${input}" name="group_role">
-          <option value="">${label('no_group', 'No group')}</option>
-          ${roles.map(role => `<option${group === role ? ' selected' : ''}>${h(role)}</option>`).join('')}
-        </select></label>
-      </div>
-      ${!enabled && legacyEditors.length ? `<fieldset><legend>${label('review', 'Convert these previous editor labels to edit grants')}</legend>
-        ${legacyEditors.map(user => `<label class="block"><input type="checkbox" name="legacy_user" value="${user.id}"> ${h(user.name)}</label>`).join('')}</fieldset>` : ''}
-      <button class="${button}" name="action" value="mode">${enabled ? label('save', 'Save permissions') : label('enable', 'Enable page access')}</button>
-    </form>
-    ${enabled ? `<section class="space-y-3 rounded border border-gray-200 bg-white p-4">
-      <h2 class="font-semibold">${label('sharing', 'Named editors')}</h2>
-      ${grants.map(user => `<form method="post" action="${url}" class="flex items-center gap-3">${version}
-        <input type="hidden" name="user_id" value="${user.id}"><span>${h(user.name)}</span>
-        <button class="text-indigo-600" name="action" value="remove">${label('remove', 'Remove')}</button></form>`).join('')}
-    </section>` : ''}
-    <section class="space-y-3 rounded border border-gray-200 bg-white p-4">
-      <form method="get" action="${url}" class="flex flex-wrap items-end gap-2">
-        <label>${label('search_users', 'Search users')} <input name="q" class="${input}" value="${h(query)}"></label>
-        <button class="${button}">${label('search', 'Search')}</button>
-      </form>
-      ${accounts.length ? `<form method="post" action="${url}" class="flex flex-wrap items-end gap-2">${version}
-        <label>${label('user', 'User')} <select name="user_id" class="${input}" required><option value="">${label('choose_user', 'Choose a user')}</option>${users}</select></label>
-        ${enabled ? `<button class="${button}" name="action" value="add">${label('add', 'Add user')}</button>` : ''}
-        <button class="${button}" name="action" value="transfer">${label('transfer', 'Transfer ownership')}</button>
-      </form>` : query ? `<p>${label('no_matching_users', 'No matching users')}</p>` : ''}
-    </section>
-  </div>`;
+  const { pageId, title, mode } = opts;
+  const body = await renderView(views, '/templates/page-access.json', {
+    pageId, title, pageName: opts.pageName, owner: opts.owner, revision: opts.revision, enabled: opts.enabled, mode,
+    action: `/admin/pages/${pageId}/access`,
+    permissions: ['owner', 'group', 'others'].map((key, i) => ({ key, digit: mode[i] })),
+    group: opts.group ?? '', roles: opts.roles, grants: opts.grants, legacyEditors: opts.legacyEditors,
+    accounts: opts.accounts, query: opts.query,
+  });
   return adminLayout(views, opts, { title, body });
 }
 
@@ -108,7 +69,7 @@ pageAccessRoutes.get('/pages/:id/access', async c => {
       ...legacyEditors.map(user => user.id), ...(accounts?.results ?? []).map(user => user.id)])].map(String));
   const t = await uiTranslator(c);
   return renderPage(c, renderAccess, {
-    t, title: t('page_access.title', 'Page access'), pageId: page.id, pageName: page.name,
+    title: t('page_access.title', 'Page access'), pageId: page.id, pageName: page.name,
     revision: policy?.revision ?? 0, enabled: !!policy?.enabled, mode: String(policy?.mode ?? 600).padStart(3, '0'),
     owner: ownerAccount?.name ?? t('page_access.unassigned', 'Unassigned'), group: policy?.group_role ?? null,
     roles: [...roles.keys()].sort(), grants: grants.results, legacyEditors, accounts: accounts?.results ?? [], query,

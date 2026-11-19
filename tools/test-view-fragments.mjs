@@ -187,3 +187,94 @@ test('trash confirms page deletion once and cancels a declined click', () => {
   assert.deepEqual(messages, ['Move this page to trash?', 'Move this page to trash?']);
   assert.equal(prevented, 1);
 });
+
+// The read-only page view and the page-access form used to be HTML built in
+// TypeScript. Render the Liquid that replaced them with the browser engine's
+// settings (auto-escape on, snippets resolved from the assembled tree).
+function browserLiquid(views) {
+  const browser = {};
+  runInNewContext(views.get('assets/liquid.browser.min.js').toString(), browser);
+  const read = (file) => {
+    const source = views.get(file.replace(/^\//, ''));
+    if (!source) throw new Error('missing view ' + file);
+    return source.toString();
+  };
+  const liquid = new browser.liquidjs.Liquid({
+    outputEscape: 'escape', extname: '.liquid', root: ['sections', 'snippets'], relativeReference: false,
+    fs: {
+      readFileSync: read, readFile: async (file) => read(file),
+      existsSync: (file) => views.has(file), exists: async (file) => views.has(file),
+      contains: () => true, containsSync: () => true,
+      resolve: (_root, file, ext) => (file.endsWith(ext) ? file : file + ext),
+    },
+  });
+  liquid.registerFilter('t', (key) => `[${key}]`);
+  return { liquid, section: (name) => read('sections/' + name + '.liquid') };
+}
+
+test('read view renders nested items, escapes values, and keeps the live badge HTML', async () => {
+  const { liquid, section } = browserLiquid(assembleViews({}));
+  const field = (label, value, extras = []) => ({ label, value, extras });
+  const html = await liquid.parseAndRender(section('read'), {
+    pageName: '<About>', backHref: '/admin', editHref: '/admin/pages/1/edit', pageAccessHref: '',
+    readBase: '/admin/pages/1/read', versionCreatedAt: '2026-01-01 00:00:00', iconHrefPrefix: '/assets/icons.svg',
+    meta: { slug: '/about', type: 'default', weight: '0', parent: '', start: '', end: '', timezone: '', editors: [], modifier: 'Ann' },
+    languages: [{ value: 'en', selected: true, href: '/admin/pages/1/read?language=en' }],
+    structured: {
+      settings: null,
+      content: {
+        fields: [field('Title', 'Hello <b>', [{ key: 'read.url', value: 'https://x.test' }])],
+        groups: [{ name: 'Links', rows: [{ label: 'Row 1', settings: null, content: {
+          fields: [field('Name', '')],
+          groups: [{ name: 'Nested', rows: [] }],
+        } }] }],
+      },
+      blocks: [],
+    },
+    tagGroups: [],
+    liveBadgeHtml: ' <span class="live">Live</span>',
+    versions: [{ label: 'v1', href: '/admin/pages/1/read?version=7', active: true, live: true }],
+  });
+  assert.match(html, /&lt;About&gt;/);
+  assert.match(html, /Hello &lt;b&gt;/);
+  assert.match(html, /\[read\.url\]:<\/span> https:\/\/x\.test/);
+  assert.match(html, /Row 1[\s\S]*Name[\s\S]*&mdash;[\s\S]*Nested[\s\S]*\[read\.no_items\]/);
+  assert.match(html, /version=7[^>]*>v1 <span class="live">Live<\/span><\/a>/);
+  assert.match(html, /\[read\.no_blocks\]/);
+  assert.match(html, /\[read\.viewing_version_prefix\] 2026-01-01 00:00:00/);
+  assert.match(html, /href="\/admin\/pages\/1\/edit"/);
+  assert.match(html, /\[view_strings\.sections_editor\.slug\][\s\S]*\/about/);
+  assert.doesNotMatch(html, /\[page_access\.title\]/);
+});
+
+test('page access form keeps its mode selects, grants, and user search', async () => {
+  const { liquid, section } = browserLiquid(assembleViews({}));
+  const data = {
+    pageId: 5, title: 'Page access', pageName: 'P&Q', owner: 'Ann', revision: 3, mode: '640',
+    action: '/admin/pages/5/access', group: 'editor', roles: ['admin', 'editor'],
+    permissions: [{ key: 'owner', digit: '6' }, { key: 'group', digit: '4' }, { key: 'others', digit: '0' }],
+    grants: [{ id: 9, name: 'Bo' }], legacyEditors: [{ id: 8, name: 'Cy' }],
+    accounts: [{ id: 9, name: 'Bo', email: 'bo@x.test' }, { id: 10, name: 'd@x.test', email: 'd@x.test' }], query: 'x',
+  };
+  const enabled = await liquid.parseAndRender(section('page-access'), { ...data, enabled: true });
+  assert.match(enabled, /P&amp;Q/);
+  assert.match(enabled, /<code>640<\/code>/);
+  assert.match(enabled, /name="owner">\s*<option value="0">[^<]*<\/option>\s*<option value="4">[^<]*<\/option>\s*<option value="6" selected>/);
+  assert.match(enabled, /name="group">\s*<option value="0">[^<]*<\/option>\s*<option value="4" selected>/);
+  assert.match(enabled, /<option selected>editor<\/option>/);
+  assert.match(enabled, /name="user_id" value="9"><span>Bo<\/span>/);
+  assert.match(enabled, /<option value="9">Bo \(bo@x\.test\)<\/option><option value="10">d@x\.test<\/option>/);
+  assert.match(enabled, /value="add"/);
+  assert.doesNotMatch(enabled, /legacy_user/);
+
+  const legacy = await liquid.parseAndRender(section('page-access'), { ...data, enabled: false, accounts: [] });
+  assert.match(legacy, /\[page_access\.legacy\]/);
+  assert.match(legacy, /name="legacy_user" value="8"> Cy/);
+  assert.match(legacy, /\[page_access\.enable\]/);
+  assert.match(legacy, /\[page_access\.no_matching_users\]/);
+  assert.doesNotMatch(legacy, /\[page_access\.sharing\]/);
+});
+
+test('session keepalive ships as an asset', () => {
+  assert.ok(assembleViews({}).has('assets/session-keepalive.js'));
+});

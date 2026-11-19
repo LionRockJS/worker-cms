@@ -139,8 +139,14 @@ describe('app shell routes', () => {
       fetchWorker('/admin', { headers: { Cookie: await authCookie() } }),
     ]);
 
-    expect(await admin.text()).toContain("fetch('/auth/refresh'");
-    expect(await login.text()).not.toContain("fetch('/auth/refresh'");
+    expect(await admin.text()).toContain('/assets/session-keepalive.js');
+    expect(await login.text()).not.toContain('/assets/session-keepalive.js');
+  });
+
+  it('serves the session keepalive script as a static asset', async () => {
+    const response = await fetchWorker('/assets/session-keepalive.js');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("fetch('/auth/refresh'");
   });
 
   it('rejects cross-origin mutations before protected routes run', async () => {
@@ -3915,8 +3921,11 @@ describe('Lect JSON version diff', () => {
 
     const read = await fetchWorker('/admin/pages/101/read?version=501', { headers });
     expect(read.status).toBe(200);
-    const history = renderPayload(await read.text()).layoutData.body;
-    expect(history).toMatch(/version=501[^>]*>[^<]*<span[^>]*>Live<\/span>/);
+    const history = bodyData(await read.text());
+    expect(history.versions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ live: true, href: expect.stringContaining('version=501') }),
+    ]));
+    expect(history.liveBadgeHtml).toMatch(/<span[^>]*>Live<\/span>/);
   });
 
   it('shows version timestamps in the CMS default timezone', async () => {

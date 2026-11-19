@@ -1,0 +1,61 @@
+<div class="mx-auto max-w-3xl space-y-4 px-4 py-5">
+  <a class="text-indigo-600" href="/admin/pages/{{ pageId }}/edit?native=1">{{ "page_access.back" | t }}</a>
+  <h1 class="text-xl font-semibold">{{ title }} · {{ pageName }}</h1>
+  <p>{{ "page_access.owner" | t }} <strong>{{ owner }}</strong></p>
+  <form method="post" action="{{ action }}" class="space-y-3 rounded border border-gray-200 bg-white p-4">
+    <input type="hidden" name="revision" value="{{ revision }}">
+    <p>{% if enabled %}<code>{{ mode }}</code>{% else %}{{ "page_access.legacy" | t }}{% endif %}</p>
+    <div class="flex flex-wrap gap-3">
+      {% for permission in permissions %}
+        {% assign labelKey = "page_access." | append: permission.key %}
+        <label>{{ labelKey | t }}
+          <select class="rounded border border-gray-300 bg-white px-2 py-1" name="{{ permission.key }}">
+            <option value="0"{% if permission.digit == "0" %} selected{% endif %}>{{ "page_access.none" | t }}</option>
+            <option value="4"{% if permission.digit == "4" %} selected{% endif %}>{{ "page_access.read" | t }}</option>
+            <option value="6"{% if permission.digit == "6" %} selected{% endif %}>{{ "page_access.edit" | t }}</option>
+          </select></label>
+      {% endfor %}
+      <label>{{ "page_access.role" | t }} <select class="rounded border border-gray-300 bg-white px-2 py-1" name="group_role">
+        <option value="">{{ "page_access.no_group" | t }}</option>
+        {% for role in roles %}<option{% if group == role %} selected{% endif %}>{{ role }}</option>{% endfor %}
+      </select></label>
+    </div>
+    {% if enabled == false and legacyEditors.size > 0 %}
+      <fieldset><legend>{{ "page_access.review" | t }}</legend>
+        {% for user in legacyEditors %}<label class="block"><input type="checkbox" name="legacy_user" value="{{ user.id }}"> {{ user.name }}</label>{% endfor %}
+      </fieldset>
+    {% endif %}
+    <button class="rounded bg-indigo-600 px-3 py-1.5 text-white" name="action" value="mode">{% if enabled %}{{ "page_access.save" | t }}{% else %}{{ "page_access.enable" | t }}{% endif %}</button>
+  </form>
+  {% if enabled %}
+    <section class="space-y-3 rounded border border-gray-200 bg-white p-4">
+      <h2 class="font-semibold">{{ "page_access.sharing" | t }}</h2>
+      {% for user in grants %}
+        <form method="post" action="{{ action }}" class="flex items-center gap-3">
+          <input type="hidden" name="revision" value="{{ revision }}">
+          <input type="hidden" name="user_id" value="{{ user.id }}"><span>{{ user.name }}</span>
+          <button class="text-indigo-600" name="action" value="remove">{{ "page_access.remove" | t }}</button>
+        </form>
+      {% endfor %}
+    </section>
+  {% endif %}
+  <section class="space-y-3 rounded border border-gray-200 bg-white p-4">
+    <form method="get" action="{{ action }}" class="flex flex-wrap items-end gap-2">
+      <label>{{ "page_access.search_users" | t }} <input name="q" class="rounded border border-gray-300 bg-white px-2 py-1" value="{{ query }}"></label>
+      <button class="rounded bg-indigo-600 px-3 py-1.5 text-white">{{ "page_access.search" | t }}</button>
+    </form>
+    {% if accounts.size > 0 %}
+      <form method="post" action="{{ action }}" class="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="revision" value="{{ revision }}">
+        <label>{{ "page_access.user" | t }} <select name="user_id" class="rounded border border-gray-300 bg-white px-2 py-1" required>
+          <option value="">{{ "page_access.choose_user" | t }}</option>
+          {% for user in accounts %}<option value="{{ user.id }}">{% if user.name == user.email %}{{ user.name }}{% else %}{{ user.name }} ({{ user.email }}){% endif %}</option>{% endfor %}
+        </select></label>
+        {% if enabled %}<button class="rounded bg-indigo-600 px-3 py-1.5 text-white" name="action" value="add">{{ "page_access.add" | t }}</button>{% endif %}
+        <button class="rounded bg-indigo-600 px-3 py-1.5 text-white" name="action" value="transfer">{{ "page_access.transfer" | t }}</button>
+      </form>
+    {% elsif query != blank %}
+      <p>{{ "page_access.no_matching_users" | t }}</p>
+    {% endif %}
+  </section>
+</div>

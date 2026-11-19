@@ -199,8 +199,9 @@ describe('sidebar menu items by profile', () => {
 
     expect(layoutData(html).clientAssets).toEqual(expected);
     // The renderer loads first and only here: client-render.js
-    // replaces the document with what default.liquid renders.
-    expect(bootstrap).toEqual(['/assets/client-render.js', ...expected]);
+    // replaces the document with what default.liquid renders. The keepalive
+    // is admin-only and both shells load it (it binds once per page).
+    expect(bootstrap).toEqual(['/assets/client-render.js', '/assets/session-keepalive.js', ...expected]);
   });
 
   it('ships every declared client asset', async () => {

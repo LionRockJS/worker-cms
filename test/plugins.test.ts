@@ -1562,7 +1562,7 @@ describe('plugin admin proxy', () => {
       expect(native.status).toBe(200);
       const nativeBody = await native.text();
       expect(nativeBody).not.toContain('PLUGIN_READ_MARKER');
-      expect(nativeBody).toContain('Read-only'); // built-in read view badge
+      expect(renderPayload(nativeBody).bodyView?.viewPath).toBe('/templates/read.json'); // built-in read view
       expect(captured).toHaveLength(1); // plugin /__plugin/read was not called again
 
       // When the plugin declines (404), the CMS renders its built-in read view.
@@ -1572,7 +1572,7 @@ describe('plugin admin proxy', () => {
       expect(fallback.status).toBe(200);
       const fallbackBody = await fallback.text();
       expect(fallbackBody).not.toContain('PLUGIN_READ_MARKER');
-      expect(fallbackBody).toContain('Read-only');
+      expect(renderPayload(fallbackBody).bodyView?.viewPath).toBe('/templates/read.json');
     } finally {
       await env.DB.prepare('DELETE FROM pages WHERE id = ?').bind(pageId).run();
     }

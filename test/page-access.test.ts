@@ -31,7 +31,9 @@ it('keeps legacy pages role-based, grants edit on one page, and transfers owners
     VALUES (72100,'acl-legacy','Legacy access fixture','acl-legacy','default','{}',72101,'72103')`).run();
   expect((await request('/pages/72100/edit', editor)).status).toBe(200);
   expect((await request('/pages/72100/read', guest)).status).toBe(302);
-  expect(await (await request('/pages/72100/access', owner)).text()).toContain('Enable page access');
+  const accessView = JSON.parse((await (await request('/pages/72100/access', owner)).text())
+    .match(/<script id="cms-render-payload"[^>]*>(.*?)<\/script>/s)![1]).bodyView;
+  expect(accessView).toMatchObject({ viewPath: '/templates/page-access.json', data: { enabled: false, mode: '600' } });
 
   const enabled = await request('/pages/72100/access', owner, { action: 'mode', revision: '0', owner: '6', group: '0', others: '0' });
   expect(enabled.status).toBe(303);
