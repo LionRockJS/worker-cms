@@ -178,6 +178,7 @@
         "rounded": "Rounded",
         "serif": "Serif",
         "slab": "Slab serif",
+        "space-grotesk": "Space Grotesk",
         "system": "System"
       },
       "help": "Applies to the admin interface for everyone signed in to this CMS.",

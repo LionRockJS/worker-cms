@@ -178,6 +178,7 @@
         "rounded": "圆体",
         "serif": "衬线体",
         "slab": "粗衬线体",
+        "space-grotesk": "Space Grotesk",
         "system": "系统默认"
       },
       "help": "适用于此 CMS 所有已登录用户的管理界面。",

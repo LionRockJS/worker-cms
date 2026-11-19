@@ -3489,9 +3489,9 @@ describe('permission-aware admin UI', () => {
     });
     expect(reset.status).toBe(302);
     const afterInvalid = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: await authCookie() } })).text());
-    expect(afterInvalid.primaryColor).toBe('#1d201c');
+    expect(afterInvalid.primaryColor).toBe('#0e0e0e');
     expect(afterInvalid.fontOptions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ value: 'system', selected: true }),
+      expect.objectContaining({ value: 'space-grotesk', selected: true }),
     ]));
   });
 

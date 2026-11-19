@@ -17,11 +17,11 @@ import { appFontStack, DEFAULT_PRIMARY_COLOR, normalizeHexColor } from '../db/se
 
 /** Canvas colours the faint accent tints blend into (see assets-source/admin.css).
  *  White doubles as the lightening end of the ramp for the `400` step. */
-const DARK_CANVAS = '#151814';
+const DARK_CANVAS = '#0e0e0e';
 const LIGHT_CANVAS = '#ffffff';
 
 /** Ink for text sitting *on* the accent (primary buttons, the avatar chip). */
-const DARK_INK = '#161915';
+const DARK_INK = '#0e0e0e';
 const LIGHT_INK = '#ffffff';
 
 /**
@@ -41,18 +41,12 @@ export function accentInk(hex: string): string {
   return relativeLuminance(hex) > 0.45 ? DARK_INK : LIGHT_INK;
 }
 
-/** `a` blended with `b`, `weight` (0..1) of the way towards `a`, as `#rrggbb`. */
-function mixHex(a: string, b: string, weight: number): string {
-  const channel = (hex: string, offset: number) => parseInt(hex.slice(offset, offset + 2), 16);
-  return '#' + [1, 3, 5]
-    .map((offset) => Math.round(channel(a, offset) * weight + channel(b, offset) * (1 - weight)))
-    .map((value) => value.toString(16).padStart(2, '0'))
-    .join('');
-}
+/** The sage-white the dark theme uses in place of a near-black accent. */
+const DARK_THEME_INK_ACCENT = '#ebf0e4';
 
 /**
  * A near-black accent (the default "ink" look) would vanish on the dark
- * canvas, so the dark theme inverts it to a soft off-white instead.
+ * canvas, so the dark theme swaps it for DARK_THEME_INK_ACCENT instead.
  */
 function isInkAccent(hex: string): boolean {
   return relativeLuminance(hex) < 0.03;
@@ -93,7 +87,7 @@ function accentScale(
  */
 export function appearanceStyleSheet(primaryColor: unknown, appFont: unknown): string {
   const primary = normalizeHexColor(primaryColor) ?? DEFAULT_PRIMARY_COLOR;
-  const darkPrimary = isInkAccent(primary) ? mixHex(primary, LIGHT_CANVAS, 0.12) : primary;
+  const darkPrimary = isInkAccent(primary) ? DARK_THEME_INK_ACCENT : primary;
   const stack = appFontStack(appFont);
   return `:root {
   --cms-primary: ${darkPrimary};

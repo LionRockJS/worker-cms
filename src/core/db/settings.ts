@@ -133,6 +133,8 @@ export type AppIcon = typeof APP_ICON_OPTIONS[number]['value'];
  * `font-sans`; monospaced captions keep their own face.
  */
 export const APP_FONT_OPTIONS = [
+  // Self-hosted from views/assets/fonts (see the @font-face in assets-source/admin.css).
+  { value: 'space-grotesk', label: 'Space Grotesk', stack: '"Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
   { value: 'system', label: 'System', stack: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
   { value: 'grotesk', label: 'Neo-grotesque', stack: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif' },
   { value: 'geometric', label: 'Geometric', stack: 'Avenir, "Avenir Next", "Century Gothic", "URW Gothic", "Trebuchet MS", sans-serif' },
@@ -145,14 +147,15 @@ export const APP_FONT_OPTIONS = [
 
 export type AppFont = typeof APP_FONT_OPTIONS[number]['value'];
 
-export const DEFAULT_PRIMARY_COLOR = '#1d201c';
-export const DEFAULT_APP_FONT: AppFont = 'system';
+export const DEFAULT_PRIMARY_COLOR = '#0e0e0e';
+export const DEFAULT_APP_FONT: AppFont = 'space-grotesk';
 
 const APP_FONT_VALUES = new Set<string>(APP_FONT_OPTIONS.map((option) => option.value));
 
-/** The stack for a saved font key, falling back to the system one. */
+/** The stack for a saved font key, falling back to the default one. */
 export function appFontStack(value: unknown): string {
-  return (APP_FONT_OPTIONS.find((option) => option.value === value) ?? APP_FONT_OPTIONS[0]).stack;
+  return (APP_FONT_OPTIONS.find((option) => option.value === value)
+    ?? APP_FONT_OPTIONS.find((option) => option.value === DEFAULT_APP_FONT)!).stack;
 }
 
 /** `#rgb` / `#rrggbb` (either case) normalized to lower-case `#rrggbb`. */
