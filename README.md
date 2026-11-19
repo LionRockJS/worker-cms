@@ -207,8 +207,16 @@ Create a `.dev.vars` file for local development (see `.dev.vars.example`).
 
 ### 6. Enable OAuth providers
 
+For an existing Cloudflare Worker, run `npm run upgrade` from the checkout
+whose `wrangler.toml` matches that deployment. The wizard shows the existing
+callback URL to register with the new provider and prompts for its credentials.
+It appends the provider to the login options and redeploys the checkout with
+the client ID and secret together. It uses the regular release gate, so run it from a clean,
+pushed revision with Wrangler signed into the Worker's Cloudflare account.
+The wizard writes the updated `wrangler.toml` after the deploy succeeds.
+
 Set `ENABLED_PROVIDERS` in `wrangler.toml` to a comma-separated list of the
-providers you want to offer on the login page:
+providers you want to offer on the login page when configuring them manually:
 
 ```toml
 ENABLED_PROVIDERS = "eventuai,github,google,microsoft,apple"

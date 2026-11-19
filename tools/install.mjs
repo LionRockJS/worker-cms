@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
+import { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_EXPIRES_IN_DAYS,
   MAX_EXPIRES_IN_DAYS,
@@ -16,6 +20,7 @@ import {
 } from './apple-client-secret.mjs';
 
 const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
+const UPGRADE_CONFIG_PATH = new URL('../.wrangler-upgrade.toml', import.meta.url);
 const EXAMPLE_CONFIG_PATH = new URL('../wrangler.example.toml', import.meta.url);
 const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
 const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
@@ -50,8 +55,18 @@ const PROVIDERS = {
   },
 };
 
+const upgradeMode = process.argv.includes('--upgrade');
+const operation = upgradeMode ? 'Upgrade' : 'Setup';
+
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
-  console.log(`0xCMS interactive Cloudflare setup
+  console.log(upgradeMode ? `0xCMS OAuth upgrade
+
+Usage:
+  npm run upgrade
+
+Add one OAuth provider to the Worker configured in this clone's wrangler.toml.
+The wizard uses the existing callback URL and deploys through npm run deploy.
+` : `0xCMS interactive Cloudflare setup
 
 Usage:
   npm run setup             ask where the CMS runs
@@ -75,12 +90,29 @@ tunnel or reverse proxy that forwards that domain to this machine.`);
   process.exit(0);
 }
 
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  console.error('Setup is interactive and must be run in a terminal.');
+if (upgradeMode && process.argv.length !== 3) {
+  console.error('Usage: npm run upgrade');
   process.exit(1);
 }
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+if (!process.stdin.isTTY || !process.stdout.isTTY) {
+  console.error(`${operation} is interactive and must be run in a terminal.`);
+  process.exit(1);
+}
+
+let hiddenInput = false;
+const promptOutput = upgradeMode ? new Writable({
+  write(chunk, encoding, done) {
+    if (hiddenInput) done();
+    else process.stdout.write(chunk, encoding, done);
+  },
+}) : process.stdout;
+const rl = createInterface({
+  input: process.stdin,
+  output: promptOutput,
+  terminal: true,
+  ...(upgradeMode ? { historySize: 0 } : {}),
+});
 
 function command(args, { capture = false, input } = {}) {
   const interactive = !capture && input === undefined;
@@ -133,6 +165,20 @@ async function confirm(label, defaultValue = true) {
   const answer = (await rl.question(`${label} [${hint}]: `)).trim().toLowerCase();
   if (!answer) return defaultValue;
   return answer === 'y' || answer === 'yes';
+}
+
+async function askSecret(label) {
+  while (true) {
+    process.stdout.write(`${label}: `);
+    hiddenInput = true;
+    try {
+      const value = await rl.question('');
+      if (value.trim()) return value;
+    } finally {
+      hiddenInput = false;
+      process.stdout.write('\n');
+    }
+  }
 }
 
 function resourceName(value) {
@@ -555,6 +601,77 @@ the .p8 key you download once from
   return token;
 }
 
+function oauthUpgradeConfig(original, providers, provider, clientId, microsoftTenant) {
+  const newline = original.includes('\r\n') ? '\r\n' : '\n';
+  const lines = original.split(newline);
+  setVar(lines, 'ENABLED_PROVIDERS', [...providers, provider].join(','));
+  setVar(lines, PROVIDERS[provider].clientId, clientId);
+  if (provider === 'microsoft') setVar(lines, 'MICROSOFT_TENANT', microsoftTenant);
+  return lines.join(newline);
+}
+
+async function upgrade() {
+  const original = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') throw new Error('Expected an existing deployment config at wrangler.toml.');
+    throw error;
+  });
+  const { unstable_readConfig } = await import('wrangler');
+  const config = unstable_readConfig({ config: fileURLToPath(CONFIG_PATH) });
+  const { name, vars } = config;
+  const callback = vars.OAUTH_REDIRECT_URI;
+  if (!name || typeof callback !== 'string' || URL.parse(callback)?.protocol !== 'https:') {
+    throw new Error('Set the deployed Worker name and HTTPS OAUTH_REDIRECT_URI in wrangler.toml.');
+  }
+  if (typeof vars.ENABLED_PROVIDERS !== 'string') {
+    throw new Error('Set ENABLED_PROVIDERS in wrangler.toml to match the deployed Worker.');
+  }
+  const providers = vars.ENABLED_PROVIDERS.split(',').map((value) => value.trim()).filter(Boolean);
+  const available = Object.keys(PROVIDERS).filter((provider) =>
+    !providers.some((enabled) => enabled.toLowerCase() === provider));
+  if (!available.length) {
+    console.log('All supported OAuth providers are already enabled.');
+    return;
+  }
+
+  console.log(`\nWorker: ${name}\nCurrent OAuth providers: ${providers.join(', ') || '(none)'}\nCallback: ${callback}\n`);
+  const provider = await ask(
+    `OAuth provider to add (${available.join(', ')})`, undefined,
+    (value) => available.includes(value.toLowerCase()),
+  ).then((value) => value.toLowerCase());
+  console.log(`Register ${callback} with ${provider}.\n${PROVIDERS[provider].instructions}`);
+  const clientId = await ask(`${provider} client ID`, vars[PROVIDERS[provider].clientId] || undefined);
+  const microsoftTenant = provider === 'microsoft'
+    ? await ask('Microsoft tenant', vars.MICROSOFT_TENANT || 'common')
+    : undefined;
+  if (!await confirm(`Add ${provider} and deploy to ${name}?`, false)) return;
+
+  // Confirm that the configured Worker already exists before invoking deploy.
+  run(['secret', 'list', '--config', 'wrangler.toml'], { capture: true });
+  const secret = provider === 'apple'
+    ? await appleClientSecret(clientId)
+    : await askSecret(`${provider} client secret (input hidden)`);
+
+  const updated = oauthUpgradeConfig(original, providers, provider, clientId, microsoftTenant);
+  // Keep the candidate next to wrangler.toml so relative binding and asset paths
+  // resolve the same way. An exclusive create also guards concurrent upgrades.
+  await writeFile(UPGRADE_CONFIG_PATH, updated, { flag: 'wx', mode: 0o600 });
+  let secretsDirectory;
+  try {
+    if (await readFile(CONFIG_PATH, 'utf8') !== original) {
+      throw new Error('wrangler.toml changed during the upgrade. Rerun npm run upgrade.');
+    }
+    secretsDirectory = await mkdtemp(join(tmpdir(), 'cms-oauth-upgrade-'));
+    const secretsFile = join(secretsDirectory, 'secrets.json');
+    await writeFile(secretsFile, JSON.stringify({ [PROVIDERS[provider].secret]: secret }), { mode: 0o600 });
+    runNpm(['run', 'deploy', '--', '--config', '.wrangler-upgrade.toml', '--keep-vars', '--secrets-file', secretsFile]);
+    await rename(UPGRADE_CONFIG_PATH, CONFIG_PATH);
+  } finally {
+    if (secretsDirectory) await rm(secretsDirectory, { recursive: true, force: true });
+    await rm(UPGRADE_CONFIG_PATH, { force: true });
+  }
+  console.log(`\nEnabled ${provider} on ${name} and updated wrangler.toml.`);
+}
+
 async function main() {
   console.log('\n0xCMS Cloudflare setup\n');
 
@@ -811,9 +928,9 @@ anywhere but the proxy.`);
 }
 
 try {
-  await main();
+  await (upgradeMode ? upgrade() : main());
 } catch (error) {
-  console.error(`\nSetup stopped: ${error.message}`);
+  console.error(`\n${operation} stopped: ${error.message}`);
   process.exitCode = 1;
 } finally {
   rl.close();

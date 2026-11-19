@@ -5,6 +5,7 @@
   "workspaces": ["assets-source"],
   "scripts": {
     "setup": "node tools/install.mjs",
+    "upgrade": "node tools/install.mjs --upgrade",
     "dev": "npm run build && wrangler dev --local",
     "build": "npm run build:version && npm run build:features && npm run build:migrations && npm run build:views && npm run build:css && npm run build:js",
     "build:version": "node tools/build-version.mjs",

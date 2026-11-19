@@ -14,6 +14,20 @@ const configFunctions = source.slice(source.indexOf('function setRootValue('), s
 const example = readFileSync(new URL('../wrangler.example.toml',import.meta.url),'utf8');
 const optionalBlock = /# \[\[r2_buckets\]\]\n# binding = "PLUGIN_VIEWS_BUCKET"\n# bucket_name = "cms-plugin-views"\n?/;
 
+test('OAuth upgrade appends the new provider and changes only its configuration', () => {
+  const start = source.indexOf('function oauthUpgradeConfig(');
+  const end = source.indexOf('async function upgrade(');
+  const update = runInNewContext(`${configFunctions}\n${source.slice(start, end)}\noauthUpgradeConfig`, {
+    PROVIDERS: { microsoft: { clientId: 'MICROSOFT_CLIENT_ID' } },
+  });
+  const original = example.replace('ENABLED_PROVIDERS = "github"', 'ENABLED_PROVIDERS = "eventuai,github"');
+  const updated = update(original, ['eventuai', 'github'], 'microsoft', 'fixture-app', 'organizations');
+  assert.equal(updated, original
+    .replace('ENABLED_PROVIDERS = "eventuai,github"', 'ENABLED_PROVIDERS = "eventuai,github,microsoft"')
+    .replace('# MICROSOFT_CLIENT_ID = ""', 'MICROSOFT_CLIENT_ID = "fixture-app"')
+    .replace('# MICROSOFT_TENANT = "common"', 'MICROSOFT_TENANT = "organizations"'));
+});
+
 async function transform(existing, pluginViewsBucketName, publishedDatabaseName = 'fixture-published', defaultTimezone) {
   let result;
   const context = {

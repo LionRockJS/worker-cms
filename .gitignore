@@ -12,6 +12,7 @@ wrangler.production.toml
 # wrangler.example.toml. The one exception is wrangler.eventuai.toml, which
 # Cloudflare Workers Builds deploys cms.eventuai.com from.
 /wrangler.toml
+/.wrangler-upgrade.toml
 /.claude
 src/core/views/locales/en.default.json
 *.p8
