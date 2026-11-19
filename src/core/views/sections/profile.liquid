@@ -2,36 +2,44 @@
 
   <section class="mb-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <form method="post" action="{{ uiLocaleAction }}" class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-end">
+      <form method="post" action="{{ uiLocaleAction }}" class="flex min-w-0 flex-1 flex-row items-end gap-2">
         <label class="min-w-0 flex-1 text-sm font-medium text-gray-700">{{ "profile.interface_language" | t }}
           <select name="locale" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2">
             {% for option in uiLocaleOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <button type="submit" class="h-10 shrink-0 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white">{{ "profile.save_language" | t }}</button>
+        <button type="submit"
+                title="{{ "profile.save_language" | t }}"
+                aria-label="{{ "profile.save_language" | t }}"
+                class="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+          <span class="hidden lg:inline">{{ "profile.save_language" | t }}</span>
+        </button>
       </form>
 
       <div class="flex flex-wrap items-center gap-2">
         <button type="button"
-                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 data-theme-toggle
                 data-theme-light-label="{{ "shell.theme.light" | t }}"
                 data-theme-dark-label="{{ "shell.theme.dark" | t }}"
                 data-theme-switch-light="{{ "shell.theme.switch_to_light" | t }}"
                 data-theme-switch-dark="{{ "shell.theme.switch_to_dark" | t }}"
                 aria-pressed="false"
+                title="{{ "shell.theme.switch_to_light" | t }}"
                 aria-label="{{ "shell.theme.switch_to_light" | t }}">
-          <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="light"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="dark"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
-          <span data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
+          <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-theme-icon="light"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-theme-icon="dark"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
+          <span class="hidden lg:inline" data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
         </button>
 
         <form method="post" action="/auth/logout" class="inline-flex">
           <button type="submit"
-                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 hover:bg-red-50"
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50"
+                  title="{{ "shell.sign_out" | t }}"
                   aria-label="{{ "shell.sign_out" | t }}">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
-            {{ "shell.sign_out" | t }}
+            <span class="hidden lg:inline">{{ "shell.sign_out" | t }}</span>
           </button>
         </form>
       </div>
@@ -66,12 +74,21 @@
         <input type="hidden" name="avatar" value="">
         <input type="file" accept="image/*" class="hidden" data-avatar-file>
         <button type="button" data-avatar-upload
-                class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">{{ "profile.avatar_upload" | t }}</button>
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+          {{ "profile.avatar_upload" | t }}
+        </button>
         <button type="button" data-avatar-initials
-                class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">{{ "profile.avatar_initials" | t }}</button>
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#user"></use></svg>
+          {{ "profile.avatar_initials" | t }}
+        </button>
         {% if hasOwnAvatar %}
           <button type="submit"
-                  class="inline-flex h-9 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50">{{ "profile.avatar_remove" | t }}</button>
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+            {{ "profile.avatar_remove" | t }}
+          </button>
         {% endif %}
         <p class="hidden w-full text-xs text-red-700" data-avatar-error>{{ "profile.invalid_avatar" | t }}</p>
       </form>
@@ -79,7 +96,10 @@
         <label for="profile-name" class="block text-sm font-medium text-gray-700">{{ "profile.display_name" | t }}</label>
         <input id="profile-name" name="name" type="text" required maxlength="100" autocomplete="name" value="{{ name }}"
                class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-        <button type="submit" class="h-10 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.save" | t }}</button>
+        <button type="submit" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+          {{ "common.save" | t }}
+        </button>
       </form>
     </section>
 
@@ -131,7 +151,7 @@
             </div>
           {% else %}
             <a href="{{ provider.connectHref }}"
-               class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+               class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg>
               {{ "profile.connect" | t }} {{ provider.label }}
             </a>
@@ -152,7 +172,10 @@
         <input type="checkbox" name="confirm" value="disable" required>
         {{ "profile.disable_acknowledge" | t }}
       </label>
-      <button type="submit" class="mt-3 h-10 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50">{{ "profile.disable_account" | t }}</button>
+      <button type="submit" class="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#lock-closed"></use></svg>
+        {{ "profile.disable_account" | t }}
+      </button>
     </form>
   </section>
 </div>

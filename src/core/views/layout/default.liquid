@@ -68,6 +68,7 @@
           var switchToDark = toggle.getAttribute('data-theme-switch-dark') || 'Switch to dark theme';
           toggle.setAttribute('aria-pressed', isLight ? 'true' : 'false');
           toggle.setAttribute('aria-label', isLight ? switchToDark : switchToLight);
+          if (toggle.hasAttribute('title')) toggle.setAttribute('title', isLight ? switchToDark : switchToLight);
           if (toggle.hasAttribute('data-sidebar-tooltip')) {
             toggle.setAttribute('data-sidebar-label', isLight ? switchToDark : switchToLight);
           }
