@@ -466,15 +466,17 @@ export async function pluginsForHook(env: Env, event: PluginHookEvent): Promise<
  * no longer contribute the same value — which previously let whichever sorted
  * first replace the other's label in the role editor.
  */
-export async function allPluginPermissions(env: Env): Promise<Array<{ value: string; label: string }>> {
+export async function allPluginPermissions(env: Env): Promise<Array<{ value: string; label: string; group: string }>> {
   const plugins = await getPlugins(env);
   const seen = new Set<string>();
-  const result: Array<{ value: string; label: string }> = [];
+  const result: Array<{ value: string; label: string; group: string }> = [];
   for (const plugin of plugins) {
+    // The role editor lists each plugin's permissions under this heading.
+    const group = plugin.manifest.name || plugin.label || plugin.manifest.id;
     for (const perm of pluginPermissions(plugin.manifest)) {
       if (!seen.has(perm.value)) {
         seen.add(perm.value);
-        result.push(perm);
+        result.push({ ...perm, group });
       }
     }
   }

@@ -238,7 +238,7 @@ describe('plugin permission namespace', () => {
 
     // A built-in under a friendly label, and another plugin's permission, are
     // both dropped — only the plugin's own namespace survives.
-    expect(await allPluginPermissions(pluginEnv())).toEqual([{ value: 'events:manage', label: 'Manage events' }]);
+    expect(await allPluginPermissions(pluginEnv())).toEqual([{ value: 'events:manage', label: 'Manage events', group: 'Events' }]);
   });
 
   it('refuses a role holding another plugin\'s permission, and admits its own', async () => {

@@ -133,6 +133,8 @@ export interface ImportExportHrefs {
 export interface ContributedPermission {
   value: string;
   label: string;
+  /** Heading the role editor lists this permission under (e.g. the plugin name). */
+  group?: string;
 }
 
 /** A quota a contributor declares, resolved to its effective value. For the

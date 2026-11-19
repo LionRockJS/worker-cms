@@ -24,6 +24,14 @@ export async function rolesPage(views: Fetcher, opts: BaseTemplateProps & {
   return adminLayout(views, opts, { title: 'Roles', body });
 }
 
+export interface PermissionGroup {
+  /** Literal heading (a plugin's name); used when labelKey is empty. */
+  label: string;
+  /** Locale key for a heading the CMS owns. */
+  labelKey: string;
+  options: Array<{ value: string; label: string; checked: boolean }>;
+}
+
 export async function roleFormPage(views: Fetcher, opts: BaseTemplateProps & {
   canManageIp?: boolean;
   ipAllowlist?: string;
@@ -34,9 +42,9 @@ export async function roleFormPage(views: Fetcher, opts: BaseTemplateProps & {
   builtin: boolean;
   locked: boolean;
   error?: string;
-  permissionOptions: Array<{ value: string; label: string; checked: boolean }>;
+  permissionGroups: PermissionGroup[];
 }): Promise<string> {
-  const { isNew, name, label, builtin, locked, error, permissionOptions } = opts;
+  const { isNew, name, label, builtin, locked, error, permissionGroups } = opts;
   const heading = isNew ? 'New Role' : locked ? `View Role: ${label}` : `Edit Role: ${label}`;
   const body = await renderView(views, '/templates/role-form.json', {
     canManageIp: !!opts.canManageIp,
@@ -53,7 +61,8 @@ export async function roleFormPage(views: Fetcher, opts: BaseTemplateProps & {
     label,
     error: error ?? '',
     hasError: !!error,
-    permissionOptions,
+    permissionGroups,
+    hasPluginGroups: permissionGroups.length > 1,
   });
   return adminLayout(views, opts, { title: heading, body });
 }

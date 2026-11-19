@@ -3,7 +3,7 @@
 
 import { Hono } from 'hono';
 import { storedIpAllowlist } from '../../../core/auth/ip-access';
-import { roleFormPage, rolesPage } from '../templates/roles';
+import { roleFormPage, rolesPage, type PermissionGroup } from '../templates/roles';
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, USER_ROLES } from '../../../types';
 import type { Env, Variables, Permission } from '../../../types';
 import { slugify, str } from '../../../core/http/forms';
@@ -16,7 +16,7 @@ import { recordPolicyDenial } from '../../../core/auth/denials';
 import type { AccessAuthorization } from '../../../core/auth/access-authorization';
 import { renderPage } from '../../../core/render/chrome';
 import { clearRolePermissionsCache, permissionsFor, splitRoles } from '../../../core/auth/roles';
-import { coreExtensions } from '../../../core/extensions';
+import { coreExtensions, type ContributedPermission } from '../../../core/extensions';
 import {
   createCustomRole,
   deleteCustomRole,
@@ -66,7 +66,7 @@ const BUILTIN_PERMISSIONS = new Set<string>(PERMISSIONS);
  * collision that gets past a contributor, and any duplicate value, so one row
  * cannot silently relabel another.
  */
-async function assignableContributedPermissions(env: Env): Promise<Array<{ value: string; label: string }>> {
+async function assignableContributedPermissions(env: Env): Promise<ContributedPermission[]> {
   const contributed = await (coreExtensions().contributedPermissions?.(env) ?? []);
   const seen = new Set<string>();
   return contributed.filter((permission) => {
@@ -76,20 +76,31 @@ async function assignableContributedPermissions(env: Env): Promise<Array<{ value
   });
 }
 
-async function buildPermissionOptions(env: Env, granted: Set<Permission | string>): Promise<Array<{ value: string; label: string; checked: boolean }>> {
+/** Role editor checkboxes: the CMS's own permissions first, then one group per
+ *  contributor (plugin), so unticking a whole group visibly blocks that plugin. */
+async function buildPermissionGroups(env: Env, granted: Set<Permission | string>): Promise<PermissionGroup[]> {
   const pluginPerms = await assignableContributedPermissions(env);
-  return [
-    ...PERMISSIONS.map((permission) => ({
+  const groups: PermissionGroup[] = [{
+    label: '',
+    labelKey: 'view_strings.sections_role_form.cms',
+    options: PERMISSIONS.map((permission) => ({
       value: permission,
       label: PERMISSION_DESCRIPTIONS[permission],
       checked: granted.has(permission),
     })),
-    ...pluginPerms.map((perm) => ({
-      value: perm.value,
-      label: perm.label,
-      checked: granted.has(perm.value),
-    })),
-  ];
+  }];
+  const byLabel = new Map<string, PermissionGroup>();
+  for (const perm of pluginPerms) {
+    const label = perm.group || perm.value.split(':')[0];
+    let group = byLabel.get(label);
+    if (!group) {
+      group = { label, labelKey: '', options: [] };
+      byLabel.set(label, group);
+      groups.push(group);
+    }
+    group.options.push({ value: perm.value, label: perm.label, checked: granted.has(perm.value) });
+  }
+  return groups;
 }
 
 rolesRoutes.get('/roles', async (c) => {
@@ -122,7 +133,7 @@ rolesRoutes.get('/roles/new', async (c) => {
     label: '',
     builtin: false,
     locked: false,
-    permissionOptions: await buildPermissionOptions(c.env, new Set()),
+    permissionGroups: await buildPermissionGroups(c.env, new Set()),
   });
 });
 
@@ -155,7 +166,7 @@ rolesRoutes.post('/roles', async (c) => {
       builtin: false,
       locked: false,
       error,
-      permissionOptions: [],
+      permissionGroups: [],
     });
   }
   return c.redirect(`/admin/roles/${encodeURIComponent(name)}/edit`);
@@ -175,7 +186,7 @@ rolesRoutes.get('/roles/:name/edit', async (c) => {
     label: role.label,
     builtin: role.builtin,
     locked: role.locked,
-    permissionOptions: await buildPermissionOptions(c.env, granted),
+    permissionGroups: await buildPermissionGroups(c.env, granted),
     canManageIp: splitRoles(c.get('user').role).includes('admin'),
     ipAllowlist: storedIpAllowlist((await c.env.DB.prepare('SELECT ip_allowlist FROM roles WHERE name = ?').bind(role.name).first<{ ip_allowlist: string }>())?.ip_allowlist ?? '[]').join('\n'),
   });

@@ -16,11 +16,13 @@
     "shared_pool_description": "当用户个人余额用尽时，共享池会支付相关费用。任何人都可以在个人资料页捐赠点数；拥有转移权限的用户可以在用户编辑页发放共享池点数。"
   },
   "view_strings": {
+    "sections_role_form.cms": "CMS",
     "sections_role_form.delete": "删除",
     "sections_role_form.delete_this_role_it_will_be_removed_from_any_users_that_have_it": "要删除此角色吗？拥有此角色的所有用户都将失去该角色。",
     "sections_role_form.name": "名称",
     "sections_role_form.optional_derived_from_the_name_if_blank_used_internally_to_identify_the_": "可选；留空时根据名称生成，用于系统内部标识角色。",
     "sections_role_form.permissions": "权限",
+    "sections_role_form.plugin_access_needs_plugin_access_and_one_of_the_plugins_permissions": "角色需要 plugin:access 权限，并至少拥有该插件的一项权限，才能访问该插件。取消勾选某插件的全部权限即可禁止访问。",
     "sections_role_form.slug": "别名",
     "sections_role_form.the_admin_role_always_has_every_permission_and_cannot_be_edited": "管理员角色始终拥有所有权限，且无法编辑。",
     "sections_roles.assign_permissions_to_roles_the_admin_role_always_has_every_permission": "为角色分配权限。管理员角色始终拥有所有权限。",
