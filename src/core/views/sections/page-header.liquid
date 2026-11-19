@@ -12,7 +12,7 @@
         </a>
       {% endif %}
       <div class="min-w-0">
-        <h2 class="break-words text-2xl font-bold text-gray-900">{{ section.settings.title }}</h2>
+        <h2 class="studio-title break-words text-gray-900">{{ section.settings.title }}</h2>
         {% if section.settings.description and section.settings.description != '' %}
           <p class="mt-1 text-sm text-gray-500">{{ section.settings.description }}</p>
         {% endif %}
@@ -26,7 +26,7 @@
               <a href="{{ action.settings.href }}"
                  title="{{ action.settings.label }}"
                  aria-label="{{ action.settings.label }}"
-                 class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+                 class="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
                 {% if action.settings.icon and action.settings.icon != '' %}<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ action.settings.icon }}"></use></svg>{% endif %}
                 <span class="hidden lg:inline">{{ action.settings.label }}</span>
               </a>
@@ -34,7 +34,7 @@
               <a href="{{ action.settings.href }}"
                  title="{{ action.settings.label }}"
                  aria-label="{{ action.settings.label }}"
-                 class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+                 class="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
                 {% if action.settings.icon and action.settings.icon != '' %}<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ action.settings.icon }}"></use></svg>{% endif %}
                 <span class="hidden lg:inline">{{ action.settings.label }}</span>
               </a>

@@ -44,9 +44,9 @@
       function storedTheme() {
         try {
           var value = window.localStorage.getItem(key);
-          return value === 'light' || value === 'dark' ? value : 'dark';
+          return value === 'light' || value === 'dark' ? value : 'light';
         } catch (error) {
-          return 'dark';
+          return 'light';
         }
       }
 
@@ -87,7 +87,7 @@
       applyTheme(storedTheme());
 
       function bindThemeToggle() {
-        renderToggle(root.getAttribute('data-theme') || 'dark');
+        renderToggle(root.getAttribute('data-theme') || 'light');
         document.querySelectorAll('[data-theme-toggle]').forEach(function(toggle) {
           if (!(toggle instanceof HTMLButtonElement)) return;
           if (toggle.dataset.themeBound === '1') return;
@@ -694,8 +694,8 @@
   {% if admin %}
     <header class="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-4 py-3 text-white shadow-xl md:hidden" data-admin-mobile-bar>
       <a href="/admin" aria-label="{{ "shell.go_to_dashboard" | t }}" class="flex min-w-0 items-center gap-3">
-        <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
-        <span class="min-w-0 truncate text-lg font-bold tracking-tight">{{ siteTitle }}</span>
+        <svg class="studio-mark shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+        <span class="studio-wordmark min-w-0 truncate">{{ siteTitle }}</span>
       </a>
       <button type="button"
               class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-700 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
@@ -716,8 +716,8 @@
            class="flex min-w-0 items-center gap-3"
            data-sidebar-tooltip
            data-sidebar-label="{{ "shell.go_to_dashboard" | t }}">
-          <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
-          <span class="min-w-0 truncate text-lg font-bold tracking-tight" data-sidebar-text>{{ siteTitle }}</span>
+          <svg class="studio-mark shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+          <span class="studio-wordmark min-w-0 truncate" data-sidebar-text>{{ siteTitle }}</span>
         </a>
         <button type="button"
                 class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-700 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white md:hidden"
