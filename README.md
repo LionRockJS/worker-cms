@@ -28,7 +28,16 @@ Content management system on Workers
 npm install
 ```
 
-`npm run setup` interactively configures resources, migrations, OAuth, and the
+For a local Wrangler instance, run `npm run setup` and accept **Set up this
+clone for local development with Wrangler?** The wizard creates `wrangler.toml`
+from the example when needed, sets the localhost origin and callback in the
+gitignored `.dev.vars`, generates a signing key if needed, and applies the D1
+migrations for the enabled databases. Then run `npm run dev` and open
+**http://localhost:8787**. To sign in, configure your OAuth client for
+`http://localhost:8787/auth/callback` and put its secret in `.dev.vars`.
+
+Decline the Wrangler development option to open the full hosting wizard.
+It interactively configures resources, migrations, OAuth, and the
 default timezone for new page schedules. It can also grant the first
 administrator role on sign-in. When the plugins feature is enabled, setup
 offers an optional private R2 cache for plugin views

@@ -2,6 +2,7 @@
 // interactive prompts or provisioning Cloudflare resources.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { runInNewContext } from 'node:vm';
 import { unstable_readConfig } from 'wrangler';
 
 const source = readFileSync(new URL('./install.mjs',import.meta.url),'utf8');
-const configFunctions = source.slice(source.indexOf('function setRootValue('), source.indexOf('function devVar('));
+const configFunctions = source.slice(source.indexOf('function setRootValue('), source.indexOf('function setDevVar('));
 const example = readFileSync(new URL('../wrangler.example.toml',import.meta.url),'utf8');
 const optionalBlock = /# \[\[r2_buckets\]\]\n# binding = "PLUGIN_VIEWS_BUCKET"\n# bucket_name = "cms-plugin-views"\n?/;
 
@@ -107,36 +108,63 @@ test('DMS setup omits both publish bindings and restores existing publish resour
   assert.equal(enabled.config.r2_buckets.some(({ binding }) => binding === 'PUBLISH_BUCKET'), false);
 });
 
-async function configureLocalAdmin(existing, confirmAdmin, providerUserId) {
-  const secretsFunctions = source.slice(source.indexOf('function devVar('), source.indexOf('async function featureEnabled('));
+async function configureLocalSecrets(existing, confirmAdmin, providerUserId, providers = ['eventuai']) {
+  const secretsFunctions = source.slice(source.indexOf('function setDevVar('), source.indexOf('async function featureEnabled('));
   let result;
   const writeSecrets = runInNewContext(`${secretsFunctions}\nwriteLocalSecrets`, {
     DEV_VARS_PATH: 'secrets',
     PROVIDERS: { eventuai: { secret: 'EVENTUAI_CLIENT_SECRET' } },
     console: { log() {} },
-    readFile: async () => existing,
-    writeFile: async (_path, value) => { result = value; },
+    readFile: async () => {
+      if (existing !== null) return existing;
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    writeFile: async (_path, value, { mode }) => {
+      assert.equal(mode, 0o600);
+      result = value;
+    },
+    parseEnv,
+    randomBytes,
     confirm: confirmAdmin,
     ask: async (label) => label.includes('account subject') ? providerUserId : '',
   });
-  await writeSecrets({ canonicalOrigin: 'http://localhost:8787', providers: ['eventuai'], clientIds: {} });
+  await writeSecrets({ canonicalOrigin: 'http://localhost:8787', providers });
   return result;
 }
+
+test('Wrangler development creates local settings without asking for OAuth', async () => {
+  const noPrompt = async () => assert.fail('Prompted for OAuth configuration');
+  const first = await configureLocalSecrets(null, noPrompt, undefined, []);
+  const vars = parseEnv(first);
+  assert.match(vars.JWT_SECRET, /^[0-9a-f]{64}$/);
+  assert.equal(vars.CANONICAL_ORIGIN, 'http://localhost:8787');
+  assert.equal(vars.OAUTH_REDIRECT_URI, 'http://localhost:8787/auth/callback');
+  assert.equal(await configureLocalSecrets(first, noPrompt, undefined, []), first);
+
+  const existing = `export JWT_SECRET = "${vars.JWT_SECRET}"\nexport CANONICAL_ORIGIN = https://example.com\nGITHUB_CLIENT_SECRET=existing\n`;
+  const updated = parseEnv(await configureLocalSecrets(existing, noPrompt, undefined, []));
+  assert.deepEqual(updated, { ...vars, GITHUB_CLIENT_SECRET: 'existing' });
+
+  for (const value of ['short', 'replace-with-a-random-32-byte-hex-string']) {
+    const repaired = parseEnv(await configureLocalSecrets(`JWT_SECRET=${value}\n`, noPrompt, undefined, []));
+    assert.match(repaired.JWT_SECRET, /^[0-9a-f]{64}$/);
+  }
+});
 
 test('local setup writes a dotenv-safe first-admin grant only when enabled', async () => {
   const existing = 'JWT_SECRET=test\n# INITIAL_USER_ROLES=\n';
   const providerUserId = 'identity\'#"\\$USER';
-  const enabled = await configureLocalAdmin(existing, async () => true, providerUserId);
+  const enabled = await configureLocalSecrets(existing, async () => true, providerUserId);
   assert.deepEqual(JSON.parse(parseEnv(enabled).INITIAL_USER_ROLES), [
     { provider: 'eventuai', providerUserId, roles: ['admin'] },
   ]);
-  const declined = await configureLocalAdmin(existing, async () => false, providerUserId);
+  const declined = await configureLocalSecrets(existing, async () => false, providerUserId);
   assert.equal(parseEnv(declined).INITIAL_USER_ROLES, undefined);
 });
 
 test('local setup preserves an existing initial role allowlist', async () => {
   const existingGrant = '[\n  {"provider":"github","providerUserId":"123","roles":["editor"]}\n]';
   const existing = `JWT_SECRET=test\nexport INITIAL_USER_ROLES = '${existingGrant}'\n`;
-  const result = await configureLocalAdmin(existing, async () => assert.fail('Prompted to replace existing grants'));
+  const result = await configureLocalSecrets(existing, async () => assert.fail('Prompted to replace existing grants'));
   assert.equal(parseEnv(result).INITIAL_USER_ROLES, existingGrant);
 });

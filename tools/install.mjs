@@ -9,6 +9,7 @@ import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import {
   DEFAULT_EXPIRES_IN_DAYS,
   MAX_EXPIRES_IN_DAYS,
@@ -27,6 +28,7 @@ const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
 const DEV_VARS_PATH = new URL('../.dev.vars', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const LOCAL_ORIGIN = 'http://localhost:8787';
 const PROVIDERS = {
   github: {
     clientId: 'GITHUB_CLIENT_ID',
@@ -66,11 +68,15 @@ Usage:
 
 Add one OAuth provider to the Worker configured in this clone's wrangler.toml.
 The wizard uses the existing callback URL and deploys through npm run deploy.
-` : `0xCMS interactive Cloudflare setup
+` : `0xCMS interactive setup
 
 Usage:
-  npm run setup             ask where the CMS runs
-  npm run setup -- --local  run it on this machine (Wrangler, server.mjs, or workerd)
+  npm run setup             choose Wrangler development or full hosting setup
+  npm run setup -- --local  full hosting setup on this machine, including OAuth
+
+For Wrangler development, setup creates wrangler.toml if needed, configures
+.dev.vars for localhost:8787, and applies the local D1 migrations. OAuth
+credentials can be configured separately when you need to sign in.
 
 The wizard asks for one namespace and derives every resource name from it
 (<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit,
@@ -140,11 +146,11 @@ function run(args, options) {
   return result;
 }
 
-function runNpm(args) {
+function runNpm(args, { stdin = 'inherit' } = {}) {
   rl.pause();
   const result = spawnSync(NPM, args, {
     cwd: new URL('..', import.meta.url),
-    stdio: 'inherit',
+    stdio: [stdin, 'inherit', 'inherit'],
   });
   rl.resume();
   if (result.error) throw result.error;
@@ -461,14 +467,9 @@ async function updateConfig(settings) {
   console.log(existing === null ? 'Created wrangler.toml from wrangler.example.toml.' : 'Updated wrangler.toml.');
 }
 
-function devVar(lines, key) {
-  const line = lines.find((item) => item.startsWith(`${key}=`));
-  return line?.slice(key.length + 1) || undefined;
-}
-
-/** Replaces KEY= (or a commented-out "# KEY=") in place, else appends it. */
 function setDevVar(lines, key, value) {
-  let index = lines.findIndex((line) => line.startsWith(`${key}=`));
+  const assignment = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*(?:=|:\\s)`);
+  let index = lines.findLastIndex((line) => assignment.test(line));
   if (index === -1) index = lines.findIndex((line) => new RegExp(`^#\\s*${key}=`).test(line));
   const replacement = `${key}=${value}`;
   if (index !== -1) lines[index] = replacement;
@@ -497,16 +498,17 @@ async function firstAdminGrant(providers, prompt) {
  * .dev.vars overrides [vars] and a stale value there would win over the
  * origin just entered. Existing secrets are kept unless replaced.
  */
-async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
+async function writeLocalSecrets({ canonicalOrigin, providers = [], clientIds = {} }) {
   const existing = await readFile(DEV_VARS_PATH, 'utf8').catch((error) => {
     if (error.code === 'ENOENT') return null;
     throw error;
   });
+  const vars = parseEnv(existing ?? '');
   const lines = (existing ?? '# Local development only. Gitignored; never reuse these values in a deployed Worker.\n').split('\n');
 
   setDevVar(lines, 'CANONICAL_ORIGIN', canonicalOrigin);
   setDevVar(lines, 'OAUTH_REDIRECT_URI', `${canonicalOrigin}/auth/callback`);
-  if (devVar(lines, 'JWT_SECRET')) {
+  if (vars.JWT_SECRET?.length >= 32 && vars.JWT_SECRET !== 'replace-with-a-random-32-byte-hex-string') {
     console.log('Keeping the existing JWT_SECRET in .dev.vars.');
   } else {
     setDevVar(lines, 'JWT_SECRET', randomBytes(32).toString('hex'));
@@ -515,7 +517,7 @@ async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
 
   for (const provider of providers) {
     const key = PROVIDERS[provider].secret;
-    if (devVar(lines, key) && !await confirm(`Replace the existing ${key} in .dev.vars?`, false)) continue;
+    if (vars[key] && !await confirm(`Replace the existing ${key} in .dev.vars?`, false)) continue;
     const secret = provider === 'apple'
       ? await appleClientSecret(clientIds.apple)
       : await ask(`${provider} client secret (blank to add later)`, undefined, () => true);
@@ -525,7 +527,7 @@ async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
 
   if (lines.some((line) => /^\s*(?:export\s+)?INITIAL_USER_ROLES\s*(?:=|:\s)/.test(line))) {
     console.log('Keeping the existing INITIAL_USER_ROLES in .dev.vars.');
-  } else {
+  } else if (providers.length) {
     const grant = await firstAdminGrant(providers, 'Configure a first admin in .dev.vars?');
     if (grant) {
       // Keep the dotenv quoting and any variable expansion out of the JSON value.
@@ -672,12 +674,34 @@ async function upgrade() {
   console.log(`\nEnabled ${provider} on ${name} and updated wrangler.toml.`);
 }
 
+async function setupLocalDevelopment() {
+  const template = await readFile(EXAMPLE_CONFIG_PATH, 'utf8');
+  try {
+    await writeFile(CONFIG_PATH, template, { flag: 'wx' });
+    console.log('Created wrangler.toml from wrangler.example.toml.');
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    console.log('Keeping the existing wrangler.toml.');
+  }
+
+  await writeLocalSecrets({ canonicalOrigin: LOCAL_ORIGIN });
+  runNpm(['run', 'db:migrate'], { stdin: 'ignore' });
+  console.log(`\nLocal setup complete. Start with npm run dev and open ${LOCAL_ORIGIN}.`);
+  console.log(`For sign-in, configure an OAuth client with callback ${LOCAL_ORIGIN}/auth/callback.`);
+}
+
 async function main() {
-  console.log('\n0xCMS Cloudflare setup\n');
+  console.log('\n0xCMS setup\n');
+
+  const localHosting = process.argv.includes('--local');
+  if (!localHosting && await confirm('Set up this clone for local development with Wrangler?')) {
+    await setupLocalDevelopment();
+    return;
+  }
 
   const canonicalOrigin = (await ask(
     'Public HTTPS origin (custom domain or workers.dev URL; http://localhost:port for local dev)',
-    undefined,
+    localHosting ? LOCAL_ORIGIN : undefined,
     origin,
   )).replace(/\/$/, '');
   const callback = `${canonicalOrigin}/auth/callback`;
@@ -685,7 +709,7 @@ async function main() {
   // local: server.mjs serves it behind a tunnel or reverse proxy.
   const loopback = isLocalOrigin(canonicalOrigin);
   const local = loopback
-    || process.argv.includes('--local')
+    || localHosting
     || await confirm('Run it on this machine behind a tunnel or proxy?', false);
 
   if (local) {
