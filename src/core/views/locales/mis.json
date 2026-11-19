@@ -445,6 +445,7 @@
     "sections_taxonomies.source": "Source",
     "sections_taxonomies.taxonomies": "Taxonomies",
     "sections_taxonomies.view": "View",
+    "sections_taxonomy_form.config_taxonomy_read_only": "This taxonomy is defined in the CMS config and is read-only.",
     "sections_taxonomy_form.delete": "Delete",
     "sections_taxonomy_form.delete_this_taxonomy_its_tags_are_kept_but_no_longer_grouped_under_it": "Delete this taxonomy? Its tags are kept but no longer grouped under it.",
     "sections_taxonomy_form.name": "Name",

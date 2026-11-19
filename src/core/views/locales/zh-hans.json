@@ -445,6 +445,7 @@
     "sections_taxonomies.source": "来源",
     "sections_taxonomies.taxonomies": "分类法",
     "sections_taxonomies.view": "查看",
+    "sections_taxonomy_form.config_taxonomy_read_only": "此分类法由 CMS 配置定义，为只读。",
     "sections_taxonomy_form.delete": "删除",
     "sections_taxonomy_form.delete_this_taxonomy_its_tags_are_kept_but_no_longer_grouped_under_it": "删除此分类法？其索引会保留，但不再归入此分类法。",
     "sections_taxonomy_form.name": "名称",

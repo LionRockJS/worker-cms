@@ -73,7 +73,7 @@ tagsRoutes.get('/taxonomies/view/:slug', async (c) => {
   const config = await resolveCmsConfig(c.env);
   const name = config.taxonomies[slug];
   if (!name) return c.notFound();
-  return taxonomyForm(c, { name, slug }, true);
+  return taxonomyForm(c, { name, slug }, true, true);
 });
 
 tagsRoutes.post('/taxonomies', requirePermission('taxonomy:write'), async (c) => {
@@ -213,11 +213,12 @@ tagsRoutes.post('/tags/:id/delete', requirePermission('tag:write'), async (c) =>
   return c.redirect('/admin/tags');
 });
 
-async function taxonomyForm(c: AppContext, taxonomy?: TaxonomyFormData, readOnly = false) {
+async function taxonomyForm(c: AppContext, taxonomy?: TaxonomyFormData, readOnly = false, fromConfig = false) {
   if (taxonomy) recordTaxonomyReads('taxonomy.read', [taxonomy]);
   return renderPage(c, taxonomyFormPage, {
     taxonomy,
     readOnly,
+    fromConfig,
   });
 }
 
