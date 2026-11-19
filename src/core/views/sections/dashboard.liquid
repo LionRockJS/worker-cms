@@ -127,10 +127,10 @@
                       <label for="weight_{{ page.id }}" class="sr-only">Weight for {{ page.name }}</label>
                       <input id="weight_{{ page.id }}" type="number" name="weight" value="{{ page.weight }}" min="0" max="1000"
                              class="w-20 shrink-0 px-2 py-1 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                      <button type="submit"
+                      <button type="submit" data-weight-save
                               title="{{ "view_strings.sections_dashboard.save" | t }}"
                               aria-label="{{ "view_strings.sections_dashboard.save" | t }}"
-                              class="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
+                              class="hidden h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
                       </button>
                     </form>

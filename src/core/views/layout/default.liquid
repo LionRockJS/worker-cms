@@ -946,13 +946,25 @@
       save(dragTable);
       dragSrc = null; dragTable = null; mdTarget = null; dragBefore = null;
     });
+    // Weight save buttons ([data-weight-save]) stay hidden until the weight
+    // input in the same form differs from its saved value.
+    function syncWeightSave(input) {
+      var btn = input.form && input.form.querySelector('[data-weight-save]');
+      if (!btn) return;
+      var changed = input.value !== input.defaultValue;
+      btn.classList.toggle('hidden', !changed);
+      btn.classList.toggle('inline-flex', changed);
+    }
+    document.addEventListener('input', function(e) {
+      if (e.target.matches && e.target.matches('input[name="weight"]')) syncWeightSave(e.target);
+    });
     // Keep the draft weight inputs in sync after reordering.
     function applyWeights(table, weights) {
       (weights || []).forEach(function(row) {
         var tr = table.querySelector('tbody tr[data-id="' + row.id + '"]');
         if (!tr) return;
         var input = tr.querySelector('input[name="weight"]');
-        if (input) input.value = row.weight;
+        if (input) { input.value = row.weight; input.defaultValue = String(row.weight); syncWeightSave(input); }
         {% feature_fragment publish/update-weight-drift %}
       });
     }
