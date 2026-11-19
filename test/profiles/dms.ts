@@ -104,6 +104,23 @@ it('runs the internal document lifecycle with no published database or bucket', 
   expect(await view('/admin/pages/list')).toMatchObject({ pages: [{ name: 'Updated record', isPublished: false }] });
   expect(await env.DB.prepare('SELECT COUNT(*) FROM page_versions WHERE page_id = ?').bind(id).first('COUNT(*)')).toBe(2);
 
+  const versions = await env.DB.prepare('SELECT id FROM page_versions WHERE page_id = ?')
+    .bind(id).all<{ id: number }>();
+  const versionId = versions.results[0].id;
+  expect(await view(`${edit}/edit?version=${versionId}`)).toMatchObject({
+    isVersionPreview: true,
+    versions: expect.arrayContaining([
+      expect.objectContaining({ href: `${edit}/edit?version=${versionId}`, live: false }),
+    ]),
+  });
+  const read = await request(`${edit}/read?version=${versionId}`);
+  expect(read.status).toBe(200);
+  const readPayload = (await read.text()).match(/<script id="cms-render-payload"[^>]*>(.*?)<\/script>/s)?.[1];
+  const history = JSON.parse(readPayload!).layoutData.body;
+  expect(history).toContain('Viewing version from');
+  for (const version of versions.results) expect(history).toContain(`${edit}/read?version=${version.id}`);
+  expect(history).not.toContain('>Live</span>');
+
   expect((await request(`${edit}/delete`, 'POST')).status).toBe(302);
   expect(await env.DB.prepare('SELECT id FROM trash_pages WHERE id = ?').bind(id).first('id')).toBe(id);
   expect((await request(`/admin/trash/${id}/restore`, 'POST')).status).toBe(302);

@@ -315,4 +315,3 @@ export async function advancedSearchMatchingPageIds(
 
   return rows.results.map((row) => row.id);
 }
-

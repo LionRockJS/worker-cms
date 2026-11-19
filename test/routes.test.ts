@@ -3826,6 +3826,20 @@ describe('structured editor weights', () => {
 });
 
 describe('Lect JSON version diff', () => {
+  it('marks the matching published version in the editor and read-only history', async () => {
+    const headers = { Cookie: await authCookie() };
+    const editor = await fetchWorker('/admin/pages/101/edit', { headers });
+    expect(editor.status).toBe(200);
+    expect(bodyData(await editor.text()).versions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ live: true, href: '/admin/pages/101/edit?version=501' }),
+    ]));
+
+    const read = await fetchWorker('/admin/pages/101/read?version=501', { headers });
+    expect(read.status).toBe(200);
+    const history = renderPayload(await read.text()).layoutData.body;
+    expect(history).toMatch(/version=501[^>]*>[^<]*<span[^>]*>Live<\/span>/);
+  });
+
   it('shows version timestamps in the CMS default timezone', async () => {
     const changed = stringifyLect({ ...basePageLectObject, name: localizedFixture('About TZ') });
     await env.DB.prepare(
