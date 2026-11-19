@@ -15,11 +15,6 @@
 //   src/features/<id>/views/**        merged in when <id> is enabled
 //   -> dist/views/**                  what [assets] points at
 //
-// Runtime paths do not change. A section still resolves as
-// /sections/<name>.liquid, so renderView(), the client engine's root list and
-// the plugin fallback chain in features/plugins/views.ts are untouched — only
-// the set of files that reaches the bundle is.
-//
 // Two paths colliding is a build error rather than a last-writer-wins merge:
 // two features owning one section, or a feature shadowing a core view, is a
 // mistake worth failing on.
@@ -48,6 +43,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compileSections } from './compile-sections.mjs';
 import { readManifest } from './build-migrations.mjs';
 import { writeIfChanged } from './write-if-changed.mjs';
 
@@ -236,6 +232,7 @@ export function assembleViews(features) {
     files.set(`${LOCALES}/${lang}.json`, Buffer.from(`${JSON.stringify(sortDeep(catalog), null, 2)}\n`));
   }
 
+  compileSections(files, features.plugins === true);
   return new Map([...files].sort(([a], [b]) => (a < b ? -1 : 1)));
 }
 

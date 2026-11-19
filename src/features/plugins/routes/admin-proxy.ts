@@ -380,6 +380,7 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
           `/admin/plugins/${pluginId}/views`,
           pluginViewRevision(plugin.manifest),
           plugin.manifest.i18n === true,
+          plugin.manifest.assets,
         )
       : await sanitizePluginHtmlFragment(await upstreamResponse.text());
     const title = decodePluginTitle(upstreamResponse.headers.get('x-cms-title')) || plugin.manifest.name || 'Plugin';

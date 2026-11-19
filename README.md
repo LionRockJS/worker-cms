@@ -564,6 +564,51 @@ For example:
 
 With no plugins registered, the system is inert and adds no plugin traffic.
 
+### Section template engines
+
+Admin views start with `views/templates/<name>.json`. Each entry in `sections` names a
+`type`, and `order` controls placement. In a core or enabled feature's `views/sections/`
+directory, provide one file per type. For a section named `summary`, any one of
+these files can render its title:
+
+| File | Template |
+| --- | --- |
+| `summary.liquid` | `<h2>{{ section.settings.title }}</h2>` |
+| `summary.hbs` or `summary.handlebars` | `<h2>{{section.settings.title}}</h2>` |
+| `summary.ejs` | `<h2><%= section.settings.title %></h2>` |
+
+JSON settings can use Liquid expressions and filters with any section engine.
+Each section receives page data, render globals, and its own `section` with resolved
+settings and ordered blocks. The build precompiles standalone EJS and Handlebars
+sections. The browser loads each compiled section on first use, shares one
+Handlebars runtime, and loads Liquid when a section, setting, snippet, or layout
+needs it. The default admin layout uses Liquid. EJS templates are executable
+developer-authored code.
+
+### Plugin sections
+
+A trusted UI plugin can mix these same file types in `views/sections/` and reference
+them by extensionless type in its usual `views/templates/*.json` entry point.
+During the plugin build, run the host's compiler against the plugin views directory:
+
+```sh
+node ../cms/tools/build-plugin-sections.mjs ./views
+```
+
+The compiler writes one script per EJS or Handlebars section under
+`views/assets/sections/` and prints the corresponding manifest `assets` entries.
+For example, `sections/summary.hbs` produces `{"path":"/assets/sections/summary.hbs.js"}`.
+Merge those entries with your existing asset declarations, remove declarations for
+retired sections, and serve the generated files at those bare asset paths on the
+plugin Worker. Admins approve the compiled files through the existing plugin asset
+screen and re-approve them when the bytes change.
+
+The browser resolves section types against the current plugin's declared section
+assets and loads each approved script on first use with its pinned integrity hash.
+Declared scripts require approval before rendering. Other types use the existing
+Liquid lookup. Handlebars uses the lazy host runtime.
+All three engines pass their plugin output through the plugin HTML sanitizer.
+
 ### Localized Liquid views
 
 Core and plugin Liquid views share the CMS translation catalog. Use a namespaced

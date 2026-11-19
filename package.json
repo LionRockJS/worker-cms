@@ -19,7 +19,7 @@
     "apple:client-secret": "node tools/generate-apple-client-secret.mjs",
     "type-check": "tsc --noEmit",
     "pretest": "npm run build",
-    "test": "node --test tools/test-view-fragments.mjs tools/test-session-keepalive.mjs tools/test-local-plugin-views.mjs tools/test-install-config.mjs && npm run check:profiles && npm run check:boundaries && npm run check:generated && npm run check:inventory && npm run check:requirements && vitest run",
+    "test": "node --test tools/test-section-engines.mjs tools/test-view-fragments.mjs tools/test-session-keepalive.mjs tools/test-local-plugin-views.mjs tools/test-install-config.mjs && npm run check:profiles && npm run check:boundaries && npm run check:generated && npm run check:inventory && npm run check:requirements && vitest run",
     "check:dms-profile": "node tools/check-dms-profile.mjs",
     "check:profiles": "node tools/check-profiles.mjs --quiet",
     "check:boundaries": "node tools/check-boundaries.mjs --quiet",
@@ -37,7 +37,9 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
     "@cloudflare/workers-types": "^5.20261118.1",
+    "ejs": "^3.1.10",
     "esbuild": "^0.28.2",
+    "handlebars": "^4.7.10",
     "typescript": "^7.0.2",
     "wrangler": "^4.164.0"
   }

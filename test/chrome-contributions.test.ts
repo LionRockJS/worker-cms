@@ -198,9 +198,9 @@ describe('sidebar menu items by profile', () => {
     const expected = [...CORE_CLIENT_ASSETS, ...features.flatMap((feature) => feature.clientAssets ?? [])];
 
     expect(layoutData(html).clientAssets).toEqual(expected);
-    // The engine and the renderer load first and only here: client-render.js
+    // The renderer loads first and only here: client-render.js
     // replaces the document with what default.liquid renders.
-    expect(bootstrap).toEqual(['/assets/liquid.browser.min.js', '/assets/client-render.js', ...expected]);
+    expect(bootstrap).toEqual(['/assets/client-render.js', ...expected]);
   });
 
   it('ships every declared client asset', async () => {

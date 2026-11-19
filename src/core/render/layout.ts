@@ -33,14 +33,8 @@ const EDITOR_SYNC_CLIENT_ASSETS: readonly string[] = [
   '/assets/editor-sync.js',
 ];
 
-/**
- * The engine and the renderer, loaded before anything else and only in the
- * bootstrap: client-render.js replaces the whole document with the rendered
- * layout, so re-listing them in default.liquid would reload the renderer into
- * the page it just produced.
- */
+/** The bootstrap starts the renderer once. It loads engines on demand. */
 const BOOTSTRAP_CLIENT_ASSETS: readonly string[] = [
-  '/assets/liquid.browser.min.js',
   '/assets/client-render.js',
 ];
 

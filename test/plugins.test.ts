@@ -983,7 +983,10 @@ describe('plugin admin proxy', () => {
     __injectPluginFetcher(url, {
       fetch: async (input: RequestInfo | URL): Promise<Response> => {
         const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        if (new URL(u).pathname === '/__plugin/manifest') return Response.json(EVENTS_MANIFEST);
+        if (new URL(u).pathname === '/__plugin/manifest') return Response.json({
+          ...EVENTS_MANIFEST,
+          assets: [{ path: '/assets/sections/cards.hbs.js' }, { path: '/assets/actions.js' }],
+        });
         return Response.json(
           { marker: 'CLIENT_VIEW_MARKER' },
           {
@@ -1015,6 +1018,7 @@ describe('plugin admin proxy', () => {
       viewPath: '/templates/plugin-dashboard.json',
       viewBasePath: '/admin/plugins/events/views',
       plugin: true,
+      sectionAssets: ['/assets/sections/cards.hbs.js'],
       data: { marker: 'CLIENT_VIEW_MARKER' },
       // EVENTS_MANIFEST does not declare `i18n`, so the client must not probe
       // this plugin's locale catalogs (that request would 404 on every view).
@@ -1425,7 +1429,7 @@ describe('plugin admin proxy', () => {
     const manifest = {
       ...EVENTS_MANIFEST,
       editViews: ['event'],
-      assets: [{ path: '/assets/event-new.js', label: 'New event auto slug' }],
+      assets: [{ path: '/assets/event-new.js', label: 'New event auto slug' }, { path: '/assets/sections/details.ejs.js' }],
     };
     const integrity = await computeIntegrity(new TextEncoder().encode('console.log("event-new")').buffer);
     await approveAsset(env.DB, 'events', '/assets/event-new.js', integrity, 'admin@example.com');
@@ -1471,6 +1475,7 @@ describe('plugin admin proxy', () => {
       expect(response.status).toBe(200);
       const payload = renderPayload(await response.text());
       expect(payload.layoutData.editorSync).toBe(true);
+      expect(payload.bodyView).toMatchObject({ sectionAssets: ['/assets/sections/details.ejs.js'] });
       expect(payload.approvedPluginAssets?.events?.[0]).toMatchObject({
         path: '/assets/event-new.js',
         integrity,

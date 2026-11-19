@@ -16,6 +16,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { sectionExtensions } from './compile-sections.mjs';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
@@ -316,7 +317,7 @@ for (const [rel, owner] of viewOwners) {
   }
   for (const section of Object.values(parsed.sections ?? {})) {
     if (!section?.type) continue;
-    const sectionOwner = viewOwners.get(`sections/${section.type}.liquid`);
+    const sectionOwner = sectionExtensions.map(ext => viewOwners.get(`sections/${section.type}.${ext}`)).find(Boolean);
     if (!sectionOwner) {
       failures.push(`${path.relative(rootDir, source)} uses section "${section.type}", which no views/ directory provides`);
     } else if (sectionOwner !== 'core' && sectionOwner !== owner) {
@@ -332,7 +333,7 @@ for (const [rel, owner] of viewOwners) {
 //     the raw key once the feature is dropped.
 const viewStringKey = /view_strings\.([\w]+)\./g;
 for (const [rel, owner] of viewOwners) {
-  if (!rel.endsWith('.liquid')) continue;
+  if (!sectionExtensions.some(ext => rel.endsWith('.' + ext))) continue;
   const source = path.join(viewsDirOf(owner), rel);
   const seen = new Set();
   for (const [, key] of readFileSync(source, 'utf8').matchAll(viewStringKey)) {
@@ -340,8 +341,8 @@ for (const [rel, owner] of viewOwners) {
     seen.add(key);
     // A key names a view file: sections_trash -> sections/trash.liquid.
     const [kind, ...rest] = key.split('_');
-    const named = `${kind}/${rest.join('-')}.liquid`;
-    const keyOwner = viewOwners.get(named);
+    const named = `${kind}/${rest.join('-')}`;
+    const keyOwner = sectionExtensions.map(ext => viewOwners.get(named + '.' + ext)).find(Boolean);
     if (keyOwner && keyOwner !== 'core' && keyOwner !== owner) {
       failures.push(`${path.relative(rootDir, source)} uses view_strings.${key}.*, named after a view the "${keyOwner}" feature owns`);
     }
