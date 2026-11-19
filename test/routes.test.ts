@@ -3489,7 +3489,7 @@ describe('permission-aware admin UI', () => {
     });
     expect(reset.status).toBe(302);
     const afterInvalid = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: await authCookie() } })).text());
-    expect(afterInvalid.primaryColor).toBe('#cbef34');
+    expect(afterInvalid.primaryColor).toBe('#1d201c');
     expect(afterInvalid.fontOptions).toEqual(expect.arrayContaining([
       expect.objectContaining({ value: 'system', selected: true }),
     ]));

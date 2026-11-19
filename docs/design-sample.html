@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<!--
+  Admin design sample — every common admin pattern on one page, styled by the
+  real compiled stylesheet. Use it to fine-tune the theme:
+
+    1. Edit tokens / components in assets-source/admin.css
+       (light: `html[data-theme="light"]`, dark: `@theme` + `:root`,
+        shape language: the "Studio components" section).
+    2. npm run build:css
+    3. Reload this page.
+
+  Serve the repo root over HTTP (the icon sprite will not load from file://):
+    python3 -m http.server 8790   →   http://localhost:8790/docs/design-sample.html
+
+  Markup is copied from the host views, so only classes the host already
+  emits are used — a class added here that no host view uses will be absent
+  from admin.css. The saved accent colour (Settings → Appearance) is applied
+  at runtime by core/render/theme.ts and is not reflected here; this page
+  shows the compiled default accent.
+-->
+<html lang="en" class="h-full overflow-x-hidden bg-gray-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Design Sample</title>
+  <link rel="stylesheet" href="../dist/views/assets/admin.css">
+  <script>
+    (function () {
+      var theme = 'light';
+      try { theme = localStorage.getItem('worker-cms-theme') === 'dark' ? 'dark' : 'light'; } catch (e) {}
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <style>
+    /* Sample-page only: token swatches. */
+    .swatch { display: flex; align-items: center; gap: .75rem; }
+    .swatch i { width: 2.25rem; height: 2.25rem; border-radius: .5rem; box-shadow: inset 0 0 0 1px var(--cms-line-strong); flex-shrink: 0; }
+    .swatch code { font-size: .75rem; color: var(--color-gray-500); }
+  </style>
+</head>
+<body class="h-full overflow-x-hidden">
+
+  <!-- ===== Sidebar (layout/default.liquid) ===== -->
+  <aside class="fixed inset-0 z-50 hidden max-h-screen min-h-screen flex-col overflow-hidden bg-gray-900 text-white shadow-xl md:fixed md:inset-y-0 md:left-0 md:flex md:min-h-0 md:w-64" data-admin-sidebar>
+    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-gray-700 px-4 py-3 md:px-6 md:py-5">
+      <a href="#" class="flex min-w-0 items-center gap-3">
+        <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#blocks"></use></svg>
+        <span class="min-w-0 truncate text-lg font-bold tracking-tight" data-sidebar-text>Studio CMS</span>
+      </a>
+    </div>
+    <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4 md:px-4 md:py-6">
+      <a href="#" class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors text-gray-300 hover:bg-gray-700 hover:text-white">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#document"></use></svg>
+        <span data-sidebar-text>Pages</span>
+      </a>
+      <a href="#" aria-current="page" class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors bg-indigo-600 font-semibold text-white shadow-sm hover:bg-indigo-700">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#blocks"></use></svg>
+        <span data-sidebar-text>Design sample</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors text-gray-300 hover:bg-gray-700 hover:text-white">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#tag"></use></svg>
+        <span data-sidebar-text>Tags</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors text-gray-300 hover:bg-gray-700 hover:text-white">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#users"></use></svg>
+        <span data-sidebar-text>Users</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors text-gray-300 hover:bg-gray-700 hover:text-white">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#settings"></use></svg>
+        <span data-sidebar-text>Settings</span>
+      </a>
+    </nav>
+    <div class="border-t border-gray-700 px-4 py-3 md:py-4" data-admin-sidebar-footer>
+      <div class="flex min-w-0 flex-wrap items-center gap-3">
+        <button type="button" id="theme-toggle"
+                class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-gray-700 px-2.5 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#sun"></use></svg>
+          <span id="theme-label">Light</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="md:ml-64 min-h-full min-w-0" data-admin-content>
+    <div class="px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
+
+      <!-- ===== List header ===== -->
+      <div class="flex items-center justify-between gap-4 mb-4">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Design sample</h1>
+          <p class="mt-1 text-sm text-gray-500">Every common admin pattern, rendered by the compiled admin.css.</p>
+        </div>
+        <a href="#" title="New page" aria-label="New page" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#plus"></use></svg>
+          <span class="hidden lg:inline">New page</span>
+        </a>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+
+        <!-- ===== Panel: fields ===== -->
+        <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <h2 class="text-lg font-bold text-gray-900">Design</h2>
+          <div class="mt-4 space-y-4">
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Title</span>
+              <input type="text" class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" value="Warp Grid">
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Form</span>
+              <select class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                <option>Cone</option><option>Cylinder</option><option>Sphere</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Placeholder</span>
+              <input type="text" class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Type to search…">
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Slug (read-only)</span>
+              <input type="text" readonly class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono bg-gray-50 text-gray-600" value="warp-grid">
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Disabled</span>
+              <input type="text" disabled class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" value="Not editable">
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Description</span>
+              <textarea rows="3" class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">A short summary shown in listings.</textarea>
+              <span class="mt-1 block text-xs text-gray-500">Help text sits under the field.</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- ===== Panel: controls ===== -->
+        <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <h2 class="text-lg font-bold text-gray-900">Pattern</h2>
+          <div class="mt-4 space-y-4">
+            <label class="block">
+              <span class="flex items-center justify-between text-sm text-gray-600"><span>Grid size</span><span class="font-medium text-gray-900">9</span></span>
+              <input type="range" min="1" max="40" value="9">
+            </label>
+            <label class="block">
+              <span class="flex items-center justify-between text-sm text-gray-600"><span>Grid spacing</span><span class="font-medium text-gray-900">4</span></span>
+              <input type="range" min="0" max="20" value="4">
+            </label>
+            <label class="block">
+              <span class="flex items-center justify-between text-sm text-gray-600"><span>Scale ratio</span><span class="font-medium text-gray-900">0.50</span></span>
+              <input type="range" min="0" max="1" step="0.01" value="0.5">
+            </label>
+
+            <div class="flex flex-wrap items-center gap-4 text-sm text-gray-700">
+              <label class="inline-flex items-center gap-2"><input type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked> Published</label>
+              <label class="inline-flex items-center gap-2"><input type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"> Featured</label>
+              <label class="inline-flex items-center gap-2"><input type="radio" name="shape" checked> Freeform</label>
+              <label class="inline-flex items-center gap-2"><input type="radio" name="shape"> Circular</label>
+            </div>
+
+            <label class="block">
+              <span class="block text-sm font-medium text-gray-700 mb-1">Colour</span>
+              <span class="flex items-center gap-3">
+                <input type="color" value="#1d201c" class="h-10 w-16 rounded-lg border border-gray-300 bg-white p-1">
+                <span class="font-mono text-sm text-gray-500">#1d201c</span>
+              </span>
+            </label>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">Draft</span>
+              <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">Editor</span>
+              <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Live</span>
+              <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">Deleted</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Buttons ===== -->
+      <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 mt-4">
+        <h2 class="text-lg font-bold text-gray-900">Buttons</h2>
+        <div class="mt-4 flex flex-wrap items-center gap-3">
+          <a href="#" class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Export</a>
+          <a href="#" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">Secondary</a>
+          <button type="button" title="Search" aria-label="Search" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#search"></use></svg>
+          </button>
+          <button type="button" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700">Small</button>
+          <button type="button" class="px-3 py-1 rounded-lg border border-red-300 text-xs font-semibold text-red-700">Remove</button>
+          <button type="button" class="text-red-500 hover:text-red-700 text-sm font-medium">Text action</button>
+        </div>
+        <div class="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center border-t border-gray-100 pt-4">
+          <button type="button" class="w-full rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 sm:w-auto">Save</button>
+          <a href="#" class="w-full rounded-lg border border-gray-300 bg-white px-6 py-2 text-center text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 sm:w-auto">Cancel</a>
+          <button type="button" class="w-full rounded-lg bg-red-600 px-6 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 sm:ml-auto sm:w-auto">Delete</button>
+        </div>
+      </div>
+
+      <!-- ===== Filter row + table + pagination ===== -->
+      <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-center gap-2">
+          <input type="search" class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Search pages">
+          <button type="button" title="Search" aria-label="Search" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#search"></use></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 mt-4">
+        <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">
+          <div>
+            <h2 class="text-lg font-bold text-gray-900">Pages</h2>
+            <p class="mt-1 text-sm text-gray-500">Card heading stays put while the table scrolls.</p>
+          </div>
+        </div>
+        <div class="overflow-x-auto w-full">
+          <table class="w-full min-w-[560px] text-left">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Title</th>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Updated</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 text-sm"><a href="#" class="font-medium text-indigo-600 hover:text-indigo-800">Warp Grid</a></td>
+                <td class="px-6 py-4 text-sm"><span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Live</span></td>
+                <td class="px-6 py-4 text-sm text-gray-400">19 Nov 2026, 10:42</td>
+              </tr>
+              <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 text-sm"><a href="#" class="font-medium text-indigo-600 hover:text-indigo-800">Cone stencil</a></td>
+                <td class="px-6 py-4 text-sm"><span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">Draft</span></td>
+                <td class="px-6 py-4 text-sm text-gray-400">18 Nov 2026, 16:05</td>
+              </tr>
+              <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 text-sm"><a href="#" class="font-medium text-indigo-600 hover:text-indigo-800">Circular repeater</a></td>
+                <td class="px-6 py-4 text-sm"><span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">Deleted</span></td>
+                <td class="px-6 py-4 text-sm text-gray-400">2 Nov 2026, 09:12</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 px-4 pb-4">
+          <p class="text-xs font-medium text-gray-500">Showing 1-3 of 24</p>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#arrow-left"></use></svg>
+              Previous
+            </span>
+            <span class="text-xs font-medium text-gray-500">Page 1 of 8</span>
+            <a href="#" class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+              Next
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="../src/core/views/assets/icons.svg#chevron-right"></use></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Banners ===== -->
+      <div class="mt-4 grid gap-3 lg:grid-cols-2">
+        <div class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">Saved. Your changes are live.</div>
+        <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">Could not publish: slug already in use.</div>
+      </div>
+
+      <!-- ===== Tokens ===== -->
+      <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 mt-4">
+        <h2 class="text-lg font-bold text-gray-900">Tokens</h2>
+        <p class="mt-1 text-sm text-gray-500">Surface tokens from assets-source/admin.css — change these first.</p>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" id="swatches"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var label = document.getElementById('theme-label');
+      function render() { label.textContent = root.getAttribute('data-theme') === 'dark' ? 'Dark' : 'Light'; }
+      document.getElementById('theme-toggle').addEventListener('click', function () {
+        var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem('worker-cms-theme', next); } catch (e) {}
+        render();
+        paint();
+      });
+      render();
+
+      var tokens = ['--cms-canvas', '--cms-surface', '--cms-raised', '--cms-field', '--cms-field-hover',
+        '--cms-field-focus', '--color-indigo-600', '--color-gray-900', '--color-gray-500'];
+      var host = document.getElementById('swatches');
+      function paint() {
+        var style = getComputedStyle(root);
+        host.innerHTML = '';
+        tokens.forEach(function (name) {
+          var row = document.createElement('div');
+          row.className = 'swatch';
+          var chip = document.createElement('i');
+          chip.style.background = 'var(' + name + ')';
+          var text = document.createElement('div');
+          text.innerHTML = '<div class="text-sm font-medium text-gray-900"></div><code></code>';
+          text.firstChild.textContent = name;
+          text.lastChild.textContent = style.getPropertyValue(name).trim();
+          row.append(chip, text);
+          host.append(row);
+        });
+      }
+      paint();
+    })();
+  </script>
+</body>
+</html>

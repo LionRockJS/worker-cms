@@ -145,7 +145,7 @@ export const APP_FONT_OPTIONS = [
 
 export type AppFont = typeof APP_FONT_OPTIONS[number]['value'];
 
-export const DEFAULT_PRIMARY_COLOR = '#cbef34';
+export const DEFAULT_PRIMARY_COLOR = '#1d201c';
 export const DEFAULT_APP_FONT: AppFont = 'system';
 
 const APP_FONT_VALUES = new Set<string>(APP_FONT_OPTIONS.map((option) => option.value));

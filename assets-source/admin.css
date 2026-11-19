@@ -3,12 +3,16 @@
    public assets. Replaces the Tailwind Play CDN so the CSP can drop remote and
    inline script sources.
 
-   Theme: a dark "sports-TV / scoreboard" skin — near-black navy canvas, a single
-   electric-lime accent, monospaced upper-case labels and tight display headings.
+   Theme: "studio" — a soft sage canvas with floating, borderless rounded
+   panels, filled (not outlined) inputs, slim controls, ink-black primary
+   actions and small upper-case panel captions. Light is the default; dark is
+   the same design on a charcoal canvas.
    Because every Tailwind v4 colour utility resolves `var(--color-*)`, the whole
-   palette is reskinned by redefining those tokens below; only the handful of
-   neutrals whose intent conflicts (e.g. text-gray-900 headings vs bg-gray-900
-   sidebar) need explicit overrides at the bottom of this file. No markup changes. */
+   palette is reskinned by redefining those tokens below; the shape language
+   (panel radius, field fills, sliders) lives in the "Studio components"
+   section at the end of this file and reads the `--cms-*` surface tokens.
+   No markup changes. Tune visually with docs/design-sample.html. */
+
 
 /* Class detection is scoped deliberately, so the stylesheet prunes with the
    feature profile instead of always carrying every screen's utilities.
@@ -71,74 +75,96 @@ button:has(> .nav-spinner-inline) {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
 
-  /* ---- Brand: electric lime (replaces indigo everywhere) ---------------- */
-  --color-brand-50:  #1b240c;
-  --color-brand-400: #d8f25e;
-  --color-brand-500: #cbef34;
-  --color-brand-600: #cbef34;
-  --color-brand-700: #b6dc1e;
+  /* ---- Accent (dark): soft off-white "ink" ------------------------------ */
+  /* Indigo utilities are reused across the templates as "the accent". These
+     are the compiled defaults; the saved primary colour (core/render/theme.ts)
+     overrides them at runtime. */
+  --color-brand-50:  #1f231e;
+  --color-brand-400: #f2f4f0;
+  --color-brand-500: #e4e8e1;
+  --color-brand-600: #e4e8e1;
+  --color-brand-700: #c9cfc4;
 
-  /* Indigo utilities are reused across the templates as "the accent"; remap
-     the whole scale to lime so links, buttons, rings and focus states follow. */
-  --color-indigo-50:  #1b240c;
-  --color-indigo-100: #243010;
-  --color-indigo-400: #d8f25e;
-  --color-indigo-500: #cbef34;
-  --color-indigo-600: #cbef34;
-  --color-indigo-700: #b6dc1e;
-  --color-indigo-800: #a6cc18;
+  --color-indigo-50:  #1f231e;
+  --color-indigo-100: #282d27;
+  --color-indigo-400: #f2f4f0;
+  --color-indigo-500: #e4e8e1;
+  --color-indigo-600: #e4e8e1;
+  --color-indigo-700: #c9cfc4;
+  --color-indigo-800: #b3baae;
 
-  /* ---- Neutrals: inverted navy scale ----------------------------------- */
+  /* ---- Neutrals: inverted sage-charcoal scale --------------------------- */
   /* Low end = dark surfaces (used as backgrounds), high end = light ink
      (used as text). A few utilities break this assumption and are overridden
      explicitly after the import. */
-  --color-gray-50:  #0b0f17;  /* page canvas / insets / row hover            */
-  --color-gray-100: #1c2331;  /* chips, divide & hairline borders            */
-  --color-gray-200: #28313f;  /* card borders                               */
-  --color-gray-300: #323d4e;  /* input borders                              */
-  --color-gray-400: #6c7689;  /* faint text                                 */
-  --color-gray-500: #828d9f;  /* muted text                                 */
-  --color-gray-600: #a4aec0;  /* secondary text                             */
-  --color-gray-700: #c4ccda;  /* body text                                  */
-  --color-gray-800: #d9e0ea;  /* strong text                                */
-  --color-gray-900: #eef2f9;  /* headings                                   */
+  --color-gray-50:  #171a16;  /* insets / table heads / row hover            */
+  --color-gray-100: #232722;  /* chips, divide & hairline borders            */
+  --color-gray-200: #2c312b;  /* card borders                               */
+  --color-gray-300: #3a4038;  /* input borders                              */
+  --color-gray-400: #6f776c;  /* faint text                                 */
+  --color-gray-500: #8b9388;  /* muted text                                 */
+  --color-gray-600: #a9b0a5;  /* secondary text                             */
+  --color-gray-700: #c8cec4;  /* body text                                  */
+  --color-gray-800: #dde2da;  /* strong text                                */
+  --color-gray-900: #eef1ec;  /* headings                                   */
 
   /* ---- Status palettes, retuned for a dark canvas ----------------------- */
   /* Green = live / success */
-  --color-green-50:  #0e2a1d;
-  --color-green-100: #11321f;
-  --color-green-200: #1c4632;
-  --color-green-500: #34d399;
-  --color-green-600: #34d399;
-  --color-green-700: #58d9a4;
-  --color-green-800: #74e0b1;
+  --color-green-50:  #0f241a;
+  --color-green-100: #122b1e;
+  --color-green-200: #1d3f2d;
+  --color-green-500: #4ccf8f;
+  --color-green-600: #4ccf8f;
+  --color-green-700: #6ad6a1;
+  --color-green-800: #86ddb3;
 
-  /* Red = danger / live dot */
-  --color-red-50:  #2a1116;
-  --color-red-200: #4d1f26;
-  --color-red-500: #f1566f;
-  --color-red-600: #f1566f;
-  --color-red-700: #f5748a;
+  /* Red = danger */
+  --color-red-50:  #2a1315;
+  --color-red-100: #3a181c;
+  --color-red-200: #4a2226;
+  --color-red-500: #f0646f;
+  --color-red-600: #f0646f;
+  --color-red-700: #f48089;
 
   /* Yellow = draft */
-  --color-yellow-50:  #2a2410;
-  --color-yellow-100: #322a10;
-  --color-yellow-300: #5a4d1a;
-  --color-yellow-500: #facc15;
-  --color-yellow-600: #e8be3e;
-  --color-yellow-800: #e6c352;
+  --color-yellow-50:  #272310;
+  --color-yellow-100: #2f2911;
+  --color-yellow-300: #574b1b;
+  --color-yellow-500: #f2c94c;
+  --color-yellow-600: #e5bd45;
+  --color-yellow-800: #e8c968;
 
-  /* Amber = warning / drift */
-  --color-amber-50:  #2a1f0c;
-  --color-amber-200: #4d3c1a;
-  --color-amber-400: #f0a93b;
-  --color-amber-600: #f0a93b;
-  --color-amber-700: #f5b94f;
-  --color-amber-800: #f6cb6c;
+  /* Amber = warning / drift / "modified" */
+  --color-amber-50:  #2a1f0e;
+  --color-amber-200: #4a391b;
+  --color-amber-400: #f29a4a;
+  --color-amber-600: #f29a4a;
+  --color-amber-700: #f5ad68;
+  --color-amber-800: #f7c088;
 
   /* Blue = info */
-  --color-blue-100: #122639;
-  --color-blue-700: #6aa6f0;
+  --color-blue-100: #142536;
+  --color-blue-700: #7cb0ec;
+}
+
+/* ========================================================================
+   Studio surface tokens. Dark values here; light overrides further down.
+   ======================================================================== */
+:root {
+  --cms-canvas: #121411;          /* page background                       */
+  --cms-surface: #1b1e1a;         /* panels / cards (.bg-white)             */
+  --cms-raised: #242823;          /* secondary buttons, menus               */
+  --cms-field: #232722;           /* filled inputs                          */
+  --cms-field-hover: #292e28;
+  --cms-field-focus: #1b1e1a;
+  --cms-line: rgba(255, 255, 255, 0.06);        /* hairlines              */
+  --cms-line-strong: rgba(255, 255, 255, 0.11); /* control outlines       */
+  --cms-focus-ring: rgba(238, 241, 236, 0.16);
+  --cms-nav-active: rgba(255, 255, 255, 0.07);
+  --cms-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --cms-radius-panel: 1rem;
+  --cms-radius-control: 0.5rem;
+  --cms-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23a9b0a5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
 }
 
 /* ========================================================================
@@ -148,7 +174,7 @@ button:has(> .nav-spinner-inline) {
 /* Base canvas + default typography. */
 html,
 body {
-  background-color: #090d15;
+  background-color: var(--cms-canvas);
   color: var(--color-gray-700);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -161,25 +187,22 @@ body.overflow-x-hidden {
   overflow-x: clip;
 }
 
-/* Tight display headings, scoreboard-style. */
 h1, h2, h3 {
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
 }
 
-/* Upper-case captions/labels get the monospaced "broadcast" treatment. */
+/* Upper-case captions/labels: small, airy tracking, same family as body. */
 th,
 .uppercase {
-  font-family: var(--font-mono);
-  letter-spacing: 0.1em !important;
+  letter-spacing: 0.07em;
 }
 
-/* Lime selection + accent caret. */
 ::selection {
-  background: rgba(203, 239, 52, 0.28);
-  color: #eef2f9;
+  background: rgba(238, 241, 236, 0.22);
+  color: #eef1ec;
 }
 :root {
-  accent-color: #cbef34;
+  accent-color: var(--color-indigo-600);
   color-scheme: dark;
 }
 
@@ -193,12 +216,12 @@ th,
 
 /* Surfaces: "white" cards become raised dark panels. */
 .bg-white {
-  background-color: #141a26;
+  background-color: var(--cms-surface);
 }
 
-/* Sidebar + any explicitly-dark blocks: deepen rather than invert. */
+/* Tooltips and other explicitly-dark blocks: deepen rather than invert. */
 .bg-gray-900 {
-  background-color: #0a0e17;
+  background-color: #0c0e0b;
 }
 .bg-gray-700,
 .hover\:bg-gray-700:hover {
@@ -209,31 +232,32 @@ th,
 }
 /* Sidebar nav links read as light ink, not a dark border colour. */
 .text-gray-300 {
-  color: #9aa4b6;
+  color: #a3aa9f;
 }
 
-/* Soften the inverted hairline borders so cards don't look boxed-in. */
-.border-gray-200 { border-color: rgba(255, 255, 255, 0.08); }
-.border-gray-300 { border-color: rgba(255, 255, 255, 0.12); }
-.border-gray-100 { border-color: rgba(255, 255, 255, 0.06); }
-.divide-gray-100 > :not(:last-child) { border-color: rgba(255, 255, 255, 0.06); }
+/* Hairline borders so panels float rather than look boxed-in. */
+.border-gray-100,
+.border-gray-200,
+.divide-gray-100 > :not(:last-child),
+.divide-gray-200 > :not(:last-child) { border-color: var(--cms-line); }
+.border-gray-300 { border-color: var(--cms-line-strong); }
 
 /* Row / button hovers as faint light washes. */
-.hover\:bg-gray-50:hover  { background-color: rgba(255, 255, 255, 0.04); }
+.hover\:bg-gray-50:hover  { background-color: rgba(255, 255, 255, 0.035); }
 .hover\:bg-gray-100:hover { background-color: rgba(255, 255, 255, 0.06); }
 
-/* Lime primary buttons / avatar need dark ink, not white, for contrast. */
+/* Light accent needs dark ink, not white, for contrast. */
 .bg-indigo-600.text-white,
 .bg-indigo-500 {
-  color: #0a0e17;
+  color: #161915;
 }
 .hover\:bg-indigo-700:hover {
-  color: #0a0e17;
+  color: #161915;
 }
 
-/* Card depth: subtle shadow reads better as a faint glow on dark. */
-.shadow-sm { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
-.shadow-xl { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+/* Flat panels; only floating layers (menus, popovers) cast a shadow. */
+.shadow-sm { box-shadow: none; }
+.shadow-xl { box-shadow: var(--cms-shadow-pop); }
 
 /* Keep intentional horizontal scrollers from widening the root document on
    mobile. The scroller still works; only its overflow stops affecting <html>. */
@@ -374,93 +398,104 @@ th,
   }
 }
 
-/* Light theme: restore conventional Tailwind-style tokens while keeping the
-   same utility classes and markup. Dark remains the default for first visit. */
+/* ========================================================================
+   Light theme (default): sage studio canvas, ink-black accent.
+   Same utility classes and markup; only tokens and a few overrides change.
+   ======================================================================== */
 html[data-theme="light"] {
   color-scheme: light;
-  accent-color: #4f46e5;
+  accent-color: var(--color-indigo-600);
 
-  --color-brand-50:  #eef2ff;
-  --color-brand-400: #818cf8;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
+  --cms-canvas: #e3e8e0;
+  --cms-surface: #f0f3ed;
+  --cms-raised: #f8faf6;
+  --cms-field: #e3e7df;
+  --cms-field-hover: #dbe0d7;
+  --cms-field-focus: #fbfcfa;
+  --cms-line: rgba(22, 25, 21, 0.07);
+  --cms-line-strong: rgba(22, 25, 21, 0.13);
+  --cms-focus-ring: rgba(22, 25, 21, 0.1);
+  --cms-nav-active: rgba(22, 25, 21, 0.07);
+  --cms-shadow-pop: 0 12px 32px rgba(40, 48, 36, 0.14), 0 2px 6px rgba(40, 48, 36, 0.06);
+  --cms-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23565c53' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
 
-  --color-indigo-50:  #eef2ff;
-  --color-indigo-100: #e0e7ff;
-  --color-indigo-400: #818cf8;
-  --color-indigo-500: #6366f1;
-  --color-indigo-600: #4f46e5;
-  --color-indigo-700: #4338ca;
-  --color-indigo-800: #3730a3;
+  --color-brand-50:  #e8ebe5;
+  --color-brand-400: #5b6258;
+  --color-brand-500: #1d201c;
+  --color-brand-600: #1d201c;
+  --color-brand-700: #3a3f38;
 
-  --color-gray-50:  #f9fafb;
-  --color-gray-100: #f3f4f6;
-  --color-gray-200: #e5e7eb;
-  --color-gray-300: #d1d5db;
-  --color-gray-400: #9ca3af;
-  --color-gray-500: #6b7280;
-  --color-gray-600: #4b5563;
-  --color-gray-700: #374151;
-  --color-gray-800: #1f2937;
-  --color-gray-900: #111827;
+  --color-indigo-50:  #e8ebe5;
+  --color-indigo-100: #dde1d9;
+  --color-indigo-400: #5b6258;
+  --color-indigo-500: #1d201c;
+  --color-indigo-600: #1d201c;
+  --color-indigo-700: #3a3f38;
+  --color-indigo-800: #50564d;
 
-  --color-green-50:  #f0fdf4;
-  --color-green-100: #dcfce7;
-  --color-green-200: #bbf7d0;
-  --color-green-500: #22c55e;
-  --color-green-600: #16a34a;
-  --color-green-700: #15803d;
-  --color-green-800: #166534;
+  /* Sage-tinted neutrals. */
+  --color-gray-50:  #e8ece5;
+  --color-gray-100: #dfe3db;
+  --color-gray-200: #d3d9cf;
+  --color-gray-300: #c3cabf;
+  --color-gray-400: #959c91;
+  --color-gray-500: #727a6f;
+  --color-gray-600: #565c53;
+  --color-gray-700: #3b4039;
+  --color-gray-800: #272b26;
+  --color-gray-900: #171a16;
 
-  --color-red-50:  #fef2f2;
-  --color-red-200: #fecaca;
-  --color-red-500: #ef4444;
-  --color-red-600: #dc2626;
-  --color-red-700: #b91c1c;
+  --color-green-50:  #e6f2e6;
+  --color-green-100: #d5ebd5;
+  --color-green-200: #b5dbb6;
+  --color-green-500: #3fa45b;
+  --color-green-600: #2f8a49;
+  --color-green-700: #23703a;
+  --color-green-800: #1c5a2f;
 
-  --color-yellow-50:  #fefce8;
-  --color-yellow-100: #fef9c3;
-  --color-yellow-300: #fde047;
-  --color-yellow-500: #eab308;
-  --color-yellow-600: #ca8a04;
-  --color-yellow-800: #854d0e;
+  --color-red-50:  #f8e6e3;
+  --color-red-100: #f3d9d4;
+  --color-red-200: #efc2bb;
+  --color-red-500: #e0533f;
+  --color-red-600: #c8402d;
+  --color-red-700: #a53424;
 
-  --color-amber-50:  #fffbeb;
-  --color-amber-200: #fde68a;
-  --color-amber-400: #fbbf24;
-  --color-amber-600: #d97706;
-  --color-amber-700: #b45309;
-  --color-amber-800: #92400e;
+  --color-yellow-50:  #f6f0d8;
+  --color-yellow-100: #f1e8c4;
+  --color-yellow-300: #e6d27c;
+  --color-yellow-500: #d4a91c;
+  --color-yellow-600: #b38c12;
+  --color-yellow-800: #74590b;
 
-  --color-blue-100: #dbeafe;
-  --color-blue-700: #1d4ed8;
+  --color-amber-50:  #f8ecdd;
+  --color-amber-200: #f0d2ae;
+  --color-amber-400: #ee8b3a;
+  --color-amber-600: #d0701f;
+  --color-amber-700: #a95717;
+  --color-amber-800: #854413;
+
+  --color-blue-100: #dde7f1;
+  --color-blue-700: #2d5f93;
 }
 
 html[data-theme="light"],
 html[data-theme="light"] body {
-  background-color: #f6f7fb;
+  background-color: var(--cms-canvas);
   color: var(--color-gray-700);
 }
 
 html[data-theme="light"] ::selection {
-  background: rgba(79, 70, 229, 0.18);
+  background: rgba(22, 25, 21, 0.14);
   color: var(--color-gray-900);
 }
 
-html[data-theme="light"] .bg-white { background-color: #ffffff; }
 html[data-theme="light"] .bg-gray-900 { background-color: var(--color-gray-900); }
 html[data-theme="light"] .bg-gray-700,
 html[data-theme="light"] .hover\:bg-gray-700:hover { background-color: var(--color-gray-700); }
-
 html[data-theme="light"] .border-gray-700 { border-color: var(--color-gray-700); }
-html[data-theme="light"] .border-gray-200 { border-color: var(--color-gray-200); }
-html[data-theme="light"] .border-gray-300 { border-color: var(--color-gray-300); }
-html[data-theme="light"] .border-gray-100,
-html[data-theme="light"] .divide-gray-100 > :not(:last-child) { border-color: var(--color-gray-100); }
 
-html[data-theme="light"] .hover\:bg-gray-50:hover { background-color: var(--color-gray-50); }
-html[data-theme="light"] .hover\:bg-gray-100:hover { background-color: var(--color-gray-100); }
+html[data-theme="light"] .hover\:bg-gray-50:hover { background-color: rgba(22, 25, 21, 0.035); }
+html[data-theme="light"] .hover\:bg-gray-100:hover { background-color: rgba(22, 25, 21, 0.06); }
 
 html[data-theme="light"] .bg-indigo-600.text-white,
 html[data-theme="light"] .bg-indigo-500,
@@ -468,72 +503,209 @@ html[data-theme="light"] .hover\:bg-indigo-700:hover {
   color: #ffffff;
 }
 
-html[data-theme="light"] .shadow-sm {
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-}
-html[data-theme="light"] .shadow-xl {
-  box-shadow: 0 20px 30px rgba(15, 23, 42, 0.14);
-}
-
 html[data-theme="light"] [data-admin-sidebar],
-html[data-theme="light"] [data-admin-mobile-bar] {
-  background-color: #ffffff;
-  color: var(--color-gray-700);
-  box-shadow: 1px 0 0 var(--color-gray-200), 0 10px 30px rgba(15, 23, 42, 0.08);
-}
+html[data-theme="light"] [data-admin-mobile-bar] { color: var(--color-gray-700); }
 html[data-theme="light"] [data-admin-sidebar] .text-white,
 html[data-theme="light"] [data-admin-mobile-bar] .text-white { color: var(--color-gray-900); }
-html[data-theme="light"] [data-admin-sidebar] [aria-current="page"].text-white {
-  color: #ffffff;
-}
 html[data-theme="light"] [data-admin-sidebar] .text-gray-300,
 html[data-theme="light"] [data-admin-sidebar] .text-gray-400,
 html[data-theme="light"] [data-admin-mobile-bar] .text-gray-300,
 html[data-theme="light"] [data-admin-mobile-bar] .text-gray-400 { color: var(--color-gray-600); }
 html[data-theme="light"] [data-admin-sidebar] .border-gray-700,
 html[data-theme="light"] [data-admin-sidebar] .md\:border-gray-700,
-html[data-theme="light"] [data-admin-mobile-bar],
-html[data-theme="light"] [data-admin-mobile-bar] .border-gray-700 { border-color: var(--color-gray-200); }
+html[data-theme="light"] [data-admin-mobile-bar] .border-gray-700 { border-color: var(--cms-line); }
 html[data-theme="light"] [data-admin-sidebar] .hover\:bg-gray-700:hover,
-html[data-theme="light"] [data-admin-mobile-bar] .hover\:bg-gray-700:hover { background-color: var(--color-gray-100); }
+html[data-theme="light"] [data-admin-mobile-bar] .hover\:bg-gray-700:hover { background-color: var(--cms-nav-active); }
 html[data-theme="light"] [data-admin-sidebar] .hover\:text-white:hover,
 html[data-theme="light"] [data-admin-mobile-bar] .hover\:text-white:hover { color: var(--color-gray-900); }
 
-html[data-theme="light"] .\[\&_input\]\:bg-\[\#141a26\] input {
-  background-color: #ffffff;
+/* ========================================================================
+   Studio components — shape language shared by both themes. Everything
+   here reads the --cms-* tokens, so a theme only has to set those.
+   ======================================================================== */
+
+/* ---- Shell: sidebar and mobile bar sit on the canvas, no chrome -------- */
+/* `html[data-theme]` lifts these over the theme-scoped .bg-gray-900 rules. */
+[data-admin-sidebar],
+[data-admin-mobile-bar],
+html[data-theme] [data-admin-sidebar],
+html[data-theme] [data-admin-mobile-bar] {
+  background-color: var(--cms-canvas);
+  box-shadow: none;
+}
+html[data-theme] [data-admin-mobile-bar] {
+  border-bottom-color: var(--cms-line);
+}
+/* Brand mark reads as a spaced upper-case wordmark. */
+[data-admin-sidebar] > div:first-child [data-sidebar-text],
+[data-admin-mobile-bar] .text-lg {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+[data-admin-sidebar] .text-indigo-400,
+[data-admin-mobile-bar] .text-indigo-400 {
+  color: var(--color-gray-900);
+}
+/* Nav: quiet rows, the current one a soft filled pill. `[class]` keeps this
+   above the accent-ink rule core/render/theme.ts emits after this file. */
+[data-admin-sidebar] nav a,
+[data-admin-sidebar] nav summary {
+  font-size: 0.875rem;
+}
+html[data-theme] [data-admin-sidebar] nav [aria-current="page"][class],
+html[data-theme] [data-admin-sidebar] nav [aria-current="page"][class]:hover {
+  background-color: var(--cms-nav-active);
+  color: var(--color-gray-900);
+  box-shadow: none;
 }
 
-html[data-theme="light"] * {
-  scrollbar-color: #cbd5e1 transparent;
+/* ---- Panels ------------------------------------------------------------ */
+.bg-white.rounded-xl,
+.bg-white.rounded-2xl,
+.rounded-xl.border-gray-200 {
+  border-radius: var(--cms-radius-panel);
+  border-color: transparent;
 }
-html[data-theme="light"] *::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  background-clip: content-box;
-}
-html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-  background-clip: content-box;
+/* Panel captions: the small upper-case "DESIGN / PATTERN" headings. */
+.rounded-xl h2:is(.text-lg, .text-base),
+.rounded-2xl h2:is(.text-lg, .text-base) {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.25rem;
+  text-transform: uppercase;
+  color: var(--color-gray-900);
 }
 
-/* Dark, slim scrollbars to match the canvas. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #2a3344 transparent;
+/* ---- Tables ------------------------------------------------------------ */
+th {
+  font-weight: 500;
 }
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb {
-  background: #2a3344;
-  border-radius: 9999px;
-  border: 2px solid transparent;
-  background-clip: content-box;
+thead.bg-gray-50,
+thead .bg-gray-50,
+tr.bg-gray-50 {
+  background-color: transparent;
 }
-*::-webkit-scrollbar-thumb:hover { background: #38445a; background-clip: content-box; }
 
-/* Native explanation toggle shares the primary color in both themes. */
-html [data-admin-sidebar] [data-sidebar-help-control]:has([data-sidebar-help-toggle]:checked) {
-  color: var(--color-indigo-600);
+/* ---- Text fields and selects: filled, borderless until focused --------- */
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"],
+               [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]),
+    select,
+    textarea):not(.bg-transparent, .sr-only) {
+  background-color: var(--cms-field);
+  border-color: var(--cms-line);
+  color: var(--color-gray-900);
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-[data-sidebar-help-control]:focus-within {
-  outline: 2px solid currentColor;
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"],
+               [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]),
+    select,
+    textarea):not(.bg-transparent, .sr-only):hover {
+  background-color: var(--cms-field-hover);
+}
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"],
+               [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]),
+    select,
+    textarea):not(.bg-transparent, .sr-only):focus {
+  background-color: var(--cms-field-focus);
+  border-color: var(--color-gray-500);
+  box-shadow: 0 0 0 3px var(--cms-focus-ring);
+  outline: none;
+}
+:is(input, textarea)[readonly]:not(.bg-transparent, .sr-only),
+:is(input, select, textarea):disabled:not(.bg-transparent, .sr-only) {
+  background-color: transparent;
+  border-color: var(--cms-line-strong);
+  border-style: dashed;
+  color: var(--color-gray-600);
+  box-shadow: none;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-gray-400);
+}
+/* Single-value selects get a slim chevron instead of the native arrow. */
+select:not([multiple], [size], .bg-transparent, .sr-only) {
+  appearance: none;
+  background-image: var(--cms-chevron);
+  background-position: right 0.6rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem;
+  padding-inline-end: 2.25rem;
+}
+
+/* ---- Checkboxes, radios, colour wells ---------------------------------- */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-indigo-600);
+}
+input[type="color"] {
+  border-radius: var(--cms-radius-control);
+  border-color: var(--cms-line-strong);
+}
+
+/* ---- Range: dotted hairline track, small ink thumb --------------------- */
+input[type="range"] {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 1.25rem;
+  width: 100%;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background-image: radial-gradient(circle, var(--color-gray-400) 0.75px, transparent 1px);
+  background-size: 4px 3px;
+}
+input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background-image: radial-gradient(circle, var(--color-gray-400) 0.75px, transparent 1px);
+  background-size: 4px 3px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  margin-top: -4.5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--cms-surface);
+  background: var(--color-gray-900);
+  box-shadow: 0 0 0 1px var(--cms-line-strong);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--cms-surface);
+  background: var(--color-gray-900);
+}
+input[type="range"]:focus-visible {
+  outline: none;
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--cms-focus-ring);
+}
+
+/* ---- Buttons ----------------------------------------------------------- */
+/* Secondary (white + gray outline) buttons become raised chips with a
+   hairline, readable on both the canvas and a panel. */
+:is(a, button, label, summary).bg-white.border-gray-300 {
+  background-color: var(--cms-raised);
+  border-color: var(--cms-line-strong);
+}
+:is(a, button, label, summary).bg-white.border-gray-300:hover {
+  background-color: var(--cms-field-hover);
+}
+/* Primary actions: a touch less heavy than Tailwind's bold. */
+:is(a, button).bg-indigo-600 {
+  font-weight: 500;
+}
+/* Keyboard focus ring for every control. */
+:is(a, button, summary, [role="button"]):focus-visible {
+  outline: 2px solid var(--color-gray-900);
   outline-offset: 2px;
 }
