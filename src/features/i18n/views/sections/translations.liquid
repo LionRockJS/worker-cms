@@ -1,7 +1,7 @@
 <div class="my-4 px-4 sm:px-6 lg:px-8">
   {% if hasFlash %}<div class="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">{{ flash | t }}</div>{% endif %}
   {% if hasError %}<div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{{ error }}</div>{% endif %}
-  {% if loginLabels %}<p class="mb-4 text-sm text-gray-500">{{ "i18n.login_labels.description" | t }}</p>{% endif %}
+  {% if loginLabels %}<p data-explanation class="mb-4 text-sm text-gray-500">{{ "i18n.login_labels.description" | t }}</p>{% endif %}
   <form method="get" action="/admin/settings/translations" class="mb-5 flex max-w-md items-end gap-3">{% if loginLabels %}<input type="hidden" name="scope" value="login">{% endif %}<label class="flex-1 text-sm font-medium text-gray-700">{{ "i18n.fields.locale" | t }}<select name="locale" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2">{% for option in localeOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.code }})</option>{% endfor %}</select></label><button class="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold">{{ "common.open" | t }}</button></form>
   {% if loginLabels %}
     <div class="max-w-2xl space-y-4">

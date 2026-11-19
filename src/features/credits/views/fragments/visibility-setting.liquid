@@ -7,7 +7,7 @@
       <option value="true"{% if showCredits %} selected{% endif %}>{{ "settings.credits.visible" | t }}</option>
       <option value="false"{% unless showCredits %} selected{% endunless %}>{{ "settings.credits.hidden" | t }}</option>
     </select>
-    <span class="mt-1 block text-xs text-gray-500">{{ "settings.credits.help" | t }}</span>
+    <span data-explanation class="mt-1 block text-xs text-gray-500">{{ "settings.credits.help" | t }}</span>
   </label>
 </section>
 {% endif %}

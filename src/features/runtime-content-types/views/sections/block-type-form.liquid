@@ -13,7 +13,7 @@
     <label for="block_type_slug" class="block min-w-0">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_block_type_form.slug" | t }}</span>
       <input id="block_type_slug" name="slug" value="{{ slug }}"{% if readOnly %} readonly{% endif %} class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono{% if readOnly %} bg-gray-50 text-gray-600{% endif %}">
-      {% unless readOnly %}<span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_block_type_form.the_block_key_referenced_by_a_page_type_s_block_list_e_g" | t }} <code>{{ "view_strings.sections_block_type_form.logos" | t }}</code>{{ "view_strings.sections_block_type_form.cannot_collide_with_a_config_or_existing_block" | t }}</span>{% endunless %}
+      {% unless readOnly %}<span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_block_type_form.the_block_key_referenced_by_a_page_type_s_block_list_e_g" | t }} <code>{{ "view_strings.sections_block_type_form.logos" | t }}</code>{{ "view_strings.sections_block_type_form.cannot_collide_with_a_config_or_existing_block" | t }}</span>{% endunless %}
     </label>
     <label for="block_type_weight" class="block min-w-0">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_block_type_form.weight" | t }}</span>
@@ -22,7 +22,7 @@
     <label for="block_type_blueprint" class="block min-w-0">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_block_type_form.blueprint_json_array" | t }}</span>
       <textarea id="block_type_blueprint" name="blueprint" rows="8"{% if readOnly %} readonly{% endif %} class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono{% if readOnly %} bg-gray-50 text-gray-600{% endif %}" spellcheck="false">{{ blueprint }}</textarea>
-      {% unless readOnly %}<span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_block_type_form.field_definitions_for_this_block_e_g" | t }} <code>["label", {"pictures": ["url"]}]</code></span>{% endunless %}
+      {% unless readOnly %}<span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_block_type_form.field_definitions_for_this_block_e_g" | t }} <code>["label", {"pictures": ["url"]}]</code></span>{% endunless %}
     </label>
   </form>
   {% if isEdit %}

@@ -5,7 +5,7 @@
       "settings": {
         "width": "3xl",
         "title": "{{ 'view_strings.sections_menu_settings.system' | t }}",
-        "description": "{{ 'view_strings.sections_menu_settings.manage_the_admin_app_name_home_page_icon_and_sidebar_menu' | t }}"
+        "explanation": "{{ 'view_strings.sections_menu_settings.manage_the_admin_app_name_home_page_icon_and_sidebar_menu' | t }}"
       }
     },
     "content": {

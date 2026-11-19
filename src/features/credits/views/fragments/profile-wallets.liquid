@@ -9,7 +9,7 @@
 <section class="mt-4 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
   <div class="mb-4">
     <h3 class="text-lg font-semibold text-gray-900">{{ wallet.nameKey | t }}</h3>
-    <p class="mt-1 text-sm text-gray-500">{{ wallet.descriptionKey | t }}</p>
+    <p data-explanation class="mt-1 text-sm text-gray-500">{{ wallet.descriptionKey | t }}</p>
   </div>
   <p class="text-2xl font-bold text-gray-900">{{ wallet.balance }}</p>
 
@@ -19,7 +19,7 @@
         class="mt-5 max-w-md space-y-3 border-t border-gray-100 pt-5">
     <input type="hidden" name="currency" value="{{ wallet.currency }}">
     <h4 class="text-sm font-semibold text-gray-900">{{ "credits.wallet.send_title" | t }}</h4>
-    <p class="text-xs text-gray-500">{{ "credits.wallet.send_description" | t }}</p>
+    <p data-explanation class="text-xs text-gray-500">{{ "credits.wallet.send_description" | t }}</p>
     <label class="block">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "profile.recipient_email" | t }}</span>
       <input name="recipient" type="email" required autocomplete="off" placeholder="user@example.com"
@@ -45,7 +45,7 @@
     <h4 class="text-sm font-semibold text-gray-900">{{ "credits.wallet.donate_title" | t }}</h4>
     <p class="text-xs text-gray-500">
       {{ "profile.shared_pool_balance" | t }}: <span class="font-semibold text-gray-900">{{ wallet.sharedBalance }}</span>.
-      {{ "credits.wallet.shared_pool_description" | t }}
+      <span data-explanation>{{ "credits.wallet.shared_pool_description" | t }}</span>
     </p>
     <label class="block">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "common.amount" | t }}</span>

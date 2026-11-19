@@ -6,7 +6,7 @@
         "backHref": "{{ backHref }}",
         "backLabel": "{{ 'view_strings.sections_plugin_credits.plugins' | t }}",
         "title": "{{ pluginLabel }} · {{ 'view_strings.sections_plugin_credits.credits' | t }}",
-        "description": "{{ 'view_strings.sections_plugin_credits.chargeable_actions_this_plugin_declares_prices_set_here_are_deducted_fro' | t }}"
+        "explanation": "{{ 'view_strings.sections_plugin_credits.chargeable_actions_this_plugin_declares_prices_set_here_are_deducted_fro' | t }}"
       }
     },
     "content": {

@@ -16,6 +16,9 @@
         {% if section.settings.description and section.settings.description != '' %}
           <p class="mt-1 text-sm text-gray-500">{{ section.settings.description }}</p>
         {% endif %}
+        {% if section.settings.explanation and section.settings.explanation != '' %}
+          <p class="mt-1 text-sm text-gray-500" data-explanation>{{ section.settings.explanation }}</p>
+        {% endif %}
       </div>
     </div>
     {% if section.blocks %}

@@ -6,7 +6,7 @@
         "backHref": "{{ backHref }}",
         "backLabel": "{{ 'view_strings.sections_plugin_assets.plugins' | t }}",
         "title": "{{ pluginLabel }} · {{ 'view_strings.sections_plugin_assets.assets' | t }}",
-        "description": "{{ 'view_strings.sections_plugin_assets.js_css_files_this_plugin_wants_to_run_inside_cms_chrome_approving_a_file' | t }}"
+        "explanation": "{{ 'view_strings.sections_plugin_assets.js_css_files_this_plugin_wants_to_run_inside_cms_chrome_approving_a_file' | t }}"
       }
     },
     "content": {

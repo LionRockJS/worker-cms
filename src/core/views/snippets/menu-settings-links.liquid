@@ -30,13 +30,13 @@
                 <p class="font-semibold text-gray-900">{{ option.label }}</p>
               {% endif %}
               {% if option.descriptionKey != blank %}
-                <p class="mt-1 text-gray-500">{{ option.descriptionKey | t }}</p>
+                <p data-explanation class="mt-1 text-gray-500">{{ option.descriptionKey | t }}</p>
               {% elsif option.description != blank %}
                 <p class="mt-1 truncate text-gray-500">{{ option.description }}</p>
               {% endif %}
               <details class="mt-2">
                 <summary class="cursor-pointer text-xs font-medium text-indigo-600">{{ "settings.menu.labels" | t }}</summary>
-                <p class="mt-2 text-xs text-gray-500">{{ "settings.menu.labels_help" | t }}</p>
+                <p data-explanation class="mt-2 text-xs text-gray-500">{{ "settings.menu.labels_help" | t }}</p>
                 <div class="mt-2 space-y-2">
                   {% for field in option.labelFields %}
                     <label class="block">

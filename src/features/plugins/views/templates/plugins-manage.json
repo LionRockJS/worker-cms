@@ -4,7 +4,7 @@
       "type": "page-header",
       "settings": {
         "title": "{{ 'view_strings.sections_plugins_manage.plugins' | t }}",
-        "description": "{{ 'view_strings.sections_plugins_manage.registered_over_https_added_here_without_a_cms_redeploy' | t }}"
+        "explanation": "{{ 'view_strings.sections_plugins_manage.registered_over_https_added_here_without_a_cms_redeploy' | t }}"
       },
       "blocks": {
         "register": {

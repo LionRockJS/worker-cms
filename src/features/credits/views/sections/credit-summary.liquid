@@ -37,7 +37,7 @@
               <td class="px-4 py-3">
                 <div class="font-medium text-gray-900">{{ row.label }}</div>
                 <div class="mt-0.5 text-xs font-mono text-gray-400">{{ row.key }}</div>
-                {% if row.description != '' %}<div class="mt-0.5 text-xs text-gray-500">{{ row.description }}</div>{% endif %}
+                {% if row.description != '' %}<div data-explanation class="mt-0.5 text-xs text-gray-500">{{ row.description }}</div>{% endif %}
               </td>
               <td class="px-4 py-3 text-gray-700">{{ row.chargeKey | t }} {{ row.chargeValue }}</td>
               <td class="px-4 py-3 font-medium text-gray-900">{% if row.effectiveFree %}{{ "credits.summary.free" | t }}{% else %}{{ row.effectiveValue }} {{ row.currencyKey | t }}{% endif %}</td>
@@ -80,7 +80,7 @@
               <td class="px-4 py-3">
                 <div class="font-medium text-gray-900">{{ row.label }}</div>
                 <div class="mt-0.5 text-xs font-mono text-gray-400">{{ row.key }}</div>
-                {% if row.description != '' %}<div class="mt-0.5 text-xs text-gray-500">{{ row.description }}</div>{% endif %}
+                {% if row.description != '' %}<div data-explanation class="mt-0.5 text-xs text-gray-500">{{ row.description }}</div>{% endif %}
               </td>
               <td class="px-4 py-3 text-gray-700">{{ row.scopeKey | t }}{% if row.scopeValue != '' %} {{ row.scopeValue }}{% endif %}</td>
               <td class="px-4 py-3 font-medium text-gray-900">{% if row.effectiveUnlimited %}{{ "credits.summary.unlimited" | t }}{% else %}{{ row.effectiveValue }}{% endif %}</td>

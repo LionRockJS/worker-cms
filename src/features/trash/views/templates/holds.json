@@ -4,7 +4,7 @@
       "type": "page-header",
       "settings": {
         "title": "{{ 'trash.holds' | t }}",
-        "description": "{{ 'trash.holds_description' | t }}"
+        "explanation": "{{ 'trash.holds_description' | t }}"
       }
     },
     "content": {

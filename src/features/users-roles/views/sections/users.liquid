@@ -59,7 +59,7 @@
   <div class="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
     <div class="mb-4">
       <h3 class="text-lg font-semibold text-gray-900">{{ "credits.wallet.shared_pool_title" | t }} · {{ wallet.nameKey | t }}</h3>
-      <p class="mt-1 text-sm text-gray-500">{{ "users.shared_pool_description" | t }}</p>
+      <p data-explanation class="mt-1 text-sm text-gray-500">{{ "users.shared_pool_description" | t }}</p>
     </div>
     <p class="text-2xl font-bold text-gray-900">{{ wallet.balance }}</p>
 
@@ -68,7 +68,7 @@
           class="mt-5 max-w-md space-y-3 border-t border-gray-100 pt-5">
       <input type="hidden" name="currency" value="{{ wallet.currency }}">
       <h4 class="text-sm font-semibold text-gray-900">{{ "view_strings.sections_users.adjust_pool" | t }}</h4>
-      <p class="text-xs text-gray-500">{{ "view_strings.sections_users.positive_grants_negative_deducts_the_pool_can_never_go_below_zero" | t }}</p>
+      <p data-explanation class="text-xs text-gray-500">{{ "view_strings.sections_users.positive_grants_negative_deducts_the_pool_can_never_go_below_zero" | t }}</p>
       <label class="block">
         <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_users.amount" | t }}</span>
         <input name="amount" type="number" step="1" required placeholder="e.g. 500 or -100"

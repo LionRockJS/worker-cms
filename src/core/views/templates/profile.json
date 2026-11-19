@@ -5,7 +5,7 @@
       "settings": {
         "width": "4xl",
         "title": "{{ 'profile.title' | t }}",
-        "description": "{{ 'profile.description' | t }}"
+        "explanation": "{{ 'profile.description' | t }}"
       }
     },
     "content": {

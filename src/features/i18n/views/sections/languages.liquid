@@ -6,7 +6,7 @@
     <div class="flex flex-wrap items-end justify-between gap-4">
       <div>
         <h2 class="text-lg font-bold text-gray-900">{{ "i18n.languages.default" | t }}</h2>
-        <p class="mt-1 text-sm text-gray-500">{{ "i18n.languages.default_description" | t }}</p>
+        <p data-explanation class="mt-1 text-sm text-gray-500">{{ "i18n.languages.default_description" | t }}</p>
       </div>
       <div class="flex items-end gap-3">
         <label class="text-sm font-medium text-gray-700">{{ "i18n.fields.default_language" | t }}<select name="default_language" class="mt-1 block w-full min-w-[10rem] rounded-lg border border-gray-300 px-3 py-2">{% for option in defaultLanguageOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.code }})</option>{% endfor %}</select></label>

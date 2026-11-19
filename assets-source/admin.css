@@ -545,7 +545,10 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
 }
 *::-webkit-scrollbar-thumb:hover { background: #38445a; background-clip: content-box; }
 
-/* Native explanation toggle shares the primary color in both themes. */
+/* Use the sidebar checkbox to control explanations throughout the admin shell. */
+body:has(> [data-admin-sidebar] [data-sidebar-help-toggle]:not(:checked)) [data-explanation] {
+  display: none;
+}
 html [data-admin-sidebar] [data-sidebar-help-control]:has([data-sidebar-help-toggle]:checked) {
   color: var(--color-indigo-600);
 }

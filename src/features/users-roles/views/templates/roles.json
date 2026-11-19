@@ -4,7 +4,7 @@
       "type": "page-header",
       "settings": {
         "title": "{{ 'view_strings.sections_roles.roles' | t }}",
-        "description": "{{ 'view_strings.sections_roles.assign_permissions_to_roles_the_admin_role_always_has_every_permission' | t }}"
+        "explanation": "{{ 'view_strings.sections_roles.assign_permissions_to_roles_the_admin_role_always_has_every_permission' | t }}"
       },
       "blocks": {
         "new": {

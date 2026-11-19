@@ -13,7 +13,7 @@
       <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">
         <div>
           <h3 class="text-lg font-bold text-gray-900">{{ "view_strings.sections_plugin_page_types.defined_page_types" | t }}</h3>
-          <p class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.page_types_contributed_by_this_plugin_through_contenttypes_blueprint" | t }}</p>
+          <p data-explanation class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.page_types_contributed_by_this_plugin_through_contenttypes_blueprint" | t }}</p>
         </div>
       </div>
       <div class="overflow-x-auto w-full">
@@ -46,7 +46,7 @@
       <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">
         <div>
           <h3 class="text-lg font-bold text-gray-900">{{ "view_strings.sections_plugin_page_types.defined_taxonomies" | t }}</h3>
-          <p class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.taxonomies_contributed_by_this_plugin_through_contenttypes_taxonomies" | t }}</p>
+          <p data-explanation class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.taxonomies_contributed_by_this_plugin_through_contenttypes_taxonomies" | t }}</p>
         </div>
       </div>
       <div class="overflow-x-auto w-full">
@@ -79,7 +79,7 @@
       <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">
         <div>
           <h3 class="text-lg font-bold text-gray-900">{{ "view_strings.sections_plugin_page_types.delegated_access" | t }}</h3>
-          <p class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.access_requested_through_readtypes_and_writetypes_approving_a_scope_lets" | t }}</p>
+          <p data-explanation class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_page_types.access_requested_through_readtypes_and_writetypes_approving_a_scope_lets" | t }}</p>
         </div>
         {% if hasPendingApprovals %}
           <form method="post" action="{{ approveAllAction }}" class="shrink-0">
