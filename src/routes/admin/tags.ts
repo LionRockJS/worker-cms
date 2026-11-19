@@ -126,9 +126,10 @@ tagsRoutes.post('/taxonomies/:id/delete', requirePermission('taxonomy:write'), a
 
 tagsRoutes.get('/tags', async (c) => {
   const filterTaxonomy = str(c.req.query('filter_taxonomy'));
+  const search = str(c.req.query('search'));
   const [taxonomies, tags, canSync] = await Promise.all([
     tagTaxonomyOptions(c),
-    listTags(c.env.DB, filterTaxonomy),
+    listTags(c.env.DB, filterTaxonomy, search),
     publication() ? userCan(c, 'tag:write') : false,
   ]);
   recordTagReads('tag.list', tags);
@@ -136,6 +137,7 @@ tagsRoutes.get('/tags', async (c) => {
     taxonomies,
     tags,
     filterTaxonomy,
+    search,
     canSync,
     syncedCount: str(c.req.query('synced')),
     syncError: str(c.req.query('error')),
@@ -233,7 +235,7 @@ async function tagSchema(db: D1DatabaseClient): Promise<TagSchema> {
   };
 }
 
-async function listTags(db: D1DatabaseClient, filterTaxonomy = ''): Promise<Tag[]> {
+async function listTags(db: D1DatabaseClient, filterTaxonomy: string, search: string): Promise<Tag[]> {
   const schema = await tagSchema(db);
   const weightExpr = schema.hasWeight ? 'tags.weight' : '5';
   const taxonomyExpr = schema.hasTaxonomySlug ? 'tags.taxonomy_slug' : 'taxonomies.slug';
@@ -242,12 +244,24 @@ async function listTags(db: D1DatabaseClient, filterTaxonomy = ''): Promise<Tag[
     ${weightExpr} AS weight, ${taxonomyExpr} AS taxonomy_slug, tags.parent_tag, tags.lect
     FROM tags${taxonomyJoin}`;
 
+  const conditions: string[] = [];
+  const bindings: string[] = [];
   if (filterTaxonomy) {
-    return (await db.prepare(`${select} WHERE ${taxonomyExpr} = ? ORDER BY weight ASC, name ASC`)
-      .bind(filterTaxonomy)
-      .all<Tag>()).results;
+    conditions.push(`${taxonomyExpr} = ?`);
+    bindings.push(filterTaxonomy);
   }
-  return (await db.prepare(`${select} ORDER BY weight ASC, name ASC`).all<Tag>()).results;
+  if (search) {
+    conditions.push(`(
+      instr(lower(tags.name), lower(?)) > 0 OR instr(lower(tags.slug), lower(?)) > 0
+      OR EXISTS (
+        SELECT 1 FROM json_each(CASE WHEN json_valid(tags.lect) THEN tags.lect ELSE '{}' END, '$.name') AS translation
+        WHERE translation.type = 'text' AND instr(lower(translation.value), lower(?)) > 0
+      )
+    )`);
+    bindings.push(search, search, search);
+  }
+  const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+  return (await db.prepare(`${select}${where} ORDER BY weight ASC, name ASC`).bind(...bindings).all<Tag>()).results;
 }
 
 function optionalNumericId(value: FormValue): number | null {

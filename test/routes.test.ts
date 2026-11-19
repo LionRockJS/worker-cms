@@ -895,6 +895,32 @@ describe('admin routes', () => {
     expect((data.tags as Array<{ slug: string }>).map((tag) => tag.slug)).toEqual(['news', 'updates']);
   });
 
+  it('searches tag names, translated names, and slugs within the selected taxonomy', async () => {
+    const insert = env.DB.prepare('INSERT INTO tags (name, slug, taxonomy_slug, lect) VALUES (?, ?, ?, ?)');
+    await env.DB.batch([
+      insert.bind('Press', 'daily-bulletin', 'categories', JSON.stringify({ name: { 'zh-hant': '最新消息' } })),
+      insert.bind('Daily roundup', 'roundup', 'topics', null),
+      insert.bind('Daily briefing', 'briefing', 'categories', '{'),
+    ]);
+    const headers = { Cookie: await authCookie() };
+
+    const response = await fetchWorker('/admin/tags?filter_taxonomy=categories&search=+DAILY+', { headers });
+    expect(response.status).toBe(200);
+    expect(bodyData(await response.text())).toMatchObject({
+      search: 'DAILY',
+      clearSearchHref: '/admin/tags?filter_taxonomy=categories',
+      tags: [expect.objectContaining({ slug: 'briefing' }), expect.objectContaining({ slug: 'daily-bulletin' })],
+    });
+
+    const translated = await fetchWorker(`/admin/tags?search=${encodeURIComponent('消息')}`, { headers });
+    expect(translated.status).toBe(200);
+    expect(bodyData(await translated.text()).tags).toEqual([expect.objectContaining({ slug: 'daily-bulletin' })]);
+
+    const noMatches = await fetchWorker('/admin/tags?search=%25', { headers });
+    expect(noMatches.status).toBe(200);
+    expect(bodyData(await noMatches.text())).toMatchObject({ hasTags: false, search: '%', tags: [] });
+  });
+
   it('persists tag weights and orders tag lists by weight', async () => {
     const cookie = await authCookie();
     const createResponse = await fetchWorker('/admin/tags', {
