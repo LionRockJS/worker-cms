@@ -94,18 +94,18 @@ apiRoutes.get('/api/parent-tags', requirePermission('content:read'), async (c) =
   })));
 });
 
-// Users for the editors combobox on the page editor. `q` filters by name or
-// email; without it, returns the most recently active users. Requires
+// Users for the user pickers (page editors, page access). Active accounts only.
+// `q` filters by name or email; without it, returns the most recently active users. Requires
 // content:write (not just read) since it enumerates user names/emails and only
 // users who can save the form need it.
 apiRoutes.get('/api/users', requirePermission('content:write'), async (c) => {
   const query = c.req.query('q')?.trim() ?? '';
   const params: unknown[] = [];
-  let whereSql = '';
+  let whereSql = 'WHERE disabled_at IS NULL';
 
   if (query) {
     const term = `%${query.replaceAll(' ', '%')}%`;
-    whereSql = 'WHERE (name LIKE ? OR email LIKE ?)';
+    whereSql += ' AND (name LIKE ? OR email LIKE ?)';
     params.push(term, term);
   }
 

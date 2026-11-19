@@ -119,3 +119,13 @@ it('transfers ownership without enabling an existing page and preserves policy t
   expect((await request(`/pages/${restored!.id}/edit`, named)).status).toBe(200);
   expect((await request(`/pages/${restored!.id}/edit`, original)).status).toBe(404);
 });
+
+it('offers only active accounts to the user pickers', async () => {
+  const editor = await session(72401, 'editor');
+  await env.DB.prepare(`INSERT INTO users (id,oauth_id,email,name,disabled_at) VALUES
+    (72410,'picker-a','zorbel-a@example.test','Zorbel Active',NULL),
+    (72411,'picker-b','zorbel-b@example.test','Zorbel Disabled',CURRENT_TIMESTAMP)`).run();
+  const found = await request('/api/users?q=zorbel', editor);
+  expect(found.status).toBe(200);
+  expect(await found.json()).toEqual([{ id: 72410, name: 'Zorbel Active', email: 'zorbel-a@example.test' }]);
+});

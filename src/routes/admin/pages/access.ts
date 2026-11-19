@@ -16,7 +16,6 @@ import { fetchEditorUsers } from '../../../core/db/admin-queries';
 import { recordPageReads, recordTableReads } from '../../../core/http/access-log';
 
 type Account = { id: number; name: string };
-type SearchAccount = Account & { email: string };
 export const pageAccessRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 async function loadPage(c: AppContext) {
@@ -34,7 +33,7 @@ async function loadPage(c: AppContext) {
 async function renderAccess(views: Fetcher, opts: BaseTemplateProps & {
   pageId: number; title: string; pageName: string; revision: number; enabled: boolean; mode: string;
   owner: string; group: string | null; roles: string[]; grants: Account[];
-  legacyEditors: Account[]; accounts: SearchAccount[]; query: string;
+  legacyEditors: Account[];
 }) {
   const { pageId, title, mode } = opts;
   const body = await renderView(views, '/templates/page-access.json', {
@@ -42,7 +41,6 @@ async function renderAccess(views: Fetcher, opts: BaseTemplateProps & {
     action: `/admin/pages/${pageId}/access`,
     permissions: ['owner', 'group', 'others'].map((key, i) => ({ key, digit: mode[i] })),
     group: opts.group ?? '', roles: opts.roles, grants: opts.grants, legacyEditors: opts.legacyEditors,
-    accounts: opts.accounts, query: opts.query,
   });
   return adminLayout(views, opts, { title, body });
 }
@@ -51,14 +49,10 @@ pageAccessRoutes.get('/pages/:id/access', async c => {
   const target = await loadPage(c);
   if (!target) return c.notFound();
   const { page, policy, owner } = target;
-  const query = (c.req.query('q') ?? '').trim().slice(0, 100);
-  const [roles, grants, accounts, ownerAccount, legacyEditors] = await Promise.all([
+  const [roles, grants, ownerAccount, legacyEditors] = await Promise.all([
     resolveRolePermissions(c.env),
     c.env.DB.prepare(`SELECT u.id, COALESCE(NULLIF(u.name,''),u.email) name FROM page_edit_grants g
       JOIN users u ON u.id = g.user_id WHERE g.page_uuid = ? ORDER BY name`).bind(page.uuid).all<Account>(),
-    query ? c.env.DB.prepare(`SELECT id, COALESCE(NULLIF(name,''),email) name, email FROM users WHERE disabled_at IS NULL
-      AND (instr(lower(name),lower(?)) > 0 OR instr(lower(email),lower(?)) > 0) ORDER BY name,id LIMIT 25`)
-      .bind(query, query).all<SearchAccount>() : undefined,
     owner === null ? null : c.env.DB.prepare('SELECT COALESCE(NULLIF(name,\'\'),email) name FROM users WHERE id = ? AND disabled_at IS NULL')
       .bind(owner).first<{ name: string }>(),
     !policy?.enabled ? fetchEditorUsers(c.env.DB, page.editors) : [],
@@ -66,13 +60,13 @@ pageAccessRoutes.get('/pages/:id/access', async c => {
   recordPageReads('page.access-view', [page]);
   recordTableReads('user.page-access-lookup', 'users',
     [...new Set([...(ownerAccount && owner ? [owner] : []), ...grants.results.map(user => user.id),
-      ...legacyEditors.map(user => user.id), ...(accounts?.results ?? []).map(user => user.id)])].map(String));
+      ...legacyEditors.map(user => user.id)])].map(String));
   const t = await uiTranslator(c);
   return renderPage(c, renderAccess, {
     title: t('page_access.title', 'Page access'), pageId: page.id, pageName: page.name,
     revision: policy?.revision ?? 0, enabled: !!policy?.enabled, mode: String(policy?.mode ?? 600).padStart(3, '0'),
     owner: ownerAccount?.name ?? t('page_access.unassigned', 'Unassigned'), group: policy?.group_role ?? null,
-    roles: [...roles.keys()].sort(), grants: grants.results, legacyEditors, accounts: accounts?.results ?? [], query,
+    roles: [...roles.keys()].sort(), grants: grants.results, legacyEditors,
   });
 });
 
