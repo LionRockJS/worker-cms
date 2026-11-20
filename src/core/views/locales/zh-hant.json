@@ -288,7 +288,71 @@
       "title": "地區設定"
     },
     "system_saved": "系統設定已儲存",
-    "timezone_invalid": "請選擇有效的 UTC 時差。"
+    "timezone_invalid": "請選擇有效的 UTC 時差。",
+    "transfer": {
+      "link": "匯出 / 匯入",
+      "back": "返回系統",
+      "title": "匯出 / 匯入設定",
+      "description": "將設定、內容類型、語言、角色和外掛註冊從一個 CMS 複製到另一個。不包括頁面、使用者和媒體。",
+      "invalid_file": "請選擇從 CMS 匯出的設定檔（JSON，最大 2 MB）。",
+      "export": {
+        "title": "匯出",
+        "help": "下載一個 JSON 檔案。絕不包含外掛密鑰。",
+        "download": "下載設定"
+      },
+      "import": {
+        "title": "匯入",
+        "help": "上傳設定檔以查看將發生的變更。確認前不會儲存任何內容。",
+        "file": "設定檔",
+        "preview": "檢查匯入"
+      },
+      "review": {
+        "title": "檢查匯入",
+        "help": "匯入按 slug、代碼、名稱或 URL 新增和更新。不會刪除此 CMS 上的任何內容。",
+        "source": "匯出來源",
+        "exported_at": "匯出時間",
+        "details": "顯示項目",
+        "apply": "匯入所選",
+        "no_changes": "此 CMS 已與檔案一致。",
+        "done": "完成"
+      },
+      "counts": {
+        "create": "新增",
+        "update": "變更",
+        "unchanged": "未變更",
+        "skip": "略過"
+      },
+      "actions": {
+        "create": "新增",
+        "update": "更新",
+        "unchanged": "未變更",
+        "skip": "略過"
+      },
+      "result": {
+        "applied": "項變更已匯入。",
+        "remaining": "項變更尚未匯入。再次匯入以繼續。",
+        "stopped": "匯入已停止：",
+        "failed": "未匯入："
+      },
+      "unavailable": {
+        "no_permission": "你沒有匯入此部分的權限。",
+        "not_installed": "此 CMS 沒有這一部分，因此會被忽略。"
+      },
+      "notes": {
+        "plugins": "匯入的外掛會獲得新的密鑰。請開啟每個外掛並按「連接」（或提供新密鑰），然後檢查其核准項目和受信任介面。"
+      },
+      "sections": {
+        "plugins": "外掛",
+        "taxonomies": "分類法",
+        "block_types": "區塊類型",
+        "page_types": "頁面類型",
+        "page_type_extensions": "頁面類型擴充",
+        "locales": "語言",
+        "translations": "翻譯",
+        "roles": "角色",
+        "system_settings": "系統設定"
+      }
+    }
   },
   "shell": {
     "show_explanations": "顯示說明",

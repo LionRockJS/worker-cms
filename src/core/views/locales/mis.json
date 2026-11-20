@@ -288,7 +288,71 @@
       "title": "Regional settings"
     },
     "system_saved": "System settings saved",
-    "timezone_invalid": "Select a valid UTC offset."
+    "timezone_invalid": "Select a valid UTC offset.",
+    "transfer": {
+      "link": "Export / import",
+      "back": "Back to System",
+      "title": "Export / import settings",
+      "description": "Copy settings, content types, languages, roles and plugin registrations from one CMS to another. Pages, users and media are not included.",
+      "invalid_file": "Choose a settings file exported from a CMS (JSON, up to 2 MB).",
+      "export": {
+        "title": "Export",
+        "help": "Downloads a JSON file. Plugin secrets are never included.",
+        "download": "Download settings"
+      },
+      "import": {
+        "title": "Import",
+        "help": "Upload a settings file to review what would change. Nothing is saved until you confirm.",
+        "file": "Settings file",
+        "preview": "Review import"
+      },
+      "review": {
+        "title": "Review import",
+        "help": "Import adds and updates by slug, code, name or URL. Nothing on this CMS is deleted.",
+        "source": "Exported from",
+        "exported_at": "Exported at",
+        "details": "Show items",
+        "apply": "Import selected",
+        "no_changes": "This CMS already matches the file.",
+        "done": "Done"
+      },
+      "counts": {
+        "create": "new",
+        "update": "changed",
+        "unchanged": "unchanged",
+        "skip": "skipped"
+      },
+      "actions": {
+        "create": "Create",
+        "update": "Update",
+        "unchanged": "Unchanged",
+        "skip": "Skip"
+      },
+      "result": {
+        "applied": "change(s) imported.",
+        "remaining": "change(s) left. Import again to continue.",
+        "stopped": "Import stopped:",
+        "failed": "Not imported:"
+      },
+      "unavailable": {
+        "no_permission": "You do not have permission to import this section.",
+        "not_installed": "This CMS has no such section, so it is ignored."
+      },
+      "notes": {
+        "plugins": "Imported plugins get a new secret. Open each plugin and press Connect (or give it the new secret), then review its approvals and trusted UI."
+      },
+      "sections": {
+        "plugins": "Plugins",
+        "taxonomies": "Taxonomies",
+        "block_types": "Block types",
+        "page_types": "Page types",
+        "page_type_extensions": "Page type extensions",
+        "locales": "Languages",
+        "translations": "Translations",
+        "roles": "Roles",
+        "system_settings": "System settings"
+      }
+    }
   },
   "shell": {
     "close_menu": "Close menu",

@@ -13,68 +13,21 @@ import { accessMutationClass, accessMutationUnavailable, roleRemovalAuditEvidenc
 import { safeRoleAuditValue } from '../../../core/auth/role-mutation-sql';
 import { requirePermission } from '../../../core/auth/guards';
 import { recordPolicyDenial } from '../../../core/auth/denials';
-import type { AccessAuthorization } from '../../../core/auth/access-authorization';
 import { renderPage } from '../../../core/render/chrome';
-import { clearRolePermissionsCache, permissionsFor, splitRoles } from '../../../core/auth/roles';
-import { coreExtensions, type ContributedPermission } from '../../../core/extensions';
+import { clearRolePermissionsCache, splitRoles } from '../../../core/auth/roles';
 import {
-  createCustomRole,
   deleteCustomRole,
   getRoleForEdit,
   listRolesForAdmin,
-  saveRolePermissions,
   readRolePermissionSnapshot,
   rolePermissionsRecordable,
-  storedRolePermissions,
-  type RolePermissionSnapshot,
 } from '../role-store';
-import type { AppContext } from '../../../core/http/context';
+import { assignableContributedPermissions, canManagePermissions, createRole, snapshotMatchesRole, stalePolicy, updateRole } from '../role-writes';
 
 export const rolesRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 rolesRoutes.use('/roles', requirePermission('roles:manage'));
 rolesRoutes.use('/roles/*', requirePermission('roles:manage'));
-
-function canManagePermissions(authorization: AccessAuthorization, permissions: Iterable<string>): boolean {
-  return authorization.admin || [...permissions].every(permission => authorization.permissions.has(permission as Permission));
-}
-
-/** Reject a policy changed after it was read for the authority check. An
- * unmanaged built-in combines code defaults with any legacy stored grants. */
-function snapshotMatchesRole(name: string, builtin: boolean, permissions: Set<Permission>, snapshot: RolePermissionSnapshot): boolean {
-  if ((!builtin && !snapshot.managed) || (snapshot.managed && snapshot.builtin !== (builtin ? 1 : 0))) return false;
-  const defaults = builtin && !snapshot.managed ? [...permissionsFor(name)] : [];
-  const actual = [...new Set([...defaults, ...snapshot.grants])].sort();
-  const observed = [...permissions].sort();
-  return actual.length === observed.length && actual.every((value, index) => value === observed[index]);
-}
-
-function stalePolicy(c: AppContext): Response {
-  return c.json({ error: 'Role policy changed; reload and try again' }, 409, { 'Cache-Control': 'no-store' });
-}
-
-const BUILTIN_PERMISSIONS = new Set<string>(PERMISSIONS);
-
-/**
- * Contributed permissions that may be offered in the role editor.
- *
- * A contributor names its own permissions, so the value it hands back is not
- * trusted here: a value colliding with a built-in would render a *second*
- * checkbox for, say, `content:write` carrying the contributor's own label, and
- * an admin ticking that friendly label would grant the real thing. The plugin
- * platform already namespaces values to the declaring plugin; this drops any
- * collision that gets past a contributor, and any duplicate value, so one row
- * cannot silently relabel another.
- */
-async function assignableContributedPermissions(env: Env): Promise<ContributedPermission[]> {
-  const contributed = await (coreExtensions().contributedPermissions?.(env) ?? []);
-  const seen = new Set<string>();
-  return contributed.filter((permission) => {
-    if (BUILTIN_PERMISSIONS.has(permission.value) || seen.has(permission.value)) return false;
-    seen.add(permission.value);
-    return true;
-  });
-}
 
 /** Role editor checkboxes: the CMS's own permissions first, then one group per
  *  contributor (plugin), so unticking a whole group visibly blocks that plugin. */
@@ -138,26 +91,12 @@ rolesRoutes.get('/roles/new', async (c) => {
 });
 
 rolesRoutes.post('/roles', async (c) => {
-  const { authorization, refused } = await authorizeAccessMutation(c, 'roles:manage');
-  if (refused) return refused;
   const form = await c.req.formData();
   const label = str(form.get('label'));
   const name = str(form.get('name')) ? slugify(str(form.get('name'))) : slugify(label);
 
-  if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
-  const classification = await accessMutationClass(c.env, ['roles', 'users']);
-  if (classification === null) return auditUnavailable(c);
-  const refusedRead = await flushReadAudit(c);
-  if (refusedRead) return refusedRead;
-  let error: string | null;
-  try {
-    error = await createCustomRole(c.env, name, label, mutationAuditEvidence(c,
-      { action: 'role.create', entityType: 'role', entityId: name }, classification.dataClass, { requirePreviousChange: true, policy: classification.policy }), authorization);
-  } catch {
-    return accessMutationUnavailable(c);
-  } finally {
-    clearRolePermissionsCache();
-  }
+  const error = await createRole(c, name, label);
+  if (error instanceof Response) return error;
   if (error) {
     return renderPage(c, roleFormPage, {
       isNew: true,
@@ -193,50 +132,9 @@ rolesRoutes.get('/roles/:name/edit', async (c) => {
 });
 
 rolesRoutes.post('/roles/:name', async (c) => {
-  const { authorization, refused } = await authorizeAccessMutation(c, 'roles:manage');
-  if (refused) return refused;
-  const name = c.req.param('name');
-  const role = await getRoleForEdit(c.env, name);
-  if (!role) return c.notFound();
-  if (role.locked || name.trim().toLowerCase() === 'admin') {
-    await recordPolicyDenial(c, 'locked_role');
-    return c.text('Forbidden: the admin role cannot be edited', 403);
-  }
-
   const form = await c.req.formData();
-  const label = role.builtin ? role.label : (str(form.get('label')) || role.label);
-  const permissions = [...new Set(form.getAll('permissions').map(String))];
-  const assignable = new Set<string>([
-    ...PERMISSIONS,
-    ...(await assignableContributedPermissions(c.env)).map((permission) => permission.value),
-  ]);
-  if (permissions.some((permission) => !assignable.has(permission))) {
-    return c.text('Invalid permission', 400);
-  }
-  if (!canManagePermissions(authorization, role.permissions) || !canManagePermissions(authorization, permissions)) {
-    await recordPolicyDenial(c, 'grant_exceeds_authority');
-    return c.text('Forbidden: cannot grant or modify permissions beyond your own', 403);
-  }
-
-  if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
-  const classification = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
-  if (classification === null) return auditUnavailable(c);
-  const refusedRead = await flushReadAudit(c);
-  if (refusedRead) return refusedRead;
-  const grants = storedRolePermissions(permissions);
-  try {
-    const before = await readRolePermissionSnapshot(c.env, name);
-    if (!rolePermissionsRecordable(before.grants) || !rolePermissionsRecordable(grants)) return unsafeAccessEvidence(c);
-    if (!snapshotMatchesRole(name, role.builtin, role.permissions, before)) return stalePolicy(c);
-    await saveRolePermissions(c.env, name, label, grants, before, mutationAuditEvidence(c,
-      { action: 'role.update', entityType: 'role', entityId: name,
-        detail: { permissions: grants.length, grants, previous: { managed: before.managed, grants: before.grants } } },
-      classification.dataClass, { requirePreviousChange: true, policy: classification.policy }), authorization);
-  } catch {
-    return accessMutationUnavailable(c);
-  } finally {
-    clearRolePermissionsCache();
-  }
+  const refused = await updateRole(c, c.req.param('name'), str(form.get('label')), [...new Set(form.getAll('permissions').map(String))]);
+  if (refused) return refused;
   return c.redirect('/admin/roles');
 });
 

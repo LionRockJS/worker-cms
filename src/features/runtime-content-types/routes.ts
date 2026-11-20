@@ -19,7 +19,7 @@ import { recordTableReads, recordTaxonomyReads } from '../../core/http/access-lo
 import { requirePermission } from '../../core/auth/guards';
 import { renderPage } from '../../core/render/chrome';
 import { userCan } from '../../core/auth/permissions';
-import { clearConfigCache, resolveCmsConfig } from '../../core/db/content-config';
+import { resolveCmsConfig } from '../../core/db/content-config';
 import {
   listDbPageTypes,
   loadPageTypeExtensions,
@@ -27,6 +27,7 @@ import {
 import { listDbBlockTypes } from '../../core/db/block-type-store';
 import { configOnlyTypes } from '../../core/db/type-admin';
 import { validateTypeForm } from './validation';
+import { availableTaxonomies, savePageTypeExtension } from './extension';
 import type { AppContext } from '../../core/http/context';
 
 interface DbTypeRow {
@@ -241,11 +242,6 @@ function nullableJsonArray(values: string[]): string | null {
   return values.length ? JSON.stringify(values) : null;
 }
 
-function availableTaxonomies(config: CmsConfig, dbTaxonomies: Array<{ slug: string; name: string }>): Array<{ slug: string; name: string }> {
-  const bySlug = new Map(Object.entries(config.taxonomies).map(([slug, name]) => [slug, { slug, name }]));
-  for (const taxonomy of dbTaxonomies) bySlug.set(taxonomy.slug, taxonomy);
-  return [...bySlug.values()].sort((a, b) => a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
-}
 
 export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | null; taxonomy_lists: string | null }, PageTypeFormValues>({
   table: 'page_types',
@@ -356,27 +352,7 @@ export const pageTypesRoutes = dbTypeRoutes<DbTypeRow & { block_lists: string | 
         lockedTaxonomies: (config.taxonomyLists[slug] ?? []).filter((entry) => !extensionTaxonomies.has(entry)),
       };
     },
-    save: async (c, slug, values) => {
-      const mutation = await prepareRuntimeTypeMutation(c, 'page_types');
-      const extensions = await mutation.extensions();
-      clearConfigCache();
-      const config = await resolveCmsConfig(c.env);
-      if (!Object.hasOwn(config.blueprint,slug)) return false;
-      const taxonomies = mutation.taxonomies;
-      const current = extensions[slug] ?? { blocks: [], taxonomies: [] };
-      const knownBlocks = new Set(Object.keys(config.blocks));
-      const knownTaxonomies = new Set(availableTaxonomies(config, taxonomies).map((taxonomy) => taxonomy.slug));
-      // Config/plugin-owned entries never enter the extension, so unchecking
-      // them (or replaying a stale form) cannot shrink the base lists.
-      const lockedBlocks = new Set((config.blockLists[slug] ?? []).filter((entry) => !current.blocks.includes(entry)));
-      const lockedTaxonomies = new Set((config.taxonomyLists[slug] ?? []).filter((entry) => !current.taxonomies.includes(entry)));
-      const extension = {
-        blocks: [...new Set(values.blockLists)].filter((entry) => knownBlocks.has(entry) && !lockedBlocks.has(entry)),
-        taxonomies: [...new Set(values.taxonomyLists)].filter((entry) => knownTaxonomies.has(entry) && !lockedTaxonomies.has(entry)),
-      };
-      await mutation.extend(slug, extension);
-      return true;
-    },
+    save: (c, slug, values) => savePageTypeExtension(c, slug, values.blockLists, values.taxonomyLists),
   },
 });
 

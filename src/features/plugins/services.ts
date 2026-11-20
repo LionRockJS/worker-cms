@@ -6,6 +6,7 @@ import type { Env } from '../../types';
 import { getPlugins, pluginById } from './registry';
 import { limitScopeTypes } from './limits';
 import { listPlugins } from './store';
+import { pluginConfigTransferSection } from './config-transfer';
 import type { PluginCreditDef, ResolvedPlugin } from './types';
 
 interface CreditContributorPayload {
@@ -18,6 +19,7 @@ interface CreditContributorPayload {
 
 export const pluginsServices: FeatureServiceEntry = {
   id: 'plugins',
+  configTransferSections: [pluginConfigTransferSection],
 
   async call(operation, env, input): Promise<unknown> {
     if (operation === 'credit-contributors') {

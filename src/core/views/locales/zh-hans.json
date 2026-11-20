@@ -288,7 +288,71 @@
       "title": "区域设置"
     },
     "system_saved": "系统设置已保存",
-    "timezone_invalid": "请选择有效的 UTC 时差。"
+    "timezone_invalid": "请选择有效的 UTC 时差。",
+    "transfer": {
+      "link": "导出 / 导入",
+      "back": "返回系统",
+      "title": "导出 / 导入设置",
+      "description": "将设置、内容类型、语言、角色和插件注册从一个 CMS 复制到另一个。不包括页面、用户和媒体。",
+      "invalid_file": "请选择从 CMS 导出的设置文件（JSON，最大 2 MB）。",
+      "export": {
+        "title": "导出",
+        "help": "下载一个 JSON 文件。绝不包含插件密钥。",
+        "download": "下载设置"
+      },
+      "import": {
+        "title": "导入",
+        "help": "上传设置文件以查看将发生的更改。确认前不会保存任何内容。",
+        "file": "设置文件",
+        "preview": "检查导入"
+      },
+      "review": {
+        "title": "检查导入",
+        "help": "导入按 slug、代码、名称或 URL 新增和更新。不会删除此 CMS 上的任何内容。",
+        "source": "导出来源",
+        "exported_at": "导出时间",
+        "details": "显示项目",
+        "apply": "导入所选",
+        "no_changes": "此 CMS 已与文件一致。",
+        "done": "完成"
+      },
+      "counts": {
+        "create": "新增",
+        "update": "更改",
+        "unchanged": "未更改",
+        "skip": "跳过"
+      },
+      "actions": {
+        "create": "新增",
+        "update": "更新",
+        "unchanged": "未更改",
+        "skip": "跳过"
+      },
+      "result": {
+        "applied": "项更改已导入。",
+        "remaining": "项更改尚未导入。再次导入以继续。",
+        "stopped": "导入已停止：",
+        "failed": "未导入："
+      },
+      "unavailable": {
+        "no_permission": "你没有导入此部分的权限。",
+        "not_installed": "此 CMS 没有这一部分，因此会被忽略。"
+      },
+      "notes": {
+        "plugins": "导入的插件会获得新的密钥。请打开每个插件并按“连接”（或提供新密钥），然后检查其批准项和受信任界面。"
+      },
+      "sections": {
+        "plugins": "插件",
+        "taxonomies": "分类法",
+        "block_types": "区块类型",
+        "page_types": "页面类型",
+        "page_type_extensions": "页面类型扩展",
+        "locales": "语言",
+        "translations": "翻译",
+        "roles": "角色",
+        "system_settings": "系统设置"
+      }
+    }
   },
   "shell": {
     "show_explanations": "显示说明",

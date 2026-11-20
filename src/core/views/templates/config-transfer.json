@@ -1,0 +1,21 @@
+{
+  "sections": {
+    "header": {
+      "type": "page-header",
+      "settings": {
+        "width": "3xl",
+        "backHref": "/admin/settings/system",
+        "backLabel": "{{ 'settings.transfer.back' | t }}",
+        "title": "{{ 'settings.transfer.title' | t }}",
+        "explanation": "{{ 'settings.transfer.description' | t }}"
+      }
+    },
+    "content": {
+      "type": "config-transfer"
+    }
+  },
+  "order": [
+    "header",
+    "content"
+  ]
+}

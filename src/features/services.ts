@@ -7,6 +7,7 @@
 
 import { PageLifecycleUnavailableError, type TrashLifecycleService } from '../core/pages/trash-lifecycle';
 import type { HostSettingWrite } from '../core/evidence/settings-mutation-evidence';
+import type { ConfigTransferSection } from '../core/config-transfer';
 import type { AppContext } from '../core/http/context';
 import type { PublicationService } from './publication';
 import type { Env } from '../types';
@@ -51,6 +52,8 @@ export interface FeatureServiceEntry {
   reservePageCreates?(env: Env, input: PageCreateReservationInput): Promise<FeatureReservation>;
   adminScreenProps?(c: AppContext, target: AdminScreenTarget): Promise<Record<string, unknown>>;
   systemSettingsWrites?(form: FormData): HostSettingWrite[];
+  /** Settings this feature owns, for export/import between CMS deployments. */
+  configTransferSections?: readonly ConfigTransferSection[];
   scheduled?(env: Env): Promise<string | null>;
   /** Audit retention/archival only; business work is denied by default. */
   scheduledDuringWriteContainment?: true;
@@ -134,6 +137,11 @@ export async function featureAdminScreenProps(
 /** Collects preferences submitted through the shared system settings form. */
 export function featureSystemSettingsWrites(form: FormData): HostSettingWrite[] {
   return featureServiceEntries.flatMap(entry => entry.systemSettingsWrites?.(form) ?? []);
+}
+
+/** Export/import sections contributed by installed features. */
+export function featureConfigTransferSections(): ConfigTransferSection[] {
+  return featureServiceEntries.flatMap(entry => entry.configTransferSections ?? []);
 }
 
 /** Runs bounded scheduled work contributed by installed features. */
