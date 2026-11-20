@@ -34,7 +34,7 @@
              data-provider-label="{{ provider.label }}"
              class="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-xl border-2 {{ provider.buttonClass }} font-semibold transition-all duration-150 group">
             <span class="{{ provider.iconClass }} transition-colors" aria-hidden="true">{{ provider.icon | raw }}</span>
-            <span class="hidden lg:inline" data-auth-provider-text>{{ "login.continue_with" | t }} {{ provider.label }}</span>
+            <span data-auth-provider-text>{{ "login.continue_with" | t }} {{ provider.label }}</span>
           </a>
         {% endfor %}
       </div>
