@@ -5,7 +5,7 @@ import worker from '../src/index';
 import { signJWT } from './auth-fixtures';
 import { verifyJWT } from '../src/core/auth/jwt';
 import { applyBulkPageAction } from '../src/core/pages/bulk-action';
-import { updateDraftWeights, ContentBatchEvidenceUnavailableError } from '../src/core/pages/batch-mutation-evidence';
+import { updateDraftWeights, ContentBatchEvidenceUnavailableError } from '../src/core/evidence/batch-mutation-evidence';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
 import { createAdvancedSearchBulkActionJob } from '../src/features/jobs/queue';
 import type { Env,JWTPayload } from '../src/types';

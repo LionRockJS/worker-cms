@@ -1,6 +1,6 @@
 # Durable weights, reorder and local bulk evidence
 
-Local W4b continuation, 2 November 2026, following `2c385b7`. Core implements the shared batch contract in `src/core/pages/batch-mutation-evidence.ts`; admin weight/reorder routes and inline/queued local bulk edits use it. No schema or regulated-write bypass is added.
+Local W4b continuation, 2 November 2026, following `2c385b7`. Core implements the shared batch contract in `src/core/evidence/batch-mutation-evidence.ts`; admin weight/reorder routes and inline/queued local bulk edits use it. No schema or regulated-write bypass is added.
 
 ## Covered changes
 

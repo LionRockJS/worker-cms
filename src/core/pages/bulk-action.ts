@@ -1,5 +1,5 @@
 import { pageAccessFilter, type PageAccessFilter } from '../auth/page-access';
-import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext } from './batch-mutation-evidence';
+import { applyLocalPageChanges, type LocalPageChange, type ContentBatchContext } from '../evidence/batch-mutation-evidence';
 // Applying one action to many pages: publish, unpublish, move to trash, change tags,
 // or replace text in draft content.
 //

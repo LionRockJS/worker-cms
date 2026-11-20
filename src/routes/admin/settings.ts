@@ -1,4 +1,4 @@
-import { HOST_SETTINGS_KEYS, prepareHostSettingsMutation } from '../../core/db/settings-mutation-evidence';
+import { HOST_SETTINGS_KEYS, prepareHostSettingsMutation } from '../../core/evidence/settings-mutation-evidence';
 import { Hono } from 'hono';
 import { requirePermission } from '../../core/auth/guards';
 import { coreExtensions } from '../../core/extensions';

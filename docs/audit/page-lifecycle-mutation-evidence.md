@@ -1,6 +1,6 @@
 # Durable local page lifecycle evidence
 
-Local W4b continuation, 2 November 2026, following `45cf496`. The neutral core service `src/core/pages/lifecycle-mutation-evidence.ts` owns the private-D1 transaction. Host delete routes, inline/claimed-job bulk delete and optional trash routes use it. Core imports no optional feature implementation. No schema change or regulated-write bypass is added.
+Local W4b continuation, 2 November 2026, following `45cf496`. The trash feature's `src/features/trash/lifecycle-mutation-evidence.ts` owns the private-D1 transaction; the neutral contract (`TrashLifecycleService`, `PageLifecycleUnavailableError`) stays in `src/core/pages/trash-lifecycle.ts`. Host delete routes, inline/claimed-job bulk delete and optional trash routes reach it through `requireTrashLifecycle()` in `src/features/services.ts`. Core imports no optional feature implementation. No schema change or regulated-write bypass is added.
 
 ## Covered operations
 

@@ -1,9 +1,9 @@
 import { IpAccessUnavailableError } from './core/auth/ip-access';
 import { auditRequestFrom,ServiceMutationUnavailableError } from './core/db/audit';
-import { SettingsMutationUnavailableError } from './core/db/settings-mutation-evidence';
-import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
+import { SettingsMutationUnavailableError } from './core/evidence/settings-mutation-evidence';
+import { PageTagEvidenceUnavailableError } from './core/evidence/tag-association-evidence';
 import { PageLifecycleUnavailableError } from './core/pages/trash-lifecycle';
-import { ContentBatchEvidenceUnavailableError } from './core/pages/batch-mutation-evidence';
+import { ContentBatchEvidenceUnavailableError } from './core/evidence/batch-mutation-evidence';
 import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
 // ============================================================
 // 0xCMS - main entry point
@@ -34,7 +34,7 @@ import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
 import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
-import { SessionEvidenceUnavailableError } from './core/auth/session-evidence';
+import { SessionEvidenceUnavailableError } from './core/evidence/session-evidence';
 import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
 import { maintainSessionHygiene } from './core/auth/sessions';
 import { coreExtensions } from './core/extensions';

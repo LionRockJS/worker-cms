@@ -1,6 +1,6 @@
 import { canManagePageAccess, pagePolicy, requestPageAllowed, requestPageFilter } from '../../../core/auth/page-access';
-import { updateDraftWeights } from '../../../core/pages/batch-mutation-evidence';
-import { saveDraftContent, removeDraftHistory, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
+import { updateDraftWeights } from '../../../core/evidence/batch-mutation-evidence';
+import { saveDraftContent, removeDraftHistory, contentMutationUnavailable } from '../../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // Page create / read / edit / update, plus the weight controls.
 //

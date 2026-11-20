@@ -1,5 +1,5 @@
 import { hasReadablePage, requestPageFilter } from '../../../core/auth/page-access';
-import { saveDraftContent, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
+import { saveDraftContent, contentMutationUnavailable } from '../../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // The dashboard and page listings: all pages, per-type lists, and the
 // create-by-type entry points.

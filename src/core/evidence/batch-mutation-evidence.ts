@@ -1,5 +1,5 @@
 import { pageAccessGuard } from '../auth/page-access';
-import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
+import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../pages/snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization, captureContentJobAuthorization } from '../auth/access-authorization';

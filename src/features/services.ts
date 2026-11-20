@@ -6,7 +6,7 @@
 // a feature implementation or a feature-owned contract directly.
 
 import { PageLifecycleUnavailableError, type TrashLifecycleService } from '../core/pages/trash-lifecycle';
-import type { HostSettingWrite } from '../core/db/settings-mutation-evidence';
+import type { HostSettingWrite } from '../core/evidence/settings-mutation-evidence';
 import type { AppContext } from '../core/http/context';
 import type { PublicationService } from './publication';
 import type { Env } from '../types';

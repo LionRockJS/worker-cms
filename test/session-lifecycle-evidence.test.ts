@@ -5,7 +5,7 @@ import worker from '../src/index';
 import { createAuthSession, rotateAuthSession, revokeRefreshSession, capUserSessions, purgeExpiredSessions,
   issueAuthTokens, type IssuedAuthTokens } from '../src/core/auth/sessions';
 import { maintainSessionHygiene, validateAccessSession } from '../src/core/auth/sessions';
-import { SessionEvidenceUnavailableError } from '../src/core/auth/session-evidence';
+import { SessionEvidenceUnavailableError } from '../src/core/evidence/session-evidence';
 import { drainAuditMutationOutbox } from '../src/core/db/audit-mutation-outbox';
 import { hashToken, signJWT } from '../src/core/auth/jwt';
 import { signJWT as signFixtureJWT } from './auth-fixtures';

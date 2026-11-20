@@ -1,5 +1,5 @@
 import { requestPageFilter } from '../../core/auth/page-access';
-import { mutateHostPageTag } from '../../core/pages/tag-association-evidence';
+import { mutateHostPageTag } from '../../core/evidence/tag-association-evidence';
 import { rejectCrossSiteRequest } from '../../core/http/headers';
 // Admin JSON API endpoints.
 

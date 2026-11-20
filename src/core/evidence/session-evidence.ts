@@ -1,7 +1,7 @@
 import type { Env } from '../../types';
 import type { AppContext } from '../http/context';
-import type { AuthDbUser } from './sessions';
-import { safeRoleAuditValue } from './role-mutation-sql';
+import type { AuthDbUser } from '../auth/sessions';
+import { safeRoleAuditValue } from '../auth/role-mutation-sql';
 import { classFor, resolveDataClasses } from '../db/data-classes';
 import { sessionAuditEnvelope } from '../db/audit';
 import { auditOutboxEvidence, drainAuditMutationOutbox } from '../db/audit-mutation-outbox';

@@ -1,7 +1,7 @@
 import { legacyPageFilter, pageAccessFilter, pageAccessGuard } from '../../core/auth/page-access';
 import type { Env,JWTPayload } from '../../types';
 import { PageLifecycleUnavailableError, type ServiceTrashAuthority, type TrashedPageRef } from '../../core/pages/trash-lifecycle';
-import type { ContentBatchContext } from '../../core/pages/batch-mutation-evidence';
+import type { ContentBatchContext } from '../../core/evidence/batch-mutation-evidence';
 import { captureAccessAuthorization,captureContentJobAuthorization } from '../../core/auth/access-authorization';
 import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { serviceMutationAuditEvidence, type AuditActor, attributedMutationAuditEvidence } from '../../core/db/audit';

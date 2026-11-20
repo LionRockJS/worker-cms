@@ -1,5 +1,5 @@
-import { saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/pages/taxonomy-mutation-evidence';
-import { contentMutationUnavailable } from '../../core/pages/mutation-evidence';
+import { saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/evidence/taxonomy-mutation-evidence';
+import { contentMutationUnavailable } from '../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // Tag and taxonomy management.
 

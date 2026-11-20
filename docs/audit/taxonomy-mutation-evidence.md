@@ -1,6 +1,6 @@
 # Durable taxonomy and tag mutation evidence
 
-Local W4b continuation, 2 November 2026, following `714b8a8`. Admin taxonomy/tag mutations now use `src/core/pages/taxonomy-mutation-evidence.ts` for their local D1 changes. Publication follows the local commit and retains its separate protection/recovery contract.
+Local W4b continuation, 2 November 2026, following `714b8a8`. Admin taxonomy/tag mutations now use `src/core/evidence/taxonomy-mutation-evidence.ts` for their local D1 changes. Publication follows the local commit and retains its separate protection/recovery contract.
 
 | Covered operation | Atomic local evidence and state |
 |---|---|

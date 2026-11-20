@@ -1,7 +1,7 @@
 import type { Env, JWTPayload } from '../../types';
 import type { AuditActor } from '../db/audit';
 import type { AppContext } from '../http/context';
-import type { ContentBatchContext } from './batch-mutation-evidence';
+import type { ContentBatchContext } from '../evidence/batch-mutation-evidence';
 
 /** Trusted service adapter, constructed by the credential-owning feature.
  * The trash service never resolves contributor credentials or manufactures a CMS user. */

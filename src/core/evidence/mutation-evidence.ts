@@ -1,4 +1,4 @@
-import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from './snapshot-id';
+import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../pages/snapshot-id';
 import { ContentBatchEvidenceUnavailableError } from './batch-mutation-evidence';
 import type { Page, PageVersion } from '../../types';
 import type { AppContext } from '../http/context';

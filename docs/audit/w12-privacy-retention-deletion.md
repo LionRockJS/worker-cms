@@ -32,8 +32,8 @@ Controls: A.5.33, A.5.34, A.8.10, plus parts of A.5.12, A.5.14, A.8.11, A.8.12.
 
 Ingest re-scans the whole published database on every complete pass, and re-mirrored any row without a draft. The code comment called this intentional. So a submission an editor trashed or purged came back as a new draft at the next pass. Its source row, which holds the personal data, was never deleted at all.
 
-- **Ingest now skips** any uuid in trash or erased ([submission-ingest.ts](../../src/core/db/submission-ingest.ts)).
-- **Purging a submission mirror erases its source** ([submission-erasure.ts](../../src/core/pages/submission-erasure.ts)):
+- **Ingest now skips** any uuid in trash or erased ([submission-ingest.ts](../../src/features/publish/submission-ingest.ts)).
+- **Purging a submission mirror erases its source** ([submission-erasure.ts](../../src/features/publish/submission-erasure.ts)):
   - The purge batch records the uuid in `submission_erasures`, and the purge audit event lists it under `source_erasures`.
   - After the purge commits, the published row and its tag links are deleted, and `erased_at` confirms it.
   - If the published database is unreachable, the erasure stays pending and cron retries it.
