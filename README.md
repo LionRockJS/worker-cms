@@ -39,9 +39,9 @@ the providers, client IDs, and secrets, which go to `.dev.vars`. Then run
 
 If you already have `wrangler.toml`, choose **continue** to create or complete
 `.dev.vars` with your existing settings. The wizard keeps `wrangler.toml`,
-generates a local signing key if needed, and offers to collect local secrets for
-configured OAuth providers. When no provider has a client ID yet, it offers the
-same OAuth provider setup as a fresh local setup. Standard Wrangler development defaults to
+generates a local signing key if needed, and offers the same OAuth provider
+setup as a fresh local setup. Providers and client IDs already in `.dev.vars`
+or `wrangler.toml` are shown as defaults you can keep, change, or drop. Standard Wrangler development defaults to
 `http://localhost:8787` when the existing config has a public origin. Use
 `npm run setup -- --local` to reuse that public origin for local hosting.
 

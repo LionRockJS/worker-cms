@@ -759,10 +759,10 @@ async function upgrade() {
   console.log(`\nEnabled ${provider} on ${name} and updated wrangler.toml.`);
 }
 
-async function askOAuthClients(callback) {
+async function askOAuthClients(callback, defaults = {}) {
   let providers;
   while (!providers) {
-    const answer = await ask('OAuth providers (comma-separated)', 'github');
+    const answer = await ask('OAuth providers (comma-separated)', defaults.providers?.join(',') || 'github');
     const selected = [...new Set(answer.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
     const invalid = selected.filter((provider) => !Object.hasOwn(PROVIDERS, provider));
     if (selected.length && !invalid.length) providers = selected;
@@ -774,9 +774,9 @@ async function askOAuthClients(callback) {
   let microsoftTenant;
   for (const provider of providers) {
     console.log(`${provider}: ${PROVIDERS[provider].instructions}`);
-    clientIds[provider] = await ask(`${provider} client ID`);
+    clientIds[provider] = await ask(`${provider} client ID`, defaults.clientIds?.[provider]);
     if (provider === 'microsoft') {
-      microsoftTenant = await ask('Microsoft tenant', 'common');
+      microsoftTenant = await ask('Microsoft tenant', defaults.microsoftTenant || 'common');
     }
   }
   return { providers, clientIds, microsoftTenant };
@@ -784,11 +784,15 @@ async function askOAuthClients(callback) {
 
 /**
  * Local counterpart of the provider prompts: the choices go to .dev.vars,
- * which overrides wrangler.toml's [vars] under wrangler dev.
+ * which overrides wrangler.toml's [vars] under wrangler dev. Providers found
+ * in the existing config are only defaults, so they can be dropped or changed.
  */
-async function askLocalOAuthClients(canonicalOrigin) {
-  if (!await confirm('No OAuth provider is configured for local sign-in. Set one up now?')) return {};
-  const { providers, clientIds, microsoftTenant } = await askOAuthClients(`${canonicalOrigin}/auth/callback`);
+async function askLocalOAuthClients(canonicalOrigin, defaults = {}) {
+  const question = defaults.providers?.length
+    ? 'Set up local OAuth sign-in (providers, client IDs, secrets)?'
+    : 'No OAuth provider is configured for local sign-in. Set one up now?';
+  if (!await confirm(question, !defaults.providers?.length)) return {};
+  const { providers, clientIds, microsoftTenant } = await askOAuthClients(`${canonicalOrigin}/auth/callback`, defaults);
   const vars = { ENABLED_PROVIDERS: providers.join(',') };
   for (const provider of providers) vars[PROVIDERS[provider].clientId] = clientIds[provider];
   if (microsoftTenant) vars.MICROSOFT_TENANT = microsoftTenant;
@@ -829,18 +833,26 @@ async function continueLocalSetup(localHosting) {
 
   console.log(`Keeping wrangler.toml. Local OAuth callback is ${canonicalOrigin}/auth/callback.`);
   const clientIds = {};
+  const sources = new Set();
   for (const name of oauthProviders(localVars.ENABLED_PROVIDERS ?? vars.ENABLED_PROVIDERS)) {
     const provider = name.toLowerCase();
     if (!Object.hasOwn(PROVIDERS, provider)) continue;
     const { clientId } = PROVIDERS[provider];
     const value = localVars[clientId] ?? vars[clientId];
     // wrangler.example.toml ships GITHUB_CLIENT_ID = "your-github-oauth-client-id".
-    if (typeof value === 'string' && value.trim() && !/^your-.*-client-id$/.test(value)) clientIds[provider] = value;
+    if (typeof value !== 'string' || !value.trim() || /^your-.*-client-id$/.test(value)) continue;
+    clientIds[provider] = value;
+    sources.add(Object.hasOwn(localVars, clientId) ? '.dev.vars' : 'wrangler.toml');
   }
   const configured = Object.keys(clientIds);
-  const oauth = configured.length
-    ? { providers: await confirm(`Configure local OAuth secrets for ${configured.join(', ')}?`, false) ? configured : [], clientIds }
-    : await askLocalOAuthClients(canonicalOrigin);
+  if (configured.length) {
+    console.log(`Found OAuth client IDs for ${configured.join(', ')} in ${[...sources].join(' and ')}.`);
+  }
+  const oauth = await askLocalOAuthClients(canonicalOrigin, {
+    providers: configured,
+    clientIds,
+    microsoftTenant: localVars.MICROSOFT_TENANT ?? vars.MICROSOFT_TENANT,
+  });
   await writeLocalSecrets({ canonicalOrigin, ...oauth });
   const port = new URL(canonicalOrigin).port;
   const portOption = isLocalOrigin(canonicalOrigin) && port && port !== '8787' ? ` -- --port ${port}` : '';
