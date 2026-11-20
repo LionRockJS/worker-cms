@@ -271,6 +271,8 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
         entityType: 'subscription',
         entityId: String(row.id),
         pluginId: row.plugin_id,
+        // The plugin's own wallet pays its subscription first.
+        scopePluginId: row.plugin_id,
         note,
         createdBy: 'system:cron',
       });

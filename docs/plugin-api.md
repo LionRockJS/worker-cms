@@ -122,6 +122,7 @@ When the optional `credits` feature is enabled, it adds:
 | `GET /credits` | Effective declared prices and balances. |
 | `GET /credits/quote` | Quote a declared key and quantity; quantity 1–1,000,000. |
 | `POST /credits/charge` | Charge a declared `metered` key; quantity 1–1,000,000 and `x-acting-user-id` required. Insufficient funds return 402 `insufficient_credits`. |
+| `POST /credits/plugin-grant` | Add (positive `amount`) or take back (negative, never below zero) credits in this plugin's own wallet; `grant_id` is required and makes the call idempotent (a reuse with a different amount or currency returns 409 `grant_conflict`). The wallet pays only this plugin's costs, before the member's balance and the shared pool. |
 | `POST /credits/usage` | Report a declared `recurring` key for a user; quantity 0–1,000,000,000. |
 | `GET /credits/subscriptions` | Read this contributor's subscriptions, optionally filtered by user. |
 

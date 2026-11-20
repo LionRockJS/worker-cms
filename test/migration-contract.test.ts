@@ -40,8 +40,8 @@ describe('flattened migration contract', () => {
     expect(await objectNames(env.DB, 'table')).toEqual([
       'admin_jobs', 'audit_archive_intents', 'audit_archive_orphans', 'audit_archive_state', 'audit_events', 'audit_log', 'audit_mutation_outbox', 'audit_seals', 'block_types', 'classification_policy_version', 'credit_ledger', 'credit_subscriptions', 'credit_wallets',
       'data_class_floors', 'data_classes', 'locale_messages', 'locales', 'media_files', 'page_access_policies', 'page_edit_grants', 'page_sensitivity_floors', 'page_tags', 'page_types',
-      'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_file_prefix_approvals',
-      'plugin_identity_approvals', 'plugin_page_type_approvals',
+      'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_credit_ledger', 'plugin_credits',
+      'plugin_file_prefix_approvals', 'plugin_identity_approvals', 'plugin_page_type_approvals',
       'plugin_sequences', 'plugin_state', 'plugins', 'record_holds', 'role_permissions', 'roles', 'sessions', 'settings',
       'shared_credit_ledger', 'shared_credits', 'submission_erasures', 'tags', 'taxonomies',
       'trash_page_tags', 'trash_page_versions', 'trash_pages',

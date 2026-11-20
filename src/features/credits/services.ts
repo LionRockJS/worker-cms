@@ -23,22 +23,26 @@ import {
 import {
   countCreditLedger,
   creditUnitLabel,
-  currencyAmounts,
   currencyLabel,
   currencyLabelKey,
   currencyUnitKey,
   declaredCredits,
   creditsSettingKey,
+  asCreditCurrency,
   effectiveCreditsForId,
-  emptyCurrencyTotals,
+  forfeitPluginCredits,
+  getPluginCreditBalances,
+  listPluginCreditLedger,
   getCreditBalances,
   getSharedCreditBalances,
   listCreditLedger,
   listSharedCreditLedger,
   pageCreateAction,
+  pageCreateAmounts,
   pageCreateCostForType,
   refundCurrencies,
   spendCurrencies,
+  type CurrencyAmount,
   type NormalizedCreditDef,
   type PluginCreditValues,
 } from './service';
@@ -74,7 +78,8 @@ export const creditsServices: FeatureServiceEntry = {
     // credits for it, another diamonds); every part is spent or none is.
     const charge = await spendCurrencies(c.env, {
       userId,
-      amounts: currencyAmounts(cost.totals),
+      // One part per pricing plugin, so each plugin's wallet can pay its own.
+      amounts: pageCreateAmounts(cost),
       action,
       entityType: pageType,
       createdBy: String(userId),
@@ -119,14 +124,14 @@ export const creditsServices: FeatureServiceEntry = {
    * message-formatted: the caller turns a refusal into its own 402 payload.
    */
   async reservePageCreates(env: Env, input) {
-    const totals = emptyCurrencyTotals();
+    const amounts: CurrencyAmount[] = [];
     const breakdown: Record<string, number> = {};
     let action = 'page_create:batch';
     let singleType: string | undefined;
     for (const { pageType, count } of input.pageTypes) {
       const cost = await pageCreateCostForType(env, pageType);
       if (cost.total > 0) {
-        for (const currency of CREDIT_CURRENCIES) totals[currency] += cost.totals[currency] * count;
+        amounts.push(...pageCreateAmounts(cost, count));
         breakdown[pageType] = cost.total * count;
       }
       if (input.pageTypes.length === 1 && count === 1) {
@@ -135,7 +140,6 @@ export const creditsServices: FeatureServiceEntry = {
       }
     }
 
-    const amounts = currencyAmounts(totals);
     const payer = input.payerUserId;
     if (!amounts.length || payer === null) {
       return { ok: true, charged: 0, refund: async () => {} };
@@ -205,6 +209,14 @@ export const creditsServices: FeatureServiceEntry = {
     if (!contributorId) return operation === 'pricing' ? [] : {};
 
     if (operation === 'pricing') return creditPricing(env, contributorId);
+    if (operation === 'plugin-wallet') return pluginWallet(env, contributorId);
+    if (operation === 'forfeit-plugin-wallet') {
+      const createdBy = typeof (request as { createdBy?: unknown }).createdBy === 'string'
+        ? (request as { createdBy: string }).createdBy
+        : 'system';
+      await forfeitPluginCredits(env, contributorId, createdBy);
+      return {};
+    }
     return undefined;
   },
 
@@ -213,6 +225,32 @@ export const creditsServices: FeatureServiceEntry = {
     return sweep.processed ? `credit subscription sweep: ${JSON.stringify(sweep)}` : null;
   },
 };
+
+/** Ledger rows shown on a plugin's wallet panel. */
+const PLUGIN_WALLET_LEDGER_SIZE = 20;
+
+/** A plugin's own wallets (credits its creator supplied) and their recent
+ *  ledger, for the plugin's credits screen. Read-only for host admins. */
+async function pluginWallet(env: Env, contributorId: string) {
+  const [balances, ledger] = await Promise.all([
+    getPluginCreditBalances(env, contributorId),
+    listPluginCreditLedger(env, contributorId, { limit: PLUGIN_WALLET_LEDGER_SIZE }),
+  ]);
+  recordTableReads('credit.plugin-wallet-read', 'plugin_credits', [contributorId]);
+  recordTableReads('credit.plugin-ledger-read', 'plugin_credit_ledger', ledger.map(row => row.id));
+  return {
+    wallets: CREDIT_CURRENCIES.map((currency) => ({
+      currency,
+      currencyKey: currencyLabelKey(currency),
+      unitKey: currencyUnitKey(currency),
+      balance: balances[currency],
+    })),
+    ledger: ledger.map((row) => ({
+      ...creditLedgerRowForView(row),
+      unitKey: currencyUnitKey(asCreditCurrency(row.currency)),
+    })),
+  };
+}
 
 async function creditPricing(env: Env, contributorId: string): Promise<CreditPricingRow[]> {
   const credits = await effectiveCreditsForId(env, contributorId);

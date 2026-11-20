@@ -1071,6 +1071,20 @@ users can never pull pool credits into their own account themselves. Admins
 always hold the permission, and it can be granted to any custom role under
 **Roles**.
 
+**Plugin wallets.** A plugin's creator can supply credits to the site through
+`POST /__cms/credits/plugin-grant`. They land in that plugin's own wallet
+(`plugin_credits`, one per plugin and currency, with its own append-only
+`plugin_credit_ledger`) and pay **only that plugin's** costs. Its `metered`
+charges, its `recurring` subscriptions and its share of a `page_create` cost
+try the plugin wallet first, for the full amount or not at all, before the
+member's balance and the shared pool. When a page type is priced by several
+plugins, each plugin's share is offered to its own wallet and whatever is
+left is charged to the member as one spend. Plugin credits never move to a
+member or the pool, so a plugin minting them can only waive its own fees.
+Admins see the balance and ledger under **Plugins → Credits**, read-only.
+Unregistering the plugin forfeits the wallet (`plugin:forfeit`), so a Worker
+that later claims the same id inherits nothing.
+
 ### Currencies: credits and diamonds
 
 There are two wallets, and they never convert into one another:
@@ -1298,8 +1312,8 @@ without them. The optional part is the `i18n` *code* feature — the screens for
 editing locales and translations. Serving the UI's own catalog
 (`GET /admin/i18n/catalog/:locale`) stays core too.
 
-The credits fragment owns `credit_wallets`, both ledgers, shared pools, and
-subscriptions. Disabling the feature therefore leaves no credit-specific
+The credits fragment owns `credit_wallets`, the ledgers, shared pools, plugin
+wallets, and subscriptions. Disabling the feature therefore leaves no credit-specific
 objects in a fresh core-only database.
 
 #### Deleting a feature's source

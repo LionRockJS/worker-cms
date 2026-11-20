@@ -401,7 +401,7 @@ describe('/__cms credits endpoints', () => {
     const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', { key: 'send_edm', quantity: 10 });
     expect(res.status).toBe(402);
     expect((await res.json() as { credit: unknown }).credit)
-      .toEqual({ currency: 'credit', required: 20, balance: 5, shared_balance: 0 });
+      .toEqual({ currency: 'credit', required: 20, balance: 5, shared_balance: 0, plugin_balance: 0 });
   });
 });
 

@@ -145,6 +145,13 @@ export interface CreditChargeInput {
   entityType?: string;
   entityId?: string;
   pluginId?: string;
+  /**
+   * The plugin whose declared cost this is. Its plugin wallet pays first
+   * (spendCredits only). Distinct from `pluginId`, which records who CALLED —
+   * a plugin creating another plugin's page type must not spend that
+   * plugin's wallet, nor its own on a cost it doesn't own.
+   */
+  scopePluginId?: string;
   note?: string;
   /** Who triggered it: a user id, or 'plugin:<id>' for server-to-server. */
   createdBy: string;
@@ -473,11 +480,22 @@ export async function adjustCredits(
  */
 export async function refundCredits(
   env: Env,
-  input: { userId: number; amount: number; currency?: CreditCurrency; action: string; note?: string; pluginId?: string; createdBy: string; source?: CreditSource },
+  input: { userId: number; amount: number; currency?: CreditCurrency; action: string; note?: string; pluginId?: string; scopePluginId?: string; createdBy: string; source?: CreditSource },
 ): Promise<void> {
   if (Math.trunc(input.amount) <= 0) return;
   const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
   try {
+    if (input.source === 'plugin') {
+      if (!input.scopePluginId) throw new Error('plugin-wallet refund needs scopePluginId');
+      await writePluginCredits(env, input.scopePluginId, Math.trunc(input.amount), false, {
+        currency,
+        action: `${input.action}:refund`,
+        userId: input.userId,
+        note: input.note,
+        createdBy: input.createdBy,
+      });
+      return;
+    }
     if (input.source === 'shared') {
       await adjustSharedCredits(env, {
         delta: Math.trunc(input.amount),
@@ -596,7 +614,7 @@ export async function countCreditLedger(
 // ── Shared credit pool ────────────────────────────────────────────────────────
 
 /** Which balance a spend was taken from. */
-export type CreditSource = 'user' | 'shared';
+export type CreditSource = 'user' | 'shared' | 'plugin';
 
 export interface SharedCreditLedgerRow {
   id: number;
@@ -710,13 +728,212 @@ export async function adjustSharedCredits(
   return writeSharedCredits(env, delta, delta < 0, input);
 }
 
-export type CreditSpendResult =
-  | { ok: true; source: CreditSource; balanceAfter: number }
-  | { ok: false; error: 'unknown_user'; balance: number; sharedBalance: number; required: number }
-  | { ok: false; error: 'insufficient_credits'; balance: number; sharedBalance: number; required: number };
+// ── Plugin wallets ────────────────────────────────────────────────────────────
+// Credits a plugin's creator supplies to this site (POST
+// /__cms/credits/plugin-grant), one balance per (plugin, currency). They pay
+// only for costs that plugin declares — spendCredits() tries them first when
+// given a scopePluginId — and never move to a member's wallet or the shared
+// pool. A plugin minting its own credits can therefore only waive its own
+// fees. Forfeited when the plugin is unregistered (forfeitPluginCredits), so a
+// Worker that later claims the same manifest id inherits nothing.
+
+export interface PluginCreditLedgerRow {
+  id: number;
+  plugin_id: string;
+  currency: CreditCurrency;
+  delta: number;
+  balance_after: number;
+  action: string;
+  /** The member a spend benefited; NULL for grants, revokes and forfeits. */
+  user_id: number | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  grant_id: string | null;
+  note: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+interface PluginCreditChangeInput {
+  currency?: CreditCurrency;
+  action: string;
+  /** Beneficiary of a spend. The write is a no-op when no such user exists,
+   *  so an invalid identity can never drain a plugin wallet. */
+  userId?: number | null;
+  entityType?: string;
+  entityId?: string;
+  grantId?: string;
+  note?: string;
+  createdBy: string;
+}
+
+export async function getPluginCreditBalance(
+  env: Env,
+  pluginId: string,
+  currency: CreditCurrency = DEFAULT_CREDIT_CURRENCY,
+): Promise<number> {
+  const row = await env.DB.prepare('SELECT balance FROM plugin_credits WHERE plugin_id = ? AND currency = ?')
+    .bind(pluginId, currency).first<{ balance: number }>();
+  return row?.balance ?? 0;
+}
+
+/** Every wallet of one plugin, keyed by currency. */
+export async function getPluginCreditBalances(env: Env, pluginId: string): Promise<Record<CreditCurrency, number>> {
+  const rows = await env.DB.prepare('SELECT currency, balance FROM plugin_credits WHERE plugin_id = ?')
+    .bind(pluginId).all<{ currency: string; balance: number }>();
+  const balances = emptyCurrencyTotals();
+  for (const row of rows.results) {
+    if (isCreditCurrency(row.currency)) balances[row.currency] = row.balance;
+  }
+  return balances;
+}
+
+/** Atomic plugin-wallet write: ledger INSERT + balance UPDATE sharing one
+ *  guard, like writeSharedCredits. Success is detected via RETURNING. */
+async function writePluginCredits(
+  env: Env,
+  pluginId: string,
+  delta: number,
+  guarded: boolean,
+  input: PluginCreditChangeInput,
+): Promise<SharedCreditResult> {
+  const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
+  const userId = input.userId ?? null;
+  let guardSql = guarded ? ' AND balance >= ?' : '';
+  const guardArgs: unknown[] = guarded ? [-delta] : [];
+  if (userId !== null) {
+    guardSql += ' AND EXISTS (SELECT 1 FROM users WHERE id = ?)';
+    guardArgs.push(userId);
+  }
+  const results = await env.DB.batch<{ balance: number }>([
+    env.DB.prepare('INSERT OR IGNORE INTO plugin_credits (plugin_id, currency, balance) VALUES (?, ?, 0)')
+      .bind(pluginId, currency),
+    env.DB.prepare(
+      `INSERT INTO plugin_credit_ledger (plugin_id, currency, delta, balance_after, action, user_id, entity_type, entity_id, grant_id, note, created_by)
+       SELECT plugin_id, currency, ?, balance + ?, ?, ?, ?, ?, ?, ?, ?
+         FROM plugin_credits WHERE plugin_id = ? AND currency = ?${guardSql}`,
+    ).bind(
+      delta, delta, input.action, userId, input.entityType ?? null, input.entityId ?? null,
+      input.grantId ?? null, input.note ?? null, input.createdBy, pluginId, currency, ...guardArgs,
+    ),
+    env.DB.prepare(`UPDATE plugin_credits SET balance = balance + ? WHERE plugin_id = ? AND currency = ?${guardSql} RETURNING balance`)
+      .bind(delta, pluginId, currency, ...guardArgs),
+  ]);
+
+  const updated = results[2].results;
+  if (updated.length === 1) return { ok: true, balanceAfter: updated[0].balance };
+  return {
+    ok: false,
+    error: 'insufficient_credits',
+    balance: await getPluginCreditBalance(env, pluginId, currency),
+    required: -delta,
+  };
+}
+
+/** Deducts from a plugin wallet for `input.userId`'s benefit; fails closed
+ *  when the wallet can't cover the FULL amount. An empty wallet — the common
+ *  case — costs one read and no write. */
+async function chargePluginCredits(
+  env: Env,
+  pluginId: string,
+  amount: number,
+  input: PluginCreditChangeInput,
+): Promise<SharedCreditResult> {
+  const balance = await getPluginCreditBalance(env, pluginId, input.currency);
+  if (balance < amount) return { ok: false, error: 'insufficient_credits', balance, required: amount };
+  return writePluginCredits(env, pluginId, -amount, true, input);
+}
+
+export type PluginGrantResult =
+  | { ok: true; duplicate: boolean; delta: number; currency: CreditCurrency; balanceAfter: number }
+  | { ok: false; error: 'insufficient_credits'; balance: number; required: number }
+  | { ok: false; error: 'grant_conflict' };
 
 /**
- * Charges the user's own balance first; when it can't cover the FULL amount,
+ * A plugin's creator adds (positive delta) or takes back (negative delta)
+ * credits in its own wallet. `grantId` is unique per plugin: repeating a
+ * grant returns the original result with `duplicate: true` and changes
+ * nothing, so a creator can retry safely; reusing an id for a different
+ * amount or currency is a `grant_conflict`. A take-back never goes below
+ * zero.
+ */
+export async function grantPluginCredits(
+  env: Env,
+  input: { pluginId: string; delta: number; currency?: CreditCurrency; grantId: string; note?: string; createdBy: string },
+): Promise<PluginGrantResult> {
+  const delta = Math.trunc(input.delta);
+  if (delta === 0) throw new Error('grantPluginCredits delta must be non-zero');
+  const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
+
+  const existing = async (): Promise<PluginGrantResult | null> => {
+    const row = await env.DB.prepare(
+      'SELECT currency, delta, balance_after FROM plugin_credit_ledger WHERE plugin_id = ? AND grant_id = ?',
+    ).bind(input.pluginId, input.grantId).first<{ currency: string; delta: number; balance_after: number }>();
+    if (!row) return null;
+    if (row.currency !== currency || row.delta !== delta) return { ok: false, error: 'grant_conflict' };
+    return { ok: true, duplicate: true, delta, currency, balanceAfter: row.balance_after };
+  };
+
+  const prior = await existing();
+  if (prior) return prior;
+  try {
+    const write = await writePluginCredits(env, input.pluginId, delta, delta < 0, {
+      currency,
+      action: delta > 0 ? 'plugin:grant' : 'plugin:revoke',
+      grantId: input.grantId,
+      note: input.note,
+      createdBy: input.createdBy,
+    });
+    if (!write.ok) return write;
+    return { ok: true, duplicate: false, delta, currency, balanceAfter: write.balanceAfter };
+  } catch (error) {
+    // A concurrent request with the same grant id won the UNIQUE constraint;
+    // the batch rolled back, so report what that request did.
+    if (/UNIQUE constraint failed/i.test(String(error))) {
+      const raced = await existing();
+      if (raced) return raced;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Zeroes every wallet of a plugin, with one ledger row per non-empty wallet —
+ * for unregistering it. One batch, so a spend can't slip between the ledger
+ * and the balance.
+ */
+export async function forfeitPluginCredits(env: Env, pluginId: string, createdBy: string): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO plugin_credit_ledger (plugin_id, currency, delta, balance_after, action, created_by)
+       SELECT plugin_id, currency, -balance, 0, 'plugin:forfeit', ?
+         FROM plugin_credits WHERE plugin_id = ? AND balance <> 0`,
+    ).bind(createdBy, pluginId),
+    env.DB.prepare('UPDATE plugin_credits SET balance = 0 WHERE plugin_id = ? AND balance <> 0').bind(pluginId),
+  ]);
+}
+
+export async function listPluginCreditLedger(
+  env: Env,
+  pluginId: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<PluginCreditLedgerRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 200);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const rows = await env.DB.prepare(
+    'SELECT * FROM plugin_credit_ledger WHERE plugin_id = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+  ).bind(pluginId, limit, offset).all<PluginCreditLedgerRow>();
+  return rows.results;
+}
+
+export type CreditSpendResult =
+  | { ok: true; source: CreditSource; balanceAfter: number }
+  | { ok: false; error: 'unknown_user'; balance: number; sharedBalance: number; pluginBalance?: number; required: number }
+  | { ok: false; error: 'insufficient_credits'; balance: number; sharedBalance: number; pluginBalance?: number; required: number };
+
+/**
+ * With a scopePluginId, that plugin's wallet pays first, for the FULL amount
+ * or not at all. Then: charges the user's own balance; when it can't cover the FULL amount,
  * the shared pool pays the full amount instead (all-or-nothing per pool, never
  * split — refunds stay one-sided). A pool-covered spend is recorded only in
  * the shared ledger, with the user as beneficiary. An unknown user never falls
@@ -726,6 +943,20 @@ export type CreditSpendResult =
 export async function spendCredits(env: Env, input: CreditChargeInput): Promise<CreditSpendResult> {
   const amount = Math.trunc(input.amount);
   const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
+  let pluginBalance: number | undefined;
+  if (input.scopePluginId && amount > 0) {
+    const own = await chargePluginCredits(env, input.scopePluginId, amount, {
+      currency,
+      action: input.action,
+      userId: input.userId,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      note: input.note,
+      createdBy: input.createdBy,
+    });
+    if (own.ok) return { ok: true, source: 'plugin', balanceAfter: own.balanceAfter };
+    pluginBalance = own.balance;
+  }
   const charge = await chargeCredits(env, input);
   if (charge.ok) return { ok: true, source: 'user', balanceAfter: charge.balanceAfter };
   if (charge.error === 'unknown_user') {
@@ -734,6 +965,7 @@ export async function spendCredits(env: Env, input: CreditChargeInput): Promise<
       error: 'unknown_user',
       balance: 0,
       sharedBalance: await getSharedCreditBalance(env, currency),
+      pluginBalance,
       required: amount,
     };
   }
@@ -752,47 +984,79 @@ export async function spendCredits(env: Env, input: CreditChargeInput): Promise<
     createdBy: input.createdBy,
   });
   if (shared.ok) return { ok: true, source: 'shared', balanceAfter: shared.balanceAfter };
-  return { ok: false, error: 'insufficient_credits', balance: charge.balance, sharedBalance: shared.balance, required: amount };
+  return { ok: false, error: 'insufficient_credits', balance: charge.balance, sharedBalance: shared.balance, pluginBalance, required: amount };
 }
 
 /** One currency's part of a multi-currency charge. */
 export interface CurrencyAmount {
   currency: CreditCurrency;
   amount: number;
+  /** The plugin whose cost this part is; its wallet may pay the part. */
+  scopePluginId?: string;
 }
 
+/** A part spendCurrencies() took, and which balance paid it. */
+export type SpentAmount = CurrencyAmount & { source: CreditSource };
+
 export type MultiSpendResult =
-  | { ok: true; spent: Array<CurrencyAmount & { source: CreditSource }> }
+  | { ok: true; spent: SpentAmount[] }
   | { ok: false; error: 'unknown_user'; currency: CreditCurrency; balance: number; sharedBalance: number; required: number }
   | { ok: false; error: 'insufficient_credits'; currency: CreditCurrency; balance: number; sharedBalance: number; required: number };
 
 /**
- * Spends several currencies for one action — a page type priced in credits by
+ * Spends several parts for one action — a page type priced in credits by
  * one plugin and in diamonds by another costs both at once.
  *
- * All-or-nothing across wallets: the amounts are spent in order and, if any
- * one of them is refused, every wallet already debited is refunded before the
- * refusal is returned. A caller therefore never has to unwind a partial
- * charge, and never half-charges a create it then rejects.
+ * Each part carrying a scopePluginId is first offered to that plugin's wallet
+ * (the full part or nothing). Whatever no plugin wallet paid is then combined
+ * per currency and spent as ONE charge from the user, falling back to the
+ * shared pool — exactly what happens when no plugin wallet is funded.
+ *
+ * All-or-nothing across parts: if any spend is refused, everything already
+ * debited is refunded before the refusal is returned. A caller therefore
+ * never has to unwind a partial charge, and never half-charges a create it
+ * then rejects.
  */
 export async function spendCurrencies(
   env: Env,
-  input: Omit<CreditChargeInput, 'amount' | 'currency'> & { amounts: readonly CurrencyAmount[] },
+  input: Omit<CreditChargeInput, 'amount' | 'currency' | 'scopePluginId'> & { amounts: readonly CurrencyAmount[] },
 ): Promise<MultiSpendResult> {
-  const spent: Array<CurrencyAmount & { source: CreditSource }> = [];
-  for (const { currency, amount } of input.amounts) {
-    if (Math.trunc(amount) <= 0) continue;
-    const charge = await spendCredits(env, { ...input, amount, currency });
+  const { amounts, ...base } = input;
+  const spent: SpentAmount[] = [];
+  const remaining = emptyCurrencyTotals();
+  for (const part of amounts) {
+    const amount = Math.trunc(part.amount);
+    if (amount <= 0) continue;
+    if (part.scopePluginId) {
+      const own = await chargePluginCredits(env, part.scopePluginId, amount, {
+        currency: part.currency,
+        action: base.action,
+        userId: base.userId,
+        entityType: base.entityType,
+        entityId: base.entityId,
+        note: base.note,
+        createdBy: base.createdBy,
+      });
+      if (own.ok) {
+        spent.push({ currency: part.currency, amount, scopePluginId: part.scopePluginId, source: 'plugin' });
+        continue;
+      }
+    }
+    remaining[part.currency] += amount;
+  }
+
+  for (const { currency, amount } of currencyAmounts(remaining)) {
+    const charge = await spendCredits(env, { ...base, amount, currency });
     if (charge.ok) {
-      spent.push({ currency, amount: Math.trunc(amount), source: charge.source });
+      spent.push({ currency, amount, source: charge.source });
       continue;
     }
     await refundCurrencies(env, {
-      userId: input.userId,
-      action: input.action,
-      pluginId: input.pluginId,
-      note: 'auto-refund: another currency in the same charge was refused',
-      createdBy: input.createdBy,
+      userId: base.userId,
+      action: base.action,
+      pluginId: base.pluginId,
+      note: 'auto-refund: another part of the same charge was refused',
+      createdBy: base.createdBy,
       spent,
     });
     return {
@@ -815,6 +1079,20 @@ export function currencyAmounts(totals: Record<CreditCurrency, number>): Currenc
     .filter((part) => part.amount > 0);
 }
 
+/** A page-create cost as spendCurrencies() parts, one per (plugin, currency),
+ *  so each plugin's share can be paid from its own wallet. `count` scales
+ *  the cost for a batch of creates. */
+export function pageCreateAmounts(cost: PageCreateCost, count = 1): CurrencyAmount[] {
+  const byPart = new Map<string, CurrencyAmount>();
+  for (const part of cost.parts) {
+    const key = `${part.pluginId}\u0000${part.currency}`;
+    const entry = byPart.get(key) ?? { currency: part.currency, amount: 0, scopePluginId: part.pluginId };
+    entry.amount += part.value * count;
+    byPart.set(key, entry);
+  }
+  return [...byPart.values()].filter((part) => part.amount > 0);
+}
+
 /**
  * Reverses what spendCurrencies() took, each part back to the balance that
  * paid it. `portion` (0..1) refunds only part of the charge — for a batch
@@ -829,7 +1107,7 @@ export async function refundCurrencies(
     pluginId?: string;
     note?: string;
     createdBy: string;
-    spent: ReadonlyArray<CurrencyAmount & { source: CreditSource }>;
+    spent: ReadonlyArray<SpentAmount>;
     portion?: number;
   },
 ): Promise<void> {
@@ -841,6 +1119,7 @@ export async function refundCurrencies(
       amount: Math.round(part.amount * portion),
       currency: part.currency,
       source: part.source,
+      scopePluginId: part.scopePluginId,
       action: input.action,
       pluginId: input.pluginId,
       note: input.note,

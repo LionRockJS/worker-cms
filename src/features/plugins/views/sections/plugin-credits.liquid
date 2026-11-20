@@ -61,4 +61,48 @@
       {% endif %}
     </form>
   {% endif %}
+
+  {% if hasWallet %}
+    <div class="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <h2 class="text-base font-semibold text-gray-900">{{ "view_strings.sections_plugin_credits.plugin_wallet" | t }}</h2>
+      <p data-explanation class="text-sm text-gray-500 mt-1">{{ "view_strings.sections_plugin_credits.plugin_wallet_explanation" | t }}</p>
+      <dl class="mt-4 flex flex-wrap gap-6">
+        {% for entry in wallets %}
+          <div>
+            <dt class="text-xs uppercase text-gray-500">{{ entry.currencyKey | t }}</dt>
+            <dd class="text-2xl font-semibold text-gray-900">{{ entry.balance }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+      {% if hasWalletLedger %}
+        <div class="mt-4 overflow-x-auto">
+          <table class="w-full min-w-[560px] text-left text-sm">
+            <thead class="bg-gray-50 text-left text-xs uppercase text-gray-500">
+              <tr>
+                <th class="px-4 py-2">{{ "common.when" | t }}</th>
+                <th class="px-4 py-2">{{ "common.action" | t }}</th>
+                <th class="px-4 py-2">{{ "common.change" | t }}</th>
+                <th class="px-4 py-2">{{ "common.balance" | t }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in walletLedger %}
+                <tr class="border-t border-gray-100">
+                  <td class="px-4 py-3 text-xs text-gray-500">{{ entry.createdAt | l10n_date }}</td>
+                  <td class="px-4 py-3">
+                    <span class="font-mono text-xs">{{ entry.action }}</span>
+                    {% if entry.note != '' %}<div class="text-xs text-gray-500 mt-0.5">{{ entry.note }}</div>{% endif %}
+                  </td>
+                  <td class="px-4 py-3 text-sm {% if entry.isSpend %}text-red-700{% else %}text-green-700{% endif %}">{{ entry.delta }} {{ entry.unitKey | t }}</td>
+                  <td class="px-4 py-3 text-sm text-gray-700">{{ entry.balanceAfter }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="mt-4 text-sm text-gray-500">{{ "view_strings.sections_plugin_credits.plugin_wallet_empty" | t }}</p>
+      {% endif %}
+    </div>
+  {% endif %}
 </div>

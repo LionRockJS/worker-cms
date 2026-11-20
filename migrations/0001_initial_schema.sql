@@ -748,7 +748,40 @@ CREATE TABLE IF NOT EXISTS credit_subscriptions(
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+-- Plugin wallets: credits a plugin's creator supplies to this site, one row
+-- per (plugin, currency). Spendable only on that plugin's own costs, before
+-- the member's wallet and the shared pool. Missing rows are zero balances.
+-- Forfeited (zeroed with a ledger row) when the plugin is unregistered, so a
+-- Worker that later claims the same manifest id inherits nothing.
+CREATE TABLE IF NOT EXISTS plugin_credits(
+    plugin_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    balance INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (plugin_id, currency)
+);
+
+-- Append-only plugin wallet ledger. user_id is the member a spend benefited;
+-- grant_id makes a plugin's grant/revoke idempotent (NULL for spends).
+CREATE TABLE IF NOT EXISTS plugin_credit_ledger(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plugin_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    delta INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    user_id INTEGER,
+    entity_type TEXT,
+    entity_id TEXT,
+    grant_id TEXT,
+    note TEXT,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE (plugin_id, grant_id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_credit_ledger_user ON credit_ledger(user_id, currency, id DESC);
+CREATE INDEX IF NOT EXISTS idx_plugin_credit_ledger_plugin ON plugin_credit_ledger(plugin_id, currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_shared_credit_ledger_user ON shared_credit_ledger(user_id, currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_shared_credit_ledger_currency ON shared_credit_ledger(currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_credit_subscriptions_due ON credit_subscriptions(status, next_charge_at);

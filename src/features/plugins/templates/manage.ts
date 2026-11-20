@@ -384,10 +384,15 @@ export async function pluginCreditsPage(views: Fetcher, opts: BaseTemplateProps 
   pluginLabel: string;
   unreachable: boolean;
   credits: PluginCreditRow[];
+  /** Credits the plugin's creator supplied, spendable only on its costs. */
+  wallet: {
+    wallets: Array<{ currency: string; currencyKey: string; unitKey: string; balance: number }>;
+    ledger: Array<{ delta: string; isSpend: boolean; balanceAfter: number; action: string; note: string; createdBy: string; createdAt: string; unitKey: string }>;
+  } | null;
   saveAction: string;
   flash?: string;
 }): Promise<string> {
-  const { pluginLabel, unreachable, credits, saveAction, flash } = opts;
+  const { pluginLabel, unreachable, credits, wallet, saveAction, flash } = opts;
   const flashMessageKey = flash === 'saved'
     ? 'view_strings.sections_plugin_credits.flash_saved'
     : '';
@@ -397,6 +402,10 @@ export async function pluginCreditsPage(views: Fetcher, opts: BaseTemplateProps 
     unreachable,
     hasCredits: credits.length > 0,
     credits,
+    hasWallet: !!wallet,
+    wallets: wallet?.wallets ?? [],
+    walletLedger: wallet?.ledger ?? [],
+    hasWalletLedger: !!wallet?.ledger.length,
     saveAction,
     hasFlash: !!flashMessageKey,
     flashMessageKey,

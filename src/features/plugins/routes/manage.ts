@@ -21,7 +21,7 @@ import { auditUnavailable } from '../../../core/http/access-log';
 import type { AppContext } from '../../../core/http/context';
 import { auditPluginManagement } from '../disclosure-audit';
 import { recordContributorReads, recordMetadataReads, recordTableReads } from '../../../core/http/access-log';
-import { listIdentityApprovals } from '../identity';
+import { getIdentityForRow, listIdentityApprovals } from '../identity';
 import { str, num } from '../../../core/http/forms';
 import { getPlugins, clearManifestCache, pluginIdentityStates } from '../registry';
 import { clearConfigCache } from '../../../core/db/content-config';
@@ -532,7 +532,17 @@ pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
   if (!mutation.row(id)) return c.notFound();
   // Use the captured pin even when disabled/offline. Unpinned legacy rows
   // remove only their registry entry; do not infer ownership from a live URL.
+  const pin = await getIdentityForRow(c.env.DB, id);
   await mutation.remove(id);
+  // Unregistering releases the manifest id, so the credits its creator
+  // supplied are forfeited — a Worker that later claims the id inherits
+  // nothing. Inert when no credits feature is installed.
+  if (pin) {
+    await callFeatureService('credits', 'forfeit-plugin-wallet', c.env, {
+      contributorId: pin.manifest_id,
+      createdBy: String(c.get('user').sub),
+    });
+  }
   return c.redirect('/admin/plugins-manage');
 });
 
@@ -808,6 +818,10 @@ interface CreditPricingPayload {
   configured: boolean;
 }
 
+/** The plugin's own wallets — credits its creator supplied — as the credits
+ *  feature reports them. Absent when no credits feature is installed. */
+type PluginWalletPayload = NonNullable<Parameters<typeof pluginCreditsPage>[1]['wallet']>;
+
 pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
   const id = Number(c.req.param('id'));
   const found = await resolvedPluginFor(c.env, id, true);
@@ -819,6 +833,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
       pluginLabel: row.label || row.url,
       unreachable: true,
       credits: [],
+      wallet: null,
       saveAction: `/admin/plugins-manage/${id}/credits`,
       flash: c.req.query('flash') ?? undefined,
     });
@@ -848,12 +863,19 @@ pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
     usesDefault: !row.configured,
     value: row.configured ? String(row.effectiveValue) : '',
   }));
+  const wallet = await callFeatureService<PluginWalletPayload>(
+    'credits',
+    'plugin-wallet',
+    c.env,
+    { contributorId: resolved.manifest.id },
+  ) ?? null;
 
   return renderPage(c, pluginCreditsPage, {
     pluginId: id,
     pluginLabel: resolved.manifest.name || row.label || row.url,
     unreachable: false,
     credits,
+    wallet,
     saveAction: `/admin/plugins-manage/${id}/credits`,
     flash: c.req.query('flash') ?? undefined,
   });

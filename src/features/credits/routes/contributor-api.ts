@@ -22,10 +22,14 @@ import {
   effectiveCreditsForId,
   getCreditBalance,
   getCreditBalances,
+  getPluginCreditBalance,
+  getPluginCreditBalances,
   getSharedCreditBalance,
   getSharedCreditBalances,
+  grantPluginCredits,
   spendCredits,
 } from '../service';
+import { isCreditCurrency } from '../currencies';
 import { listSubscriptionsForPlugin, reportSubscriptionUsage, type CreditSubscriptionRow } from '../subscriptions';
 
 export const creditApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -79,6 +83,7 @@ creditApiRoutes.get('/credits', async (c) => {
   const credits = await effectiveCreditsForId(c.env, auth.callerId);
   const balances = payer !== null ? await getCreditBalances(c.env, payer) : null;
   const sharedBalances = await getSharedCreditBalances(c.env);
+  const pluginBalances = await getPluginCreditBalances(c.env, auth.callerId);
   announceBalances(c, auth.callerId);
   announceContributor(c, auth.callerId);
   return c.json({
@@ -89,6 +94,9 @@ creditApiRoutes.get('/credits', async (c) => {
     shared_balance: sharedBalances.credit,
     balances,
     shared_balances: sharedBalances,
+    // This plugin's own wallets (credits its creator supplied), keyed by
+    // currency. They pay this plugin's costs before anyone else's balance.
+    plugin_balances: pluginBalances,
     credits: credits.map((credit) => ({
       key: credit.def.key,
       label: credit.def.label,
@@ -127,6 +135,7 @@ creditApiRoutes.get('/credits/quote', async (c) => {
   const currency = credit.def.currency;
   const balance = payer !== null ? await getCreditBalance(c.env, payer, currency) : null;
   const sharedBalance = await getSharedCreditBalance(c.env, currency);
+  const pluginBalance = await getPluginCreditBalance(c.env, auth.callerId, currency);
   const total = credit.value * quantity;
   announceBalances(c, auth.callerId, [currency]);
   announceContributor(c, auth.callerId);
@@ -138,9 +147,10 @@ creditApiRoutes.get('/credits/quote', async (c) => {
     total,
     balance,
     shared_balance: sharedBalance,
-    // The shared pool covers a spend the user can't afford, so either balance
+    plugin_balance: pluginBalance,
+    // Each balance pays the full amount or nothing, so any one of them
     // covering the total makes it affordable.
-    affordable: total === 0 || (balance !== null && balance >= total) || sharedBalance >= total,
+    affordable: total === 0 || pluginBalance >= total || (balance !== null && balance >= total) || sharedBalance >= total,
   });
 });
 
@@ -186,6 +196,8 @@ creditApiRoutes.post('/credits/charge', async (c) => {
     entityId: typeof body.entity_id === 'string' || typeof body.entity_id === 'number' ? String(body.entity_id).slice(0, 60) : undefined,
     note: typeof body.note === 'string' ? body.note.slice(0, 300) : undefined,
     pluginId: auth.callerId,
+    // The calling plugin's own wallet pays its own metered cost first.
+    scopePluginId: auth.callerId,
     createdBy: `plugin:${auth.callerId}`,
   });
   if (!charge.ok) {
@@ -200,6 +212,7 @@ creditApiRoutes.post('/credits/charge', async (c) => {
           required: charge.required,
           balance: charge.balance,
           shared_balance: charge.sharedBalance,
+          plugin_balance: charge.pluginBalance ?? 0,
         },
       },
       402,
@@ -209,6 +222,52 @@ creditApiRoutes.post('/credits/charge', async (c) => {
   // paid, the user's balance is unchanged and must be re-read.
   const balance = charge.source === 'user' ? charge.balanceAfter : await getCreditBalance(c.env, payer, currency);
   return c.json({ ok: true, charged: total, currency, balance, source: charge.source });
+});
+
+// A plugin's creator supplies credits to this site (positive amount) or takes
+// them back (negative amount, never below zero). They land in the calling
+// plugin's own wallet and pay only that plugin's costs, so a plugin can mint
+// them freely: the most it can do is waive its own fees. `grant_id` makes the
+// call idempotent — repeat it to retry safely; reusing one for a different
+// amount or currency is a 409.
+creditApiRoutes.post('/credits/plugin-grant', async (c) => {
+  const auth = await authenticateCaller(c);
+  if (auth instanceof Response) return auth;
+
+  const body = await c.req.json().catch(() => null) as {
+    amount?: unknown; currency?: unknown; grant_id?: unknown; note?: unknown;
+  } | null;
+  if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
+
+  const amount = asFiniteNumber(body.amount);
+  if (amount === null || !Number.isSafeInteger(amount) || amount === 0 || Math.abs(amount) > 1_000_000_000) {
+    return c.json({ error: 'invalid_amount' }, 400);
+  }
+  const currency = body.currency === undefined ? undefined : body.currency;
+  if (currency !== undefined && !isCreditCurrency(currency)) return c.json({ error: 'unknown_currency' }, 400);
+  const grantId = typeof body.grant_id === 'string' ? body.grant_id.trim() : '';
+  if (!/^[A-Za-z0-9._:-]{1,100}$/.test(grantId)) return c.json({ error: 'invalid_grant_id' }, 400);
+
+  const result = await grantPluginCredits(c.env, {
+    pluginId: auth.callerId,
+    delta: amount,
+    currency,
+    grantId,
+    note: typeof body.note === 'string' ? body.note.slice(0, 300) : undefined,
+    createdBy: `plugin:${auth.callerId}`,
+  });
+  announceContributor(c, auth.callerId);
+  if (!result.ok) {
+    if (result.error === 'grant_conflict') return c.json({ error: 'grant_conflict' }, 409);
+    return c.json({ error: 'insufficient_credits', balance: result.balance, required: result.required }, 402);
+  }
+  return c.json({
+    ok: true,
+    duplicate: result.duplicate,
+    currency: result.currency,
+    amount: result.delta,
+    plugin_balance: result.balanceAfter,
+  });
 });
 
 /** The subscription fields exposed to plugins (host bookkeeping omitted). */

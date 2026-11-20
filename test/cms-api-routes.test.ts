@@ -27,6 +27,7 @@ const EXPECTED = [
   'GET /credits',
   'GET /credits/quote',
   'POST /credits/charge',
+  'POST /credits/plugin-grant',
   'POST /credits/usage',
   'GET /credits/subscriptions',
   'GET /content-meta',
