@@ -16,6 +16,7 @@ import {
   type PluginHookEvent,
   type PluginIdentityApproval,
   type PluginManifest,
+  type PluginPageTypeApproval,
   type ResolvedPlugin,
   type PluginRecord,
 } from './types';
@@ -334,7 +335,9 @@ async function resolveManifests(env: Env): Promise<{
 }
 
 /** Resolves every active plugin (enabled row + manifest reachable + identity pinned to this row). */
-export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
+export async function getPlugins(env: Env): Promise<Array<ResolvedPlugin & {
+  pageTypeApprovals: PluginPageTypeApproval[];
+}>> {
   const { entries, identities } = await resolveManifests(env);
   const { allowed } = await enforceIdentities(env, entries, identities);
   const resolved = await Promise.all(entries.filter(({ record }) => allowed.has(record.id)).map(async ({ record, manifest }) => {
@@ -369,6 +372,7 @@ export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
     };
     return {
       registration: {id:record.id,uuid:record.uuid},
+      pageTypeApprovals: approvals,
       viewSource: pluginViewSource(record.config),
       binding: record.url, fetcher: fetcherForUrl(record.url), manifest: effective,
       requestedManifest: manifest, secret: record.secret || env.PLUGIN_SECRET || '',

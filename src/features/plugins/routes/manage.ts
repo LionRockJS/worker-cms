@@ -30,10 +30,7 @@ import {
   getPlugin,
 } from '../store';
 import { computeIntegrity, inspectAssetHealth, listApprovals } from '../assets';
-import {
-  isPageTypeWildcard,
-  listPageTypeApprovals,
-} from '../page-types';
+import { isPageTypeWildcard } from '../page-types';
 import {
   findFilePrefixConflict,
   listFilePrefixApprovals,
@@ -61,7 +58,7 @@ import {
   type PluginLimitRow,
   type PluginListItem,
 } from '../templates/manage';
-import { pluginTrustLevel, type PluginManifest, type ResolvedPlugin } from '../types';
+import { pluginTrustLevel, type PluginManifest, type PluginPageTypeApproval, type ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginSettingsUnavailableError)return c.json({error:'plugin_settings_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginApprovalUnavailableError)return c.json({error:'plugin_approval_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
@@ -137,6 +134,18 @@ async function readPluginTenantConfig(
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
+function requestedPageTypeScopes(contentTypes: PluginManifest['contentTypes']) {
+  return {
+    readTypes: new Set(contentTypes?.readTypes ?? []),
+    writeTypes: new Set([...(contentTypes?.writeTypes ?? []), ...Object.keys(contentTypes?.blueprint ?? {})]),
+  };
+}
+
+function pageTypeApprovalIndex(approvals: PluginPageTypeApproval[]) {
+  recordMetadataReads('plugin.type-approvals-read', 'plugin_page_type_approvals', approvals.map(approval => `${approval.plugin_id}:${approval.page_type}:${approval.access}`));
+  return new Map(approvals.map(approval => [`${approval.page_type}:${approval.access}`, approval]));
+}
+
 pluginsManageRoutes.get('/plugins-manage', async (c) => {
   const [rows, resolved, identities] = await Promise.all([
     listPlugins(c.env.DB),
@@ -166,6 +175,14 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
     const assetHealth = plugin && manifest?.assets?.length
       ? await inspectAssetHealth(c.env.DB, manifest.id, plugin.fetcher, manifest.assets)
       : undefined;
+    const { readTypes, writeTypes } = requestedPageTypeScopes(manifest?.contentTypes);
+    let pageTypeStatus: PluginListItem['pageTypeStatus'];
+    if (plugin && (readTypes.size || writeTypes.size)) {
+      const approvals = pageTypeApprovalIndex(plugin.pageTypeApprovals);
+      const pending = [...readTypes].some(type => !approvals.has(`${type}:read`))
+        || [...writeTypes].some(type => !approvals.has(`${type}:write`));
+      pageTypeStatus = pending ? 'pending' : 'approved';
+    }
     return {
       id: row.id,
       label: row.label,
@@ -178,12 +195,8 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       trustLevel: plugin ? pluginTrustLevel(plugin.manifest) : undefined,
       hasAssets: !!manifest?.assets?.length,
       hasFilePrefixes: !!manifest?.filePrefixes?.length,
-      hasPageTypes: !!(
-        Object.keys(manifest?.contentTypes?.blueprint ?? {}).length
-        + Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length
-        + (manifest?.contentTypes?.readTypes?.length ?? 0)
-        + (manifest?.contentTypes?.writeTypes?.length ?? 0)
-      ),
+      hasPageTypes: !!(pageTypeStatus || Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length),
+      pageTypeStatus,
       hasLimits: !!manifest?.limits?.length,
       hasCredits: !!manifest?.credits?.length,
       assetNeedsApproval: !!assetHealth?.needsApproval,
@@ -829,8 +842,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   }
 
   const declaredManifest = resolved.requestedManifest ?? resolved.manifest;
-  const readTypes = new Set(declaredManifest.contentTypes?.readTypes ?? []);
-  const writeTypes = new Set([...(declaredManifest.contentTypes?.writeTypes ?? []), ...Object.keys(declaredManifest.contentTypes?.blueprint ?? {})]);
+  const { readTypes, writeTypes } = requestedPageTypeScopes(declaredManifest.contentTypes);
   const definedPageTypes = Object.entries((resolved.requestedManifest ?? resolved.manifest).contentTypes?.blueprint ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([slug, blueprint]) => ({
@@ -846,9 +858,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
       viewHref: `/admin/taxonomies/view/${encodeURIComponent(slug)}`,
     }));
   const pageTypeNames = [...new Set([...readTypes, ...writeTypes])].sort();
-  const approvals = await listPageTypeApprovals(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id);
-  recordMetadataReads('plugin.type-approvals-read', 'plugin_page_type_approvals', approvals.map(approval => `${approval.plugin_id}:${approval.page_type}:${approval.access}`));
-  const approvalByKey = new Map(approvals.map((approval) => [`${approval.page_type}:${approval.access}`, approval]));
+  const approvalByKey = pageTypeApprovalIndex(resolved.pageTypeApprovals);
 
   const pageTypes = pageTypeNames.map((pageType) => {
     const readApproval = approvalByKey.get(`${pageType}:read`);

@@ -25,6 +25,7 @@ export interface PluginListItem {
   assetStatusError?: boolean;
   /** True when the manifest defines page types/taxonomies or declares delegated access. */
   hasPageTypes?: boolean;
+  pageTypeStatus?: 'pending' | 'approved';
   /** True when the manifest declares configurable quota limits. */
   hasLimits?: boolean;
   /** True when the manifest declares configurable credit costs. */
@@ -69,6 +70,7 @@ export async function pluginsManagePage(views: Fetcher, opts: BaseTemplateProps 
       hasFilePrefixes: !!plugin.hasFilePrefixes,
       filePrefixesHref: `/admin/plugins-manage/${plugin.id}/files`,
       hasPageTypes: !!plugin.hasPageTypes,
+      pageTypeStatus: plugin.pageTypeStatus,
       pageTypesHref: `/admin/plugins-manage/${plugin.id}/page-types`,
       hasLimits: !!plugin.hasLimits,
       limitsHref: `/admin/plugins-manage/${plugin.id}/limits`,

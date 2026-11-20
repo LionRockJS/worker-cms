@@ -1775,7 +1775,7 @@ describe('plugin admin proxy', () => {
     expect(listResponse.status).toBe(200);
     const listData = bodyData(await listResponse.text());
     expect(listData.plugins).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pageTypesHref: '/admin/plugins-manage/44/page-types' }),
+      expect.objectContaining({ pageTypesHref: '/admin/plugins-manage/44/page-types', pageTypeStatus: 'pending' }),
     ]));
 
     const pageResponse = await worker.fetch(new Request('http://localhost/admin/plugins-manage/44/page-types', {
@@ -1845,9 +1845,18 @@ describe('plugin admin proxy', () => {
     }, env.JWT_SECRET);
     const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
     const pageUrl = 'http://localhost/admin/plugins-manage/44/page-types';
+    const listUrl = 'http://localhost/admin/plugins-manage';
+    const expectListStatus = async (pageTypeStatus: 'pending' | 'approved') => {
+      const response = await worker.fetch(new Request(listUrl, { headers }));
+      expect(response.status).toBe(200);
+      expect(bodyData(await response.text()).plugins).toEqual(expect.arrayContaining([
+        expect.objectContaining({ pageTypesHref: '/admin/plugins-manage/44/page-types', pageTypeStatus }),
+      ]));
+    };
     const before = bodyData(await (await worker.fetch(new Request(pageUrl, { headers }))).text());
     expect(before.hasPendingApprovals).toBe(true);
     expect(before.approveAllAction).toBe('/admin/plugins-manage/44/page-types/approve-all');
+    await expectListStatus('pending');
 
     const moderatorToken = await signJWT({
       sub: '2', email: 'mod@example.com', name: 'Mod', role: 'moderator',
@@ -1882,6 +1891,7 @@ describe('plugin admin proxy', () => {
     const after = bodyData(await (await worker.fetch(new Request(`${pageUrl}?flash=approved-all`, { headers }))).text());
     expect(after.hasPendingApprovals).toBe(false);
     expect(after.flashMessageKey).toBe('view_strings.sections_plugin_page_types.flash_approved_all');
+    await expectListStatus('approved');
     const original = await env.DB.prepare(
       "SELECT updated_at FROM plugin_page_type_approvals WHERE plugin_id = 'checkin' AND page_type = 'guest' AND access = 'write'",
     ).first<{ updated_at: string }>();

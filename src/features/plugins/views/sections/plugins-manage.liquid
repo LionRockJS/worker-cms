@@ -8,6 +8,7 @@
           <th class="px-4 py-2">{{ "view_strings.sections_plugins_manage.status" | t }}</th>
           <th class="px-4 py-2">{{ "view_strings.sections_plugins_manage.trust" | t }}</th>
           <th class="px-4 py-2">{{ "view_strings.sections_plugins_manage.asset_status" | t }}</th>
+          <th class="px-4 py-2">{{ "view_strings.sections_plugins_manage.page_types" | t }}</th>
           <th class="px-4 py-2 text-right">{{ "view_strings.sections_plugins_manage.actions" | t }}</th>
         </tr>
       </thead>
@@ -34,6 +35,15 @@
                     {% if plugin.assetStatusError %}<span class="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{{ "view_strings.sections_plugins_manage.asset_unable_to_verify" | t }}</span>{% endif %}
                     {% unless plugin.assetNeedsApproval or plugin.assetNeedsUpdate or plugin.assetStatusError %}<span class="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">{{ "view_strings.sections_plugins_manage.asset_approved" | t }}</span>{% endunless %}
                   </div>
+                {% else %}
+                  <span class="text-xs text-gray-400">—</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3">
+                {% if plugin.pageTypeStatus == 'pending' %}
+                  <a href="{{ plugin.pageTypesHref }}" class="inline-block rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800 hover:underline">{{ "view_strings.sections_plugin_page_types.status_not_approved" | t }}</a>
+                {% elsif plugin.pageTypeStatus == 'approved' %}
+                  <a href="{{ plugin.pageTypesHref }}" class="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800 hover:underline">{{ "view_strings.sections_plugin_page_types.status_approved" | t }}</a>
                 {% else %}
                   <span class="text-xs text-gray-400">—</span>
                 {% endif %}
@@ -127,7 +137,7 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="6" class="px-4 py-8 text-center text-sm text-gray-500">
+            <td colspan="7" class="px-4 py-8 text-center text-sm text-gray-500">
               {{ "view_strings.sections_plugins_manage.no_plugins_registered_yet" | t }} <a class="text-indigo-600 font-medium" href="/admin/plugins-manage/new">{{ "view_strings.sections_plugins_manage.register_one" | t }}</a>.
             </td>
           </tr>
