@@ -341,7 +341,9 @@ not silently merge logged-out accounts just because their emails match.
 
 `npm run setup` and `npm run setup -- --local` can grant `admin` on account
 creation. Choose an enabled OAuth provider and enter its stable account subject
-(`sub`), or the numeric user ID for GitHub. The wizard saves the grant in
+(`sub`), or the numeric user ID for GitHub. For Google and Apple you can enter
+the account's email instead, which matches when the provider reports it as
+verified. The wizard saves the grant in
 `.dev.vars` for local setup or uploads it after a Cloudflare deployment. Local
 setup keeps existing grants in `.dev.vars`. For Cloudflare, accepting the prompt
 replaces the existing `INITIAL_USER_ROLES` secret if one is set.

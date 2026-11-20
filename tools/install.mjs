@@ -497,10 +497,25 @@ async function firstAdminGrant(providers, prompt) {
     providers[0],
     (value) => providers.includes(value.toLowerCase()),
   )).toLowerCase();
-  const providerUserId = provider === 'github'
-    ? await ask('First admin\'s GitHub numeric user ID', undefined, (value) => /^[1-9]\d*$/.test(value))
-    : await ask(`First admin's ${provider} account subject (sub)`);
-
+  if (provider === 'github') {
+    const providerUserId = await ask('First admin\'s GitHub numeric user ID', undefined, (value) => /^[1-9]\d*$/.test(value));
+    return JSON.stringify([{ provider, providerUserId, roles: ['admin'] }]);
+  }
+  // Only Google and Apple send the email_verified claim an email grant needs;
+  // the CMS treats every other provider's email as unverified.
+  if (provider === 'google' || provider === 'apple') {
+    // Same pattern as initialUserRoles(): one bad entry rejects the whole config.
+    const value = await ask(`First admin's ${provider} email or account subject (sub)`, undefined,
+      (answer) => Boolean(answer) && (!answer.includes('@') || /^[^\s@*]+@[^\s@*]+$/.test(answer)));
+    return JSON.stringify([value.includes('@')
+      ? { provider, email: value, roles: ['admin'] }
+      : { provider, providerUserId: value, roles: ['admin'] }]);
+  }
+  const providerUserId = await ask(
+    `First admin's ${provider} account subject (sub, not an email)`,
+    undefined,
+    (value) => Boolean(value) && !value.includes('@'),
+  );
   return JSON.stringify([{ provider, providerUserId, roles: ['admin'] }]);
 }
 
