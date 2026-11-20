@@ -8,6 +8,19 @@
       {{ "view_strings.sections_plugin_assets.this_plugin_is_not_reachable_right_now_so_its_declared_assets_can_t_be_l" | t }}
     </div>
   {% else %}
+    {% if hasPendingApprovals %}
+      <div class="mb-4 flex justify-end">
+        <form method="post" action="{{ approveAllAction }}" class="shrink-0">
+          <button type="submit"
+                  title="{{ "view_strings.sections_plugin_assets.approve_all" | t }}"
+                  aria-label="{{ "view_strings.sections_plugin_assets.approve_all" | t }}"
+                  class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_plugin_assets.approve_all" | t }}</span>
+          </button>
+        </form>
+      </div>
+    {% endif %}
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
       <table class="w-full min-w-[560px] text-left text-sm">
         <thead class="bg-gray-50 text-left text-xs uppercase text-gray-500">

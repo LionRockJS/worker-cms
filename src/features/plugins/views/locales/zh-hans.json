@@ -70,11 +70,13 @@
   },
   "view_strings": {
     "sections_plugin_assets.approve": "批准",
+    "sections_plugin_assets.approve_all": "全部批准",
     "sections_plugin_assets.approved_by": "批准人：",
     "sections_plugin_assets.asset": "资源文件",
     "sections_plugin_assets.assets": "资源文件",
     "sections_plugin_assets.could_not_fetch_current_file_from_plugin": "无法从插件获取当前文件",
     "sections_plugin_assets.flash_approved": "资源文件已批准，现在可以在此插件的 CMS 管理界面中运行。",
+    "sections_plugin_assets.flash_approved_all": "已批准所有声明的资源文件，现在可以在此插件的 CMS 管理界面中运行。",
     "sections_plugin_assets.flash_fetch_failed": "无法从插件获取资源文件，批准状态未更改。",
     "sections_plugin_assets.flash_revoked": "批准已撤销，资源文件将不再于 CMS 管理界面中运行。",
     "sections_plugin_assets.js_css_files_this_plugin_wants_to_run_inside_cms_chrome_approving_a_file": "此插件希望在 CMS 管理界面中运行的 JS/CSS 文件。批准文件会固定其内容哈希；如果插件中的文件发生变化，它将停止运行，直到重新批准。",

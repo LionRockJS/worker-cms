@@ -70,11 +70,13 @@
   },
   "view_strings": {
     "sections_plugin_assets.approve": "Approve",
+    "sections_plugin_assets.approve_all": "Approve all",
     "sections_plugin_assets.approved_by": "Approved by",
     "sections_plugin_assets.asset": "Asset",
     "sections_plugin_assets.assets": "Assets",
     "sections_plugin_assets.could_not_fetch_current_file_from_plugin": "Could not fetch current file from plugin",
     "sections_plugin_assets.flash_approved": "Asset approved. It will now execute inside CMS chrome for this plugin.",
+    "sections_plugin_assets.flash_approved_all": "All declared assets approved. They will now execute inside CMS chrome for this plugin.",
     "sections_plugin_assets.flash_fetch_failed": "Could not fetch the asset from the plugin — approval not changed.",
     "sections_plugin_assets.flash_revoked": "Approval revoked. The asset will no longer execute inside CMS chrome.",
     "sections_plugin_assets.js_css_files_this_plugin_wants_to_run_inside_cms_chrome_approving_a_file": "JS/CSS files this plugin wants to run inside CMS chrome. Approving a file pins its content hash — if the plugin's file ever changes, it stops running until re-approved.",

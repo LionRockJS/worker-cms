@@ -232,7 +232,9 @@ export async function pluginAssetsPage(views: Fetcher, opts: BaseTemplateProps &
   flash?: string;
 }): Promise<string> {
   const { pluginLabel, unreachable, assets, flash } = opts;
-  const flashMessageKey = flash === 'approved'
+  const flashMessageKey = flash === 'approved-all'
+    ? 'view_strings.sections_plugin_assets.flash_approved_all'
+    : flash === 'approved'
     ? 'view_strings.sections_plugin_assets.flash_approved'
     : flash === 'revoked'
       ? 'view_strings.sections_plugin_assets.flash_revoked'
@@ -244,6 +246,8 @@ export async function pluginAssetsPage(views: Fetcher, opts: BaseTemplateProps &
     pluginLabel,
     unreachable,
     hasAssets: assets.length > 0,
+    hasPendingApprovals: assets.some((asset) => !asset.approved || asset.drifted),
+    approveAllAction: `/admin/plugins-manage/${opts.pluginId}/assets/approve-all`,
     assets: assets.map((asset) => ({
       ...asset,
       statusKey: asset.drifted

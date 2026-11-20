@@ -537,6 +537,13 @@ pluginsManageRoutes.get('/plugins-manage/:id/assets', async (c) => {
   });
 });
 
+pluginsManageRoutes.post('/plugins-manage/:id/assets/approve-all', async (c) => {
+  const id = Number(c.req.param('id'));
+  const result = await mutatePluginApproval(c, {id, action:'plugin.asset.approve_all'});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  return c.redirect(`/admin/plugins-manage/${id}/assets?flash=${result}`);
+});
+
 pluginsManageRoutes.post('/plugins-manage/:id/assets/approve', async (c) => {
   const id = Number(c.req.param('id'));
   const form = await c.req.formData();

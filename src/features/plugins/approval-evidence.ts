@@ -15,7 +15,7 @@ import { inspectPluginManifest,PLUGIN_ORIGIN } from './registry';
 import { REGISTRY,IDENTITY } from './evidence-common';
 import { capturePluginMutationContext,OWNED,snapshot,guard,json,fingerprint,invalidate,type Row } from './registration-evidence';
 
-type Action='plugin.identity.approve'|'plugin.asset.approve'|'plugin.asset.revoke'|'plugin.file_prefix.approve'|'plugin.file_prefix.revoke'|'plugin.page_type.approve'|'plugin.page_type.revoke'|'plugin.page_type.approve_all';
+type Action='plugin.identity.approve'|'plugin.asset.approve'|'plugin.asset.approve_all'|'plugin.asset.revoke'|'plugin.file_prefix.approve'|'plugin.file_prefix.revoke'|'plugin.page_type.approve'|'plugin.page_type.revoke'|'plugin.page_type.approve_all';
 export interface PluginApprovalChange {id:number;action:Action;key?:string;access?:string}
 type Result='missing'|'unreachable'|'identity-ok'|'identity-claimed'|'identity-approved'|'invalid'|'fetch-failed'|'conflict'|'approved'|'revoked'|'approved-all';
 interface Plan {table:string;fields:string[];keys:string[];before:Row[];after:Row[];where:string;args:string[]}
@@ -110,7 +110,24 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
     detail.retained_limit_pricing_settings=true;
   }else if(action.startsWith('plugin.asset.')){
     const plan=plans[0];
-    if(action.endsWith('.approve')){
+    if(action.endsWith('_all')){
+      // Every declared asset not already pinned to its current bytes: new
+      // files are approved and drifted ones re-pinned, all or nothing.
+      const paths=[...new Set((manifest.assets??[]).map(a=>a.path))];
+      if(paths.length){
+        await auditPluginManagement(c.env,pluginId,'asset-approve-fetch',contextActor(c));
+        await c.env.DB.batch([...base.admission(),...base.finish()]);
+      }
+      const pinned=await Promise.all(paths.map(async path=>{
+        const upstream=await fetcher.fetch(`${PLUGIN_ORIGIN}${path}`);
+        return upstream.ok?{path,integrity:await computeIntegrity(await limitedBytes(upstream))}:null;
+      }));
+      if(pinned.some(p=>!p))return 'fetch-failed';
+      for(const {path,integrity} of pinned as {path:string;integrity:string}[]){
+        if(plan.after.some(r=>r.plugin_id===pluginId&&r.path===path&&r.integrity===integrity))continue;
+        await approve(plan,{plugin_id:pluginId,path,integrity,approved_by:actor.email});
+      }
+    }else if(action.endsWith('.approve')){
       if(!(manifest.assets??[]).some(a=>a.path===key))return 'invalid';
       await auditPluginManagement(c.env,pluginId,'asset-approve-fetch',contextActor(c));
       // Guard captured authority/registry before disclosing to the plugin too.
@@ -120,7 +137,7 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
       await approve(plan,{plugin_id:pluginId,path:key,integrity,approved_by:actor.email});
       detail.integrity=integrity;
     }else plan.after=plan.after.filter(r=>r.plugin_id!==pluginId||r.path!==key);
-    detail.key_fingerprint=await fingerprint(key);
+    if(!action.endsWith('_all'))detail.key_fingerprint=await fingerprint(key);
   }else if(action.startsWith('plugin.file_prefix.')){
     const plan=plans[2];
     if(action.endsWith('.approve')){
