@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -101,6 +102,11 @@ tunnel or reverse proxy that forwards that domain to this machine.`);
 
 if (upgradeMode && process.argv.length !== 3) {
   console.error('Usage: npm run upgrade');
+  process.exit(1);
+}
+
+if (!existsSync(new URL('../node_modules/wrangler/package.json', import.meta.url))) {
+  console.error('Dependencies are not installed. Run "npm install" first.');
   process.exit(1);
 }
 
