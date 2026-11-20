@@ -126,6 +126,12 @@ When the optional `credits` feature is enabled, it adds:
 | `POST /credits/usage` | Report a declared `recurring` key for a user; quantity 0–1,000,000,000. |
 | `GET /credits/subscriptions` | Read this contributor's subscriptions, optionally filtered by user. |
 
+A declared cost with `plugin_only: true` is paid only from the plugin's own
+wallet (see `POST /credits/plugin-grant`), never the member's balance or the
+shared pool. A short wallet refuses it with 402 and `plugin_only: true` in the
+`credit` payload; `GET /credits` and `GET /credits/quote` report the flag, and
+the quote's `affordable` considers only the wallet.
+
 The host handles `page_create` charges through its creation pipeline; plugins
 should not charge those a second time. Recurring usage is billed by the host's
 sweep. Prices and currencies come from host configuration, not plugin requests.

@@ -110,6 +110,8 @@ creditApiRoutes.get('/credits', async (c) => {
       // Recurring costs: block size and billing mode (per `per` units/month).
       per: credit.def.charge === 'recurring' ? credit.def.per : undefined,
       billing: credit.def.billing ?? undefined,
+      // Paid only from plugin_balances, never the member or the shared pool.
+      plugin_only: credit.def.pluginOnly,
     })),
   });
 });
@@ -148,9 +150,11 @@ creditApiRoutes.get('/credits/quote', async (c) => {
     balance,
     shared_balance: sharedBalance,
     plugin_balance: pluginBalance,
-    // Each balance pays the full amount or nothing, so any one of them
-    // covering the total makes it affordable.
-    affordable: total === 0 || pluginBalance >= total || (balance !== null && balance >= total) || sharedBalance >= total,
+    plugin_only: credit.def.pluginOnly,
+    // Each balance pays the full amount or nothing, so any eligible one
+    // covering the total makes it affordable. A plugin-only cost has one.
+    affordable: total === 0 || pluginBalance >= total
+      || (!credit.def.pluginOnly && ((balance !== null && balance >= total) || sharedBalance >= total)),
   });
 });
 
@@ -198,6 +202,7 @@ creditApiRoutes.post('/credits/charge', async (c) => {
     pluginId: auth.callerId,
     // The calling plugin's own wallet pays its own metered cost first.
     scopePluginId: auth.callerId,
+    pluginOnly: credit.def.pluginOnly,
     createdBy: `plugin:${auth.callerId}`,
   });
   if (!charge.ok) {
@@ -213,6 +218,7 @@ creditApiRoutes.post('/credits/charge', async (c) => {
           balance: charge.balance,
           shared_balance: charge.sharedBalance,
           plugin_balance: charge.pluginBalance ?? 0,
+          ...(charge.pluginOnly ? { plugin_only: true } : {}),
         },
       },
       402,

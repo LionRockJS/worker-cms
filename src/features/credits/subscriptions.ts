@@ -273,6 +273,7 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
         pluginId: row.plugin_id,
         // The plugin's own wallet pays its subscription first.
         scopePluginId: row.plugin_id,
+        pluginOnly: credit.def.pluginOnly,
         note,
         createdBy: 'system:cron',
       });

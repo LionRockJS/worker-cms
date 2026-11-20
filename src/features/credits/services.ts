@@ -92,7 +92,9 @@ export const creditsServices: FeatureServiceEntry = {
         code: charge.error === 'unknown_user' ? 'unknown_user' : 'insufficient_credits',
         message: charge.error === 'unknown_user'
           ? `Your user account could not be charged ${money}.`
-          : `Not enough ${money}: creating this needs ${charge.required} ${money} and you have ${charge.balance} (shared pool: ${charge.sharedBalance}).`,
+          : charge.pluginOnly
+            ? `Not enough ${money} in the ${charge.pluginId} plugin's wallet: creating this needs ${charge.required} ${money} from that plugin's own credits and it has ${charge.pluginBalance ?? 0}.`
+            : `Not enough ${money}: creating this needs ${charge.required} ${money} and you have ${charge.balance} (shared pool: ${charge.sharedBalance}).`,
       };
     }
 
@@ -174,6 +176,7 @@ export const creditsServices: FeatureServiceEntry = {
               required: charge.required,
               balance: charge.balance,
               shared_balance: charge.sharedBalance,
+              ...(charge.pluginOnly ? { plugin_only: true, plugin_id: charge.pluginId, plugin_balance: charge.pluginBalance ?? 0 } : {}),
             },
           },
         };
@@ -265,6 +268,7 @@ async function creditPricing(env: Env, contributorId: string): Promise<CreditPri
     defaultValue: credit.def.defaultValue,
     effectiveValue: credit.value,
     configured: credit.configured,
+    pluginOnly: credit.def.pluginOnly,
   }));
 }
 

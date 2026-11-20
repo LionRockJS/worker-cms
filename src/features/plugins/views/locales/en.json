@@ -122,6 +122,7 @@
     "sections_plugin_credits.monthly_advance_per": "Monthly (advance) per",
     "sections_plugin_credits.monthly_arrears_per": "Monthly (arrears) per",
     "sections_plugin_credits.on_create": "On create:",
+    "sections_plugin_credits.plugin_credits_only": "Plugin credits only",
     "sections_plugin_credits.plugin_wallet": "Plugin wallet",
     "sections_plugin_credits.plugin_wallet_empty": "The plugin's creator has not supplied any credits.",
     "sections_plugin_credits.plugin_wallet_explanation": "Credits this plugin's creator supplied to the site. They pay only for this plugin's own costs, before the member's balance and the shared pool, and are forfeited if the plugin is unregistered.",

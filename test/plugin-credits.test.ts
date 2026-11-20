@@ -4,6 +4,7 @@ import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } fr
 import { clearConfigCache } from '../src/core/db/content-config';
 import { signJWT } from './auth-fixtures';
 import {
+  declaredCredits,
   getCreditBalances,
   getPluginCreditBalance,
   getPluginCreditBalances,
@@ -35,12 +36,16 @@ const MANIFEST = {
   id: PLUGIN_ID,
   name: 'Messaging Suite',
   version: '1.0.0',
-  contentTypes: { blueprint: { broadcast: ['name:text/title'] } },
+  contentTypes: { blueprint: { broadcast: ['name:text/title'], memo: ['name:text/title'] } },
   credits: [
     { key: 'send_edm', label: 'Send EDM', charge: 'metered', unit: 'recipient', default: 2 },
     { key: 'send_sms', label: 'Send SMS', charge: 'metered', unit: 'message', currency: 'diamond', default: 3 },
     { key: 'storage', label: 'Storage', charge: 'recurring', unit: 'GB', default: 10 },
     { key: 'create_broadcast', label: 'Create a broadcast', charge: 'page_create', page_type: 'broadcast', default: 5 },
+    // Paid only from the plugin's own wallet.
+    { key: 'ai_summary', label: 'AI summary', charge: 'metered', unit: 'summary', default: 4, plugin_only: true },
+    { key: 'archive', label: 'Archive', charge: 'recurring', unit: 'GB', default: 6, plugin_only: true },
+    { key: 'create_memo', label: 'Create a memo', charge: 'page_create', page_type: 'memo', default: 7, plugin_only: true },
   ],
 } as unknown as PluginManifest;
 
@@ -146,7 +151,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM plugin_credits').run();
   await env.DB.prepare('DELETE FROM credit_subscriptions').run();
   await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'plugin.credits.%'").run();
-  await env.DB.prepare("DELETE FROM pages WHERE page_type = 'broadcast'").run();
+  await env.DB.prepare("DELETE FROM pages WHERE page_type IN ('broadcast', 'memo')").run();
   await seedPool('credit', 0);
   await seedPool('diamond', 0);
   savedSecret = testEnv.PLUGIN_SECRET;
@@ -365,5 +370,103 @@ describe('admin screens', () => {
     expect(await getPluginCreditBalances(env, PLUGIN_ID)).toEqual({ credit: 0, diamond: 0 });
     expect((await walletLedger(PLUGIN_ID)).filter((row) => row.action === 'plugin:forfeit')).toHaveLength(2);
     expect(await getPluginCreditBalance(env, OTHER_PLUGIN_ID)).toBe(9);
+  });
+});
+
+describe('plugin-only costs', () => {
+  it('reads plugin_only from the manifest, strictly', () => {
+    const defs = declaredCredits({
+      id: PLUGIN_ID,
+      name: 'Messaging Suite',
+      credits: [...(MANIFEST.credits ?? []), { key: 'loose', charge: 'metered', plugin_only: 'yes' }] as never,
+      pricablePageTypes: new Set(['broadcast', 'memo']),
+    });
+    const byKey = new Map(defs.map((def) => [def.key, def.pluginOnly]));
+    expect(byKey.get('ai_summary')).toBe(true);
+    expect(byKey.get('create_memo')).toBe(true);
+    expect(byKey.get('send_edm')).toBe(false);
+    expect(byKey.get('loose')).toBe(false);
+  });
+
+  it('charges the plugin wallet', async () => {
+    await fund(PLUGIN_ID, 10);
+    const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', { key: 'ai_summary', quantity: 2 });
+    expect(await res.json()).toMatchObject({ ok: true, charged: 8, source: 'plugin' });
+    expect(await getPluginCreditBalance(env, PLUGIN_ID)).toBe(2);
+  });
+
+  it('refuses instead of falling back to the member or the pool', async () => {
+    await seedUser(PAYER_ID, 1000);
+    await seedPool('credit', 1000);
+    await fund(PLUGIN_ID, 3);
+    const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', { key: 'ai_summary', quantity: 1 });
+    expect(res.status).toBe(402);
+    expect((await res.json() as { credit: unknown }).credit)
+      .toEqual({ currency: 'credit', required: 4, balance: 0, shared_balance: 0, plugin_balance: 3, plugin_only: true });
+    expect(await getCreditBalances(env, PAYER_ID)).toEqual({ credit: 1000, diamond: 0 });
+    expect(await getPluginCreditBalance(env, PLUGIN_ID)).toBe(3);
+  });
+
+  it('quotes against the plugin wallet only', async () => {
+    await seedUser(PAYER_ID, 1000);
+    const quote = await (await cmsApiAs(PAYER_ID, 'GET', '/__cms/credits/quote?key=ai_summary&quantity=1')).json();
+    expect(quote).toMatchObject({ plugin_only: true, plugin_balance: 0, affordable: false });
+    const list = await (await cmsApiAs(PAYER_ID, 'GET', '/__cms/credits')).json() as { credits: Array<{ key: string; plugin_only: boolean }> };
+    expect(list.credits.find((credit) => credit.key === 'ai_summary')?.plugin_only).toBe(true);
+    expect(list.credits.find((credit) => credit.key === 'send_edm')?.plugin_only).toBe(false);
+  });
+
+  it('blocks a page create the plugin wallet cannot cover', async () => {
+    await seedUser(PAYER_ID, 1000);
+    const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/pages', { page_type: 'memo', name: 'M1' });
+    expect(res.status).toBe(402);
+    expect((await res.json() as { credit: unknown }).credit)
+      .toMatchObject({ required: 7, plugin_only: true, plugin_id: PLUGIN_ID, plugin_balance: 0 });
+    expect(await getCreditBalances(env, PAYER_ID)).toEqual({ credit: 1000, diamond: 0 });
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM pages WHERE page_type = 'memo'").first<{ n: number }>();
+    expect(count?.n).toBe(0);
+  });
+
+  it('creates the page when the plugin wallet covers it', async () => {
+    await fund(PLUGIN_ID, 7);
+    const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/pages', { page_type: 'memo', name: 'M1' });
+    expect(res.status).toBe(201);
+    expect(await getPluginCreditBalance(env, PLUGIN_ID)).toBe(0);
+  });
+
+  it('refunds earlier parts when a plugin-only part is refused', async () => {
+    await fund(OTHER_PLUGIN_ID, 50);
+    const spend = await spendCurrencies(env, {
+      userId: PAYER_ID,
+      amounts: [
+        { currency: 'credit', amount: 10, scopePluginId: OTHER_PLUGIN_ID },
+        { currency: 'credit', amount: 5, scopePluginId: PLUGIN_ID, pluginOnly: true },
+      ],
+      action: 'page_create:memo',
+      createdBy: 'test',
+    });
+    expect(spend).toMatchObject({ ok: false, error: 'insufficient_credits', pluginOnly: true, pluginId: PLUGIN_ID });
+    expect(await getPluginCreditBalance(env, OTHER_PLUGIN_ID)).toBe(50);
+  });
+
+  it('reports an unknown user, not a short wallet', async () => {
+    const spend = await spendCredits(env, {
+      userId: 999999, amount: 4, action: 'x', scopePluginId: PLUGIN_ID, pluginOnly: true, createdBy: 'test',
+    });
+    expect(spend).toMatchObject({ ok: false, error: 'unknown_user', pluginOnly: true });
+  });
+
+  it('marks a recurring subscription past due instead of billing the member', async () => {
+    await seedUser(PAYER_ID, 1000);
+    await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/usage', { key: 'archive', quantity: 1 });
+    expect(await sweepCreditSubscriptions(env)).toMatchObject({ processed: 1, pastDue: 1 });
+    expect(await getCreditBalances(env, PAYER_ID)).toEqual({ credit: 1000, diamond: 0 });
+  });
+
+  it('marks plugin-only costs on the pricing screen', async () => {
+    const html = await (await adminFetch(`/admin/plugins-manage/${pluginRowId}/credits`)).text();
+    expect(html).toContain('"key":"ai_summary"');
+    expect(html).toMatch(/"key":"ai_summary"[^}]*"pluginOnly":true/);
+    expect(html).toMatch(/"key":"send_edm"[^}]*"pluginOnly":false/);
   });
 });

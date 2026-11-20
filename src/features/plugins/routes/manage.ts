@@ -816,6 +816,7 @@ interface CreditPricingPayload {
   defaultValue: number;
   effectiveValue: number;
   configured: boolean;
+  pluginOnly?: boolean;
 }
 
 /** The plugin's own wallets — credits its creator supplied — as the credits
@@ -862,6 +863,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
     effectiveKey: row.effectiveValue === 0 ? 'view_strings.sections_plugin_credits.free' : '',
     usesDefault: !row.configured,
     value: row.configured ? String(row.effectiveValue) : '',
+    pluginOnly: row.pluginOnly === true,
   }));
   const wallet = await callFeatureService<PluginWalletPayload>(
     'credits',

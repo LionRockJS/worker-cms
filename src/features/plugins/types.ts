@@ -287,6 +287,9 @@ export interface PluginCreditDef {
   per?: number;
   period?: 'month';
   billing?: PluginCreditBilling;
+  /** Pay only from this plugin's wallet (credits its creator supplied) —
+   *  never from the member's balance or the shared pool. */
+  plugin_only?: boolean;
 }
 
 /** An admin-approved plugin asset (see PluginManifest.assets), stored in the

@@ -121,6 +121,9 @@ export interface NormalizedCreditDef {
   per: number;
   /** Set exactly when charge is 'recurring'. */
   billing: CreditBillingMode | null;
+  /** Paid only from the declaring plugin's wallet, never the member's
+   *  balance or the shared pool. */
+  pluginOnly: boolean;
 }
 
 /** Configured prices keyed by credit key (always ≥ 0; 0 = explicitly free). */
@@ -152,6 +155,10 @@ export interface CreditChargeInput {
    * plugin's wallet, nor its own on a cost it doesn't own.
    */
   scopePluginId?: string;
+  /** With scopePluginId: the plugin wallet is the ONLY payer — when it is
+   *  short the spend is refused rather than falling back to the member or
+   *  the shared pool. */
+  pluginOnly?: boolean;
   note?: string;
   /** Who triggered it: a user id, or 'plugin:<id>' for server-to-server. */
   createdBy: string;
@@ -223,6 +230,7 @@ export function declaredCredits(contributor: CreditContributor): NormalizedCredi
       defaultValue: coercePrice(def.default),
       per: def.charge === 'recurring' ? per : 1,
       billing: def.charge === 'recurring' ? (def.billing as CreditBillingMode | undefined) ?? 'advance' : null,
+      pluginOnly: def.plugin_only === true,
     });
   }
   return out;
@@ -301,7 +309,7 @@ export interface PageCreateCost {
   /** Sum across every currency — enough to tell "priced" from "free". */
   total: number;
   /** The priced parts (value > 0 only). */
-  parts: Array<{ pluginId: string; key: string; label: string; currency: CreditCurrency; value: number }>;
+  parts: Array<{ pluginId: string; key: string; label: string; currency: CreditCurrency; value: number; pluginOnly?: boolean }>;
 }
 
 /** The effective cost of creating one page of `pageType`, across all plugins. */
@@ -320,6 +328,7 @@ export async function pageCreateCostForType(env: Env, pageType: string): Promise
           label: credit.def.label,
           currency: credit.def.currency,
           value: credit.value,
+          ...(credit.def.pluginOnly ? { pluginOnly: true } : {}),
         });
       }
     }
@@ -926,10 +935,24 @@ export async function listPluginCreditLedger(
   return rows.results;
 }
 
+/** Refusal fields shared by every spend failure. `pluginOnly` marks a cost
+ *  only its plugin's wallet may pay; balance/sharedBalance are then 0, since
+ *  neither was eligible. */
+interface SpendRefusal {
+  balance: number;
+  sharedBalance: number;
+  pluginBalance?: number;
+  pluginOnly?: true;
+  required: number;
+}
+
 export type CreditSpendResult =
   | { ok: true; source: CreditSource; balanceAfter: number }
-  | { ok: false; error: 'unknown_user'; balance: number; sharedBalance: number; pluginBalance?: number; required: number }
-  | { ok: false; error: 'insufficient_credits'; balance: number; sharedBalance: number; pluginBalance?: number; required: number };
+  | ({ ok: false; error: 'unknown_user' | 'insufficient_credits' } & SpendRefusal);
+
+async function userExists(env: Env, userId: number): Promise<boolean> {
+  return !!await env.DB.prepare('SELECT 1 AS found FROM users WHERE id = ?').bind(userId).first();
+}
 
 /**
  * With a scopePluginId, that plugin's wallet pays first, for the FULL amount
@@ -956,6 +979,17 @@ export async function spendCredits(env: Env, input: CreditChargeInput): Promise<
     });
     if (own.ok) return { ok: true, source: 'plugin', balanceAfter: own.balanceAfter };
     pluginBalance = own.balance;
+    if (input.pluginOnly) {
+      return {
+        ok: false,
+        error: await userExists(env, input.userId) ? 'insufficient_credits' : 'unknown_user',
+        balance: 0,
+        sharedBalance: 0,
+        pluginBalance,
+        pluginOnly: true,
+        required: amount,
+      };
+    }
   }
   const charge = await chargeCredits(env, input);
   if (charge.ok) return { ok: true, source: 'user', balanceAfter: charge.balanceAfter };
@@ -993,6 +1027,8 @@ export interface CurrencyAmount {
   amount: number;
   /** The plugin whose cost this part is; its wallet may pay the part. */
   scopePluginId?: string;
+  /** With scopePluginId: only that plugin's wallet may pay this part. */
+  pluginOnly?: boolean;
 }
 
 /** A part spendCurrencies() took, and which balance paid it. */
@@ -1000,15 +1036,15 @@ export type SpentAmount = CurrencyAmount & { source: CreditSource };
 
 export type MultiSpendResult =
   | { ok: true; spent: SpentAmount[] }
-  | { ok: false; error: 'unknown_user'; currency: CreditCurrency; balance: number; sharedBalance: number; required: number }
-  | { ok: false; error: 'insufficient_credits'; currency: CreditCurrency; balance: number; sharedBalance: number; required: number };
+  | ({ ok: false; error: 'unknown_user' | 'insufficient_credits'; currency: CreditCurrency; pluginId?: string } & SpendRefusal);
 
 /**
  * Spends several parts for one action — a page type priced in credits by
  * one plugin and in diamonds by another costs both at once.
  *
  * Each part carrying a scopePluginId is first offered to that plugin's wallet
- * (the full part or nothing). Whatever no plugin wallet paid is then combined
+ * (the full part or nothing); a `pluginOnly` part the wallet can't cover
+ * refuses the whole spend. Whatever no plugin wallet paid is then combined
  * per currency and spent as ONE charge from the user, falling back to the
  * shared pool — exactly what happens when no plugin wallet is funded.
  *
@@ -1040,6 +1076,27 @@ export async function spendCurrencies(
       if (own.ok) {
         spent.push({ currency: part.currency, amount, scopePluginId: part.scopePluginId, source: 'plugin' });
         continue;
+      }
+      if (part.pluginOnly) {
+        await refundCurrencies(env, {
+          userId: base.userId,
+          action: base.action,
+          pluginId: base.pluginId,
+          note: 'auto-refund: another part of the same charge was refused',
+          createdBy: base.createdBy,
+          spent,
+        });
+        return {
+          ok: false,
+          error: await userExists(env, base.userId) ? 'insufficient_credits' : 'unknown_user',
+          currency: part.currency,
+          pluginId: part.scopePluginId,
+          balance: 0,
+          sharedBalance: 0,
+          pluginBalance: own.balance,
+          pluginOnly: true,
+          required: amount,
+        };
       }
     }
     remaining[part.currency] += amount;
@@ -1085,8 +1142,10 @@ export function currencyAmounts(totals: Record<CreditCurrency, number>): Currenc
 export function pageCreateAmounts(cost: PageCreateCost, count = 1): CurrencyAmount[] {
   const byPart = new Map<string, CurrencyAmount>();
   for (const part of cost.parts) {
-    const key = `${part.pluginId}\u0000${part.currency}`;
-    const entry = byPart.get(key) ?? { currency: part.currency, amount: 0, scopePluginId: part.pluginId };
+    const pluginOnly = part.pluginOnly === true;
+    const key = `${part.pluginId}\u0000${part.currency}\u0000${pluginOnly}`;
+    const entry = byPart.get(key)
+      ?? { currency: part.currency, amount: 0, scopePluginId: part.pluginId, ...(pluginOnly ? { pluginOnly } : {}) };
     entry.amount += part.value * count;
     byPart.set(key, entry);
   }

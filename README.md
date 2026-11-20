@@ -1081,6 +1081,11 @@ member's balance and the shared pool. When a page type is priced by several
 plugins, each plugin's share is offered to its own wallet and whatever is
 left is charged to the member as one spend. Plugin credits never move to a
 member or the pool, so a plugin minting them can only waive its own fees.
+A cost declared with `plugin_only: true` in the manifest is paid **only**
+from the plugin's wallet: when the wallet is short the action is refused
+with 402 (`plugin_only: true` in the payload) instead of falling back to the
+member or the pool — for features a plugin gives away only as far as its own
+credits go. Such costs are marked "Plugin credits only" on the pricing screen.
 Admins see the balance and ledger under **Plugins → Credits**, read-only.
 Unregistering the plugin forfeits the wallet (`plugin:forfeit`), so a Worker
 that later claims the same id inherits nothing.

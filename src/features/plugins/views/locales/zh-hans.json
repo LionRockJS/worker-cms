@@ -122,6 +122,7 @@
     "sections_plugin_credits.monthly_advance_per": "每月预付，按单位计费：",
     "sections_plugin_credits.monthly_arrears_per": "每月后付，按单位计费：",
     "sections_plugin_credits.on_create": "创建时：",
+    "sections_plugin_credits.plugin_credits_only": "仅限插件点数",
     "sections_plugin_credits.plugin_wallet": "插件钱包",
     "sections_plugin_credits.plugin_wallet_empty": "此插件的开发者尚未提供任何点数。",
     "sections_plugin_credits.plugin_wallet_explanation": "此插件的开发者提供给网站的点数。只能用于此插件本身的收费，会先于成员余额及共享点数池扣除；取消注册插件时将会作废。",

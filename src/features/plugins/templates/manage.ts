@@ -377,6 +377,8 @@ export interface PluginCreditRow {
   usesDefault: boolean;
   /** Configured price as a string, or '' when unset (default applies). */
   value: string;
+  /** Paid only from the plugin's own wallet. */
+  pluginOnly: boolean;
 }
 
 export async function pluginCreditsPage(views: Fetcher, opts: BaseTemplateProps & {
