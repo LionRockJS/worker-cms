@@ -209,7 +209,11 @@ function browserLiquid(views) {
     },
   });
   liquid.registerFilter('t', (key) => `[${key}]`);
-  return { liquid, section: (name) => read('sections/' + name + '.liquid') };
+  return {
+    liquid,
+    dataLiquid: new browser.liquidjs.Liquid(),
+    section: (name) => read('sections/' + name + '.liquid'),
+  };
 }
 
 test('read view renders nested items, escapes values, and keeps the live badge HTML', async () => {
@@ -248,30 +252,40 @@ test('read view renders nested items, escapes values, and keeps the live badge H
 });
 
 test('page access form keeps its mode selects, grants, and user search', async () => {
-  const { liquid, section } = browserLiquid(assembleViews({}));
+  const views = assembleViews({});
+  const { liquid, dataLiquid, section } = browserLiquid(views);
   const data = {
     pageId: 5, title: 'Page access', pageName: 'P&Q', owner: 'Ann', revision: 3, mode: '640',
     action: '/admin/pages/5/access', group: 'editor', roles: ['admin', 'editor'],
     permissions: [{ key: 'owner', digit: '6' }, { key: 'group', digit: '4' }, { key: 'others', digit: '0' }],
     grants: [{ id: 9, name: 'Bo' }], legacyEditors: [{ id: 8, name: 'Cy' }],
-    accounts: [{ id: 9, name: 'Bo', email: 'bo@x.test' }, { id: 10, name: 'd@x.test', email: 'd@x.test' }], query: 'x',
   };
+  const { header } = JSON.parse(views.get('templates/page-access.json').toString()).sections;
+  const description = await dataLiquid.parseAndRender(header.settings.description, data);
+  const heading = await liquid.parseAndRender(section(header.type), { section: { settings: { description } } });
+  assert.match(heading, />P&amp;Q<\/p>/);
+
   const enabled = await liquid.parseAndRender(section('page-access'), { ...data, enabled: true });
-  assert.match(enabled, /P&amp;Q/);
-  assert.match(enabled, /<code>640<\/code>/);
+  assert.match(enabled, /<span[^>]*>640<\/span>/);
   assert.match(enabled, /name="owner">\s*<option value="0">[^<]*<\/option>\s*<option value="4">[^<]*<\/option>\s*<option value="6" selected>/);
   assert.match(enabled, /name="group">\s*<option value="0">[^<]*<\/option>\s*<option value="4" selected>/);
   assert.match(enabled, /<option selected>editor<\/option>/);
-  assert.match(enabled, /name="user_id" value="9"><span>Bo<\/span>/);
-  assert.match(enabled, /<option value="9">Bo \(bo@x\.test\)<\/option><option value="10">d@x\.test<\/option>/);
-  assert.match(enabled, /value="add"/);
+  assert.match(enabled, /name="user_id" value="9">\s*<span[^>]*>Bo<\/span>\s*<button[^>]*name="action" value="remove"/);
+  assert.match(enabled, /data-access-user-picker data-source="\/admin\/api\/users"/);
+  assert.match(enabled, /id="page-access-user"[^>]*role="combobox"[^>]*aria-controls="page-access-user-results"/);
+  assert.match(enabled, /id="page-access-user-results" role="listbox"/);
+  assert.match(enabled, /name="user_id" value="" data-access-user-id/);
+  assert.match(enabled, /name="action" value="add" disabled data-access-user-action/);
+  assert.match(enabled, /name="action" value="transfer" disabled data-access-user-action/);
   assert.doesNotMatch(enabled, /legacy_user/);
 
-  const legacy = await liquid.parseAndRender(section('page-access'), { ...data, enabled: false, accounts: [] });
+  const legacy = await liquid.parseAndRender(section('page-access'), { ...data, enabled: false });
   assert.match(legacy, /\[page_access\.legacy\]/);
-  assert.match(legacy, /name="legacy_user" value="8"> Cy/);
-  assert.match(legacy, /\[page_access\.enable\]/);
-  assert.match(legacy, /\[page_access\.no_matching_users\]/);
+  assert.match(legacy, /type="checkbox" name="legacy_user" value="8"[^>]*>\s*<span>Cy<\/span>/);
+  assert.match(legacy, /name="action" value="mode"\s+title="\[page_access\.enable\]"/);
+  assert.match(legacy, /data-empty-text="\[page_access\.no_matching_users\]"/);
+  assert.match(legacy, /name="action" value="transfer" disabled data-access-user-action/);
+  assert.doesNotMatch(legacy, /name="action" value="add"/);
   assert.doesNotMatch(legacy, /\[page_access\.sharing\]/);
 });
 
