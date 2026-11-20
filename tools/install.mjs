@@ -105,11 +105,6 @@ if (upgradeMode && process.argv.length !== 3) {
   process.exit(1);
 }
 
-if (!existsSync(new URL('../node_modules/wrangler/package.json', import.meta.url))) {
-  console.error('Dependencies are not installed. Run "npm install" first.');
-  process.exit(1);
-}
-
 if (!process.stdin.isTTY || !process.stdout.isTTY) {
   console.error(`${operation} is interactive and must be run in a terminal.`);
   process.exit(1);
@@ -180,6 +175,13 @@ async function confirm(label, defaultValue = true) {
   const answer = (await rl.question(`${label} [${hint}]: `)).trim().toLowerCase();
   if (!answer) return defaultValue;
   return answer === 'y' || answer === 'yes';
+}
+
+async function ensureDependencies() {
+  if (existsSync(new URL('../node_modules/wrangler/package.json', import.meta.url))) return;
+  console.log('Dependencies are not installed.');
+  if (!await confirm('Run npm install now?')) throw new Error('Run "npm install" first.');
+  runNpm(['install']);
 }
 
 async function askSecret(label, optional = false) {
@@ -1094,6 +1096,7 @@ anywhere but the proxy.`);
 }
 
 try {
+  await ensureDependencies();
   await (upgradeMode ? upgrade() : main());
 } catch (error) {
   console.error(`\n${operation} stopped: ${error.message}`);
