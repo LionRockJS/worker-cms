@@ -32,14 +32,16 @@ For a local Wrangler instance, run `npm run setup` and accept **Set up this
 clone for local development with Wrangler?** on a fresh setup. The wizard
 creates `wrangler.toml` from the example, sets the localhost origin and callback in the
 gitignored `.dev.vars`, generates a signing key if needed, and applies the D1
-migrations for the enabled databases. Then run `npm run dev` and open
-**http://localhost:8787**. To sign in, configure your OAuth client for
-`http://localhost:8787/auth/callback` and put its secret in `.dev.vars`.
+migrations for the enabled databases. It also offers to set up OAuth sign-in:
+register `http://localhost:8787/auth/callback` with each provider, then enter
+the providers, client IDs, and secrets, which go to `.dev.vars`. Then run
+`npm run dev` and open **http://localhost:8787**.
 
 If you already have `wrangler.toml`, choose **continue** to create or complete
 `.dev.vars` with your existing settings. The wizard keeps `wrangler.toml`,
 generates a local signing key if needed, and offers to collect local secrets for
-configured OAuth providers. Standard Wrangler development defaults to
+configured OAuth providers. When no provider has a client ID yet, it offers the
+same OAuth provider setup as a fresh local setup. Standard Wrangler development defaults to
 `http://localhost:8787` when the existing config has a public origin. Use
 `npm run setup -- --local` to reuse that public origin for local hosting.
 

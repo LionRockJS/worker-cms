@@ -76,8 +76,9 @@ Usage:
   npm run setup -- --local  full hosting setup on this machine, including OAuth
 
 For Wrangler development, setup creates wrangler.toml if needed, configures
-.dev.vars for localhost:8787, and applies the local D1 migrations. OAuth
-credentials can be configured separately when you need to sign in.
+.dev.vars for localhost:8787, and applies the local D1 migrations. When no
+OAuth provider is configured, it offers to add providers, client IDs, and
+secrets to .dev.vars.
 
 With an existing wrangler.toml, continue to configure .dev.vars or start over
 with a fresh setup. Starting over saves the old config files under .wrangler/.
@@ -509,7 +510,7 @@ async function firstAdminGrant(providers, prompt) {
  * .dev.vars overrides [vars] and a stale value there would win over the
  * origin just entered. Existing secrets are kept unless replaced.
  */
-async function writeLocalSecrets({ canonicalOrigin, providers = [], clientIds = {} }) {
+async function writeLocalSecrets({ canonicalOrigin, providers = [], clientIds = {}, vars: oauthVars = {} }) {
   const existing = await readFile(DEV_VARS_PATH, 'utf8').catch((error) => {
     if (error.code === 'ENOENT') return null;
     throw error;
@@ -519,6 +520,7 @@ async function writeLocalSecrets({ canonicalOrigin, providers = [], clientIds = 
 
   setDevVar(lines, 'CANONICAL_ORIGIN', canonicalOrigin);
   setDevVar(lines, 'OAUTH_REDIRECT_URI', `${canonicalOrigin}/auth/callback`);
+  for (const [key, value] of Object.entries(oauthVars)) setDevVar(lines, key, value);
   if (vars.JWT_SECRET?.length >= 32 && vars.JWT_SECRET !== 'replace-with-a-random-32-byte-hex-string') {
     console.log('Keeping the existing JWT_SECRET in .dev.vars.');
   } else {
@@ -757,6 +759,42 @@ async function upgrade() {
   console.log(`\nEnabled ${provider} on ${name} and updated wrangler.toml.`);
 }
 
+async function askOAuthClients(callback) {
+  let providers;
+  while (!providers) {
+    const answer = await ask('OAuth providers (comma-separated)', 'github');
+    const selected = [...new Set(answer.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
+    const invalid = selected.filter((provider) => !Object.hasOwn(PROVIDERS, provider));
+    if (selected.length && !invalid.length) providers = selected;
+    else console.log(`Choose from: ${Object.keys(PROVIDERS).join(', ')}.`);
+  }
+
+  console.log(`\nRegister this callback URL with every OAuth provider:\n  ${callback}\n`);
+  const clientIds = {};
+  let microsoftTenant;
+  for (const provider of providers) {
+    console.log(`${provider}: ${PROVIDERS[provider].instructions}`);
+    clientIds[provider] = await ask(`${provider} client ID`);
+    if (provider === 'microsoft') {
+      microsoftTenant = await ask('Microsoft tenant', 'common');
+    }
+  }
+  return { providers, clientIds, microsoftTenant };
+}
+
+/**
+ * Local counterpart of the provider prompts: the choices go to .dev.vars,
+ * which overrides wrangler.toml's [vars] under wrangler dev.
+ */
+async function askLocalOAuthClients(canonicalOrigin) {
+  if (!await confirm('No OAuth provider is configured for local sign-in. Set one up now?')) return {};
+  const { providers, clientIds, microsoftTenant } = await askOAuthClients(`${canonicalOrigin}/auth/callback`);
+  const vars = { ENABLED_PROVIDERS: providers.join(',') };
+  for (const provider of providers) vars[PROVIDERS[provider].clientId] = clientIds[provider];
+  if (microsoftTenant) vars.MICROSOFT_TENANT = microsoftTenant;
+  return { providers, clientIds, vars };
+}
+
 async function setupLocalDevelopment() {
   const template = await readFile(EXAMPLE_CONFIG_PATH, 'utf8');
   try {
@@ -767,10 +805,13 @@ async function setupLocalDevelopment() {
     console.log('Keeping the existing wrangler.toml.');
   }
 
-  await writeLocalSecrets({ canonicalOrigin: LOCAL_ORIGIN });
+  const oauth = await askLocalOAuthClients(LOCAL_ORIGIN);
+  await writeLocalSecrets({ canonicalOrigin: LOCAL_ORIGIN, ...oauth });
   runNpm(['run', 'db:migrate'], { stdin: 'ignore' });
   console.log(`\nLocal setup complete. Start with npm run dev and open ${LOCAL_ORIGIN}.`);
-  console.log(`For sign-in, configure an OAuth client with callback ${LOCAL_ORIGIN}/auth/callback.`);
+  if (!oauth.providers) {
+    console.log(`For sign-in, configure an OAuth client with callback ${LOCAL_ORIGIN}/auth/callback.`);
+  }
 }
 
 async function continueLocalSetup(localHosting) {
@@ -793,13 +834,14 @@ async function continueLocalSetup(localHosting) {
     if (!Object.hasOwn(PROVIDERS, provider)) continue;
     const { clientId } = PROVIDERS[provider];
     const value = localVars[clientId] ?? vars[clientId];
-    if (typeof value === 'string' && value.trim()) clientIds[provider] = value;
+    // wrangler.example.toml ships GITHUB_CLIENT_ID = "your-github-oauth-client-id".
+    if (typeof value === 'string' && value.trim() && !/^your-.*-client-id$/.test(value)) clientIds[provider] = value;
   }
   const configured = Object.keys(clientIds);
-  const providers = configured.length && await confirm(`Configure local OAuth secrets for ${configured.join(', ')}?`, false)
-    ? configured
-    : [];
-  await writeLocalSecrets({ canonicalOrigin, providers, clientIds });
+  const oauth = configured.length
+    ? { providers: await confirm(`Configure local OAuth secrets for ${configured.join(', ')}?`, false) ? configured : [], clientIds }
+    : await askLocalOAuthClients(canonicalOrigin);
+  await writeLocalSecrets({ canonicalOrigin, ...oauth });
   const port = new URL(canonicalOrigin).port;
   const portOption = isLocalOrigin(canonicalOrigin) && port && port !== '8787' ? ` -- --port ${port}` : '';
   console.log(`\nLocal settings are ready. Start with npm run dev${portOption}.`);
@@ -944,25 +986,7 @@ async function main() {
     ? await name('Audit archive R2 bucket name', derived.auditBucketName)
     : null;
 
-  let providers;
-  while (!providers) {
-    const answer = await ask('OAuth providers (comma-separated)', 'github');
-    const selected = [...new Set(answer.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
-    const invalid = selected.filter((provider) => !Object.hasOwn(PROVIDERS, provider));
-    if (selected.length && !invalid.length) providers = selected;
-    else console.log(`Choose from: ${Object.keys(PROVIDERS).join(', ')}.`);
-  }
-
-  console.log(`\nRegister this callback URL with every OAuth provider:\n  ${callback}\n`);
-  const clientIds = {};
-  let microsoftTenant;
-  for (const provider of providers) {
-    console.log(`${provider}: ${PROVIDERS[provider].instructions}`);
-    clientIds[provider] = await ask(`${provider} client ID`);
-    if (provider === 'microsoft') {
-      microsoftTenant = await ask('Microsoft tenant', 'common');
-    }
-  }
+  const { providers, clientIds, microsoftTenant } = await askOAuthClients(callback);
 
   let databaseId;
   let publishedDatabaseId;
