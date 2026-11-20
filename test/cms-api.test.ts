@@ -557,7 +557,7 @@ describe('Plugin API create / read / list / update / delete', () => {
     await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest',
       name: 'Su Sheng',
-      lect: { name: { en: 'Su Sheng' }, zh_hans_name: '苏生', email: 'su@example.com' },
+      lect: { name: { en: 'Su Sheng' }, zh_hans_name: '苏生', note: '里線', email: 'su@example.com' },
     });
     await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest',
@@ -572,6 +572,10 @@ describe('Plugin API create / read / list / update / delete', () => {
     const simplified = await (await cmsApi('GET', '/__cms/pages?page_type=guest&q=%E8%8B%8F')).json() as { total: number; pages: Array<{ name: string }> };
     expect(simplified.total).toBe(1);
     expect(simplified.pages[0].name).toBe('Su Sheng');
+
+    const regional = await cmsApi('GET', `/__cms/pages?page_type=guest&q=${encodeURIComponent('裏綫')}`);
+    expect(regional.status).toBe(200);
+    expect(await regional.json()).toMatchObject({ total: 1, pages: [{ name: 'Su Sheng' }] });
   });
 
   it('filters search results by multiple pointer values', async () => {

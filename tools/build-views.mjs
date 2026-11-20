@@ -178,8 +178,7 @@ export function assembleViews(features) {
 
   if (catalogs.size === 0) throw new Error('src/core/views/locales holds no catalogs; the core catalog defines the supported languages');
 
-  // Simplified/Traditional tables for search (src/core/db/chinese.ts): an
-  // asset, not a module, so the 44 kB stays out of the Worker bundle.
+  // Chinese search tables (src/core/db/chinese.ts) stay out of the Worker bundle.
   add(CHINESE_DICTIONARY, readFileSync(path.join(rootDir, 'dictionary', 'chinese-chars.json')), 'dictionary');
 
   for (const id of enabled) {

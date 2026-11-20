@@ -2139,6 +2139,28 @@ describe('admin routes', () => {
     expect(await search({ search1: '苏玮', path1: 'body.en' })).toEqual(['Content match']);
   });
 
+  it('matches Chinese regional variants in mixed-script names and content', async () => {
+    await env.DB.batch([
+      [103, 'aBC 裡線[1]*?', null],
+      [104, 'ABC unrelated', JSON.stringify({ body: { en: 'abc 里線[1]*?' } })],
+      [105, 'ABC 裡線11xx', null],
+    ].map(([id, name, lect]) =>
+      env.DB.prepare('INSERT INTO pages (id, name, slug, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+        .bind(id, name, `regional-search-${id}`, 'default', lect)));
+
+    const cookie = await authCookie();
+    for (const [path1, expected] of [
+      ['', ['ABC unrelated', 'aBC 裡線[1]*?']],
+      ['body.en', ['ABC unrelated']],
+    ] as const) {
+      const query = new URLSearchParams({ search1: 'AbC 裏綫[1]*?', path1 });
+      const response = await fetchWorker(`/admin/advanced-search/default?${query}`, { headers: { Cookie: cookie } });
+      expect(response.status).toBe(200);
+      const data = bodyData(await response.text());
+      expect((data.pages as Array<{ name: string }>).map((page) => page.name).sort()).toEqual(expected);
+    }
+  });
+
   it('POST /admin/pages/pull/:uuid recreates a missing draft from published content', async () => {
     await env.PUBLISHED_DB.prepare(
       `INSERT INTO pages (id, uuid, name, slug, weight, page_type, lect, creator, editors)

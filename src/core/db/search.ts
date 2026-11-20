@@ -6,7 +6,7 @@ import { cmsConfig } from '../../cms-config';
 import type { BlueprintEntry, CmsConfig } from '../../cms-config';
 import type { Page } from '../../types';
 import { strParam } from '../http/forms';
-import { chineseSearchVariants } from './chinese';
+import { chineseSearchPattern } from './chinese';
 import { countPageMetadata } from './count-metadata';
 
 export type AdvancedSearchOperator = 'AND' | 'OR' | 'NOT';
@@ -164,31 +164,26 @@ export async function advancedSearchCondition(
   const params: unknown[] = [];
 
   if (criterion.term) {
-    // A Chinese term also matches its Simplified/Traditional variants, so we OR
-    // a LIKE per variant. Non-Chinese terms yield a single variant.
-    const searchTerms = (await chineseSearchVariants(criterion.term))
-      .map((variant) => `%${variant.replaceAll(' ', '%')}%`);
-    const orGroup = (clause: string) =>
-      searchTerms.length > 1 ? `(${searchTerms.map(() => clause).join(' OR ')})` : clause;
+    const { operator, pattern } = await chineseSearchPattern(criterion.term);
 
     if (criterion.path) {
       const wildcardParts = wildcardJsonPathParts(criterion.path);
       if (wildcardParts) {
         const beforePath = sqliteJsonPath(wildcardParts.beforePath);
         const afterPath = sqliteJsonPath(wildcardParts.afterPath);
-        conditions.push(orGroup(`EXISTS (
+        conditions.push(`EXISTS (
           SELECT 1 FROM json_each(json_extract(${pageAlias}.lect, ?))
-          WHERE json_extract(value, ?) LIKE ?
-        )`));
-        for (const term of searchTerms) params.push(beforePath, afterPath, term);
+          WHERE json_extract(value, ?) ${operator} ?
+        )`);
+        params.push(beforePath, afterPath, pattern);
       } else {
         const path = sqliteJsonPath(criterion.path);
-        conditions.push(orGroup(`json_extract(${pageAlias}.lect, ?) LIKE ?`));
-        for (const term of searchTerms) params.push(path, term);
+        conditions.push(`json_extract(${pageAlias}.lect, ?) ${operator} ?`);
+        params.push(path, pattern);
       }
     } else {
-      conditions.push(orGroup(`(${pageAlias}.name LIKE ? OR ${pageAlias}.lect LIKE ?)`));
-      for (const term of searchTerms) params.push(term, term);
+      conditions.push(`(${pageAlias}.name ${operator} ? OR ${pageAlias}.lect ${operator} ?)`);
+      params.push(pattern, pattern);
     }
   }
 

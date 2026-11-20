@@ -40,7 +40,7 @@ import {
 } from './serialize';
 import { createPages } from './create';
 import { emitPluginHooks } from './hooks';
-import { chineseSearchVariants } from '../../../core/db/chinese';
+import { chineseSearchPattern } from '../../../core/db/chinese';
 import { advancedSearchOperator, advancedSearchOrder, advancedSearchSort, performAdvancedSearch } from '../../../core/db/search';
 import { blueprintToLect, mergeLects, safeParseLect, stringifyLect } from '../../../core/db/lect';
 import { resolveCmsConfig } from '../../../core/db/content-config';
@@ -286,9 +286,9 @@ pagesApiRoutes.get('/pages', async (c) => {
     }
   }
   if (q) {
-    const terms = (await chineseSearchVariants(q)).map((variant) => `%${variant.replaceAll(' ', '%')}%`);
-    where += ` AND (${terms.map(() => '(name LIKE ? OR slug LIKE ? OR lect LIKE ?)').join(' OR ')})`;
-    for (const term of terms) params.push(term, term, term);
+    const { operator, pattern } = await chineseSearchPattern(q);
+    where += ` AND (name ${operator} ? OR slug ${operator} ? OR lect ${operator} ?)`;
+    params.push(pattern, pattern, pattern);
   }
 
   // count=0 skips the COUNT(*) (a scan of the whole filtered set) — callers
