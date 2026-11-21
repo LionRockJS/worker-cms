@@ -10,7 +10,7 @@ import { APP_BRANDING_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY } from '../src/co
 import { MAX_CHANGES_PER_REQUEST } from '../src/routes/admin/config-transfer';
 
 const TABLES = ['audit_events', 'data_classes', 'plugin_identity_approvals', 'plugins', 'settings', 'sessions', 'user_oauth_identities',
-  'users', 'role_permissions', 'roles', 'page_types', 'block_types', 'taxonomies', 'locale_messages'];
+  'users', 'role_permissions', 'roles', 'page_types', 'block_types', 'page_tags', 'tags', 'taxonomies', 'locale_messages'];
 let counter = 0;
 
 async function cookieFor(role: string): Promise<string> {
@@ -27,6 +27,10 @@ async function wipe(): Promise<void> {
 async function seed(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO taxonomies(slug, name) VALUES ('topic', 'Topics')"),
+    env.DB.prepare(`INSERT INTO tags(slug, name, weight, taxonomy_slug, lect)
+      VALUES ('news', 'News', 2, 'topic', '{"name":{"en":"News","zh-hant":"新聞"}}')`),
+    env.DB.prepare(`INSERT INTO tags(slug, name, weight, taxonomy_slug, parent_tag, lect)
+      VALUES ('local-news', 'Local', 4, 'topic', (SELECT id FROM tags WHERE slug = 'news'), '{"name":{"en":"Local"}}')`),
     env.DB.prepare("INSERT INTO block_types(slug, name, blueprint, weight) VALUES ('quote', 'Quote', '[\"text\"]', 3)"),
     env.DB.prepare(`INSERT INTO page_types(slug, name, blueprint, weight, block_lists, taxonomy_lists)
       VALUES ('story', 'Story', '["title","body"]', 7, '["quote"]', '["topic"]')`),
@@ -54,7 +58,7 @@ async function call(path: string, body: BodyInit, role = 'admin'): Promise<Respo
   return response;
 }
 
-const ALL = ['plugins', 'taxonomies', 'block_types', 'page_types', 'page_type_extensions', 'locales', 'translations', 'roles', 'system_settings'];
+const ALL = ['plugins', 'taxonomies', 'tags', 'block_types', 'page_types', 'page_type_extensions', 'locales', 'translations', 'roles', 'system_settings'];
 
 async function exportBundle(sections = ALL): Promise<Record<string, any>> {
   const form = new URLSearchParams();
@@ -76,6 +80,8 @@ async function snapshot() {
   const rows = async (sql: string) => (await env.DB.prepare(sql).all()).results;
   return {
     taxonomies: await rows('SELECT slug, name FROM taxonomies ORDER BY slug'),
+    tags: (await rows(`SELECT t.slug, t.name, t.weight, t.taxonomy_slug, p.slug AS parent, t.lect
+      FROM tags t LEFT JOIN tags p ON p.id = t.parent_tag ORDER BY t.slug`)).map((row) => ({ ...row, lect: JSON.parse(String(row.lect)) })),
     // Imported blueprints are stored pretty-printed; compare their content.
     blocks: (await rows('SELECT slug, name, blueprint, weight FROM block_types ORDER BY slug')).map((row) => ({ ...row, blueprint: JSON.parse(String(row.blueprint)) })),
     pages: await rows('SELECT slug, name, weight, block_lists, taxonomy_lists FROM page_types ORDER BY slug'),
@@ -100,6 +106,10 @@ it('exports settings without plugin secrets or CMS-owned plugin flags, as an exp
   expect(bundle.sections.plugins).toEqual([{ url: 'https://events.example.com', label: 'Events', enabled: false, sortOrder: 4, viewSource: 'host', config: { region: 'hk' } }]);
   expect(JSON.stringify(bundle)).not.toContain('source-secret');
   expect(bundle.sections.page_types).toEqual([{ slug: 'story', name: 'Story', blueprint: ['title', 'body'], weight: 7, blockLists: ['quote'], taxonomyLists: ['topic'] }]);
+  expect(bundle.sections.tags).toEqual([
+    { slug: 'news', name: 'News', weight: 2, taxonomy: 'topic', parent: null, lect: { name: { en: 'News', 'zh-hant': '新聞' } } },
+    { slug: 'local-news', name: 'Local', weight: 4, taxonomy: 'topic', parent: 'news', lect: { name: { en: 'Local' } } },
+  ]);
   expect(bundle.sections.roles).toContainEqual({ name: 'reviewer', builtin: false, label: 'Reviewer', permissions: ['content:write', 'tag:write'] });
   expect(bundle.sections.roles.some((role: { name: string }) => role.name === 'admin')).toBe(false);
   expect(bundle.sections.translations).toContainEqual({ locale: 'fr', key: 'common.save', value: 'Enregistrer' });
@@ -146,6 +156,7 @@ it('recreates exported settings on an empty CMS through the audited save paths, 
   expect(JSON.parse(plugin!.config)).toEqual({ region: 'hk', cmsTrustedUi: false });
   const actions = (await env.DB.prepare("SELECT action FROM audit_events WHERE event_class = 'admin'").all<{ action: string }>()).results.map((row) => row.action);
   expect(actions).toEqual(expect.arrayContaining(['plugin.create', 'page_type.create', 'block_type.create', 'role.create', 'role.update', 'settings.system.update']));
+  expect((await env.DB.prepare("SELECT COUNT(*) n FROM audit_events WHERE action = 'tag.create' AND outcome = 'success'").first<{ n: number }>())!.n).toBe(2);
 
   const before = (await env.DB.prepare('SELECT COUNT(*) n FROM audit_events WHERE event_class = \'admin\'').first<{ n: number }>())!.n;
   const again = await call('/admin/settings/transfer/apply', applyForm(bundle));
@@ -162,6 +173,24 @@ it('applies at most one batch of changes per request and continues on the next',
   const second = await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['taxonomies']))).text();
   expect(second).toContain('"applied":3');
   expect((await env.DB.prepare('SELECT COUNT(*) n FROM taxonomies').first<{ n: number }>())!.n).toBe(taxonomies.length);
+});
+
+it('imports tags parents first and skips tags whose parent is missing or loops', async () => {
+  const bundle = { format: '0xcms-config', version: 1, exportedAt: '', source: '', sections: { tags: [
+    { slug: 'child', name: 'Child', weight: 1, taxonomy: null, parent: 'parent', lect: null },
+    { slug: 'parent', name: 'Parent', weight: 1, taxonomy: null, parent: null, lect: { name: { 'zh-hant': '父' } } },
+    { slug: 'orphan', name: 'Orphan', weight: 1, taxonomy: null, parent: 'nowhere', lect: null },
+    { slug: 'loop-a', name: 'A', weight: 1, taxonomy: null, parent: 'loop-b', lect: null },
+    { slug: 'loop-b', name: 'B', weight: 1, taxonomy: null, parent: 'loop-a', lect: null },
+    { slug: 'Bad Slug', name: 'Bad', weight: 1, taxonomy: null, parent: null, lect: null },
+  ] } };
+  const html = await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['tags']))).text();
+  expect(html).toContain('"applied":2');
+  const rows = (await env.DB.prepare(`SELECT t.slug, p.slug AS parent, t.lect FROM tags t LEFT JOIN tags p ON p.id = t.parent_tag ORDER BY t.slug`)
+    .all<{ slug: string; parent: string | null; lect: string }>()).results;
+  expect(rows.map(({ slug, parent }) => ({ slug, parent }))).toEqual([{ slug: 'child', parent: 'parent' }, { slug: 'parent', parent: null }]);
+  expect(JSON.parse(rows[1].lect).name).toEqual({ 'zh-hant': '父' });
+  expect((await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['tags']))).text())).toContain('"applied":0');
 });
 
 it('skips entries it must not import and leaves this CMS untouched for them', async () => {

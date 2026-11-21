@@ -3,12 +3,12 @@
 // the rest through features/services. See core/config-transfer.ts.
 
 import { Hono } from 'hono';
-import type { Env, Variables } from '../../types';
+import type { Env, Tag, Variables } from '../../types';
 import type { AppContext } from '../../core/http/context';
 import { requirePermission } from '../../core/auth/guards';
 import { userCan } from '../../core/auth/permissions';
 import { renderPage } from '../../core/render/chrome';
-import { flushReadAudit, recordTaxonomyReads } from '../../core/http/access-log';
+import { flushReadAudit, recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 import { contextActor } from '../../core/db/audit';
 import { slugify } from '../../core/http/forms';
 import {
@@ -23,7 +23,8 @@ import {
 } from '../../core/db/settings';
 import { prepareHostSettingsMutation } from '../../core/evidence/settings-mutation-evidence';
 import { MAX_ICON_SPRITE_BYTES, parseIconSprite } from '../../core/render/icon-sprite';
-import { saveTaxonomy } from '../../core/evidence/taxonomy-mutation-evidence';
+import { saveTag, saveTaxonomy } from '../../core/evidence/taxonomy-mutation-evidence';
+import { normalizeLect, safeParseLect, stringifyLect, type Lect } from '../../core/db/lect';
 import { featureConfigTransferSections, publication } from '../../features/services';
 import {
   configTransferPage,
@@ -141,9 +142,98 @@ const taxonomiesSection: ConfigTransferSection = {
   },
 };
 
+interface TagTransferItem { slug: string; name: string; weight: number; taxonomy: string | null; parent: string | null; lect: Lect }
+
+/** The comparable, storable form of a tag; parents are named by slug so ids never cross CMSes. */
+function tagTransferItem(tag: Tag, slugById: ReadonlyMap<number, string>): TagTransferItem {
+  return {
+    slug: tag.slug, name: tag.name, weight: tag.weight, taxonomy: tag.taxonomy_slug,
+    parent: tag.parent_tag === null ? null : slugById.get(tag.parent_tag) ?? null, lect: safeParseLect(tag.lect),
+  };
+}
+
+/** The imported tag, or an error message. */
+function parsedTagItem(item: unknown): TagTransferItem | string {
+  if (!isRecord(item)) return 'Invalid tag.';
+  const slug = typeof item.slug === 'string' ? item.slug : '';
+  const name = typeof item.name === 'string' ? item.name.trim() : '';
+  const slugOrNull = (value: unknown) => value === null || value === undefined ? null : typeof value === 'string' && value && slugify(value) === value ? value : undefined;
+  const taxonomy = slugOrNull(item.taxonomy);
+  const parent = slugOrNull(item.parent);
+  if (!slug || slugify(slug) !== slug) return 'Invalid slug.';
+  if (!name) return 'Name is required.';
+  if (item.weight !== undefined && (typeof item.weight !== 'number' || !Number.isFinite(item.weight))) return 'Invalid weight.';
+  if (taxonomy === undefined) return 'Invalid taxonomy.';
+  if (parent === undefined) return 'Invalid parent tag.';
+  if (parent === slug) return 'A tag cannot be its own parent.';
+  if (item.lect !== undefined && item.lect !== null && !isRecord(item.lect)) return 'Invalid translations.';
+  return { slug, name, weight: typeof item.weight === 'number' ? item.weight : 5, taxonomy, parent, lect: normalizeLect(item.lect ?? {}) };
+}
+
+/** Bundle tags ordered parents first, so a parent created in this import exists before its children.
+ *  A depth of -1 marks a tag whose parent chain loops back on itself. */
+function parentsFirst<T extends { item: TagTransferItem | string }>(entries: readonly T[]): Array<T & { depth: number }> {
+  const bySlug = new Map<string, TagTransferItem>();
+  for (const { item } of entries) if (typeof item !== 'string') bySlug.set(item.slug, item);
+  const depth = (item: TagTransferItem): number => {
+    const seen = new Set([item.slug]);
+    let n = 0;
+    for (let parent = item.parent; parent && bySlug.has(parent); parent = bySlug.get(parent)!.parent, n++) {
+      if (seen.has(parent)) return -1;
+      seen.add(parent);
+    }
+    return n;
+  };
+  return entries.map((entry) => ({ ...entry, depth: typeof entry.item === 'string' ? 0 : depth(entry.item) }))
+    .sort((a, b) => a.depth - b.depth);
+}
+
+const tagsSection: ConfigTransferSection = {
+  id: 'tags',
+  labelKey: 'settings.transfer.sections.tags',
+  order: 25,
+  permission: 'tag:write',
+  async exportItems(c) {
+    const { results } = await c.env.DB.prepare('SELECT * FROM tags ORDER BY taxonomy_slug, weight, name, slug').all<Tag>();
+    recordTagReads('config.export-read', results);
+    const slugById = new Map(results.map((tag) => [tag.id, tag.slug]));
+    return parentsFirst(results.map((tag) => ({ item: tagTransferItem(tag, slugById) }))).map(({ item }) => item);
+  },
+  async plan(c, items) {
+    const { results } = await c.env.DB.prepare('SELECT * FROM tags').all<Tag>();
+    recordTagReads('config.import-read', results);
+    const slugById = new Map(results.map((tag) => [tag.id, tag.slug]));
+    const existing = new Map(results.map((tag) => [tag.slug, tag]));
+    const parsed = items.map((raw) => ({
+      label: isRecord(raw) && typeof raw.slug === 'string' && raw.slug ? raw.slug : '?',
+      item: parsedTagItem(raw),
+    }));
+    const inBundle = new Set(parsed.flatMap(({ item }) => typeof item === 'string' ? [] : [item.slug]));
+    return parentsFirst(parsed).map(({ label, item, depth }): ConfigTransferPlanItem => {
+      if (typeof item === 'string') return skipItem(label, item);
+      if (depth < 0) return skipItem(label, 'Its parent tags form a loop.');
+      if (item.parent && !existing.has(item.parent) && !inBundle.has(item.parent)) return skipItem(label, `Parent tag ${item.parent} is not on this CMS or in the file.`);
+      const before = existing.get(item.slug);
+      return planChange(label, before && tagTransferItem(before, slugById), item, async () => {
+        // Re-read at apply time: a parent this import created moments ago now has an id.
+        const [current, parent] = await Promise.all([
+          c.env.DB.prepare('SELECT * FROM tags WHERE slug = ?').bind(item.slug).first<Tag>(),
+          item.parent ? c.env.DB.prepare('SELECT id FROM tags WHERE slug = ?').bind(item.parent).first<{ id: number }>() : null,
+        ]);
+        if (item.parent && !parent) throw new ConfigTransferItemError(`Parent tag ${item.parent} was not imported.`);
+        const id = await saveTag(c, {
+          name: item.name, slug: item.slug, weight: item.weight, taxonomy_slug: item.taxonomy,
+          parent_tag: parent?.id ?? null, lect: stringifyLect(item.lect),
+        }, current ?? undefined);
+        await publication()?.publishTagToTargets(c.env, id, contextActor(c));
+      });
+    });
+  },
+};
+
 /** Every section this CMS can export or import, in apply order. */
 export function configTransferSections(): ConfigTransferSection[] {
-  return [systemSettingsSection, taxonomiesSection, ...featureConfigTransferSections()].sort((a, b) => a.order - b.order);
+  return [systemSettingsSection, taxonomiesSection, tagsSection, ...featureConfigTransferSections()].sort((a, b) => a.order - b.order);
 }
 
 async function permittedSections(c: AppContext): Promise<ConfigTransferSection[]> {

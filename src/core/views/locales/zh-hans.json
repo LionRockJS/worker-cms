@@ -293,7 +293,7 @@
       "link": "导出 / 导入",
       "back": "返回系统",
       "title": "导出 / 导入设置",
-      "description": "将设置、内容类型、语言、角色和插件注册从一个 CMS 复制到另一个。不包括页面、用户和媒体。",
+      "description": "将设置、分类法和标签、内容类型、语言、角色和插件注册从一个 CMS 复制到另一个。不包括页面、用户和媒体。",
       "invalid_file": "请选择从 CMS 导出的设置文件（JSON，最大 2 MB）。",
       "export": {
         "title": "导出",
@@ -344,6 +344,7 @@
       "sections": {
         "plugins": "插件",
         "taxonomies": "分类法",
+        "tags": "标签",
         "block_types": "区块类型",
         "page_types": "页面类型",
         "page_type_extensions": "页面类型扩展",

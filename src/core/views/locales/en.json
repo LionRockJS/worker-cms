@@ -295,7 +295,7 @@
       "link": "Export / import",
       "back": "Back to System",
       "title": "Export / import settings",
-      "description": "Copy settings, content types, languages, roles and plugin registrations from one CMS to another. Pages, users and media are not included.",
+      "description": "Copy settings, taxonomies and tags, content types, languages, roles and plugin registrations from one CMS to another. Pages, users and media are not included.",
       "invalid_file": "Choose a settings file exported from a CMS (JSON, up to 2 MB).",
       "export": {
         "title": "Export",
@@ -346,6 +346,7 @@
       "sections": {
         "plugins": "Plugins",
         "taxonomies": "Taxonomies",
+        "tags": "Tags",
         "block_types": "Block types",
         "page_types": "Page types",
         "page_type_extensions": "Page type extensions",

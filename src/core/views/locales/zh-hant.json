@@ -293,7 +293,7 @@
       "link": "匯出 / 匯入",
       "back": "返回系統",
       "title": "匯出 / 匯入設定",
-      "description": "將設定、內容類型、語言、角色和外掛註冊從一個 CMS 複製到另一個。不包括頁面、使用者和媒體。",
+      "description": "將設定、分類法和標籤、內容類型、語言、角色和外掛註冊從一個 CMS 複製到另一個。不包括頁面、使用者和媒體。",
       "invalid_file": "請選擇從 CMS 匯出的設定檔（JSON，最大 2 MB）。",
       "export": {
         "title": "匯出",
@@ -344,6 +344,7 @@
       "sections": {
         "plugins": "外掛",
         "taxonomies": "分類法",
+        "tags": "標籤",
         "block_types": "區塊類型",
         "page_types": "頁面類型",
         "page_type_extensions": "頁面類型擴充",
