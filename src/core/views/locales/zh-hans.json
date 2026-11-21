@@ -314,6 +314,8 @@
         "details": "显示项目",
         "apply": "导入所选",
         "no_changes": "此 CMS 已与文件一致。",
+        "auto_countdown": "将在 {seconds} 秒后导入下一批。",
+        "pause_auto": "暂停自动导入",
         "done": "完成"
       },
       "counts": {

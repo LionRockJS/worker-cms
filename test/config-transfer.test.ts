@@ -170,9 +170,27 @@ it('applies at most one batch of changes per request and continues on the next',
   const first = await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['taxonomies']))).text();
   expect(first).toContain(`"applied":${MAX_CHANGES_PER_REQUEST}`);
   expect(first).toContain('"remaining":3');
+  expect(first).toContain('"autoContinue":true');
   const second = await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['taxonomies']))).text();
   expect(second).toContain('"applied":3');
+  expect(second).toContain('"autoContinue":false');
   expect((await env.DB.prepare('SELECT COUNT(*) n FROM taxonomies').first<{ n: number }>())!.n).toBe(taxonomies.length);
+});
+
+it('keeps the previous section selection and only auto-continues ticked sections that still have changes', async () => {
+  const taxonomies = Array.from({ length: MAX_CHANGES_PER_REQUEST + 1 }, (_, index) => ({ slug: `t-${index}`, name: `Topic ${index}` }));
+  const tags = [{ slug: 'news', name: 'News', weight: 5, taxonomy: null, parent: null, lect: {} }];
+  const bundle = { format: '0xcms-config', version: 1, exportedAt: '', source: 'https://source.example.com', sections: { taxonomies, tags } };
+  const preview = await (await call('/admin/settings/transfer/preview', applyForm(bundle, []))).text();
+  expect(preview).toContain('"autoContinue":false');
+  expect(preview).not.toContain('"checked":false');
+  const first = await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['taxonomies']))).text();
+  expect(first).toContain('"items":[{"label":"news","action":"create","actionKey":"settings.transfer.actions.create","note":""}],"checked":false');
+  expect(first).toContain('"autoContinue":true');
+  // Only the unticked section is left: nothing to auto-continue.
+  const second = await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['taxonomies']))).text();
+  expect(second).toContain('"autoContinue":false');
+  expect((await env.DB.prepare('SELECT COUNT(*) n FROM tags').first<{ n: number }>())!.n).toBe(0);
 });
 
 it('imports tags parents first and skips tags whose parent is missing or loops', async () => {

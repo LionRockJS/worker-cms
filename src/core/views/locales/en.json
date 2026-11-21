@@ -316,6 +316,8 @@
         "details": "Show items",
         "apply": "Import selected",
         "no_changes": "This CMS already matches the file.",
+        "auto_countdown": "Next batch starts in {seconds}s.",
+        "pause_auto": "Pause auto-import",
         "done": "Done"
       },
       "counts": {

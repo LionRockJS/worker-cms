@@ -368,9 +368,11 @@ configTransferRoutes.post('/settings/transfer/apply', async (c) => {
   const form = await c.req.formData();
   const bundle = await readBundle(form);
   if (!bundle) return renderTransfer(c, { errorKey: 'settings.transfer.invalid_file' }, 400);
-  const result = await applyConfigBundle(c, bundle, new Set(form.getAll('sections').map(String)));
+  const selected = form.getAll('sections').map(String);
+  const result = await applyConfigBundle(c, bundle, new Set(selected));
   return renderTransfer(c, {
     result,
+    selected,
     preview: { source: bundle.source, exportedAt: bundle.exportedAt, bundleJson: JSON.stringify(bundle), sections: await previewSections(c, bundle) },
   });
 });

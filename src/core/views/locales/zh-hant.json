@@ -314,6 +314,8 @@
         "details": "顯示項目",
         "apply": "匯入所選",
         "no_changes": "此 CMS 已與檔案一致。",
+        "auto_countdown": "將在 {seconds} 秒後匯入下一批。",
+        "pause_auto": "暫停自動匯入",
         "done": "完成"
       },
       "counts": {

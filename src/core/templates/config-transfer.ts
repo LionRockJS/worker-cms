@@ -35,9 +35,16 @@ export async function configTransferPage(views: Fetcher, opts: BaseTemplateProps
   exportSections: ConfigTransferSectionOption[];
   preview?: { source: string; exportedAt: string; bundleJson: string; sections: ConfigTransferPreviewSection[] };
   result?: ConfigTransferResult;
+  /** Sections ticked on the previous apply; omitted on first review, where every importable section is ticked. */
+  selected?: readonly string[];
   errorKey?: string;
 }): Promise<string> {
   const preview = opts.preview;
+  const previewSections = (preview?.sections ?? []).map((section) => ({
+    ...section,
+    checked: !opts.selected || opts.selected.includes(section.id),
+  }));
+  const result = opts.result;
   const body = await renderView(views, '/templates/config-transfer.json', {
     exportSections: opts.exportSections,
     hasExportSections: opts.exportSections.length > 0,
@@ -45,8 +52,11 @@ export async function configTransferPage(views: Fetcher, opts: BaseTemplateProps
     source: preview?.source ?? '',
     exportedAt: preview?.exportedAt ?? '',
     bundleJson: preview?.bundleJson ?? '',
-    previewSections: preview?.sections ?? [],
+    previewSections,
     hasChanges: !!preview?.sections.some((section) => !section.unavailableKey && section.changes > 0),
+    // Keep importing the same selection after a batch that left changes, unless it stopped on an outage.
+    autoContinue: !!result && result.remaining > 0 && !result.stopped
+      && previewSections.some((section) => section.checked && !section.unavailableKey && section.changes > 0),
     hasResult: !!opts.result,
     result: opts.result ?? { applied: 0, remaining: 0, failed: [], stopped: '' },
     hasFailures: !!opts.result?.failed.length,
