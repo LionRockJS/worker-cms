@@ -11,6 +11,7 @@ import { resolveCmsConfig } from '../../../core/db/content-config';
 import { editorTaxonomy } from '../../../core/db/admin-queries';
 import { capturePluginPageMutationAuthority } from '../page-update-evidence';
 import { ensurePluginTags } from '../tag-ensure-evidence';
+import { ensureContactTaxonomies } from '../taxonomy-ensure';
 import { advancedSearchPathSpecs } from '../../../core/db/search';
 import { pageTypeScopeAllows } from '../page-types';
 
@@ -55,4 +56,16 @@ contentApiRoutes.post('/tags/ensure', async (c) => {
   if (!authority.allowed.size) return ensurePluginTags(c, authority, null);
   const body = await c.req.json().catch(() => null);
   return ensurePluginTags(c, authority, body);
+});
+
+// Taxonomies are host-wide. Limit provisioning to Import / Export with its
+// existing delegated contact write access.
+contentApiRoutes.post('/taxonomies/ensure', async (c) => {
+  const auth = await authenticatePlugin(c);
+  if (auth instanceof Response) return auth;
+  if (auth.pluginId !== 'import-export') return c.json({ error: 'forbidden' }, 403);
+  if (!pageTypeScopeAllows(auth.allowedTypes, 'contact')) return forbiddenPageType(c, auth, 'contact');
+
+  const authority = await capturePluginPageMutationAuthority(c, auth, 'taxonomy-ensure');
+  return ensureContactTaxonomies(c, authority, await c.req.json().catch(() => null));
 });

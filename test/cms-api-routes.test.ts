@@ -32,6 +32,7 @@ const EXPECTED = [
   'GET /credits/subscriptions',
   'GET /content-meta',
   'POST /tags/ensure',
+  'POST /taxonomies/ensure',
   'POST /tenant/claim',
   'GET /pages',
   'POST /pages/list-batch',

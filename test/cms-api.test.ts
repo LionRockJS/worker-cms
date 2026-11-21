@@ -1539,6 +1539,60 @@ describe('Plugin API content-meta, tag ensure, and lookup projections', () => {
     expect(await response.json()).toMatchObject({ error: 'forbidden_page_type', page_type: 'default' });
   });
 
+  it('limits taxonomy provisioning to Import / Export with contact write approval', async () => {
+    const endpoint = '/__cms/taxonomies/ensure';
+    const request = { names: ['Industry'] };
+    expect((await cmsApi('POST', endpoint, request)).status).toBe(403);
+
+    const importer = { 'x-plugin-id': 'import-export' };
+    await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', contentTypes: { writeTypes: ['*'] } });
+    expect((await cmsApi('POST', endpoint, request, importer)).status).toBe(403);
+    await approvePageTypeAccess(env.DB, 'import-export', '*', 'write', 'admin');
+    expect((await cmsApi('POST', endpoint, request, { ...importer, 'x-plugin-secret': 'wrong' })).status).toBe(403);
+    expect((await cmsApi('POST', endpoint, { names: ['Industry', '  '] }, importer)).status).toBe(400);
+    expect(await env.DB.prepare("SELECT id FROM taxonomies WHERE name = 'Industry'").first()).toBeNull();
+  });
+
+  it('ensures taxonomy names idempotently and records new taxonomies under the plugin identity', async () => {
+    await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', contentTypes: { writeTypes: ['*'] } });
+    await approvePageTypeAccess(env.DB, 'import-export', '*', 'write', 'admin');
+    await env.DB.prepare("INSERT INTO taxonomies (name, slug) VALUES ('Industry', 'industry-custom'), ('Existing', 'interest')").run();
+    const request = { names: ['Industry', 'Interest', 'Interest', '興趣'] };
+    const headers = { 'x-plugin-id': 'import-export', 'x-acting-user-id': '123' };
+    const expected = { taxonomies: [
+      { name: 'Industry', slug: 'industry-custom' },
+      { name: 'Interest', slug: 'interest-2' },
+      { name: '興趣', slug: 'taxonomy' },
+    ] };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await cmsApi('POST', '/__cms/taxonomies/ensure', request, headers);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expected);
+    }
+
+    const events = await env.DB.prepare(`SELECT a.acting_via, a.actor_user_id, a.detail FROM audit_events a
+      JOIN taxonomies t ON a.target_id = t.uuid WHERE a.action = 'taxonomy.create' AND t.name IN ('Industry', 'Interest', '興趣')`).all();
+    expect(events.results).toHaveLength(2);
+    for (const event of events.results) {
+      expect(event).toMatchObject({ acting_via: expect.stringMatching(/^plugin:/), actor_user_id: null });
+      expect(JSON.parse(String(event.detail))).toMatchObject({ acting_user_verified: false, asserted_user_id: 123 });
+    }
+  });
+
+  it('rolls back the taxonomy batch when its audit evidence cannot be committed', async () => {
+    await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', contentTypes: { writeTypes: ['*'] } });
+    await approvePageTypeAccess(env.DB, 'import-export', '*', 'write', 'admin');
+    await env.DB.prepare(`CREATE TRIGGER refuse_taxonomy_ensure_receipt BEFORE INSERT ON audit_events
+      WHEN NEW.action='taxonomy.create' BEGIN SELECT RAISE(IGNORE); END`).run();
+    try {
+      const response = await cmsApi('POST', '/__cms/taxonomies/ensure', { names: ['Rollback Interest', 'Rollback Industry'] }, { 'x-plugin-id': 'import-export' });
+      expect(response.status).toBe(503);
+      expect(await env.DB.prepare("SELECT id FROM taxonomies WHERE name IN ('Rollback Interest','Rollback Industry')").first()).toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER refuse_taxonomy_ensure_receipt').run();
+    }
+  });
+
   it('ensures tags by taxonomy and name, reusing existing rows', async () => {
     await env.DB.prepare("INSERT INTO taxonomies (name, slug) VALUES ('Topic', 'topic')").run();
 
