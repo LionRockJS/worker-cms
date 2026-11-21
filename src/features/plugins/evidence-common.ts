@@ -48,7 +48,7 @@ export async function snapshotPluginCredential(c: AppContext, auth: PluginAuth) 
 
 /** Authority for a plugin's own key/value store (state, sequences): the
  * credential snapshot plus the classification of the store table. */
-export async function capturePluginStoreAuthority(c: AppContext, auth: PluginAuth, table: 'plugin_state' | 'plugin_sequences', readAction: string) {
+export async function capturePluginStoreAuthority(c: AppContext, auth: PluginAuth, table: 'plugin_state' | 'plugin_sequences' | 'record_holds', readAction: string) {
   try {
     const policy = await resolveDataClasses(c.env, true);
     if (!policy.ok) throw new Error('Store policy unavailable');

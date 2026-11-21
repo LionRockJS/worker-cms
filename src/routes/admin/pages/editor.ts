@@ -1,3 +1,4 @@
+import { ACTIVE_HOLD } from '../../../core/db/record-holds';
 import { requestPageAllowed } from '../../../core/auth/page-access';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 import { recordRead } from '../../../core/http/access-log';
@@ -132,7 +133,7 @@ export async function editorPageData(
   const history = c.env.DB.prepare('SELECT * FROM page_versions WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 20')
     .bind(page.id)
     .all<PageVersion>();
-  const [parentPages, taxonomy, version, versions, pageTags, liveState] = await Promise.all([
+  const [parentPages, taxonomy, version, versions, pageTags, liveState, hold] = await Promise.all([
     parentId && await requestPageAllowed(c, Number(parentId), 'read') ? parentPageOption(c.env.DB, parentId) : [],
     editorTaxonomy(c.env.DB),
     Number.isFinite(requestedVersionId)
@@ -145,6 +146,10 @@ export async function editorPageData(
       .bind(page.id)
       .all<{ tag_id: number }>(),
     publication()?.editorPublicationState(c.env, page, history),
+    // A hold (often a plugin's retention hold) stops this page being purged: the editor says so.
+    c.env.DB.prepare(`SELECT reason, keep_until, placed_by_plugin FROM record_holds WHERE page_uuid = ? AND ${ACTIVE_HOLD}`)
+      .bind(page.uuid)
+      .first<{ reason: string; keep_until: string | null; placed_by_plugin: string | null }>(),
   ]);
 
   recordTagReads('tag.editor-options', taxonomy.tags);
@@ -168,6 +173,7 @@ export async function editorPageData(
     isPublished: liveState?.isPublished ?? false,
     isLiveSynced: liveState?.isLiveSynced ?? false,
     selectedTagIds: pageTags.results.map((pt) => pt.tag_id),
+    hold: hold ? { reason: hold.reason, keepUntil: hold.keep_until ?? '', plugin: hold.placed_by_plugin ?? '' } : null,
   };
 }
 

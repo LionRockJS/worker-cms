@@ -16,6 +16,7 @@ import { dashboardPagination, renderPage } from '../../core/render/chrome';
 import { userCan } from '../../core/auth/permissions';
 import { dashboardPageNumber, dashboardPageSize } from '../../core/http/forms';
 import { requireAnyPermission, requirePermission } from '../../core/auth/guards';
+import { ACTIVE_HOLD, CLOSE_EXPIRED_HOLD, KEEP_UNTIL } from '../../core/db/record-holds';
 
 export const trashRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -51,7 +52,7 @@ trashRoutes.get('/trash', requireAnyPermission('content:read', 'trash:restore', 
 
   recordPageReads('page.trash-list', trashedPages.results);
   const held = new Set((await c.env.DB.prepare(
-    'SELECT page_uuid FROM record_holds WHERE released_at IS NULL AND page_uuid IN (SELECT value FROM json_each(?))',
+    `SELECT page_uuid FROM record_holds WHERE ${ACTIVE_HOLD} AND page_uuid IN (SELECT value FROM json_each(?))`,
   ).bind(JSON.stringify(trashedPages.results.map((page) => page.uuid))).all<{ page_uuid: string }>()).results.map((row) => row.page_uuid));
 
   const paginationResult = {
@@ -161,7 +162,8 @@ trashRoutes.post('/trash/empty', requirePermission('trash:purge'), async (c) => 
 
 trashRoutes.get('/holds', requirePermission('records:hold'), async (c) => {
   const holds = await c.env.DB.prepare(
-    `SELECT id, page_uuid, reason, placed_by, placed_at, released_by, released_at FROM record_holds
+    `SELECT id, page_uuid, reason, placed_by, placed_at, released_by, released_at, placed_by_plugin, keep_until,
+            (${ACTIVE_HOLD}) AS active FROM record_holds
      ORDER BY released_at IS NOT NULL, id DESC LIMIT 200`,
   ).all<HoldRow>();
   return renderPage(c, holdsPage, { holds: holds.results, flash: c.req.query('flash') || undefined });
@@ -173,13 +175,18 @@ trashRoutes.post('/holds', requirePermission('records:hold'), async (c) => {
   // so accept any plain identifier rather than only the CMS's own format.
   const uuid = String(form.get('uuid') ?? '').trim();
   const reason = String(form.get('reason') ?? '').trim();
+  const keepUntil = String(form.get('keep_until') ?? '').trim();
   const back = form.get('back') === 'trash' ? '/admin/trash' : '/admin/holds';
   if (!/^[A-Za-z0-9-]{1,64}$/.test(uuid) || !reason || reason.length > 500) return c.redirect(`${back}?flash=A+page+UUID+and+a+reason+are+required`);
-  if (await c.env.DB.prepare('SELECT 1 FROM record_holds WHERE page_uuid = ? AND released_at IS NULL').bind(uuid).first()) {
+  if (keepUntil && !KEEP_UNTIL.test(keepUntil)) return c.redirect(`${back}?flash=Keep+until+must+be+a+date`);
+  if (await c.env.DB.prepare(`SELECT 1 FROM record_holds WHERE page_uuid = ? AND ${ACTIVE_HOLD}`).bind(uuid).first()) {
     return c.redirect(`${back}?flash=That+page+is+already+held`);
   }
-  await changeHold(c, 'hold.place', uuid, { reason },
-    c.env.DB.prepare('INSERT INTO record_holds (page_uuid, reason, placed_by) VALUES (?, ?, ?)').bind(uuid, reason, Number(c.get('user').sub)));
+  // A hold past its date still holds the page's one unreleased slot: close it first.
+  await changeHold(c, 'hold.place', uuid, { reason, keep_until: keepUntil || null }, [
+    c.env.DB.prepare(CLOSE_EXPIRED_HOLD).bind(uuid),
+    c.env.DB.prepare('INSERT INTO record_holds (page_uuid, reason, placed_by, keep_until) VALUES (?, ?, ?, ?)').bind(uuid, reason, Number(c.get('user').sub), keepUntil || null),
+  ]);
   return c.redirect(`${back}?flash=Hold+placed`);
 });
 
@@ -193,16 +200,28 @@ trashRoutes.post('/holds/:id/release', requirePermission('records:hold'), async 
   return c.redirect('/admin/holds?flash=Hold+released');
 });
 
+// Change how long a hold lasts (blank: until released), including one a plugin placed.
+trashRoutes.post('/holds/:id/keep-until', requirePermission('records:hold'), async (c) => {
+  const id = parseInt(c.req.param('id'), 10);
+  const keepUntil = String((await c.req.formData()).get('keep_until') ?? '').trim();
+  if (keepUntil && !KEEP_UNTIL.test(keepUntil)) return c.redirect('/admin/holds?flash=Keep+until+must+be+a+date');
+  const hold = await c.env.DB.prepare(`SELECT page_uuid, keep_until FROM record_holds WHERE id = ? AND ${ACTIVE_HOLD}`).bind(id).first<{ page_uuid: string; keep_until: string | null }>();
+  if (!hold) return c.notFound();
+  await changeHold(c, 'hold.keep-until', hold.page_uuid, { hold_id: id, keep_until_before: hold.keep_until, keep_until: keepUntil || null },
+    c.env.DB.prepare(`UPDATE record_holds SET keep_until = ? WHERE id = ? AND ${ACTIVE_HOLD}`).bind(keepUntil || null, id));
+  return c.redirect('/admin/holds?flash=Hold+changed');
+});
+
 /** Applies one hold change with its audit receipt in the same batch; a change
  *  that matches no row (a concurrent place or release) rolls the batch back. */
-async function changeHold(c: AppContext, action: string, uuid: string, detail: Record<string, unknown>, change: D1PreparedStatement): Promise<void> {
+async function changeHold(c: AppContext, action: string, uuid: string, detail: Record<string, unknown>, change: D1PreparedStatement | D1PreparedStatement[]): Promise<void> {
   const authority = await captureAccessAuthorization(c.env, c.get('user'), 'records:hold');
   if (!authority.allowed) throw new Error('Hold authority unavailable');
   const policy = await resolveDataClasses(c.env, true);
   if (!policy.ok) throw new Error('Hold classification unavailable');
   const receipt = mutationAuditEvidence(c, { action, entityType: 'page', entityId: uuid, detail },
     classFor(policy, 'table', 'record_holds') ?? 'none', { policy, requirePreviousChange: true });
-  await c.env.DB.batch([authority.guard(), change, receipt.write, receipt.guard]);
+  await c.env.DB.batch([authority.guard(), ...(Array.isArray(change) ? change : [change]), receipt.write, receipt.guard]);
 }
 
 /** TRASH_RETENTION_DAYS as a whole number of days, or null when unset or invalid. */

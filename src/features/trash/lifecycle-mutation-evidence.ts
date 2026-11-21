@@ -1,3 +1,4 @@
+import { ACTIVE_HOLD } from '../../core/db/record-holds';
 import { legacyPageFilter, pageAccessFilter, pageAccessGuard } from '../../core/auth/page-access';
 import type { Env,JWTPayload } from '../../types';
 import { PageLifecycleUnavailableError, type ServiceTrashAuthority, type TrashedPageRef } from '../../core/pages/trash-lifecycle';
@@ -29,7 +30,7 @@ export async function trashPagesAsService(env:Env,service:ServiceTrashAuthority,
 export type LifecycleAction='trash'|'restore'|'purge';
 /** A purge reached a page under an active hold (W12). Nothing was changed. */
 export class RecordHeldError extends Error {constructor(readonly uuids:string[]){super('Record under hold');}}
-const ACTIVE_HOLDS='SELECT page_uuid FROM record_holds WHERE released_at IS NULL';
+const ACTIVE_HOLDS=`SELECT page_uuid FROM record_holds WHERE ${ACTIVE_HOLD}`;
 /** A held trash row and every trash ancestor whose purge would cascade to it. */
 const HELD_SUBTREES=`id NOT IN (WITH RECURSIVE up(id,page_id) AS (SELECT id,page_id FROM trash_pages WHERE uuid IN (${ACTIVE_HOLDS})
   UNION SELECT t.id,t.page_id FROM trash_pages t JOIN up ON t.id=up.page_id) SELECT id FROM up)`;

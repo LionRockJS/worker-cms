@@ -1,11 +1,15 @@
 {
   "trash": {
     "all_types": "所有类型",
+    "change_keep_until": "更改",
     "held": "保留中",
     "hold": "保留",
+    "hold_expired": "已结束（已过保留日期）",
     "hold_reason": "原因",
     "holds": "保留",
     "holds_description": "保留中的页面在解除保留前无法永久删除。",
+    "keep_until": "保留至",
+    "keep_until_help": "保留的最后一天。留空即保留至解除为止。",
     "last_hour": "最近一小时",
     "no_holds": "没有保留。",
     "page_in_trash": "个回收站页面",
@@ -13,6 +17,7 @@
     "pages_in_trash": "个回收站页面",
     "place_hold": "设置保留",
     "placed": "设置于",
+    "plugin_hold": "插件",
     "purge_expired": "清除过期项目",
     "release": "解除",
     "release_confirm": "解除此保留？之后页面便可被永久删除。",

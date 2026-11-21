@@ -539,7 +539,7 @@ CREATE TRIGGER IF NOT EXISTS classification_version_data_class_floors_delete AFT
 END;
 
 -- Records under hold (W12). Purging a held page from trash is refused, by hand
--- or by retention, until the hold is released. Keyed by page uuid, which a page
+-- or by retention, until the hold is released or its keep_until date passes. Keyed by page uuid, which a page
 -- keeps through trash and restore, so a hold can be placed before deletion.
 -- Released holds are kept as the record of who held what, when and why.
 CREATE TABLE IF NOT EXISTS record_holds (
@@ -549,6 +549,11 @@ CREATE TABLE IF NOT EXISTS record_holds (
     placed_by INTEGER NOT NULL,
     placed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     released_by INTEGER,
-    released_at TEXT
+    released_at TEXT,
+    -- Set when a plugin placed the hold (its id); placed_by is then the acting user, or 0.
+    placed_by_plugin TEXT,
+    -- Last day kept (YYYY-MM-DD). After it the hold no longer counts, with
+    -- nothing to release; NULL holds until someone releases it.
+    keep_until TEXT CHECK (keep_until IS NULL OR keep_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_record_holds_active ON record_holds (page_uuid) WHERE released_at IS NULL;

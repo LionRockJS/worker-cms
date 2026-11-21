@@ -556,6 +556,9 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   isPublished?: boolean;
   publicationStatus?: PagePublicationStatus;
   isLiveSynced?: boolean;
+  /** An active record hold on the page (it cannot be purged), and the Holds screen for those who may change it. */
+  hold?: { reason: string; keepUntil: string; plugin: string } | null;
+  holdHref?: string;
   parentPages: Page[];
   tags: Tag[];
   taxonomies: Taxonomy[];
@@ -677,6 +680,8 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
     hasErrors: errors.length > 0,
     flash,
     hasFlash: !!flash,
+    hold: opts.hold ?? null,
+    holdHref: opts.holdHref ?? '',
     page: {
       id: page?.id ?? '',
       name: page?.name ?? '',

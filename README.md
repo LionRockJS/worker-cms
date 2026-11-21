@@ -973,6 +973,27 @@ Counters are namespaced by the caller's manifest id like state, keys share the
 state-key shape, and a plugin may hold 1000. They are **not** dropped when a
 plugin is unregistered, so re-registering never reissues a number.
 
+### Plugin record holds
+
+A plugin keeps its own records from being purged for a retention period (for
+example a completed form kept 7 years) by placing a record hold with a last
+day:
+
+```http
+POST /__cms/holds
+{ "holds": [{ "page_id": 123, "keep_until": "2033-06-30", "reason": "Completed form: 7-year retention" }] }
+→ { "holds": [{ "page_id": 123, "status": "placed", "keep_until": "2033-06-30" }] }
+```
+
+Up to 100 pages per call, each a page of a type the plugin owns or may write.
+`status` is `placed`, `extended` (a later date), `unchanged` (the plugin's hold
+already lasts as long), `held_by_other` (someone else's hold, left alone),
+`not_found` or `forbidden_page_type`. A hold only counts through its
+`keep_until` day, so nothing needs releasing when retention ends. Admins with
+`records:hold` see the plugin's holds under **Admin → Holds** (the page editor
+shows a banner on held pages), and can change their date or release them early.
+Existing databases need `migrations/manual/2026-11-21_record_hold_expiry.sql`.
+
 ### List filters on lect fields
 
 Besides `pointer_key`/`pointer_value(s)`, `GET /__cms/pages` filters on one

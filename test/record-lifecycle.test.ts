@@ -170,6 +170,33 @@ describe('holds', () => {
     expect(flash(await request(`/trash/${trashId}/delete`, {}))).toBe('Page is under hold and was not deleted');
   });
 
+  it('stops counting after its keep-until date, and a new hold replaces an expired one', async () => {
+    const trashId = await trashPage('kept-page');
+    expect(flash(await request('/holds', { uuid: 'kept-page', reason: 'Retention', keep_until: '2099-12-31' }))).toBe('Hold placed');
+    expect(flash(await request(`/trash/${trashId}/delete`, {}))).toBe('Page is under hold and was not deleted');
+    const hold = await env.DB.prepare('SELECT id FROM record_holds WHERE page_uuid = ?').bind('kept-page').first<{ id: number }>();
+    expect(flash(await request(`/holds/${hold!.id}/keep-until`, { keep_until: '2001-01-01' }))).toBe('Hold changed');
+    expect(await (await request('/holds')).text()).toContain('"expired":true');
+    // A fresh hold closes the expired one rather than colliding with it.
+    expect(flash(await request('/holds', { uuid: 'kept-page', reason: 'New matter' }))).toBe('Hold placed');
+    expect(await env.DB.prepare("SELECT released_at FROM record_holds WHERE id = ?").bind(hold!.id).first()).toEqual({ released_at: '2001-01-02' });
+    const fresh = await env.DB.prepare('SELECT id FROM record_holds WHERE page_uuid = ? AND released_at IS NULL').bind('kept-page').first<{ id: number }>();
+    await request(`/holds/${fresh!.id}/release`, {});
+    await env.DB.prepare("INSERT INTO record_holds (page_uuid, reason, placed_by, keep_until) VALUES ('kept-page', 'Old', 1, '2001-01-01')").run();
+    expect(flash(await request(`/trash/${trashId}/delete`, {}))).toBe('Page permanently deleted');
+    expect(flash(await request('/holds', { uuid: 'x', reason: 'y', keep_until: 'soon' }))).toBe('Keep until must be a date');
+  });
+
+  it('shows in the page editor', async () => {
+    await env.DB.prepare("INSERT INTO pages (uuid, name, slug, page_type, lect) VALUES ('banner-page', 'Banner', 'banner-page', 'article', '{}')").run();
+    const id = await draftId('banner-page', 'pages');
+    await request('/holds', { uuid: 'banner-page', reason: 'Seven-year retention', keep_until: '2033-06-30' });
+    const editor = await (await request(`/pages/${id}/edit`)).text();
+    expect(editor).toContain('Seven-year retention');
+    expect(editor).toContain('2033-06-30');
+    expect(editor).toContain('/admin/holds');
+  });
+
   it('cannot be placed or released without records:hold', async () => {
     const editorSession = await createAuthSession(env, editor);
     expect((await request('/holds', { uuid: 'any-page', reason: 'x' }, {}, editorSession)).status).toBe(403);

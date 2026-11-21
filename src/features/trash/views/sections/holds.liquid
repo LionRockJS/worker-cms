@@ -3,6 +3,7 @@
     <form method="POST" action="{{ placeAction }}" class="flex flex-wrap items-center gap-2">
       <input type="text" name="uuid" required maxlength="64" aria-label="{{ "trash.page_uuid" | t }}" placeholder="{{ "trash.page_uuid" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-mono">
       <input type="text" name="reason" required maxlength="500" aria-label="{{ "trash.hold_reason" | t }}" placeholder="{{ "trash.hold_reason" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
+      <input type="date" name="keep_until" aria-label="{{ "trash.keep_until" | t }}" title="{{ "trash.keep_until_help" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
       <button type="submit"
               title="{{ "trash.place_hold" | t }}"
               aria-label="{{ "trash.place_hold" | t }}"
@@ -39,10 +40,14 @@
           {% for hold in holds %}
             <tr class="hover:bg-gray-50 transition-colors">
               <td class="px-6 py-4 text-xs text-gray-500 font-mono">{{ hold.uuid }}</td>
-              <td class="px-6 py-4 text-sm text-gray-900">{{ hold.reason }}</td>
-              <td class="px-6 py-4 text-sm text-gray-400">{{ hold.placedAt | l10n_date }} · #{{ hold.placedBy }}</td>
+              <td class="px-6 py-4 text-sm text-gray-900">{{ hold.reason }}{% if hold.keepUntil != blank %}<div class="text-xs text-gray-500">{{ "trash.keep_until" | t }}: {{ hold.keepUntil }}</div>{% endif %}</td>
+              <td class="px-6 py-4 text-sm text-gray-400">{{ hold.placedAt | l10n_date }} · {% if hold.plugin != blank %}{{ "trash.plugin_hold" | t }} {{ hold.plugin }}{% else %}#{{ hold.placedBy }}{% endif %}</td>
               <td class="px-6 py-4">
                 {% if hold.active %}
+                  <form method="POST" action="{{ hold.keepUntilAction }}" class="inline-flex items-center gap-1">
+                    <input type="date" name="keep_until" value="{{ hold.keepUntil }}" aria-label="{{ "trash.keep_until" | t }}" title="{{ "trash.keep_until_help" | t }}" class="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm">
+                    <button type="submit" class="inline-flex text-indigo-600 hover:underline text-sm font-medium items-center h-8">{{ "trash.change_keep_until" | t }}</button>
+                  </form>
                   <form method="POST" action="{{ hold.releaseAction }}" class="inline"
                         data-confirm="{{ "trash.release_confirm" | t }}">
                     <button type="submit"
@@ -53,8 +58,10 @@
                       <span class="hidden lg:inline">{{ "trash.release" | t }}</span>
                     </button>
                   </form>
+                {% elsif hold.expired %}
+                  <span class="text-sm text-gray-400">{{ "trash.hold_expired" | t }}</span>
                 {% else %}
-                  <span class="text-sm text-gray-400">{{ "trash.released" | t }} {{ hold.releasedAt | l10n_date }} · #{{ hold.releasedBy }}</span>
+                  <span class="text-sm text-gray-400">{{ "trash.released" | t }} {{ hold.releasedAt | l10n_date }}{% if hold.releasedBy %} · #{{ hold.releasedBy }}{% endif %}</span>
                 {% endif %}
               </td>
             </tr>

@@ -55,6 +55,7 @@ const EXPECTED = [
   'DELETE /state/:key',
   'GET /sequences/:key',
   'POST /sequences/:key/next',
+  'POST /holds',
   'GET /files',
   'HEAD /files',
   'PUT /files',
