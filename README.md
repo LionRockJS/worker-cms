@@ -1029,6 +1029,39 @@ already lasts as long), `held_by_other` (someone else's hold, left alone),
 `records:hold` see the plugin's holds under **Admin → Holds** (the page editor
 shows a banner on held pages), and can change their date or release them early.
 
+### Plugin access events
+
+A plugin records access the host cannot see — a page it rendered, a file it
+streamed, a no-login link someone opened — into the host audit log, the same
+`audit_events` stream as the host's own reads:
+
+```http
+POST /__cms/audit/events
+x-acting-user-id: 42          (omit for someone with no CMS account)
+{ "events": [{ "action": "form.download", "page_id": 123, "detail": { "file": "a1b2.pdf" } }] }
+→ { "recorded": 1, "errors": [] }
+
+GET /__cms/audit/events?page_id=123&limit=50&before=<seq>
+→ { "events": [{ "seq", "occurred_at", "action": "form.download", "event_class", "actor_user_id",
+                 "actor_name", "actor_email", "detail" }], "next": <seq or null> }
+```
+
+- Up to 100 events per call, each on a page the plugin may read; others come
+  back in `errors` (`not_found`, `forbidden_page_type`). `event_class` is
+  `read` (default) or `export`.
+- The stored action is `plugin.<action>` with the plugin in `acting_via`, so a
+  plugin cannot write events the host's own signals trust. The acting user is
+  the plugin's assertion and is marked unverified in the detail.
+- `detail` is up to 20 flat scalars (text up to 200 characters). A value that
+  looks like an email is refused (`detail_contains_email`): the trail never
+  holds one. Name a no-login link by a hash of its token instead.
+- A classified page keeps its class's retention, and `phi` fails closed (503:
+  serve nothing). An unclassified page still records, under the
+  `plugin_access` retention class (365 days in D1).
+- Reading returns only the calling plugin's own events on that page, with each
+  actor's current name and email from `users` (never stored in the trail), and
+  is itself recorded as `audit.read`.
+
 ### List filters on lect fields
 
 Besides `pointer_key`/`pointer_value(s)`, `GET /__cms/pages` filters on one
