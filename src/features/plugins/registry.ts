@@ -131,6 +131,11 @@ async function loadManifest(url: string, fetcher: Fetcher, fresh = false): Promi
   }
 }
 
+/** Public manifest inspection for settings transfer. The caller supplies a validated base URL. */
+export async function transferManifest(url: string): Promise<PluginManifest | null> {
+  return loadManifest(url, fetcherForUrl(url), true);
+}
+
 /** Approval inspection must not take a first-use identity claim or resolve
  * unrelated plugins. Return a fresh declaration tied to the captured row. */
 export async function inspectPluginManifest(record: PluginRecord): Promise<{ manifest: PluginManifest; fetcher: Fetcher } | null> {

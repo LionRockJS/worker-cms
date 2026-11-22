@@ -32,6 +32,12 @@ for five minutes. The host returns the tenant identity, CMS URL and pairwise
 secret. Optional `tenantVars` declares safe plugin environment variable names
 for the SDK's tenant setup; the host does not send their values.
 
+## Portable registration settings
+
+A plugin can declare top-level registration config fields in its public manifest, for example `"portableConfigFields": ["region", "displayLanguage"]`. The host transfers the complete JSON value of each named field, including any nested values. Choose fields whose contents are safe to copy to another CMS. An absent or malformed list, an unavailable manifest, or a conflicting pinned plugin identity yields an empty config export.
+
+On import, the destination checks the manifest at the registration URL and merges only declared fields present in the file. Omitted fields retain their destination values. Older files follow the same rule. The shared secret, trusted UI approval and view source belong to each installation.
+
 ## Plugin-to-CMS endpoints
 
 All paths below are relative to `/__cms`. JSON requests should send

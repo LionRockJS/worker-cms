@@ -102,6 +102,8 @@ export type PluginHookEvent = 'create' | 'submission' | 'update' | 'publish' | '
 export interface PluginManifest {
   /** Host operations requested by this plugin. Each needs its own local grant. */
   capabilities?: string[];
+  /** Top-level registration config keys which may travel between CMS installations. */
+  portableConfigFields?: string[];
   id: string;
   name: string;
   version: string;

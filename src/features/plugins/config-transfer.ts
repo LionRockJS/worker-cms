@@ -10,19 +10,27 @@ import {
 } from '../../core/config-transfer';
 import { recordTableReads } from '../../core/http/access-log';
 import { listPlugins } from './store';
-import { readForm } from './registration-form';
-import { pluginViewSource } from './view-source';
+import { normalizeUrl, readForm } from './registration-form';
+import { transferManifest } from './registry';
+import { getIdentityForRow } from './identity';
+import type { AppContext } from '../../core/http/context';
 import { preparePluginRegistrationMutation, PluginRegistrationConflictError } from './registration-evidence';
 
-/** CMS-owned keys a plugin's config carries; set per CMS, never transferred. */
-const CMS_CONFIG_KEYS = ['cmsTrustedUi', 'cmsViewSource'];
+const LOCAL_KEYS = new Set(['cmsTrustedUi', 'cmsViewSource', '__proto__', 'prototype', 'constructor']);
 
 function configObject(raw: string | null | undefined): Record<string, unknown> {
   try { const parsed = JSON.parse(raw || '{}'); return isRecord(parsed) ? parsed : {}; } catch { return {}; }
 }
 
-function portableConfig(raw: string | null | undefined): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(configObject(raw)).filter(([key]) => !CMS_CONFIG_KEYS.includes(key)));
+async function portableConfig(c: AppContext, url: string, config: Record<string, unknown>, rowId?: number) {
+  if (!Object.keys(config).some(key => !LOCAL_KEYS.has(key)) || normalizeUrl(url)[1]) return {};
+  const manifest = await transferManifest(url);
+  const fields = manifest?.portableConfigFields;
+  if (!manifest || !Array.isArray(fields) || !fields.every(key => typeof key === 'string')) return {};
+  const pin = rowId === undefined ? null : await getIdentityForRow(c.env.DB, rowId);
+  if (pin && pin.manifest_id !== manifest.id) return {};
+  return Object.fromEntries(fields.filter(key => !LOCAL_KEYS.has(key) && Object.hasOwn(config, key))
+    .map(key => [key, config[key]]));
 }
 
 export const pluginConfigTransferSection: ConfigTransferSection = {
@@ -34,14 +42,13 @@ export const pluginConfigTransferSection: ConfigTransferSection = {
   async exportItems(c) {
     const plugins = await listPlugins(c.env.DB);
     recordTableReads('config.export-read', 'plugins', plugins.map((plugin) => plugin.id));
-    return plugins.map((plugin) => ({
+    return Promise.all(plugins.map(async (plugin) => ({
       url: plugin.url,
       label: plugin.label,
       enabled: !!plugin.enabled,
       sortOrder: plugin.sort_order,
-      viewSource: pluginViewSource(plugin.config),
-      config: portableConfig(plugin.config),
-    }));
+      config: await portableConfig(c, plugin.url, configObject(plugin.config), plugin.id),
+    })));
   },
   async plan(c, items) {
     const existing = await listPlugins(c.env.DB);
@@ -54,16 +61,17 @@ export const pluginConfigTransferSection: ConfigTransferSection = {
       form.set('label', typeof raw.label === 'string' ? raw.label : '');
       if (raw.enabled === true) form.set('enabled', 'on');
       form.set('sort_order', String(typeof raw.sortOrder === 'number' ? raw.sortOrder : 0));
-      form.set('view_source', typeof raw.viewSource === 'string' ? raw.viewSource : 'host');
-      form.set('config', JSON.stringify(raw.config));
       const parsed = readForm(form, !!c.env.PLUGIN_VIEWS_BUCKET, !!c.env.PLUGIN_LOCAL_VIEWS);
       if (!parsed.input) { plans.push(skipItem(label, parsed.error ?? 'Invalid plugin entry.')); continue; }
-      const before = existing.find((plugin) => plugin.url === parsed.input!.url);
-      // Keep this CMS's own trust decision for a plugin it already has.
-      if (before && configObject(before.config).cmsTrustedUi === true) {
-        form.set('trusted_ui', '1');
-      }
-      const input = readForm(form, !!c.env.PLUGIN_VIEWS_BUCKET, !!c.env.PLUGIN_LOCAL_VIEWS).input!;
+      const input = parsed.input;
+      const before = existing.find(plugin => plugin.url === input.url);
+      const incoming = raw.config;
+      const merge = async (local: string | null | undefined) => {
+        const imported = await portableConfig(c, input.url, incoming, before?.id);
+        return Object.keys(imported).length ? JSON.stringify({ ...configObject(local), ...imported }) : local;
+      };
+      // A preview only contacts plugins already registered on this CMS.
+      if (before) input.config = await merge(before.config);
       const comparable = (value: { label: string; enabled: boolean | number; config?: string | null; sort_order?: number }) => ({
         label: value.label, enabled: !!value.enabled, config: configObject(value.config), sortOrder: value.sort_order ?? 0,
       });
@@ -71,10 +79,11 @@ export const pluginConfigTransferSection: ConfigTransferSection = {
         const mutation = await preparePluginRegistrationMutation(c);
         try {
           if (before) {
-            if (!mutation.row(before.id)) throw new ConfigTransferItemError(`${input.url} changed during import.`);
-            await mutation.update(before.id, input);
+            const current = mutation.row(before.id);
+            if (!current || current.uuid !== before.uuid || current.url !== before.url || current.config !== before.config) throw new ConfigTransferItemError(`${input.url} changed during import.`);
+            await mutation.update(before.id, { ...input, config: await merge(current.config) });
           } else {
-            await mutation.create(input);
+            await mutation.create({ ...input, config: await merge(input.config) });
           }
         } catch (error) {
           if (error instanceof PluginRegistrationConflictError) throw new ConfigTransferItemError(error.message);

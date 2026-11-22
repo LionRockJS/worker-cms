@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { signJWT } from './auth-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
-import { clearManifestCache } from '../src/features/plugins/registry';
+import { __clearInjectedFetchers, __injectPluginFetcher, clearManifestCache } from '../src/features/plugins/registry';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { APP_BRANDING_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY } from '../src/core/db/settings';
 import { MAX_CHANGES_PER_REQUEST } from '../src/routes/admin/config-transfer';
@@ -94,8 +94,21 @@ async function snapshot() {
   };
 }
 
-beforeEach(wipe);
-afterEach(wipe);
+const eventsUrl = 'https://events.example.com';
+function eventsManifest(fields?: unknown) {
+  __injectPluginFetcher(eventsUrl, { fetch: async () => Response.json({
+    id: 'events', name: 'Events', version: '1', portableConfigFields: fields,
+  }) } as Fetcher);
+}
+
+beforeEach(async () => {
+  await wipe();
+  eventsManifest(['region']);
+});
+afterEach(async () => {
+  __clearInjectedFetchers();
+  await wipe();
+});
 
 it('exports settings without plugin secrets or CMS-owned plugin flags, as an export disclosure', async () => {
   await seed();
@@ -103,7 +116,7 @@ it('exports settings without plugin secrets or CMS-owned plugin flags, as an exp
   await env.DB.prepare("INSERT INTO data_classes(container_kind, container_key, class) VALUES ('table', 'plugins', 'pii')").run();
   const bundle = await exportBundle();
   expect(bundle).toMatchObject({ format: '0xcms-config', version: 1, source: expect.any(String) });
-  expect(bundle.sections.plugins).toEqual([{ url: 'https://events.example.com', label: 'Events', enabled: false, sortOrder: 4, viewSource: 'host', config: { region: 'hk' } }]);
+  expect(bundle.sections.plugins).toEqual([{ url: 'https://events.example.com', label: 'Events', enabled: false, sortOrder: 4, config: { region: 'hk' } }]);
   expect(JSON.stringify(bundle)).not.toContain('source-secret');
   expect(bundle.sections.page_types).toEqual([{ slug: 'story', name: 'Story', blueprint: ['title', 'body'], weight: 7, blockLists: ['quote'], taxonomyLists: ['topic'] }]);
   expect(bundle.sections.tags).toEqual([
@@ -116,6 +129,37 @@ it('exports settings without plugin secrets or CMS-owned plugin flags, as an exp
   const exports = (await env.DB.prepare("SELECT target_type, detail FROM audit_events WHERE event_class = 'export'").all<{ target_type: string; detail: string }>()).results;
   expect(exports.map((row) => row.target_type)).toContain('plugins');
   expect(JSON.parse(exports[0].detail)).toMatchObject({ destination: 'download', operation: 'config.export' });
+});
+
+it('exports declared keys only and preserves destination config when importing a legacy or edited bundle', async () => {
+  await seed();
+  const config = { region: 'hk', currency: 'HKD', apiToken: 'source-private', cmsTrustedUi: true, cmsViewSource: 'bucket' };
+  await env.DB.prepare('UPDATE plugins SET config=?').bind(JSON.stringify(config)).run();
+  eventsManifest(['region', 'currency', 'cmsTrustedUi', 'cmsViewSource', '__proto__', '*']);
+  const bundle = await exportBundle(['plugins']);
+  const entry = bundle.sections.plugins[0];
+  expect(entry.config).toEqual({ region: 'hk', currency: 'HKD' });
+  expect(entry).not.toHaveProperty('viewSource');
+  expect(JSON.stringify(bundle)).not.toContain('source-private');
+
+  const local = { region: 'uk', timezone: 'Europe/London', currency: 'GBP', apiToken: 'destination-private', branding: { size: 3 },
+    cmsTrustedUi: true, cmsViewSource: 'local' };
+  await env.DB.prepare('UPDATE plugins SET config=?, secret=?').bind(JSON.stringify(local), 'destination-secret').run();
+  eventsManifest(['region', 'timezone']);
+  Object.assign(entry, { viewSource: 'host', portableConfigFields: ['apiToken'] });
+  Object.assign(entry.config, { apiToken: 'injected', cmsTrustedUi: false, cmsViewSource: 'host' });
+  const apply = () => call('/admin/settings/transfer/apply', applyForm(bundle, ['plugins']));
+  expect(await (await apply()).text()).toContain('"applied":1');
+  const saved = await env.DB.prepare('SELECT config, secret FROM plugins').first<{ config: string; secret: string }>();
+  expect(JSON.parse(saved!.config)).toEqual({ ...local, region: 'hk' });
+  expect(saved!.secret).toBe('destination-secret');
+  expect(await (await apply()).text()).toContain('"applied":0');
+});
+
+it.each([undefined, 'region', ['region', 3]])('defaults to empty portable config for declaration %j', async fields => {
+  await seed();
+  eventsManifest(fields);
+  expect((await exportBundle(['plugins'])).sections.plugins[0].config).toEqual({});
 });
 
 it('only exports sections the signed-in user may manage', async () => {
