@@ -1,4 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
+import cms from '../src/index';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
@@ -31,12 +33,37 @@ async function page(uuid: string, pageType = 'eform'): Promise<number> {
     .bind(uuid, uuid, uuid, pageType, '{}').first<{ id: number }>())!.id;
 }
 
-async function place(holds: unknown[]): Promise<Response> {
-  return worker.fetch(new Request('http://localhost/__cms/holds', {
+async function place(holds: unknown[], beforeExtension?: () => Promise<void>): Promise<Response> {
+  const request = new Request('http://localhost/__cms/holds', {
     method: 'POST',
     headers: { 'x-plugin-id': PLUGIN_ID, 'x-plugin-secret': SECRET, 'content-type': 'application/json', 'x-acting-user-id': '42' },
     body: JSON.stringify({ holds }),
-  }));
+  });
+  if (!beforeExtension) return worker.fetch(request);
+
+  // Commit the competing request after this request read the hold, just before its write.
+  const session = env.DB.withSession('first-primary');
+  let extensionPrepared = false;
+  const DB = {
+    withSession: () => ({
+      prepare(sql: string) {
+        if (sql.startsWith('UPDATE record_holds SET keep_until')) extensionPrepared = true;
+        return session.prepare(sql);
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        if (extensionPrepared && beforeExtension) {
+          const compete = beforeExtension;
+          beforeExtension = undefined;
+          await compete();
+        }
+        return session.batch(statements);
+      },
+    }),
+  } as D1Database;
+  const ctx = createExecutionContext();
+  const response = await cms.fetch(request, { ...env, DB }, ctx);
+  await waitOnExecutionContext(ctx);
+  return response;
 }
 
 const holdOf = (uuid: string) => env.DB.prepare('SELECT placed_by, placed_by_plugin, keep_until, reason, released_at FROM record_holds WHERE page_uuid = ? ORDER BY id DESC').bind(uuid).first();
@@ -64,6 +91,41 @@ describe('Plugin holds API', () => {
     expect(await holdOf('form-1')).toMatchObject({ keep_until: '2035-01-01', reason: 'Longer' });
     const events = await env.DB.prepare("SELECT action FROM audit_events WHERE action LIKE 'hold.%' ORDER BY rowid").all<{ action: string }>();
     expect(events.results.map((event) => event.action)).toEqual(['hold.place', 'hold.extend']);
+  });
+
+  it('preserves a plugin hold made indefinite by an administrator', async () => {
+    const uuid = 'form-indefinite';
+    const id = await page(uuid);
+    expect((await place([{ page_id: id, keep_until: '2033-01-01', reason: 'Original' }])).status).toBe(200);
+    await env.DB.prepare('UPDATE record_holds SET keep_until = NULL WHERE page_uuid = ?').bind(uuid).run();
+
+    const response = await place([{ page_id: id, keep_until: '2040-01-01', reason: 'Renewal' }]);
+    expect(await response.json()).toEqual({ holds: [{ page_id: id, status: 'unchanged' }] });
+    expect(await holdOf(uuid)).toMatchObject({ keep_until: null, reason: 'Original', released_at: null });
+    expect(await env.DB.prepare("SELECT COUNT(*) FROM audit_events WHERE action = 'hold.extend' AND target_id = ?")
+      .bind(uuid).first('COUNT(*)')).toBe(0);
+  });
+
+  it.each(['2035-01-01', '2045-01-01'])('handles a concurrent extension to %s', async (competingDate) => {
+    const uuid = `form-concurrent-${competingDate}`;
+    const id = await page(uuid);
+    const original = '2030-01-01';
+    const requested = '2040-01-01';
+    expect((await place([{ page_id: id, keep_until: original, reason: 'Original' }])).status).toBe(200);
+    const response = await place([{ page_id: id, keep_until: requested, reason: 'Requested' }], async () => {
+      const competing = await place([{ page_id: id, keep_until: competingDate, reason: 'Competing' }]);
+      expect(await competing.json()).toEqual({ holds: [{ page_id: id, status: 'extended', keep_until: competingDate }] });
+    });
+    const extended = requested > competingDate;
+    const finalDate = extended ? requested : competingDate;
+    expect(await response.json()).toEqual({ holds: [{ page_id: id, status: extended ? 'extended' : 'unchanged', keep_until: finalDate }] });
+    expect(await holdOf(uuid)).toMatchObject({ keep_until: finalDate, reason: extended ? 'Requested' : 'Competing' });
+    const events = await env.DB.prepare(`SELECT json_extract(detail, '$.keep_until_before') AS previous,
+      json_extract(detail, '$.keep_until') AS next FROM audit_events
+      WHERE action = 'hold.extend' AND target_id = ? ORDER BY rowid`).bind(uuid).all();
+    const expected = [{ previous: original, next: competingDate }];
+    if (extended) expected.push({ previous: competingDate, next: requested });
+    expect(events.results).toEqual(expected);
   });
 
   it('leaves other holds alone and refuses pages that are not the plugin\'s', async () => {
