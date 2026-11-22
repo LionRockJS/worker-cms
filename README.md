@@ -1244,7 +1244,8 @@ The debit, ledger entry, and advance of `next_charge_at` commit together.
 The wallet writes check the subscription's billing fields so concurrent sweeps
 can only settle the period once. Insufficient credits flip the row to
 `past_due` and retry daily; an unreachable plugin defers it an hour; a manifest
-that no longer declares the cost cancels the row.
+that no longer declares the cost cancels the row. An unexpected failure leaves
+that subscription due, logs its ID, and lets the sweep continue.
 
 ---
 

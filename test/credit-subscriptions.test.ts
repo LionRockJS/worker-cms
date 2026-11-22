@@ -240,26 +240,35 @@ describe('sweepCreditSubscriptions — advance', () => {
     expect(await getCreditBalance(env, PAYER_ID)).toBe(300);
   });
 
-  it('leaves the period due if the advance fails after the debit', async () => {
+  it('leaves a failed period due and bills the next subscription', async () => {
     await seedUser(PAYER_ID, 100);
     await reportUsage('record_storage', 100);
-    const due = await subscriptionRow('record_storage');
-    expect(due).not.toBeNull();
+    const otherPayer = PAYER_ID + 1;
+    await seedUser(otherPayer, 100);
+    await reportUsage('record_storage', 100, otherPayer);
+    const now = new Date();
+    const due = (await subscriptionRow('record_storage'))!;
+    await env.DB.prepare('UPDATE credit_subscriptions SET next_charge_at = ? WHERE id = ?')
+      .bind(sqliteDate(new Date(now.getTime() - 60_000)), due.id).run();
+    const before = await subscriptionRow('record_storage');
 
     await env.DB.prepare(`CREATE TRIGGER interrupt_subscription_advance
       BEFORE UPDATE OF last_charged_at ON credit_subscriptions
-      WHEN NEW.last_charged_at IS NOT NULL
+      WHEN OLD.id = ${due.id} AND NEW.last_charged_at IS NOT NULL
       BEGIN SELECT RAISE(ABORT, 'subscription advance interrupted'); END`).run();
     try {
-      await expect(sweepCreditSubscriptions(env)).rejects.toThrow('subscription advance interrupted');
-      expect(await subscriptionRow('record_storage')).toEqual(due);
+      expect(await sweepCreditSubscriptions(env, { now })).toMatchObject({ processed: 2, failed: 1, charged: 1 });
+      expect(await subscriptionRow('record_storage')).toEqual(before);
       expect(await getCreditBalance(env, PAYER_ID)).toBe(100);
       expect(await ledgerRows(PAYER_ID)).toEqual([]);
+      expect(await getCreditBalance(env, otherPayer)).toBe(50);
+      expect(await ledgerRows(otherPayer)).toEqual([expect.objectContaining({ delta: -50 })]);
+      expect((await subscriptionRow('record_storage', otherPayer))?.last_charged_at).toBe(sqliteDate(now));
     } finally {
       await env.DB.prepare('DROP TRIGGER interrupt_subscription_advance').run();
     }
 
-    expect(await sweepCreditSubscriptions(env)).toMatchObject({ charged: 1 });
+    expect(await sweepCreditSubscriptions(env, { now })).toMatchObject({ processed: 1, failed: 0, charged: 1 });
     expect(await getCreditBalance(env, PAYER_ID)).toBe(50);
     expect(await ledgerRows(PAYER_ID)).toHaveLength(1);
   });

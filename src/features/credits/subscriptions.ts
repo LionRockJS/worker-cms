@@ -169,6 +169,7 @@ export interface SweepResult {
   pastDue: number;
   canceled: number;
   deferred: number;
+  failed: number;
 }
 
 /**
@@ -179,12 +180,12 @@ export interface SweepResult {
 export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = {}): Promise<SweepResult> {
   assertRegulatedWritesAllowed(env);
   const now = opts.now ?? new Date();
-  const result: SweepResult = { processed: 0, charged: 0, pastDue: 0, canceled: 0, deferred: 0 };
+  const result: SweepResult = { processed: 0, charged: 0, pastDue: 0, canceled: 0, deferred: 0, failed: 0 };
 
   const due = await env.DB.prepare(
     `SELECT * FROM credit_subscriptions
       WHERE status IN ('active', 'past_due') AND next_charge_at <= ?
-      ORDER BY next_charge_at LIMIT ?`,
+      ORDER BY next_charge_at, id LIMIT ?`,
   ).bind(sqliteDate(now), SWEEP_BATCH).all<CreditSubscriptionRow>();
   if (!due.results.length) return result;
 
@@ -195,121 +196,126 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
   for (const row of due.results) {
     result.processed += 1;
 
-    // Amount and mode were calculated from this snapshot. A report or another
-    // sweep can change billing fields between the due query and the write.
-    const current = `id = ? AND next_charge_at = ? AND status = ? AND quantity = ?
-      AND peak_quantity = ? AND last_charged_at IS ? AND last_mode IS ?`;
-    const bindings = [row.id, row.next_charge_at, row.status, row.quantity,
-      row.peak_quantity, row.last_charged_at, row.last_mode];
+    try {
+      // Amount and mode were calculated from this snapshot. A report or another
+      // sweep can change billing fields between the due query and the write.
+      const current = `id = ? AND next_charge_at = ? AND status = ? AND quantity = ?
+        AND peak_quantity = ? AND last_charged_at IS ? AND last_mode IS ?`;
+      const bindings = [row.id, row.next_charge_at, row.status, row.quantity,
+        row.peak_quantity, row.last_charged_at, row.last_mode];
 
-    const contributor = contributors.get(row.plugin_id);
-    if (!contributor) {
-      // Unreachable or disabled — likely transient, so defer without touching
-      // status; a permanently removed plugin keeps deferring hourly until an
-      // admin clears it or it comes back.
-      const deferred = await env.DB.prepare(
-        `UPDATE credit_subscriptions SET next_charge_at = ?, updated_at = ? WHERE ${current} RETURNING id`,
-      ).bind(sqliteDate(new Date(now.getTime() + HOUR_MS)), sqliteDate(now), ...bindings).first();
-      if (deferred) result.deferred += 1;
-      continue;
-    }
-
-    let credits = creditCache.get(row.plugin_id);
-    if (!credits) {
-      credits = await effectiveCreditsFor(env, contributor);
-      creditCache.set(row.plugin_id, credits);
-    }
-    const credit = credits.find((entry) => entry.def.key === row.credit_key);
-    if (!credit || credit.def.charge !== 'recurring') {
-      // The manifest is authoritative: the cost no longer exists, so the
-      // subscription ends. A future usage report recreates it.
-      const canceled = await env.DB.prepare(
-        `UPDATE credit_subscriptions SET status = 'canceled', updated_at = ? WHERE ${current} RETURNING id`,
-      ).bind(sqliteDate(now), ...bindings).first();
-      if (canceled) result.canceled += 1;
-      continue;
-    }
-
-    const mode = credit.def.billing ?? 'advance';
-    const { per, unit } = credit.def;
-    const money = currencyLabel(credit.def.currency);
-    const price = credit.value;
-
-    // What this boundary owes (see module header for the mode-switch rules).
-    let amount = 0;
-    let note: string;
-    if (mode === 'advance') {
-      amount = blockCost(row.quantity, per, price);
-      note = `advance: ${row.quantity} ${unit} @ ${price} ${money}/${per}/month`;
-      if (row.last_mode === 'arrears') {
-        const owed = blockCost(row.peak_quantity, per, price);
-        amount += owed;
-        note = `billing switch: arrears peak ${row.peak_quantity} (${owed}) + ${note}`;
-      }
-    } else if (row.last_mode === 'advance') {
-      // advance → arrears: the elapsed month was pre-paid; charge nothing.
-      note = 'billing switch: advance → arrears, period pre-paid';
-    } else {
-      amount = blockCost(row.peak_quantity, per, price);
-      note = `arrears: peak ${row.peak_quantity} ${unit} @ ${price} ${money}/${per}/month`;
-    }
-
-    // Advance from the due date to keep the anniversary. Skip missed periods
-    // when the resulting date is still past due.
-    let nextAt = addMonthsUTC(parseSqliteDate(row.next_charge_at), 1);
-    if (nextAt.getTime() <= now.getTime()) nextAt = addMonthsUTC(now, 1);
-    const advance = (afterDebit: boolean) => env.DB.prepare(
-      `UPDATE credit_subscriptions
-          SET next_charge_at = ?, last_charged_at = ?, last_mode = ?, updated_at = ?,
-              peak_quantity = quantity,
-              status = CASE WHEN quantity = 0 THEN 'canceled' ELSE 'active' END
-        WHERE ${current}${afterDebit ? ' AND changes() = 1' : ''}
-        RETURNING id`,
-    ).bind(sqliteDate(nextAt), sqliteDate(now), mode, sqliteDate(now), ...bindings);
-
-    if (amount > 0) {
-      const charge = await spendCredits(env, {
-        userId: row.user_id,
-        amount,
-        // The wallet comes from the cost as declared NOW, so re-denominating a
-        // recurring cost takes effect from the next period.
-        currency: credit.def.currency,
-        action: `${row.plugin_id}:${row.credit_key}`,
-        entityType: 'subscription',
-        entityId: String(row.id),
-        pluginId: row.plugin_id,
-        // The plugin's own wallet pays its subscription first.
-        scopePluginId: row.plugin_id,
-        pluginOnly: credit.def.pluginOnly,
-        note,
-        createdBy: 'system:cron',
-        settlement: {
-          eligible: `EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${current})`,
-          bindings,
-          advance: advance(true),
-        },
-      });
-      if (!charge.ok) {
-        // A stale snapshot cannot debit any wallet or change the schedule.
-        // A genuine decline keeps the billing state and schedules a retry.
-        const status = charge.error === 'unknown_user' ? 'canceled' : 'past_due';
-        const retryAt = status === 'canceled' ? row.next_charge_at : sqliteDate(new Date(now.getTime() + DAY_MS));
-        const declined = await env.DB.prepare(
-          `UPDATE credit_subscriptions SET status = ?, next_charge_at = ?, updated_at = ?
-            WHERE ${current} RETURNING id`,
-        ).bind(status, retryAt, sqliteDate(now), ...bindings).first();
-        if (declined) {
-          if (status === 'canceled') result.canceled += 1;
-          else result.pastDue += 1;
-        }
+      const contributor = contributors.get(row.plugin_id);
+      if (!contributor) {
+        // Unreachable or disabled — likely transient, so defer without touching
+        // status; a permanently removed plugin keeps deferring hourly until an
+        // admin clears it or it comes back.
+        const deferred = await env.DB.prepare(
+          `UPDATE credit_subscriptions SET next_charge_at = ?, updated_at = ? WHERE ${current} RETURNING id`,
+        ).bind(sqliteDate(new Date(now.getTime() + HOUR_MS)), sqliteDate(now), ...bindings).first();
+        if (deferred) result.deferred += 1;
         continue;
       }
-      result.charged += 1;
-    } else if (!await advance(false).first()) {
-      continue;
-    }
 
-    if (row.quantity === 0) result.canceled += 1;
+      let credits = creditCache.get(row.plugin_id);
+      if (!credits) {
+        credits = await effectiveCreditsFor(env, contributor);
+        creditCache.set(row.plugin_id, credits);
+      }
+      const credit = credits.find((entry) => entry.def.key === row.credit_key);
+      if (!credit || credit.def.charge !== 'recurring') {
+        // The manifest is authoritative: the cost no longer exists, so the
+        // subscription ends. A future usage report recreates it.
+        const canceled = await env.DB.prepare(
+          `UPDATE credit_subscriptions SET status = 'canceled', updated_at = ? WHERE ${current} RETURNING id`,
+        ).bind(sqliteDate(now), ...bindings).first();
+        if (canceled) result.canceled += 1;
+        continue;
+      }
+
+      const mode = credit.def.billing ?? 'advance';
+      const { per, unit } = credit.def;
+      const money = currencyLabel(credit.def.currency);
+      const price = credit.value;
+
+      // What this boundary owes (see module header for the mode-switch rules).
+      let amount = 0;
+      let note: string;
+      if (mode === 'advance') {
+        amount = blockCost(row.quantity, per, price);
+        note = `advance: ${row.quantity} ${unit} @ ${price} ${money}/${per}/month`;
+        if (row.last_mode === 'arrears') {
+          const owed = blockCost(row.peak_quantity, per, price);
+          amount += owed;
+          note = `billing switch: arrears peak ${row.peak_quantity} (${owed}) + ${note}`;
+        }
+      } else if (row.last_mode === 'advance') {
+        // advance → arrears: the elapsed month was pre-paid; charge nothing.
+        note = 'billing switch: advance → arrears, period pre-paid';
+      } else {
+        amount = blockCost(row.peak_quantity, per, price);
+        note = `arrears: peak ${row.peak_quantity} ${unit} @ ${price} ${money}/${per}/month`;
+      }
+
+      // Advance from the due date to keep the anniversary. Skip missed periods
+      // when the resulting date is still past due.
+      let nextAt = addMonthsUTC(parseSqliteDate(row.next_charge_at), 1);
+      if (nextAt.getTime() <= now.getTime()) nextAt = addMonthsUTC(now, 1);
+      const advance = (afterDebit: boolean) => env.DB.prepare(
+        `UPDATE credit_subscriptions
+            SET next_charge_at = ?, last_charged_at = ?, last_mode = ?, updated_at = ?,
+                peak_quantity = quantity,
+                status = CASE WHEN quantity = 0 THEN 'canceled' ELSE 'active' END
+          WHERE ${current}${afterDebit ? ' AND changes() = 1' : ''}
+          RETURNING id`,
+      ).bind(sqliteDate(nextAt), sqliteDate(now), mode, sqliteDate(now), ...bindings);
+
+      if (amount > 0) {
+        const charge = await spendCredits(env, {
+          userId: row.user_id,
+          amount,
+          // The wallet comes from the cost as declared NOW, so re-denominating a
+          // recurring cost takes effect from the next period.
+          currency: credit.def.currency,
+          action: `${row.plugin_id}:${row.credit_key}`,
+          entityType: 'subscription',
+          entityId: String(row.id),
+          pluginId: row.plugin_id,
+          // The plugin's own wallet pays its subscription first.
+          scopePluginId: row.plugin_id,
+          pluginOnly: credit.def.pluginOnly,
+          note,
+          createdBy: 'system:cron',
+          settlement: {
+            eligible: `EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${current})`,
+            bindings,
+            advance: advance(true),
+          },
+        });
+        if (!charge.ok) {
+          // A stale snapshot cannot debit any wallet or change the schedule.
+          // A genuine decline keeps the billing state and schedules a retry.
+          const status = charge.error === 'unknown_user' ? 'canceled' : 'past_due';
+          const retryAt = status === 'canceled' ? row.next_charge_at : sqliteDate(new Date(now.getTime() + DAY_MS));
+          const declined = await env.DB.prepare(
+            `UPDATE credit_subscriptions SET status = ?, next_charge_at = ?, updated_at = ?
+              WHERE ${current} RETURNING id`,
+          ).bind(status, retryAt, sqliteDate(now), ...bindings).first();
+          if (declined) {
+            if (status === 'canceled') result.canceled += 1;
+            else result.pastDue += 1;
+          }
+          continue;
+        }
+        result.charged += 1;
+      } else if (!await advance(false).first()) {
+        continue;
+      }
+
+      if (row.quantity === 0) result.canceled += 1;
+    } catch (error) {
+      result.failed += 1;
+      console.error('[credits] Subscription sweep failed', { subscriptionId: row.id, error });
+    }
   }
 
   return result;
