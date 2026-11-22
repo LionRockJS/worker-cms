@@ -132,9 +132,16 @@ for (const { router, basePath } of publicRouters) {
   app.route(basePath ?? '/', router);
 }
 
+// The signed-out sign-in page is the only render that loads views from here
+// (layout.ts viewBasePath); every other view is served behind sign-in at
+// /admin/views/*, so the admin screens' markup is not public.
+const PUBLIC_VIEW_PATHS: ReadonlySet<string> = new Set([
+  '/layout/default.liquid', '/templates/login.json', '/sections/login.liquid',
+]);
+
 app.get('/views/*', async (c) => {
   const path = c.req.path.slice('/views'.length);
-  if (!path.startsWith('/') || path.includes('..')) return c.notFound();
+  if (!PUBLIC_VIEW_PATHS.has(path)) return c.notFound();
 
   const response = await c.env.VIEWS.fetch(`https://views.local${path}`);
   if (!response.ok) return c.notFound();

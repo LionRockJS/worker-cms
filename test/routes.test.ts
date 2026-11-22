@@ -152,6 +152,23 @@ describe('app shell routes', () => {
     expect(await response.text()).toContain("fetch('/auth/refresh'");
   });
 
+  it('serves signed-out visitors only the view files the sign-in page renders', async () => {
+    const page = await (await fetchWorker('/auth/login')).text();
+    const payload = JSON.parse(page.match(/<script[^>]*id="cms-render-payload"[^>]*>([\s\S]*?)<\/script>/)![1]);
+    expect(payload.viewBasePath).toBe('/views');
+    const template = await fetchWorker(`/views${payload.bodyView.viewPath}`);
+    expect(template.status).toBe(200);
+    const sections = Object.values((await template.json() as { sections: Record<string, { type: string }> }).sections);
+    for (const path of [payload.layoutPath, ...sections.map(({ type }) => `/sections/${type}.liquid`)]) {
+      expect((await fetchWorker(`/views${path}`)).status, path).toBe(200);
+    }
+
+    for (const path of ['/templates/dashboard.json', '/sections/editor.liquid', '/locales/en.json', '/snippets/read-value.liquid']) {
+      expect((await fetchWorker(`/views${path}`)).status, path).toBe(404);
+      expect((await fetchWorker(`/admin/views${path}`, { headers: { Cookie: await authCookie() } })).status, path).toBe(200);
+    }
+  });
+
   it('rejects cross-origin mutations before protected routes run', async () => {
     const response = await fetchWorker('/admin/pages', {
       method: 'POST',
