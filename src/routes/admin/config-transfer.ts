@@ -1,237 +1,31 @@
-import { exportRows, exportTree, exportConfigPart, ExportHierarchyError, OversizedConfigRecord, type ExportPosition } from '../../core/config-export';
-import { sign, verify } from 'hono/jwt';
-// Settings export/import screen (/admin/settings/transfer). Core contributes
-// the system settings and taxonomy sections; installed features contribute
-// the rest through features/services. See core/config-transfer.ts.
-
+// Settings export/import screen (/admin/settings/transfer).
 import { Hono } from 'hono';
-import type { Env, Tag, Variables } from '../../types';
+import { sign, verify } from 'hono/jwt';
+import type { Env, Variables } from '../../types';
 import type { AppContext } from '../../core/http/context';
 import { requirePermission } from '../../core/auth/guards';
 import { userCan } from '../../core/auth/permissions';
-import { renderPage } from '../../core/render/chrome';
-import { flushReadAudit, recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
-import { contextActor } from '../../core/db/audit';
-import { slugify } from '../../core/http/forms';
+import { exportConfigPart, ExportHierarchyError, OversizedConfigRecord, type ExportPosition } from '../../core/config-export';
 import {
   MAX_CONFIG_BUNDLE_BYTES,
-  ConfigTransferItemError, configBundleBytes, isRecord, parseConfigBundle, planChange, skipItem,
+  ConfigTransferItemError, configBundleBytes, parseConfigBundle,
   type ConfigTransferBundle, type ConfigTransferPlanItem, type ConfigTransferSection,
 } from '../../core/config-transfer';
-import {
-  ADMIN_HOME_SETTING_KEY, APP_BRANDING_SETTING_KEY, CUSTOM_ICON_SPRITE_SETTING_KEY, SHOW_CREDITS_SETTING_KEY,
-  SIDEBAR_MENU_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY,
-  customIconSpriteFromRaw, getSetting, normalizeAdminHomeSettings, normalizeAppBrandingSettings, normalizeSystemTimezone,
-} from '../../core/db/settings';
-import { prepareHostSettingsMutation } from '../../core/evidence/settings-mutation-evidence';
-import { MAX_ICON_SPRITE_BYTES, parseIconSprite } from '../../core/render/icon-sprite';
-import { saveTag, saveTaxonomy, TagParentCycleError } from '../../core/evidence/taxonomy-mutation-evidence';
-import { normalizeLect, safeParseLect, stringifyLect, type Lect } from '../../core/db/lect';
-import { featureConfigTransferSections, publication } from '../../features/services';
+import { TagParentCycleError } from '../../core/evidence/taxonomy-mutation-evidence';
+import { flushReadAudit } from '../../core/http/access-log';
+import { renderPage } from '../../core/render/chrome';
 import {
   configTransferPage,
   type ConfigTransferPreviewSection,
   type ConfigTransferResult,
 } from '../../core/templates/config-transfer';
+import { featureConfigTransferSections } from '../../features/services';
+import { systemSettingsSection } from './config-transfer/system-settings';
+import { tagsSection } from './config-transfer/tags';
+import { taxonomiesSection } from './config-transfer/taxonomy';
 
 /** Changes applied per request; D1 calls per change are bounded, the total is not. */
 export const MAX_CHANGES_PER_REQUEST = 25;
-
-// The sprite comes first so branding can refer to an imported custom icon.
-const SETTING_KEYS = [
-  CUSTOM_ICON_SPRITE_SETTING_KEY, APP_BRANDING_SETTING_KEY, ADMIN_HOME_SETTING_KEY,
-  SYSTEM_TIMEZONE_SETTING_KEY, SHOW_CREDITS_SETTING_KEY, SIDEBAR_MENU_SETTING_KEY,
-] as const;
-type SettingKey = typeof SETTING_KEYS[number];
-
-function parsedJson(value: string): unknown {
-  try { return JSON.parse(value); } catch { return undefined; }
-}
-
-/** The value to store for an imported setting, or an error message. */
-function normalizedSetting(c: AppContext, key: SettingKey, value: string, customIcons: ReadonlySet<string>): string | { error: string } {
-  switch (key) {
-    case CUSTOM_ICON_SPRITE_SETTING_KEY: {
-      const sprite = customIconSpriteFromRaw(value);
-      if (!sprite || new TextEncoder().encode(sprite.svg).length > MAX_ICON_SPRITE_BYTES) return { error: 'Invalid icon sprite.' };
-      try { return JSON.stringify(parseIconSprite(sprite.svg)); } catch { return { error: 'Invalid icon sprite.' }; }
-    }
-    case APP_BRANDING_SETTING_KEY: {
-      const saved = parsedJson(value);
-      if (!isRecord(saved)) return { error: 'Invalid branding.' };
-      return JSON.stringify(normalizeAppBrandingSettings({
-        appName: saved.appName, appIcon: saved.appIcon, primaryColor: saved.primaryColor, appFont: saved.appFont,
-      }, c.env.SITE_TITLE ?? '0xCMS', customIcons));
-    }
-    case ADMIN_HOME_SETTING_KEY: {
-      const saved = parsedJson(value);
-      return isRecord(saved) ? JSON.stringify(normalizeAdminHomeSettings({ href: saved.href })) : { error: 'Invalid home page.' };
-    }
-    case SYSTEM_TIMEZONE_SETTING_KEY:
-      return normalizeSystemTimezone(value) ?? { error: 'Invalid timezone.' };
-    case SHOW_CREDITS_SETTING_KEY:
-      return value === 'true' || value === 'false' ? value : { error: 'Invalid value.' };
-    case SIDEBAR_MENU_SETTING_KEY:
-      // The menu loader ignores unknown or malformed entries, so any object is safe to store.
-      return isRecord(parsedJson(value)) ? value : { error: 'Invalid menu settings.' };
-  }
-}
-
-const systemSettingsSection: ConfigTransferSection = {
-  id: 'system_settings',
-  labelKey: 'settings.transfer.sections.system_settings',
-  order: 70,
-  permission: 'menu:manage',
-  async *exportRecords(c, after) {
-    for (const key of SETTING_KEYS.slice(after ? SETTING_KEYS.indexOf(after as SettingKey) + 1 : 0)) {
-      const value = await getSetting(c.env, key);
-      if (value !== null) yield { key, label: key, item: { key, value } };
-    }
-  },
-  async plan(c, items) {
-    const current = new Map<string, string | null>();
-    for (const key of SETTING_KEYS) current.set(key, await getSetting(c.env, key));
-    const bundleSprite = items.find((item) => isRecord(item) && item.key === CUSTOM_ICON_SPRITE_SETTING_KEY);
-    const customIcons = new Set([
-      ...(customIconSpriteFromRaw(current.get(CUSTOM_ICON_SPRITE_SETTING_KEY) ?? null)?.icons ?? []),
-      ...(isRecord(bundleSprite) && typeof bundleSprite.value === 'string' ? customIconSpriteFromRaw(bundleSprite.value)?.icons ?? [] : []),
-    ]);
-    const ordered = [...items].sort((a, b) => SETTING_KEYS.indexOf((isRecord(a) ? a.key : '') as SettingKey)
-      - SETTING_KEYS.indexOf((isRecord(b) ? b.key : '') as SettingKey));
-    return ordered.map((item): ConfigTransferPlanItem => {
-      const key = isRecord(item) && typeof item.key === 'string' ? item.key : '?';
-      if (!isRecord(item) || !SETTING_KEYS.includes(key as SettingKey) || typeof item.value !== 'string') {
-        return skipItem(key, 'This setting cannot be imported.');
-      }
-      const value = normalizedSetting(c, key as SettingKey, item.value, customIcons);
-      if (typeof value !== 'string') return skipItem(key, value.error);
-      const before = current.get(key);
-      const comparable = (raw: string) => parsedJson(raw) ?? raw;
-      return planChange(key, before === null || before === undefined ? undefined : comparable(before), comparable(value), async () => {
-        const mutation = await prepareHostSettingsMutation(c, [key as SettingKey]);
-        await mutation.commit([{ key: key as SettingKey, value }]);
-      });
-    });
-  },
-};
-
-const taxonomiesSection: ConfigTransferSection = {
-  id: 'taxonomies',
-  labelKey: 'settings.transfer.sections.taxonomies',
-  order: 20,
-  permission: 'taxonomy:write',
-  exportRecords(c, after) {
-    return exportRows<{ slug: string; name: string }>(c,
-      'SELECT slug, name FROM taxonomies WHERE slug > ? ORDER BY slug LIMIT ?', after, row => {
-        recordTaxonomyReads('config.export-read', [row]);
-        return { key: row.slug, label: row.slug, item: row };
-      });
-  },
-  async plan(c, items) {
-    const { results } = await c.env.DB.prepare('SELECT * FROM taxonomies').all<import('../../types').Taxonomy>();
-    recordTaxonomyReads('config.import-read', results);
-    return items.map((item) => {
-      const slug = isRecord(item) && typeof item.slug === 'string' ? item.slug : '';
-      const name = isRecord(item) && typeof item.name === 'string' ? item.name.trim() : '';
-      if (!slug || slugify(slug) !== slug) return skipItem(slug || '?', 'Invalid slug.');
-      if (!name) return skipItem(slug, 'Name is required.');
-      const before = results.find((row) => row.slug === slug);
-      return planChange(slug, before?.name, name, async () => {
-        const moved = await saveTaxonomy(c, { name, slug }, before);
-        if (moved.length) await publication()?.publishTagsToTargets(c.env, moved, contextActor(c));
-      });
-    });
-  },
-};
-
-interface TagTransferItem { slug: string; name: string; weight: number; taxonomy: string | null; parent: string | null; lect: Lect }
-
-/** The comparable, storable form of a tag; parents are named by slug so ids never cross CMSes. */
-function tagTransferItem(tag: Tag, parent: string | null): TagTransferItem {
-  return {
-    slug: tag.slug, name: tag.name, weight: tag.weight, taxonomy: tag.taxonomy_slug,
-    parent, lect: safeParseLect(tag.lect),
-  };
-}
-
-/** The imported tag, or an error message. */
-function parsedTagItem(item: unknown): TagTransferItem | string {
-  if (!isRecord(item)) return 'Invalid tag.';
-  const slug = typeof item.slug === 'string' ? item.slug : '';
-  const name = typeof item.name === 'string' ? item.name.trim() : '';
-  const slugOrNull = (value: unknown) => value === null || value === undefined ? null : typeof value === 'string' && value && slugify(value) === value ? value : undefined;
-  const taxonomy = slugOrNull(item.taxonomy);
-  const parent = slugOrNull(item.parent);
-  if (!slug || slugify(slug) !== slug) return 'Invalid slug.';
-  if (!name) return 'Name is required.';
-  if (item.weight !== undefined && (typeof item.weight !== 'number' || !Number.isFinite(item.weight))) return 'Invalid weight.';
-  if (taxonomy === undefined) return 'Invalid taxonomy.';
-  if (parent === undefined) return 'Invalid parent tag.';
-  if (parent === slug) return 'A tag cannot be its own parent.';
-  if (item.lect !== undefined && item.lect !== null && !isRecord(item.lect)) return 'Invalid translations.';
-  return { slug, name, weight: typeof item.weight === 'number' ? item.weight : 5, taxonomy, parent, lect: normalizeLect(item.lect ?? {}) };
-}
-
-/** Bundle tags ordered parents first, so a parent created in this import exists before its children.
- *  A depth of -1 marks a tag whose parent chain loops back on itself. */
-function parentsFirst<T extends { item: TagTransferItem | string }>(entries: readonly T[], parents = new Map<string, string | null>()): Array<T & { depth: number }> {
-  for (const { item } of entries) if (typeof item !== 'string') parents.set(item.slug, item.parent);
-  const depth = (item: TagTransferItem): number => {
-    const seen = new Set([item.slug]);
-    let n = 0;
-    for (let parent = item.parent; parent && parents.has(parent); parent = parents.get(parent) ?? null, n++) {
-      if (seen.has(parent)) return -1;
-      seen.add(parent);
-    }
-    return n;
-  };
-  return entries.map((entry) => ({ ...entry, depth: typeof entry.item === 'string' ? 0 : depth(entry.item) }))
-    .sort((a, b) => a.depth - b.depth);
-}
-
-const tagsSection: ConfigTransferSection = {
-  id: 'tags',
-  labelKey: 'settings.transfer.sections.tags',
-  order: 25,
-  permission: 'tag:write',
-  exportRecords(c, after) {
-    return exportTree<Tag & { parentSlug: string | null }>(c, 'tags', after, row => {
-      recordTagReads('config.export-read', [row]);
-      return { key: String(row.id), label: row.slug, item: tagTransferItem(row, row.parentSlug) };
-    });
-  },
-  async plan(c, items) {
-    const { results } = await c.env.DB.prepare('SELECT * FROM tags').all<Tag>();
-    recordTagReads('config.import-read', results);
-    const slugById = new Map(results.map((tag) => [tag.id, tag.slug]));
-    const existing = new Map(results.map((tag) => [tag.slug, tag]));
-    const parsed = items.map((raw) => ({
-      label: isRecord(raw) && typeof raw.slug === 'string' && raw.slug ? raw.slug : '?',
-      item: parsedTagItem(raw),
-    }));
-    const inBundle = new Set(parsed.flatMap(({ item }) => typeof item === 'string' ? [] : [item.slug]));
-    const parents = new Map(results.map((tag) => [tag.slug, tag.parent_tag === null ? null : slugById.get(tag.parent_tag) ?? null]));
-    return parentsFirst(parsed, parents).map(({ label, item, depth }): ConfigTransferPlanItem => {
-      if (typeof item === 'string') return skipItem(label, item);
-      if (depth < 0) return skipItem(label, TagParentCycleError.messageText);
-      if (item.parent && !existing.has(item.parent) && !inBundle.has(item.parent)) return skipItem(label, `Parent tag ${item.parent} is not on this CMS or in the file.`);
-      const before = existing.get(item.slug);
-      return planChange(label, before && tagTransferItem(before, before.parent_tag === null ? null : slugById.get(before.parent_tag) ?? null), item, async () => {
-        // Re-read at apply time: a parent this import created moments ago now has an id.
-        const [current, parent] = await Promise.all([
-          c.env.DB.prepare('SELECT * FROM tags WHERE slug = ?').bind(item.slug).first<Tag>(),
-          item.parent ? c.env.DB.prepare('SELECT id FROM tags WHERE slug = ?').bind(item.parent).first<{ id: number }>() : null,
-        ]);
-        if (item.parent && !parent) throw new ConfigTransferItemError(`Parent tag ${item.parent} was not imported.`);
-        const id = await saveTag(c, {
-          name: item.name, slug: item.slug, weight: item.weight, taxonomy_slug: item.taxonomy,
-          parent_tag: parent?.id ?? null, lect: stringifyLect(item.lect),
-        }, current ?? undefined);
-        await publication()?.publishTagToTargets(c.env, id, contextActor(c));
-      });
-    });
-  },
-};
 
 /** Every section this CMS can export or import, in apply order. */
 export function configTransferSections(): ConfigTransferSection[] {
