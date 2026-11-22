@@ -211,6 +211,24 @@ it('imports tags parents first and skips tags whose parent is missing or loops',
   expect((await (await call('/admin/settings/transfer/apply', applyForm(bundle, ['tags']))).text())).toContain('"applied":0');
 });
 
+it('skips a partial import that would place a tag under its existing descendant', async () => {
+  await seed(); // local-news already has news as its parent and is absent from the file.
+  const before = (await snapshot()).tags;
+  const bundle = { format: '0xcms-config', version: 1, sections: { tags: [
+    { slug: 'news', name: 'Changed', parent: 'local-news' },
+  ] } };
+  for (const step of ['preview', 'apply']) {
+    const response = await call(`/admin/settings/transfer/${step}`, applyForm(bundle, ['tags']));
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('"label":"news","action":"skip"');
+    expect(html).toContain('Its parent tags form a loop.');
+    if (step === 'apply') expect(html).toContain('"applied":0');
+  }
+  expect((await snapshot()).tags).toEqual(before);
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'tag.update'").first('n')).toBe(0);
+});
+
 it('skips entries it must not import and leaves this CMS untouched for them', async () => {
   const bundle = { format: '0xcms-config', version: 1, exportedAt: '', source: '', sections: {
     roles: [{ name: 'admin', builtin: true, label: 'Admin', permissions: [] }],

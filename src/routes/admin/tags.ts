@@ -1,5 +1,5 @@
 import { readNotice } from '../../core/http/notice';
-import { saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/evidence/taxonomy-mutation-evidence';
+import { TagParentCycleError,saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/evidence/taxonomy-mutation-evidence';
 import { contentMutationUnavailable } from '../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // Tag and taxonomy management.
@@ -175,7 +175,10 @@ tagsRoutes.post('/tags', requirePermission('tag:write'), async (c) => {
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
   let id:number;
-  try{id=await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)});}catch(error){return contentMutationUnavailable(c,error);}
+  try{id=await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)});} catch (error) {
+    if (error instanceof TagParentCycleError) return c.text(error.message, 400);
+    return contentMutationUnavailable(c, error);
+  }
   await publication()?.publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
@@ -202,7 +205,10 @@ tagsRoutes.post('/tags/:id', requirePermission('tag:write'), async (c) => {
   ensureDefaultLectName(lect, name);
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
-  try{await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)},existing);}catch(error){return contentMutationUnavailable(c,error);}
+  try{await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)},existing);} catch (error) {
+    if (error instanceof TagParentCycleError) return c.text(error.message, 400);
+    return contentMutationUnavailable(c, error);
+  }
   await publication()?.publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });

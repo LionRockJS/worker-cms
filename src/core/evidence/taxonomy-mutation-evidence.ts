@@ -89,11 +89,32 @@ function relatedPages(s:Snapshot) {
 function detail<T extends Record<string,unknown>>(value:T):T {json(value);return value;}
 export type TagValues=Pick<Tag,'name'|'slug'|'weight'|'taxonomy_slug'|'parent_tag'|'lect'>;
 const VALUE_FIELDS=['name','slug','weight','taxonomy_slug','parent_tag','lect'] as const;
+export class TagParentCycleError extends Error {
+  static readonly messageText = 'Its parent tags form a loop.';
+  constructor() { super(TagParentCycleError.messageText); }
+}
+
+// UNION stops the walk even when a legacy parent chain already contains a cycle.
+const TAG_PARENT_CYCLE = `(WITH RECURSIVE ancestors(id, parent_tag) AS (
+  SELECT id, parent_tag FROM tags WHERE id = ?
+  UNION
+  SELECT t.id, t.parent_tag FROM tags t JOIN ancestors a ON t.id = a.parent_tag
+) SELECT EXISTS (SELECT 1 FROM ancestors WHERE id = ?)
+      OR (EXISTS (SELECT 1 FROM ancestors) AND NOT EXISTS (SELECT 1 FROM ancestors WHERE parent_tag IS NULL)))`;
+
 export async function saveTag(c:AppContext,values:TagValues,before?:Tag):Promise<number> {
   const uuid=before?.uuid??crypto.randomUUID();
   const s=await snapshot(c,{ids:[before?.id,before?.parent_tag,values.parent_tag].filter((id):id is number=>id!==null&&id!==undefined),uuid,taxonomySlugs:[before?.taxonomy_slug??'default',values.taxonomy_slug??'default']},'tag:write');
   if(before && !s.tagRows.some(t=>t.id===before.id&&TAG_FIELDS.every(f=>t[f]===before[f])))throw new Error('Tag changed');
   const statements=s.guards;
+  if (values.parent_tag !== null) {
+    const bindings = [values.parent_tag, before?.id ?? null];
+    if (await c.env.DB.prepare(`SELECT ${TAG_PARENT_CYCLE} AS cycle`).bind(...bindings).first<number>('cycle')) {
+      throw new TagParentCycleError();
+    }
+    // Recheck in the write transaction in case an ancestor moved after validation.
+    statements.push(abortIf(c.env, TAG_PARENT_CYCLE, bindings));
+  }
   if(before)statements.push(abortIf(c.env,'(SELECT lect FROM tags WHERE id=?) IS NOT ?',[before.id,before.lect]),c.env.DB.prepare(`UPDATE tags SET ${VALUE_FIELDS.map(f=>`${f}=?`).join(',')} WHERE id=?`).bind(...VALUE_FIELDS.map(f=>values[f]),before.id));
   else statements.push(c.env.DB.prepare(`INSERT INTO tags(uuid,${VALUE_FIELDS.join(',')}) VALUES (?,${VALUE_FIELDS.map(()=>'?').join(',')})`).bind(uuid,...VALUE_FIELDS.map(f=>values[f])));
   const evidence=mutationAuditEvidence(c,{action:before?'tag.update':'tag.create',entityType:'tag',entityId:uuid,detail:detail({fields:VALUE_FIELDS.filter(f=>!before||before[f]!==values[f]),...(before?{tag_id:before.id}:{}),related_pages:relatedPages(s)})},s.dataClass,{policy:s.policy,requirePreviousChange:true});

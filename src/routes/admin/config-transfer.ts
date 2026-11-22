@@ -23,7 +23,7 @@ import {
 } from '../../core/db/settings';
 import { prepareHostSettingsMutation } from '../../core/evidence/settings-mutation-evidence';
 import { MAX_ICON_SPRITE_BYTES, parseIconSprite } from '../../core/render/icon-sprite';
-import { saveTag, saveTaxonomy } from '../../core/evidence/taxonomy-mutation-evidence';
+import { saveTag, saveTaxonomy, TagParentCycleError } from '../../core/evidence/taxonomy-mutation-evidence';
 import { normalizeLect, safeParseLect, stringifyLect, type Lect } from '../../core/db/lect';
 import { featureConfigTransferSections, publication } from '../../features/services';
 import {
@@ -172,13 +172,12 @@ function parsedTagItem(item: unknown): TagTransferItem | string {
 
 /** Bundle tags ordered parents first, so a parent created in this import exists before its children.
  *  A depth of -1 marks a tag whose parent chain loops back on itself. */
-function parentsFirst<T extends { item: TagTransferItem | string }>(entries: readonly T[]): Array<T & { depth: number }> {
-  const bySlug = new Map<string, TagTransferItem>();
-  for (const { item } of entries) if (typeof item !== 'string') bySlug.set(item.slug, item);
+function parentsFirst<T extends { item: TagTransferItem | string }>(entries: readonly T[], parents = new Map<string, string | null>()): Array<T & { depth: number }> {
+  for (const { item } of entries) if (typeof item !== 'string') parents.set(item.slug, item.parent);
   const depth = (item: TagTransferItem): number => {
     const seen = new Set([item.slug]);
     let n = 0;
-    for (let parent = item.parent; parent && bySlug.has(parent); parent = bySlug.get(parent)!.parent, n++) {
+    for (let parent = item.parent; parent && parents.has(parent); parent = parents.get(parent) ?? null, n++) {
       if (seen.has(parent)) return -1;
       seen.add(parent);
     }
@@ -209,9 +208,10 @@ const tagsSection: ConfigTransferSection = {
       item: parsedTagItem(raw),
     }));
     const inBundle = new Set(parsed.flatMap(({ item }) => typeof item === 'string' ? [] : [item.slug]));
-    return parentsFirst(parsed).map(({ label, item, depth }): ConfigTransferPlanItem => {
+    const parents = new Map(results.map((tag) => [tag.slug, tag.parent_tag === null ? null : slugById.get(tag.parent_tag) ?? null]));
+    return parentsFirst(parsed, parents).map(({ label, item, depth }): ConfigTransferPlanItem => {
       if (typeof item === 'string') return skipItem(label, item);
-      if (depth < 0) return skipItem(label, 'Its parent tags form a loop.');
+      if (depth < 0) return skipItem(label, TagParentCycleError.messageText);
       if (item.parent && !existing.has(item.parent) && !inBundle.has(item.parent)) return skipItem(label, `Parent tag ${item.parent} is not on this CMS or in the file.`);
       const before = existing.get(item.slug);
       return planChange(label, before && tagTransferItem(before, slugById), item, async () => {
@@ -293,7 +293,7 @@ export async function applyConfigBundle(c: AppContext, bundle: ConfigTransferBun
         await plan.apply!();
         result.applied += 1;
       } catch (error) {
-        if (error instanceof ConfigTransferItemError) {
+        if (error instanceof ConfigTransferItemError || error instanceof TagParentCycleError) {
           result.failed.push({ sectionLabelKey: section.labelKey, label: plan.label, message: error.message });
         } else {
           // Audit or policy outages refuse every later write too; stop rather than retry each.
