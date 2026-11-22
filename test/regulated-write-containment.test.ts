@@ -122,7 +122,7 @@ it.each([
   ['POST', '/auth/callback'], ['POST', '/auth/refresh'], ['POST', '/auth/logout'], ['POST', '/admin/profile/locale'],
   ['POST', '/admin/pages/8251/unpublish'], ['POST', '/admin/plugins-manage/8252/disconnect'],
   ['POST', '/admin/plugins-manage/8252/assets/revoke'], ['POST', '/admin/plugins-manage/8252/files/revoke'],
-  ['POST', '/admin/plugins-manage/8252/page-types/revoke'], ['POST', '/admin/profile/identities/9/disconnect'],
+  ['POST', '/admin/plugins-manage/8252/page-types/revoke'], ['POST', '/admin/plugins-manage/8252/capabilities/taxonomy-create/revoke'], ['POST', '/admin/profile/identities/9/disconnect'],
   ['POST', '/admin/audit/outages/incident/reconcile'],
 ])('leaves %s %s to its existing authorization/containment guard', (method, path) => {
   expect(regulatedRequestWriteBlocked(configured(), new Request(`https://cms.example.com${path}`, { method }))).toBe(false);

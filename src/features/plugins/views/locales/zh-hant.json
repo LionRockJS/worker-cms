@@ -185,6 +185,8 @@
     "sections_plugin_limits.usage_varies_by_group": "因群組而異",
     "sections_plugin_page_types.access_requested_through_readtypes_and_writetypes_approving_a_scope_lets": "透過 readTypes 和 writeTypes 請求的存取權限。批准範圍後，外掛程式便可透過 CMS API 使用該範圍。",
     "sections_plugin_page_types.all_page_types": "所有頁面類型",
+    "sections_plugin_page_types.create_taxonomies": "建立分類法",
+    "sections_plugin_page_types.create_taxonomies_help": "允許外掛為整個 CMS 建立分類法。",
     "sections_plugin_page_types.approve": "批准",
     "sections_plugin_page_types.approve_all": "全部批准",
     "sections_plugin_page_types.approved_by": "批准者：",

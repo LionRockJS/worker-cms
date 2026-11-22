@@ -39,6 +39,9 @@ export async function capturePluginPageMutationAuthority(c: AppContext, auth: Pl
     const rows = await snapshot<Row>(c, 'plugins', REGISTRY, 'id=?', [registration.id]);
     const pins = await snapshot<Row>(c, 'plugin_identity_approvals', IDENTITY, 'plugin_row_id=?', [registration.id]);
     const approvals = await snapshot<Row>(c, 'plugin_page_type_approvals', APPROVAL, 'plugin_id=?', [auth.pluginId]);
+    const taxonomyGrant = purpose === 'taxonomy-ensure' && auth.plugin.requestedManifest?.capabilities?.includes('taxonomy:create')
+      ? await c.env.DB.prepare("SELECT id FROM plugin_capability_approvals WHERE plugin_id=? AND capability='taxonomy:create'")
+        .bind(auth.pluginId).first<{id: number}>() : null;
     const row = rows[0];
     if (!row || row.uuid !== registration.uuid || row.enabled !== 1 || row.url !== auth.plugin.binding || pins[0]?.manifest_id !== auth.pluginId || !row.secret
       || !timingSafeEqualStr(String(row.secret), auth.plugin.apiSecret) || !timingSafeEqualStr(String(row.secret), c.req.header('x-plugin-secret') ?? '')) throw new Error('Page credential changed');
@@ -50,10 +53,15 @@ export async function capturePluginPageMutationAuthority(c: AppContext, auth: Pl
     if (allowed.size !== auth.allowedTypes.size || [...allowed].some(type => !auth.allowedTypes.has(type))) throw new Error('Page scope changed');
     const actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: `plugin:${registration.uuid}` };
     const context = requestContext.getStore(); if (context) context.readActor = actor;
-    const dataClass = strongestClass(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events',...(purpose==='delete'?['trash_pages','trash_page_versions','trash_page_tags']:[])].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
+    const dataClass = strongestClass(['plugins','plugin_identity_approvals','plugin_page_type_approvals','pages','page_versions','page_tags','tags','taxonomies','page_sensitivity_floors','audit_events',...(purpose==='taxonomy-ensure'?['plugin_capability_approvals']:[]),...(purpose==='delete'?['trash_pages','trash_page_versions','trash_page_tags']:[])].map(table => classFor(policy, 'table', table)).concat(classFor(policy, 'plugin', auth.pluginId)));
     await auditBackgroundReads(c.env, ['plugins','plugin_identity_approvals','plugin_page_type_approvals','audit_events'].map(table => ({ action: `plugin.page-${purpose}-authority-read`, kind: 'table' as const, key: table, targetType: table === 'audit_events' ? 'plugin_registry_journal' : table, ids: table === 'plugin_page_type_approvals' ? approvals.map(row => String(row.id)) : [table === 'audit_events' ? registration.uuid : String(registration.id)], count: table === 'plugin_page_type_approvals' ? approvals.length : 1, minimumClass: dataClass === 'none' ? undefined : dataClass })), actor);
-    const check = () => [guard(c, 'plugins', REGISTRY, rows, 'id=?', [registration.id]), guard(c, 'plugin_identity_approvals', IDENTITY, pins, 'plugin_row_id=?', [registration.id]), guard(c, 'plugin_page_type_approvals', APPROVAL, approvals, 'plugin_id=?', [auth.pluginId]), classificationPolicyGuard(c.env, policy), abortIf(c.env, "(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin' AND target_id=?)<>?", [registration.uuid, journal.generation])];
-    return { [brand]: true as const, purpose, actor, policy, dataClass, check, allowed, registryId: registration.id, identityFingerprint: await fingerprint(auth.pluginId) };
+    if (taxonomyGrant) await auditBackgroundReads(c.env, [{ action: 'plugin.capability-read', kind: 'table',
+      key: 'plugin_capability_approvals', targetType: 'plugin_capability_approval', ids: [String(taxonomyGrant.id)], count: 1,
+      minimumClass: dataClass === 'none' ? undefined : dataClass }], actor);
+    const check = () => [...(taxonomyGrant ? [abortIf(c.env,
+      "NOT EXISTS (SELECT 1 FROM plugin_capability_approvals WHERE id=? AND plugin_id=? AND capability='taxonomy:create')",
+      [taxonomyGrant.id, auth.pluginId])] : []), guard(c, 'plugins', REGISTRY, rows, 'id=?', [registration.id]), guard(c, 'plugin_identity_approvals', IDENTITY, pins, 'plugin_row_id=?', [registration.id]), guard(c, 'plugin_page_type_approvals', APPROVAL, approvals, 'plugin_id=?', [auth.pluginId]), classificationPolicyGuard(c.env, policy), abortIf(c.env, "(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin' AND target_id=?)<>?", [registration.uuid, journal.generation])];
+    return { [brand]: true as const, purpose, actor, policy, dataClass, check, allowed, taxonomyCreationApproved: !!taxonomyGrant, registryId: registration.id, identityFingerprint: await fingerprint(auth.pluginId) };
   } catch { return unavailable(c); }
 }
 export type PluginPageMutationAuthority = Awaited<ReturnType<typeof capturePluginPageMutationAuthority>>;

@@ -146,11 +146,22 @@ function pageTypeApprovalIndex(approvals: PluginPageTypeApproval[]) {
   return new Map(approvals.map(approval => [`${approval.page_type}:${approval.access}`, approval]));
 }
 
+async function taxonomyGrants(c: AppContext, registrationId?: number) {
+  const query = `SELECT pin.plugin_row_id AS registrationId, grantRow.id FROM plugin_identity_approvals pin
+    JOIN plugin_capability_approvals grantRow ON grantRow.plugin_id=pin.manifest_id
+    WHERE grantRow.capability='taxonomy:create'`;
+  const rows = await c.env.DB.prepare(query + (registrationId === undefined ? '' : ' AND pin.plugin_row_id=?'))
+    .bind(...(registrationId === undefined ? [] : [registrationId])).all<{registrationId: number; id: number}>();
+  recordTableReads('plugin.capability-read', 'plugin_capability_approvals', rows.results.map(row => row.id));
+  return new Set(rows.results.map(row => row.registrationId));
+}
+
 pluginsManageRoutes.get('/plugins-manage', async (c) => {
-  const [rows, resolved, identities] = await Promise.all([
+  const [rows, resolved, identities, taxonomyApprovals] = await Promise.all([
     listPlugins(c.env.DB),
     getPlugins(c.env),
     pluginIdentityStates(c.env),
+    taxonomyGrants(c),
   ]);
   recordTableReads('plugin.registry-list', 'plugins', rows.map(row => row.id));
   recordMetadataReads('plugin.identity-read', 'plugin_identity_approvals', identities.filter(state => state.pinnedId).map(state => state.rowId));
@@ -177,9 +188,10 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       : undefined;
     const { readTypes, writeTypes } = requestedPageTypeScopes(manifest?.contentTypes);
     let pageTypeStatus: PluginListItem['pageTypeStatus'];
-    if (plugin && (readTypes.size || writeTypes.size)) {
+    const requestsTaxonomies = manifest?.capabilities?.includes('taxonomy:create');
+    if (plugin && (readTypes.size || writeTypes.size || requestsTaxonomies)) {
       const approvals = pageTypeApprovalIndex(plugin.pageTypeApprovals);
-      const pending = [...readTypes].some(type => !approvals.has(`${type}:read`))
+      const pending = (requestsTaxonomies && !taxonomyApprovals.has(row.id)) || [...readTypes].some(type => !approvals.has(`${type}:read`))
         || [...writeTypes].some(type => !approvals.has(`${type}:write`));
       pageTypeStatus = pending ? 'pending' : 'approved';
     }
@@ -195,7 +207,7 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       trustLevel: plugin ? pluginTrustLevel(plugin.manifest) : undefined,
       hasAssets: !!manifest?.assets?.length,
       hasFilePrefixes: !!manifest?.filePrefixes?.length,
-      hasPageTypes: !!(pageTypeStatus || Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length),
+      hasPageTypes: !!(pageTypeStatus || taxonomyApprovals.has(row.id) || Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length),
       pageTypeStatus,
       hasLimits: !!manifest?.limits?.length,
       hasCredits: !!manifest?.credits?.length,
@@ -829,11 +841,12 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
+  const taxonomyApproved = (await taxonomyGrants(c, id)).has(id);
   if (!resolved) {
     return renderPage(c, pluginPageTypesPage, {
       pluginId: id,
       pluginLabel: row.label || row.url,
-      unreachable: true,
+      unreachable: true, taxonomyApproved,
       definedPageTypes: [],
       definedTaxonomies: [],
       pageTypes: [],
@@ -882,12 +895,22 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   return renderPage(c, pluginPageTypesPage, {
     pluginId: id,
     pluginLabel: (resolved.requestedManifest ?? resolved.manifest).name || row.label || row.url,
-    unreachable: false,
+    unreachable: false, taxonomyApproved, taxonomyRequested: declaredManifest.capabilities?.includes('taxonomy:create'),
     definedPageTypes,
     definedTaxonomies,
     pageTypes,
     flash: c.req.query('flash') ?? undefined,
   });
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/capabilities/taxonomy-create/:decision', async c => {
+  const id = Number(c.req.param('id'));
+  const decision = c.req.param('decision');
+  if (decision !== 'approve' && decision !== 'revoke') return c.notFound();
+  const result = await mutatePluginApproval(c, { id, action: `plugin.capability.${decision}`, key: 'taxonomy:create' });
+  if (result === 'invalid') return c.text('The plugin must request taxonomy creation.', 400);
+  if (result !== 'approved' && result !== 'revoked') return c.notFound();
+  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve-all', async (c) => {

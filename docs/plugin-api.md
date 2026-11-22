@@ -53,7 +53,7 @@ All paths below are relative to `/__cms`. JSON requests should send
 | `DELETE /pages/batch` | Body `{ ids: [...] }`. Trash a bounded set of scoped pages. |
 | `DELETE /pages/children` | Select by `page_type` and `parent_page_id` or pointer filters. Returns `trashed` and `done`; repeat while `done` is false. Published copies are not withdrawn by this endpoint. |
 | `GET /content-meta` | Readable page types, languages, default language, taxonomy names/slugs and searchable `path_specs`; optional `types` filter. |
-| `POST /taxonomies/ensure` | Body `{ names: [name, ...] }`. Returns `{ taxonomies: [{ name, slug }, ...] }` for up to 100 names. The Import / Export plugin must have contact write access. Existing taxonomies are reused by exact name. |
+| `POST /taxonomies/ensure` | Body `{ names: [name, ...] }`. Returns `{ taxonomies: [{ name, slug }, ...] }` for up to 100 names. Declare `"capabilities": ["taxonomy:create"]` in the manifest and approve **Create taxonomies** under **Plugins → Page types**. Existing taxonomies are reused by exact name. |
 | `POST /tags/ensure` | Body `{ tags: [{ taxonomy, name }, ...] }`. Find or create tags by taxonomy slug and name; requires write scope. |
 | `GET /limits` | Effective declared quotas and usage. Supply `page_id` for parent usage or `pointer_value` for pointer usage; otherwise scoped usage is `null`. |
 | `POST /ingest/submissions` | Run bounded, resumable ingestion of published-only submissions into draft. Requires the manifest's `submission` hook. |

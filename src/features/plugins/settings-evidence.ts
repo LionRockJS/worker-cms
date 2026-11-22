@@ -9,7 +9,7 @@ import { recordAuditOutage } from '../../core/db/audit-outages';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import { cmsConfig } from '../../cms-config';
 import { callFeatureService } from '../services';
-import { capturePluginMutationContext,OWNED,invalidate } from './registration-evidence';
+import { capturePluginMutationContext,APPROVAL_TABLES,invalidate } from './registration-evidence';
 import { REGISTRY,IDENTITY } from './evidence-common';
 import { inspectPluginManifest } from './registry';
 import { declaredLimits,limitsSettingKey } from './limits';
@@ -26,7 +26,7 @@ async function mutate(c:AppContext,id:number,kind:'limits'|'pricing',form:FormDa
   const found=await inspectPluginManifest(row);if(!found)return false;
   const manifest=found.manifest,pin=base.identities.find(p=>p.plugin_row_id===id);
   if(pin?.manifest_id!==manifest.id){await c.env.DB.batch([...base.admission(),...base.finish()]);await recordPolicyDenial(c,'plugin_identity_required');return false;}
-  const spec=OWNED[1],approvals=await snapshot<Row>(c,spec.table,spec.fields,'plugin_id=?',[manifest.id]);
+  const spec=APPROVAL_TABLES[1],approvals=await snapshot<Row>(c,spec.table,spec.fields,'plugin_id=?',[manifest.id]);
   const write=new Set(approvals.filter(r=>r.access==='write').map(r=>String(r.page_type)));
   const types=new Set(Object.keys(manifest.contentTypes?.blueprint??{}).filter(type=>write.has(type)&&!Object.hasOwn(cmsConfig.blueprint,type)));
   for(const type of manifest.contentTypes?.writeTypes??[])if(write.has(type))types.add(type);

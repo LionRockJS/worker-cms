@@ -16,12 +16,14 @@ import type { PluginRecord,PluginIdentityApproval } from './types';
 import { REGISTRY,IDENTITY } from './evidence-common';
 
 const MUTABLE=['label','url','enabled','config','sort_order','secret'] as const;
-export const OWNED=[
+export const APPROVAL_TABLES=[
   {table:'plugin_asset_approvals',fields:['id','plugin_id','path','integrity','approved_by','created_at','updated_at']},
   {table:'plugin_page_type_approvals',fields:['id','plugin_id','page_type','access','approved_by','created_at','updated_at']},
   {table:'plugin_file_prefix_approvals',fields:['id','plugin_id','prefix','approved_by','created_at','updated_at']},
-  {table:'plugin_state',fields:['plugin_id','key','value','created_at','updated_at']},
+  {table:'plugin_capability_approvals',fields:['id','plugin_id','capability','approved_by','created_at','updated_at']},
 ];
+export const STATE_TABLE={table:'plugin_state',fields:['plugin_id','key','value','created_at','updated_at']};
+const OWNED=[...APPROVAL_TABLES, STATE_TABLE];
 
 export class PluginRegistrationUnavailableError extends Error {constructor(){super('Plugin registration change unavailable');}}
 export class PluginRegistrationConflictError extends Error {constructor(){super('A plugin with that URL is already registered.');}}

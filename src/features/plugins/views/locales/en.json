@@ -185,6 +185,8 @@
     "sections_plugin_limits.usage_varies_by_group": "Varies by group",
     "sections_plugin_page_types.access_requested_through_readtypes_and_writetypes_approving_a_scope_lets": "Access requested through readTypes and writeTypes. Approving a scope lets the plugin use it through the CMS API.",
     "sections_plugin_page_types.all_page_types": "All page types",
+    "sections_plugin_page_types.create_taxonomies": "Create taxonomies",
+    "sections_plugin_page_types.create_taxonomies_help": "Allows the plugin to create taxonomies for the entire CMS.",
     "sections_plugin_page_types.approve": "Approve",
     "sections_plugin_page_types.approve_all": "Approve all",
     "sections_plugin_page_types.approved_by": "Approved by",

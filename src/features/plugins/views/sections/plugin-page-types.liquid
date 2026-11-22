@@ -3,6 +3,17 @@
     <div class="mb-4 px-4 py-2 rounded-lg bg-amber-50 text-amber-800 text-sm">{{ flashMessageKey | t }}</div>
   {% endif %}
 
+  {% if showTaxonomyCapability %}
+    <form method="post" action="{{ taxonomyAction }}" class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4">
+      <div>
+        <h3 class="font-semibold">{{ "view_strings.sections_plugin_page_types.create_taxonomies" | t }}</h3>
+        <p class="text-sm text-gray-600">{{ "view_strings.sections_plugin_page_types.create_taxonomies_help" | t }}</p>
+        <span class="text-xs">{% if taxonomyApproved %}{{ "view_strings.sections_plugin_page_types.status_approved" | t }}{% else %}{{ "view_strings.sections_plugin_page_types.status_not_approved" | t }}{% endif %}</span>
+      </div>
+      <button type="submit" class="rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold">{% if taxonomyApproved %}{{ "view_strings.sections_plugin_page_types.revoke" | t }}{% else %}{{ "view_strings.sections_plugin_page_types.approve" | t }}{% endif %}</button>
+    </form>
+  {% endif %}
+
   {% if unreachable %}
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-sm text-gray-500">
       {{ "view_strings.sections_plugin_page_types.this_plugin_is_not_reachable_right_now_so_its_page_types_and_taxonomies_" | t }}

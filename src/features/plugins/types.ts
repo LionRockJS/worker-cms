@@ -100,6 +100,8 @@ export interface PluginContentTypes {
 export type PluginHookEvent = 'create' | 'submission' | 'update' | 'publish' | 'unpublish' | 'delete';
 
 export interface PluginManifest {
+  /** Host operations requested by this plugin. Each needs its own local grant. */
+  capabilities?: string[];
   id: string;
   name: string;
   version: string;

@@ -457,6 +457,8 @@ export async function pluginPageTypesPage(views: Fetcher, opts: BaseTemplateProp
   definedPageTypes: PluginDefinedPageTypeRow[];
   definedTaxonomies: PluginDefinedTaxonomyRow[];
   pageTypes: PluginPageTypeRow[];
+  taxonomyRequested?: boolean;
+  taxonomyApproved?: boolean;
   flash?: string;
 }): Promise<string> {
   const { pluginLabel, unreachable, definedPageTypes, definedTaxonomies, pageTypes, flash } = opts;
@@ -471,6 +473,9 @@ export async function pluginPageTypesPage(views: Fetcher, opts: BaseTemplateProp
   const body = await renderView(views, '/templates/plugin-page-types.json', {
     pluginLabel,
     unreachable,
+    showTaxonomyCapability: !!(opts.taxonomyRequested || opts.taxonomyApproved),
+    taxonomyApproved: !!opts.taxonomyApproved,
+    taxonomyAction: `/admin/plugins-manage/${opts.pluginId}/capabilities/taxonomy-create/${opts.taxonomyApproved ? 'revoke' : 'approve'}`,
     hasDefinedPageTypes: definedPageTypes.length > 0,
     definedPageTypes,
     hasDefinedTaxonomies: definedTaxonomies.length > 0,

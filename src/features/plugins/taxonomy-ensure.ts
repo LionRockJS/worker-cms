@@ -10,7 +10,6 @@ import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { slugify } from '../../core/http/forms';
 import { noteActingUser, unavailable } from './evidence-common';
 import { assertPluginPageAuthority, type PluginPageMutationAuthority } from './page-update-evidence';
-import { pageTypeScopeAllows } from './page-types';
 
 const MAX_TAXONOMIES = 100;
 const TAXONOMY_FIELDS = ['id', 'uuid', 'name', 'slug', 'created_at', 'updated_at'];
@@ -22,9 +21,9 @@ interface TaxonomyIdentity {
   uuid: string;
 }
 
-export async function ensureContactTaxonomies(c: AppContext, authority: PluginPageMutationAuthority, input: unknown): Promise<Response> {
+export async function ensurePluginTaxonomies(c: AppContext, authority: PluginPageMutationAuthority, input: unknown): Promise<Response> {
   assertPluginPageAuthority(authority, 'taxonomy-ensure');
-  if (!pageTypeScopeAllows(authority.allowed, 'contact')) return c.json({ error: 'forbidden' }, 403);
+  if (!authority.taxonomyCreationApproved) return c.json({ error: 'forbidden' }, 403);
 
   const raw = input && typeof input === 'object' && 'names' in input ? input.names : null;
   if (!Array.isArray(raw)) return c.json({ error: 'invalid_body' }, 400);
@@ -65,7 +64,6 @@ export async function ensureContactTaxonomies(c: AppContext, authority: PluginPa
 
     const dataClass = strongestClass([
       authority.dataClass,
-      classFor(authority.policy, 'page_type', 'contact'),
       ...[...existing, ...created].map(row => classFor(authority.policy, 'taxonomy', row.slug)),
     ]);
     await auditBackgroundReads(c.env, [{

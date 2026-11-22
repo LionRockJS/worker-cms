@@ -173,6 +173,8 @@ function isPluginManifest(value: unknown): value is PluginManifest {
     if (value[key] !== undefined && !['server-only', 'sandboxed-ui', 'trusted-ui'].includes(String(value[key]))) return false;
   }
   if (value.i18n !== undefined && typeof value.i18n !== 'boolean') return false;
+  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities)
+    || !value.capabilities.every(key => typeof key === 'string'))) return false;
   if (value.autoTenant !== undefined && typeof value.autoTenant !== 'boolean') return false;
   if (value.auto_tenant !== undefined && typeof value.auto_tenant !== 'boolean') return false;
   if (value.filePrefixes !== undefined) {
