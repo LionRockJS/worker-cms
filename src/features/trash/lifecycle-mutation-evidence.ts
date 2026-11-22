@@ -7,6 +7,7 @@ import { captureAccessAuthorization,captureContentJobAuthorization } from '../..
 import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { serviceMutationAuditEvidence, type AuditActor, attributedMutationAuditEvidence } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
+import { guard, json, snapshot } from '../../core/db/bounded-mutation';
 import { auditBackgroundReads } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
@@ -35,22 +36,6 @@ const ACTIVE_HOLDS=`SELECT page_uuid FROM record_holds WHERE ${ACTIVE_HOLD}`;
 const HELD_SUBTREES=`id NOT IN (WITH RECURSIVE up(id,page_id) AS (SELECT id,page_id FROM trash_pages WHERE uuid IN (${ACTIVE_HOLDS})
   UNION SELECT t.id,t.page_id FROM trash_pages t JOIN up ON t.id=up.page_id) SELECT id FROM up)`;
 const MIRROR_ACTIONS=['ingest-submission','pull-published'];
-function json(value:unknown):string {const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Lifecycle manifest requires review');return text;}
-/** The database checks the budget before returning bodies to the Worker. */
-async function snapshot(env:Env,table:string,fields:string[],where:string,bindings:Bind[]=[]):Promise<Row[]> {
-  const object=`json_object(${fields.map(f=>`'${f}',r.${f}`).join(',')})`;
-  const result=await env.DB.prepare(`WITH scoped AS (SELECT * FROM ${table} WHERE ${where} ORDER BY id LIMIT 5001),
-    budget AS (SELECT COUNT(*) AS n,COALESCE(SUM(length(CAST(${object} AS BLOB))),0)+COUNT(*)+2 AS bytes FROM scoped r)
-    SELECT CASE WHEN n>5000 OR bytes>1000000 THEN json('{') ELSE (SELECT json_group_array(${object}) FROM scoped r) END AS snapshot FROM budget`).bind(...bindings).first<{snapshot:string}>();
-  if(!result)throw new Error('Lifecycle snapshot unavailable');
-  const rows=JSON.parse(result.snapshot) as Row[];
-  if(fields.includes('id')&&rows.some(r=>!Number.isSafeInteger(r.id)||Number(r.id)<=0))throw new Error('Unsafe lifecycle identity');
-  return rows;
-}
-function guard(env:Env,table:string,fields:string[],where:string,bindings:Bind[],rows:Row[]) {
-  return abortIf(env,`(SELECT COUNT(*) FROM ${table} WHERE ${where})<>? OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS
-    (SELECT 1 FROM ${table} p WHERE ${fields.map(f=>`p.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...bindings,rows.length,json(rows)]);
-}
 function subset(env:Env,table:string,fields:string[],rows:Row[]) {
   return abortIf(env,`EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM ${table} p WHERE
     ${fields.map(f=>`p.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[json(rows)]);
@@ -95,11 +80,11 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   // Bulk purges pass over held pages; an explicit purge of one is refused below.
   if(action==='purge'&&!selection.ids)conditions.push(HELD_SUBTREES);
   const selectedWhere=conditions.join(' AND ');
-  const selected=await snapshot(env,src,['id'],selectedWhere,params);const selectedIds=selected.map(p=>p.id);
+  const selected=await snapshot<Row>({env},src,['id'],selectedWhere,params);const selectedIds=selected.map(p=>p.id);
   const recursive=`WITH RECURSIVE picked(id) AS (SELECT id FROM trash_pages WHERE id IN (SELECT value FROM json_each(?))
     UNION SELECT c.id FROM trash_pages c JOIN picked p ON c.page_id=p.id) SELECT id FROM picked`;
   const sourceWhere=action==='purge'?`id IN (${recursive})`:'id IN (SELECT value FROM json_each(?))';
-  const sourceParams=[json(selectedIds)];const sources=await snapshot(env,src,sf,sourceWhere,sourceParams);
+  const sourceParams=[json(selectedIds)];const sources=await snapshot<Row>({env},src,sf,sourceWhere,sourceParams);
   const ids=sources.map(p=>p.id);const uuids=sources.map(p=>p.uuid);const idJson=json(ids);const uuidJson=json(uuids);
   const heldWhere=`page_uuid IN (SELECT value FROM json_each(?)) AND page_uuid IN (${ACTIVE_HOLDS})`;
   if(action==='purge'){
@@ -109,7 +94,7 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   if(service&&sources.some(p=>!service.allows(String(p.page_type??''))))throw new Error('Service trash scope changed');
   const base=[...checks(),...(service?.before?.()??[]),classificationPolicyGuard(env,policy),
     abortIf(env,"(SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('trash_pages','trash_page_versions','trash_page_tags'))<>3"),
-    guard(env,src,['id'],selectedWhere,params,selected),guard(env,src,sf,sourceWhere,sourceParams,sources)];
+    guard({env},src,['id'],selected,selectedWhere,params),guard({env},src,sf,sources,sourceWhere,sourceParams)];
   if (user) base.push(pageAccessGuard(env, user, uuids.map(String), true));
   if(job)base.push(job.delegationGuard);
   // A hold placed after the read above still stops the batch.
@@ -121,21 +106,21 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
   const childFields=sf.filter(f=>f!=='lect');
   const childWhere='page_id IN (SELECT value FROM json_each(?)) AND id NOT IN (SELECT value FROM json_each(?))';
   const [versions,links,destinations,children,sourceParents,destinationParents]=await Promise.all([
-    snapshot(env,sv,VERSION,subWhere,[idJson]),snapshot(env,sl,LINK,subWhere,[idJson]),
-    action==='purge'?Promise.resolve([] as Row[]):snapshot(env,dst,df,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
-    src==='trash_pages'?snapshot(env,src,childFields,childWhere,[idJson,idJson]):Promise.resolve([] as Row[]),
-    snapshot(env,src,['id','uuid','page_type'],'id IN (SELECT value FROM json_each(?))',[parentJson]),
-    action==='purge'?Promise.resolve([] as Row[]):snapshot(env,dst,['id','uuid','page_type'],`id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT uuid FROM ${src} WHERE id IN (SELECT value FROM json_each(?)))`,[parentJson,parentJson]),
+    snapshot<Row>({env},sv,VERSION,subWhere,[idJson]),snapshot<Row>({env},sl,LINK,subWhere,[idJson]),
+    action==='purge'?Promise.resolve([] as Row[]):snapshot<Row>({env},dst,df,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
+    src==='trash_pages'?snapshot<Row>({env},src,childFields,childWhere,[idJson,idJson]):Promise.resolve([] as Row[]),
+    snapshot<Row>({env},src,['id','uuid','page_type'],'id IN (SELECT value FROM json_each(?))',[parentJson]),
+    action==='purge'?Promise.resolve([] as Row[]):snapshot<Row>({env},dst,['id','uuid','page_type'],`id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT uuid FROM ${src} WHERE id IN (SELECT value FROM json_each(?)))`,[parentJson,parentJson]),
   ]);
   const targetId=(p:Row)=>destinations.find(d=>d.uuid===p.uuid)?.id??p.id;
   const targetIds=sources.map(targetId);const targetJson=json(targetIds);
   const destSubWhere='page_id IN (SELECT value FROM json_each(?)) OR id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))';
   const versionArgs=[targetJson,json(versions.map(v=>v.id)),json(versions.map(v=>v.uuid))];
   const linkArgs=[targetJson,json(links.map(l=>l.id)),json(links.map(l=>l.uuid))];
-  const [destVersions,destLinks]=action==='purge'?[[],[]] as Row[][]:await Promise.all([snapshot(env,dv,VERSION,destSubWhere,versionArgs),snapshot(env,dl,LINK,destSubWhere,linkArgs)]);
+  const [destVersions,destLinks]=action==='purge'?[[],[]] as Row[][]:await Promise.all([snapshot<Row>({env},dv,VERSION,destSubWhere,versionArgs),snapshot<Row>({env},dl,LINK,destSubWhere,linkArgs)]);
   if([...links,...destLinks].some(l=>!Number.isSafeInteger(l.tag_id)||Number(l.tag_id)<=0||(l.weight!==null&&!Number.isFinite(l.weight))))throw new Error('Unsafe lifecycle link metadata');
   const tagIds=[...new Set([...links,...destLinks].map(l=>l.tag_id))];
-  const tags=await snapshot(env,'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)]);
+  const tags=await snapshot<Row>({env},'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)]);
   if(action==='restore'&&links.some(l=>!tags.some(t=>t.id===l.tag_id)))throw new Error('Restoration tag unavailable');
   const floorUuids=[...new Set([...sources,...destinations,...children,...sourceParents,...destinationParents].map(p=>p.uuid))];
   const floorWhere='uuid IN (SELECT value FROM json_each(?))';
@@ -153,14 +138,14 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
     await auditBackgroundReads(env,types.map(key=>{const group=rows.filter(p=>(p.page_type??'default')===key);return {action:table==='trash_pages'?'page.trash-lifecycle-read':'page.lifecycle-read',kind:'page_type' as const,key,targetType:'page',ids:group.map(p=>String(p.id)),count:group.length,...(service&&dataClass!=='none'?{minimumClass:dataClass}:{}),uuidById:Object.fromEntries(group.map(p=>[String(p.id),String(p.uuid)]))};}),actor);
   }
   if(service)await auditBackgroundReads(env,[sv,sl,dv,dl,'tags','page_sensitivity_floors'].map(table=>({action:'page.delete-metadata-read',kind:'table' as const,key:table,targetType:table,ids:uuids.map(String),count:sources.length,minimumClass:dataClass==='none'?undefined:dataClass})),actor);
-  base.push(guard(env,sv,VERSION,subWhere,[idJson],versions),guard(env,sl,LINK,subWhere,[idJson],links),
-    guard(env,'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)],tags),
-    guard(env,'page_sensitivity_floors',['uuid','level'],floorWhere,[json(floorUuids)],floors),
-    guard(env,src,['id','uuid','page_type'],'id IN (SELECT value FROM json_each(?))',[parentJson],sourceParents));
-  if(src==='trash_pages')base.push(guard(env,src,childFields,childWhere,[idJson,idJson],children));
-  if(action!=='purge')base.push(guard(env,dst,df,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson],destinations),
-    guard(env,dv,VERSION,destSubWhere,versionArgs,destVersions),guard(env,dl,LINK,destSubWhere,linkArgs,destLinks),
-    guard(env,dst,['id','uuid','page_type'],`id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT uuid FROM ${src} WHERE id IN (SELECT value FROM json_each(?)))`,[parentJson,parentJson],destinationParents));
+  base.push(guard({env},sv,VERSION,versions,subWhere,[idJson]),guard({env},sl,LINK,links,subWhere,[idJson]),
+    guard({env},'tags',['id','uuid','taxonomy_slug'],tags,'id IN (SELECT value FROM json_each(?))',[json(tagIds)]),
+    guard({env},'page_sensitivity_floors',['uuid','level'],floors,floorWhere,[json(floorUuids)]),
+    guard({env},src,['id','uuid','page_type'],sourceParents,'id IN (SELECT value FROM json_each(?))',[parentJson]));
+  if(src==='trash_pages')base.push(guard({env},src,childFields,children,childWhere,[idJson,idJson]));
+  if(action!=='purge')base.push(guard({env},dst,df,destinations,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
+    guard({env},dv,VERSION,destVersions,destSubWhere,versionArgs),guard({env},dl,LINK,destLinks,destSubWhere,linkArgs),
+    guard({env},dst,['id','uuid','page_type'],destinationParents,`id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT uuid FROM ${src} WHERE id IN (SELECT value FROM json_each(?)))`,[parentJson,parentJson]));
   const detached:Row[]=children.map(c=>({...c,page_id:null,source_page_id:action==='restore'?targetId(sources.find(p=>p.id===c.page_id)!):(c.source_page_id??c.page_id)}));
   const mirror=(p:Row)=>versions.some(v=>v.page_id===p.id&&MIRROR_ACTIONS.includes(String(v.action)));
   // Purging a submission mirror erases its published source too (W12).
@@ -216,13 +201,13 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
     env.DB.prepare(`DELETE FROM ${src} WHERE id IN (SELECT value FROM json_each(?))`).bind(idJson),abortIf(env,'changes()<>?',[sources.length]),
     receipt.write,receipt.guard,...perPage.flatMap(r=>[r.write,r.guard]),
     ...(erasures.length?[env.DB.prepare('INSERT INTO submission_erasures (uuid) SELECT value FROM json_each(?) WHERE true ON CONFLICT(uuid) DO NOTHING').bind(json(erasures))]:[]),
-    guard(env,src,sf,'id IN (SELECT value FROM json_each(?))',[idJson],[]),guard(env,sv,VERSION,subWhere,[idJson],[]),guard(env,sl,LINK,subWhere,[idJson],[]));
+    guard({env},src,sf,[],'id IN (SELECT value FROM json_each(?))',[idJson]),guard({env},sv,VERSION,[],subWhere,[idJson]),guard({env},sl,LINK,[],subWhere,[idJson]));
   if (action === 'purge') statements.push(env.DB.prepare(`DELETE FROM page_access_policies WHERE page_uuid IN (SELECT value FROM json_each(?))
     AND NOT EXISTS (SELECT 1 FROM pages WHERE uuid = page_uuid)`).bind(uuidJson));
-  if(action!=='purge')statements.push(guard(env,dst,df.filter(f=>f!=='updated_at'),'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson],expectedDest),
-    guard(env,dv,VERSION,destSubWhere,versionArgs,expectedVersions),guard(env,dl,LINK,destSubWhere,linkArgs,expectedLinks),subset(env,dst,['id','uuid'],parentRefs));
+  if(action!=='purge')statements.push(guard({env},dst,df.filter(f=>f!=='updated_at'),expectedDest,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
+    guard({env},dv,VERSION,expectedVersions,destSubWhere,versionArgs),guard({env},dl,LINK,expectedLinks,destSubWhere,linkArgs),subset(env,dst,['id','uuid'],parentRefs));
   if(children.length)statements.push(subset(env,src,childFields.filter(f=>f!=='updated_at'),detached));
-  if(service)statements.push(abortIf(env,`EXISTS(SELECT 1 FROM trash_pages WHERE uuid IN (SELECT value FROM json_each(?)) AND (updated_at<? OR updated_at>CURRENT_TIMESTAMP))`,[uuidJson,clock.now]),guard(env,'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)],tags));
+  if(service)statements.push(abortIf(env,`EXISTS(SELECT 1 FROM trash_pages WHERE uuid IN (SELECT value FROM json_each(?)) AND (updated_at<? OR updated_at>CURRENT_TIMESTAMP))`,[uuidJson,clock.now]),guard({env},'tags',['id','uuid','taxonomy_slug'],tags,'id IN (SELECT value FROM json_each(?))',[json(tagIds)]));
   statements.push(...(service?[receipt.guard,...perPage.map(r=>r.guard)]:[]),classificationPolicyGuard(env,policy),...checks(),...(service?.after?.()??[]),
     abortIf(env,`EXISTS (SELECT 1 FROM page_sensitivity_floors WHERE uuid IN (SELECT value FROM json_each(?)) AND level>?)
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=json_extract(e.value,'$.uuid')),0)<json_extract(e.value,'$.level'))`,[json(floorUuids),dataClass==='phi'?2:dataClass==='pii'?1:0,json(floors)]));

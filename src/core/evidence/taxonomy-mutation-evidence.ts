@@ -1,9 +1,10 @@
-import type { Env,Tag,Taxonomy } from '../../types';
+import type { Tag,Taxonomy } from '../../types';
+import { captureMutationAuthority } from './mutation-authority';
 import type { AppContext } from '../http/context';
-import { captureAccessAuthorization } from '../auth/access-authorization';
 import { mutationAuditEvidence,attributedMutationAuditEvidence } from '../db/audit';
-import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../db/data-classes';
+import { classFor,classificationPolicyGuard,strongestClass } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
+import { guard, json } from '../db/bounded-mutation';
 import { recordTagReads,recordTaxonomyReads,flushReadAudit } from '../http/access-log';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
@@ -13,17 +14,10 @@ const LINK_FIELDS=['id','uuid','page_id','tag_id','weight'] as const;
 type TagMetadata=Omit<Tag,'lect'>;
 type Bind = string|number|null;
 type Row = Record<string,string|number|null>;
-function json(value:unknown):string {const result=JSON.stringify(value);if(new TextEncoder().encode(result).length>1_000_000)throw new Error('Taxonomy manifest requires review');return result;}
-function exact(env:Env,table:string,where:string,bindings:Bind[],rows:readonly unknown[],fields:readonly string[]) {
-  return abortIf(env,`(SELECT COUNT(*) FROM ${table} WHERE ${where}) <> ? OR EXISTS (SELECT 1 FROM json_each(?) e
-    WHERE NOT EXISTS (SELECT 1 FROM ${table} t WHERE ${fields.map(f=>`t.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...bindings,rows.length,json(rows)]);
-}
 interface Scope { ids?:number[]; uuid?:string; taxonomySlugs?:string[]; childrenOf?:number }
 async function snapshot(c:AppContext,scope:Scope,capability:'tag:write'|'taxonomy:write') {
   assertRegulatedWritesAllowed(c.env);
-  const authority=await captureAccessAuthorization(c.env,c.get('user'),capability);
-  if(!authority.allowed)throw new Error('Taxonomy authority unavailable');
-  const policy=await resolveDataClasses(c.env,true);if(!policy.ok)throw new Error('Taxonomy classification unavailable');
+  const {authority,policy}=await captureMutationAuthority(c,capability);
   const where=`id IN (SELECT value FROM json_each(?)) OR uuid=? OR taxonomy_slug IN (SELECT value FROM json_each(?)) OR parent_tag=?`;
   const bindings:Bind[]=[json(scope.ids??[]),scope.uuid??'',json(scope.taxonomySlugs??[]),scope.childrenOf??null];
   const [tags,presence]=await c.env.DB.batch([
@@ -59,14 +53,14 @@ async function snapshot(c:AppContext,scope:Scope,capability:'tag:write'|'taxonom
   if(await flushReadAudit(c))throw new Error('Taxonomy read evidence unavailable');
   const linkWhere='tag_id IN (SELECT value FROM json_each(?))';const linkBind=[json(ids)];
   const guards=[authority.guard(),classificationPolicyGuard(c.env,policy),
-    exact(c.env,'tags',where,bindings,tagRows,TAG_FIELDS),
-    exact(c.env,'taxonomies','slug IN (SELECT value FROM json_each(?))',[json(slugKeys)],taxRows,TAX_FIELDS),
-    exact(c.env,'page_tags',linkWhere,linkBind,links.results,LINK_FIELDS),
-    exact(c.env,'pages','id IN (SELECT value FROM json_each(?))',[json(pageRows.map(p=>p.id))],pageRows,['id','uuid','page_type']),
-    exact(c.env,'page_sensitivity_floors','uuid IN (SELECT value FROM json_each(?))',[json(uuids)],retained,['uuid','level']),
+    guard(c,'tags',TAG_FIELDS,tagRows,where,bindings),
+    guard(c,'taxonomies',TAX_FIELDS,taxRows,'slug IN (SELECT value FROM json_each(?))',[json(slugKeys)]),
+    guard(c,'page_tags',LINK_FIELDS,links.results,linkWhere,linkBind),
+    guard(c,'pages',['id','uuid','page_type'],pageRows,'id IN (SELECT value FROM json_each(?))',[json(pageRows.map(p=>p.id))]),
+    guard(c,'page_sensitivity_floors',['uuid','level'],retained,'uuid IN (SELECT value FROM json_each(?))',[json(uuids)]),
     abortIf(c.env,"(SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('trash_pages','trash_page_tags')) <> ?",[trash?2:0])];
-  if(trash)guards.push(exact(c.env,'trash_page_tags',linkWhere,linkBind,trashLinks.results,LINK_FIELDS),
-    exact(c.env,'trash_pages','id IN (SELECT value FROM json_each(?))',[json(trashRows.map(p=>p.id))],trashRows,['id','uuid','page_type']));
+  if(trash)guards.push(guard(c,'trash_page_tags',LINK_FIELDS,trashLinks.results,linkWhere,linkBind),
+    guard(c,'trash_pages',['id','uuid','page_type'],trashRows,'id IN (SELECT value FROM json_each(?))',[json(trashRows.map(p=>p.id))]));
   return {scope,where,bindings,tagRows,taxRows,links:links.results as Row[],trashLinks:trashLinks.results as Row[],trash,policy,authority,
     dataClass:dataClass as 'none'|'pii'|'phi',guards,retained,uuids,pageRows,trashRows,slugKeys,floors:floors.results as Array<{container_key:string;level:number}>,linkWhere,linkBind};
 }
@@ -74,13 +68,13 @@ type Snapshot=Awaited<ReturnType<typeof snapshot>>;
 function finalGuards(c:AppContext,s:Snapshot,tags:TagMetadata[],taxonomies:Taxonomy[],links:Row[],trashLinks:Row[],version:number) {
   const level=s.dataClass==='phi'?2:s.dataClass==='pii'?1:0;
   const statements=[classificationPolicyGuard(c.env,{...s.policy,version}),
-    exact(c.env,'tags',`(${s.where}) OR id IN (SELECT value FROM json_each(?))`,[...s.bindings,json(s.tagRows.map(t=>t.id))],tags,TAG_FIELDS.filter(f=>f!=='updated_at')),
-    exact(c.env,'taxonomies','slug IN (SELECT value FROM json_each(?))',[json(s.slugKeys)],taxonomies,TAX_FIELDS.filter(f=>f!=='updated_at')),
-    exact(c.env,'page_tags',s.linkWhere,s.linkBind,links,LINK_FIELDS),
-    exact(c.env,'pages','id IN (SELECT value FROM json_each(?))',[json(s.pageRows.map(p=>p.id))],s.pageRows,['id','uuid','page_type']),
+    guard(c,'tags',TAG_FIELDS.filter(f=>f!=='updated_at'),tags,`(${s.where}) OR id IN (SELECT value FROM json_each(?))`,[...s.bindings,json(s.tagRows.map(t=>t.id))]),
+    guard(c,'taxonomies',TAX_FIELDS.filter(f=>f!=='updated_at'),taxonomies,'slug IN (SELECT value FROM json_each(?))',[json(s.slugKeys)]),
+    guard(c,'page_tags',LINK_FIELDS,links,s.linkWhere,s.linkBind),
+    guard(c,'pages',['id','uuid','page_type'],s.pageRows,'id IN (SELECT value FROM json_each(?))',[json(s.pageRows.map(p=>p.id))]),
     abortIf(c.env,`EXISTS (SELECT 1 FROM page_sensitivity_floors WHERE uuid IN (SELECT value FROM json_each(?)) AND level>?)
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=json_extract(e.value,'$.uuid')),0)<json_extract(e.value,'$.level'))`,[json(s.uuids),level,json(s.retained)])];
-  if(s.trash)statements.push(exact(c.env,'trash_page_tags',s.linkWhere,s.linkBind,trashLinks,LINK_FIELDS),exact(c.env,'trash_pages','id IN (SELECT value FROM json_each(?))',[json(s.trashRows.map(p=>p.id))],s.trashRows,['id','uuid','page_type']));
+  if(s.trash)statements.push(guard(c,'trash_page_tags',LINK_FIELDS,trashLinks,s.linkWhere,s.linkBind),guard(c,'trash_pages',['id','uuid','page_type'],s.trashRows,'id IN (SELECT value FROM json_each(?))',[json(s.trashRows.map(p=>p.id))]));
   return statements;
 }
 function relatedPages(s:Snapshot) {

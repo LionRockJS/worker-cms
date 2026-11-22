@@ -1,8 +1,9 @@
 import type { AppContext } from '../http/context';
-import { captureAccessAuthorization } from '../auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../db/data-classes';
+import { captureMutationAuthority } from './mutation-authority';
+import { classFor,classificationPolicyGuard } from '../db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
+import { json } from '../db/bounded-mutation';
 import { auditBackgroundReads,flushReadAudit } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
@@ -14,11 +15,6 @@ export type HostSettingWrite = { key: HostSettingKey; value: string };
 
 type Row={key:string;value:string;created_at:string;updated_at:string};
 export class SettingsMutationUnavailableError extends Error {constructor(){super('Settings change unavailable');}}
-function json(value:unknown):string {
-  const result=JSON.stringify(value);
-  if(new TextEncoder().encode(result).length>1_000_000)throw new Error('Settings manifest requires review');
-  return result;
-}
 async function unavailable(c:AppContext):Promise<never> {
   await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});
   throw new SettingsMutationUnavailableError();
@@ -31,10 +27,7 @@ export async function prepareHostSettingsMutation(c:AppContext, scope: readonly 
 }
 async function prepare(c:AppContext,scope: readonly HostSettingKey[]) {
   const env=c.env,user=c.get('user');
-  const authority=await captureAccessAuthorization(env,user,'menu:manage');
-  if(!authority.allowed)throw new Error('Settings authority unavailable');
-  const policy=await resolveDataClasses(env,true);
-  if(!policy.ok)throw new Error('Settings classification unavailable');
+  const {authority,policy}=await captureMutationAuthority(c,'menu:manage');
   const keys=json(scope);
   const captured=await env.DB.prepare(`WITH scoped AS (SELECT key,value,created_at,updated_at FROM settings WHERE key IN (SELECT value FROM json_each(?))),
     budget AS (SELECT COALESCE(SUM(length(CAST(json_object('key',key,'value',value,'created_at',created_at,'updated_at',updated_at) AS BLOB))),0)+COUNT(*)+2 bytes FROM scoped)

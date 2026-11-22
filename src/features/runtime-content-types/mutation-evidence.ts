@@ -1,8 +1,9 @@
 import type { AppContext } from '../../core/http/context';
-import { captureAccessAuthorization } from '../../core/auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
+import { captureMutationAuthority } from '../../core/evidence/mutation-authority';
+import { classFor,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
+import { guard, json, snapshot, type Row } from '../../core/db/bounded-mutation';
 import { nextIdSql } from '../../core/pages/snapshot-id';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
@@ -11,29 +12,11 @@ import { clearConfigCache } from '../../core/db/content-config';
 import { PAGE_TYPE_EXTENSIONS_SETTING_KEY,type PageTypeExtension } from '../../core/db/page-type-store';
 
 type Table='page_types'|'block_types';
-type Row=Record<string,string|number|null>;
 const BASE=['id','uuid','created_at','updated_at','slug','name','blueprint','weight'];
 const fields=(table:Table)=>table==='page_types'?[...BASE,'block_lists','taxonomy_lists']:BASE;
 const SETTING=['key','value','created_at','updated_at'];
 const TAXONOMY=['id','uuid','slug','name','created_at','updated_at'];
 export class RuntimeTypeMutationUnavailableError extends Error {constructor(){super('Runtime type change unavailable');}}
-function json(value:unknown):string {
-  const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Schema manifest requires review');return text;
-}
-async function snapshot(c:AppContext,table:string,columns:string[],where='1',args:Array<string|number|null>=[]):Promise<Row[]> {
-  const object=`json_object(${columns.map(f=>`'${f}',r.${f}`).join(',')})`;
-  const row=await c.env.DB.prepare(`WITH scoped AS (SELECT * FROM ${table} WHERE ${where} ORDER BY ${columns[0]} LIMIT 5001),
-    budget AS (SELECT COUNT(*) n,COALESCE(SUM(length(CAST(${object} AS BLOB))),0)+COUNT(*)+2 bytes FROM scoped r)
-    SELECT CASE WHEN n>5000 OR bytes>1000000 THEN json('{') ELSE (SELECT json_group_array(${object}) FROM scoped r) END snapshot FROM budget`).bind(...args).first<{snapshot:string}>();
-  if(!row)throw new Error('Schema snapshot unavailable');
-  const rows=JSON.parse(row.snapshot) as Row[];
-  if(columns.includes('id')&&rows.some(r=>!Number.isSafeInteger(r.id)||Number(r.id)<=0))throw new Error('Unsafe schema identity');
-  return rows;
-}
-function guard(c:AppContext,table:string,columns:string[],rows:Row[],where='1',args:Array<string|number|null>=[]) {
-  return abortIf(c.env,`(SELECT COUNT(*) FROM ${table} WHERE ${where})<>? OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS
-    (SELECT 1 FROM ${table} r WHERE ${columns.map(f=>`r.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...args,rows.length,json(rows)]);
-}
 function array(value:unknown):string[] {if(value==null)return [];const parsed=typeof value==='string'?JSON.parse(value):value;if(!Array.isArray(parsed)||parsed.length>5000||parsed.some(v=>typeof v!=='string'))throw new Error('Invalid schema selection');return parsed;}
 function extensionsFromRaw(raw:string|null):Record<string,PageTypeExtension> {
   const map=raw===null?{}:JSON.parse(raw);
@@ -50,10 +33,8 @@ export async function prepareRuntimeTypeMutation(c:AppContext,table:Table) {
   try{return await prepare(c,table);}catch{return unavailable(c);}
 }
 async function prepare(c:AppContext,table:Table) {
-  const authority=await captureAccessAuthorization(c.env,c.get('user'),table==='page_types'?'pagetype:write':'blocktype:write');
-  if(!authority.allowed)throw new Error('Schema authority unavailable');
-  const policy=await resolveDataClasses(c.env,true);if(!policy.ok)throw new Error('Schema classification unavailable');
-  const [pages,blocks,taxonomies,settings]=await Promise.all([snapshot(c,'page_types',fields('page_types')),snapshot(c,'block_types',BASE),snapshot(c,'taxonomies',TAXONOMY),snapshot(c,'settings',SETTING,'key=?',[PAGE_TYPE_EXTENSIONS_SETTING_KEY])]);
+  const {authority,policy}=await captureMutationAuthority(c,table==='page_types'?'pagetype:write':'blocktype:write');
+  const [pages,blocks,taxonomies,settings]=await Promise.all([snapshot<Row>(c,'page_types',fields('page_types')),snapshot<Row>(c,'block_types',BASE),snapshot<Row>(c,'taxonomies',TAXONOMY),snapshot<Row>(c,'settings',SETTING,'key=?',[PAGE_TYPE_EXTENSIONS_SETTING_KEY])]);
   const catalog={page_types:pages,block_types:blocks};const source=catalog[table];
   const admission=()=>[authority.guard(),classificationPolicyGuard(c.env,policy),guard(c,'page_types',fields('page_types'),pages),guard(c,'block_types',BASE,blocks),guard(c,'taxonomies',TAXONOMY,taxonomies),guard(c,'settings',SETTING,settings,'key=?',[PAGE_TYPE_EXTENSIONS_SETTING_KEY])];
   const protection=(slugs:string[],taxa:string[])=>{
