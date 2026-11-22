@@ -141,6 +141,27 @@ missing table or column.
 clone's baseline; add `--local` for the local databases. `npm run deploy` runs
 it last and refuses to deploy onto a database that is missing something.
 
+#### Existing-installation release check
+
+From the release candidate checkout, look up the currently deployed Worker's
+Git commit in its version tag and run the upgrade drill from that commit:
+
+```bash
+npm run check:upgrade -- --from <deployed-commit>
+```
+
+Repeat for each distinct deployed revision you plan to upgrade. The drill
+lists numbered migrations for the private and published databases in apply
+order, checks that both upgraded schemas match a fresh install, and reports
+rollback hazards for review. A mismatch means the numbered migrations alone
+cannot bring that revision up to date. Use the reported differences to plan
+the database changes before deploying.
+
+The drill reconstructs the old revision in local SQLite. Check the actual
+target databases with `npm run check:schema -- -c <wrangler config>` after
+applying any required database changes. Use the same Wrangler config for the
+check and the deploy.
+
 ### 4. Create and bind the private R2 media bucket
 
 Picture fields upload files to the `MEDIA_BUCKET` R2 binding. R2 buckets are not public by default; this CMS keeps the bucket private and serves objects through the Worker at `/media/<key>`.
@@ -1066,6 +1087,8 @@ volumes.
   2026 security review covered OAuth, sessions, RBAC, cross-origin mutations,
   plugins, uploads/media, rendering/CSP, structured JSON, publishing, and
   dependencies; it is not a substitute for an independent penetration test.
+- For upgrades, run the [existing-installation release check](#existing-installation-release-check)
+  using the currently deployed revision.
 
 ---
 
