@@ -118,3 +118,11 @@ CREATE INDEX IF NOT EXISTS idx_plugin_credit_ledger_plugin ON plugin_credit_ledg
 CREATE INDEX IF NOT EXISTS idx_shared_credit_ledger_user ON shared_credit_ledger(user_id, currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_shared_credit_ledger_currency ON shared_credit_ledger(currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_credit_subscriptions_due ON credit_subscriptions(status, next_charge_at);
+-- Completed metered charges, scoped to the authenticated plugin.
+CREATE TABLE IF NOT EXISTS plugin_charge_receipts(
+    plugin_id TEXT NOT NULL,
+    charge_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    response TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, charge_id)
+);

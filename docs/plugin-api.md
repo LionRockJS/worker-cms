@@ -128,10 +128,17 @@ When the optional `credits` feature is enabled, it adds:
 | --- | --- |
 | `GET /credits` | Effective declared prices and balances. |
 | `GET /credits/quote` | Quote a declared key and quantity; quantity 1–1,000,000. |
-| `POST /credits/charge` | Charge a declared `metered` key; quantity 1–1,000,000 and `x-acting-user-id` required. Insufficient funds return 402 `insufficient_credits`. |
+| `POST /credits/charge` | Charge a declared `metered` key; quantity 1–1,000,000 and `x-acting-user-id` required. Insufficient funds return 402 `insufficient_credits`. Accepts an optional plugin-scoped `charge_id` for safe retries. |
 | `POST /credits/plugin-grant` | Add (positive `amount`) or take back (negative, never below zero) credits in this plugin's own wallet; `grant_id` is required and makes the call idempotent (a reuse with a different amount or currency returns 409 `grant_conflict`). The wallet pays only this plugin's costs, before the member's balance and the shared pool. |
 | `POST /credits/usage` | Report a declared `recurring` key for a user; quantity 0–1,000,000,000. |
 | `GET /credits/subscriptions` | Read this contributor's subscriptions, optionally filtered by user. |
+
+For metered charges, generate one `charge_id` per usage report and reuse it
+on retries. IDs are case sensitive and use 1–128 letters, digits, dots,
+underscores, colons, or hyphens. A retry of a completed charge returns its
+original response, including the original balance. Reusing the ID with a
+different payer, key, quantity, entity, or note returns `409 charge_id_conflict`.
+Declined charges do not reserve the ID.
 
 A declared cost with `plugin_only: true` is paid only from the plugin's own
 wallet (see `POST /credits/plugin-grant`), never the member's balance or the

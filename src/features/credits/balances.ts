@@ -3,6 +3,7 @@
 // append-only ledger. Every write is one guarded DB.batch; see ./service.ts.
 
 import type { Env } from '../../types';
+import { insertChargeReceipt, type ChargeReceiptKey } from './charge-receipts';
 import { DEFAULT_CREDIT_CURRENCY, isCreditCurrency, emptyCurrencyTotals, type CreditCurrency } from './currencies';
 
 export interface CreditChargeInput {
@@ -30,6 +31,7 @@ export interface CreditChargeInput {
   note?: string;
   /** Who triggered it: a user id, or 'plugin:<id>' for server-to-server. */
   createdBy: string;
+  receipt?: ChargeReceiptKey;
 }
 
 export type CreditChargeResult =
@@ -113,6 +115,9 @@ export async function chargeCredits(env: Env, input: CreditChargeInput): Promise
       -amount, amount, input.action, input.entityType ?? null, input.entityId ?? null,
       input.pluginId ?? null, input.note ?? null, input.createdBy, input.userId, currency, amount,
     ),
+    ...(input.receipt ? [insertChargeReceipt(env, input.receipt, input.userId, currency, amount, 'user',
+      'EXISTS (SELECT 1 FROM credit_wallets WHERE user_id = ? AND currency = ? AND balance >= ?)',
+      [input.userId, currency, amount])] : []),
     env.DB.prepare(
       `UPDATE credit_wallets
           SET balance = balance - ?
@@ -121,7 +126,7 @@ export async function chargeCredits(env: Env, input: CreditChargeInput): Promise
     ).bind(amount, input.userId, currency, amount),
   ]);
 
-  const updated = results[2].results;
+  const updated = results.at(-1)!.results;
   if (updated.length === 1) {
     return { ok: true, balanceAfter: updated[0].balance };
   }
@@ -266,6 +271,7 @@ interface SharedCreditChangeInput {
   pluginId?: string;
   note?: string;
   createdBy: string;
+  receipt?: ChargeReceiptKey;
 }
 
 /** Atomic pool write: ledger INSERT + balance UPDATE sharing one guard, like
@@ -291,11 +297,14 @@ async function writeSharedCredits(
       currency, delta, delta, input.action, input.userId ?? null, input.entityType ?? null,
       input.entityId ?? null, input.pluginId ?? null, input.note ?? null, input.createdBy, currency, ...guardArgs,
     ),
+    ...(input.receipt ? [insertChargeReceipt(env, input.receipt, input.userId!, currency, -delta, 'shared',
+      `EXISTS (SELECT 1 FROM shared_credits WHERE currency = ?${guardSql})`,
+      [currency, ...guardArgs])] : []),
     env.DB.prepare(`UPDATE shared_credits SET balance = balance + ? WHERE currency = ?${guardSql} RETURNING balance`)
       .bind(delta, currency, ...guardArgs),
   ]);
 
-  const updated = results[2].results;
+  const updated = results.at(-1)!.results;
   if (updated.length === 1) return { ok: true, balanceAfter: updated[0].balance };
   return {
     ok: false,
@@ -364,6 +373,7 @@ interface PluginCreditChangeInput {
   grantId?: string;
   note?: string;
   createdBy: string;
+  receipt?: ChargeReceiptKey;
 }
 
 export async function getPluginCreditBalance(
@@ -415,11 +425,14 @@ export async function writePluginCredits(
       delta, delta, input.action, userId, input.entityType ?? null, input.entityId ?? null,
       input.grantId ?? null, input.note ?? null, input.createdBy, pluginId, currency, ...guardArgs,
     ),
+    ...(input.receipt ? [insertChargeReceipt(env, input.receipt, userId!, currency, -delta, 'plugin',
+      `EXISTS (SELECT 1 FROM plugin_credits WHERE plugin_id = ? AND currency = ?${guardSql})`,
+      [pluginId, currency, ...guardArgs])] : []),
     env.DB.prepare(`UPDATE plugin_credits SET balance = balance + ? WHERE plugin_id = ? AND currency = ?${guardSql} RETURNING balance`)
       .bind(delta, pluginId, currency, ...guardArgs),
   ]);
 
-  const updated = results[2].results;
+  const updated = results.at(-1)!.results;
   if (updated.length === 1) return { ok: true, balanceAfter: updated[0].balance };
   return {
     ok: false,

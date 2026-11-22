@@ -1,5 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import cms from '../src/index';
 import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { signJWT } from './auth-fixtures';
@@ -11,6 +13,7 @@ import {
   grantPluginCredits,
   pageCreateAmounts,
   refundCurrencies,
+  saveCreditValues,
   spendCredits,
   spendCurrencies,
 } from '../src/features/credits/service';
@@ -68,8 +71,8 @@ async function registerPlugin(): Promise<void> {
   } as unknown as Fetcher);
 }
 
-function cmsApiAs(userId: number, method: string, path: string, body?: unknown): Promise<Response> {
-  return worker.fetch(new Request(`http://localhost${path}`, {
+function pluginRequest(userId: number, method: string, path: string, body?: unknown): Request {
+  return new Request(`http://localhost${path}`, {
     method,
     headers: {
       'x-plugin-secret': PLUGIN_SECRET,
@@ -78,7 +81,11 @@ function cmsApiAs(userId: number, method: string, path: string, body?: unknown):
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
-  }));
+  });
+}
+
+function cmsApiAs(userId: number, method: string, path: string, body?: unknown): Promise<Response> {
+  return worker.fetch(pluginRequest(userId, method, path, body));
 }
 
 async function adminFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -148,6 +155,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM credit_ledger').run();
   await env.DB.prepare('DELETE FROM shared_credit_ledger').run();
   await env.DB.prepare('DELETE FROM plugin_credit_ledger').run();
+  await env.DB.prepare('DELETE FROM plugin_charge_receipts').run();
   await env.DB.prepare('DELETE FROM plugin_credits').run();
   await env.DB.prepare('DELETE FROM credit_subscriptions').run();
   await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'plugin.credits.%'").run();
@@ -322,6 +330,80 @@ describe('grant API', () => {
     const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', { key: 'send_edm', quantity: 10 });
     expect(await res.json()).toMatchObject({ ok: true, charged: 20, source: 'plugin', balance: 100 });
     expect(await getPluginCreditBalance(env, PLUGIN_ID)).toBe(20);
+  });
+
+  it.each([
+    { source: 'plugin', table: 'plugin_credit_ledger' },
+    { source: 'user', table: 'credit_ledger' },
+    { source: 'shared', table: 'shared_credit_ledger' },
+  ])('debits the $source wallet once when charge retries overlap', async ({ source, table }) => {
+    if (source === 'plugin') await fund(PLUGIN_ID, 20);
+    if (source === 'user') await seedUser(PAYER_ID, 40);
+    if (source !== 'user') await seedPool('credit', 40);
+
+    const body = { key: 'send_edm', quantity: 10, charge_id: 'edm:batch-1', entity_id: 'batch-1' };
+    const path = '/__cms/credits/charge';
+    const charge = (payload = body, payer = PAYER_ID) => cmsApiAs(payer, 'POST', path, payload);
+    // Start the competing request after the first has missed the receipt and
+    // reached the debit batch for this wallet, but before that batch runs.
+    const session = env.DB.withSession('first-primary');
+    let debitPrepared = false;
+    let competingResponse: Response | undefined;
+    const DB = {
+      withSession: () => ({
+        prepare(sql: string) {
+          if (sql.startsWith(`INSERT INTO ${table} (`)) debitPrepared = true;
+          return session.prepare(sql);
+        },
+        async batch(statements: D1PreparedStatement[]) {
+          if (debitPrepared && !competingResponse) competingResponse = await charge();
+          return session.batch(statements);
+        },
+      }),
+    } as D1Database;
+    const ctx = createExecutionContext();
+    const firstResponse = await cms.fetch(pluginRequest(PAYER_ID, 'POST', path, body), { ...env, DB }, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(competingResponse).toBeDefined();
+    const original = { ok: true, charged: 20, currency: 'credit', balance: source === 'user' ? 20 : 0, source };
+    for (const response of [firstResponse, competingResponse!]) {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(original);
+    }
+
+    await seedUser(PAYER_ID, 100);
+    expect(await (await charge()).json()).toEqual(original);
+    for (const conflict of [await charge({ ...body, quantity: 1 }), await charge(body, ADMIN_ID)]) {
+      expect(conflict.status).toBe(409);
+      expect(await conflict.json()).toEqual({ error: 'charge_id_conflict' });
+    }
+    for (const ledger of ['plugin_credit_ledger', 'credit_ledger', 'shared_credit_ledger']) {
+      const spends = await env.DB.prepare(`SELECT delta FROM ${ledger} WHERE action = ?`)
+        .bind(`${PLUGIN_ID}:send_edm`).all();
+      expect(spends.results).toEqual(ledger === table ? [{ delta: -20 }] : []);
+    }
+  });
+
+  it('allows the same charge ID after an insufficient-funds response', async () => {
+    const charge = () => cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', {
+      key: 'send_edm', charge_id: 'retry-after-top-up',
+    });
+    expect((await charge()).status).toBe(402);
+    await seedUser(PAYER_ID, 5);
+    expect(await (await charge()).json()).toMatchObject({ ok: true, charged: 2, balance: 3 });
+  });
+
+  it('replays a zero-price charge after the host changes the price', async () => {
+    await saveCreditValues(env, PLUGIN_ID, { send_edm: 0 });
+    await seedUser(PAYER_ID, 5);
+    const charge = () => cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', {
+      key: 'send_edm', charge_id: 'free-send',
+    });
+    const original = { ok: true, charged: 0, currency: 'credit', balance: 5 };
+    expect(await (await charge()).json()).toEqual(original);
+    await saveCreditValues(env, PLUGIN_ID, { send_edm: 2 });
+    expect(await (await charge()).json()).toEqual(original);
+    expect((await getCreditBalances(env, PAYER_ID))?.credit).toBe(5);
   });
 
   it('reports plugin balances in the listing, the quote and a refusal', async () => {

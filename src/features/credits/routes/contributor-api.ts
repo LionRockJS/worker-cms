@@ -15,6 +15,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../../../types';
 import type { AppContext } from '../../../core/http/context';
 import { coreExtensions, type ApiCallerIdentity } from '../../../core/extensions';
+import { fingerprint } from '../../../core/db/bounded-mutation';
 import { recordRead, recordTableReads } from '../../../core/http/access-log';
 import { recordWalletReads } from '../read-audit';
 import type { CreditCurrency } from '../currencies';
@@ -30,6 +31,7 @@ import {
   spendCredits,
 } from '../service';
 import { isCreditCurrency } from '../currencies';
+import { insertChargeReceipt, readChargeReceipt } from '../charge-receipts';
 import { listSubscriptionsForPlugin, reportSubscriptionUsage, type CreditSubscriptionRow } from '../subscriptions';
 
 export const creditApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -167,7 +169,7 @@ creditApiRoutes.post('/credits/charge', async (c) => {
   if (auth instanceof Response) return auth;
 
   const body = await c.req.json().catch(() => null) as {
-    key?: unknown; quantity?: unknown; entity_type?: unknown; entity_id?: unknown; note?: unknown;
+    key?: unknown; quantity?: unknown; charge_id?: unknown; entity_type?: unknown; entity_id?: unknown; note?: unknown;
   } | null;
   if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
 
@@ -176,35 +178,73 @@ creditApiRoutes.post('/credits/charge', async (c) => {
   const quantity = Math.trunc(asFiniteNumber(body.quantity) ?? 1);
   if (quantity < 1 || quantity > 1_000_000) return c.json({ error: 'invalid_quantity' }, 400);
 
+  const chargeId = body.charge_id;
+  if (chargeId !== undefined && (typeof chargeId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(chargeId))) {
+    return c.json({ error: 'invalid_charge_id' }, 400);
+  }
+  const payer = actingUserId(c);
+  if (payer === null) return c.json({ error: 'acting_user_required' }, 400);
+  const entityType = typeof body.entity_type === 'string' ? body.entity_type.slice(0, 60) : undefined;
+  const entityId = typeof body.entity_id === 'string' || typeof body.entity_id === 'number' ? String(body.entity_id).slice(0, 60) : undefined;
+  const note = typeof body.note === 'string' ? body.note.slice(0, 300) : undefined;
+  const receipt = chargeId === undefined ? undefined : {
+    pluginId: auth.callerId,
+    chargeId,
+    fingerprint: await fingerprint(JSON.stringify([payer, key, quantity, entityType, entityId, note])),
+  };
+  const replay = async () => {
+    if (!receipt) return null;
+    const saved = await readChargeReceipt(c.env, receipt);
+    if (!saved) return null;
+    return saved.conflict ? c.json({ error: 'charge_id_conflict' }, 409) : c.json(saved.response);
+  };
+  const previous = await replay();
+  if (previous) return previous;
+
   const credit = (await effectiveCreditsForId(c.env, auth.callerId)).find((entry) => entry.def.key === key);
   if (!credit) return c.json({ error: 'unknown_credit_key' }, 400);
   if (credit.def.charge !== 'metered') return c.json({ error: 'not_metered' }, 400);
-
-  const payer = actingUserId(c);
-  if (payer === null) return c.json({ error: 'acting_user_required' }, 400);
 
   const currency = credit.def.currency;
   const total = credit.value * quantity;
   announceBalances(c, auth.callerId, [currency]);
   announceContributor(c, auth.callerId);
-  if (total === 0) {
-    return c.json({ ok: true, charged: 0, currency, balance: await getCreditBalance(c.env, payer, currency) });
-  }
-
-  const charge = await spendCredits(c.env, {
+  const spend = () => spendCredits(c.env, {
     userId: payer,
     amount: total,
     currency,
     action: `${auth.callerId}:${key}`,
-    entityType: typeof body.entity_type === 'string' ? body.entity_type.slice(0, 60) : undefined,
-    entityId: typeof body.entity_id === 'string' || typeof body.entity_id === 'number' ? String(body.entity_id).slice(0, 60) : undefined,
-    note: typeof body.note === 'string' ? body.note.slice(0, 300) : undefined,
+    entityType,
+    entityId,
+    note,
     pluginId: auth.callerId,
     // The calling plugin's own wallet pays its own metered cost first.
     scopePluginId: auth.callerId,
     pluginOnly: credit.def.pluginOnly,
     createdBy: `plugin:${auth.callerId}`,
+    receipt,
   });
+
+  let charge: Awaited<ReturnType<typeof spendCredits>>;
+  try {
+    if (total === 0) {
+      if (!receipt) return c.json({ ok: true, charged: 0, currency, balance: await getCreditBalance(c.env, payer, currency) });
+      await insertChargeReceipt(c.env, receipt, payer, currency, 0).run();
+      const saved = await replay();
+      if (!saved) throw new Error('Metered charge receipt unavailable');
+      return saved;
+    }
+    charge = await spend();
+  } catch (error) {
+    // A concurrent request can win the receipt's unique constraint.
+    const saved = await replay();
+    if (saved) return saved;
+    throw error;
+  }
+  // Read even after a decline. A concurrent debit may have used the last funds.
+  const saved = await replay();
+  if (saved) return saved;
+  if (receipt && charge.ok) throw new Error('Metered charge receipt unavailable');
   if (!charge.ok) {
     if (charge.error === 'unknown_user') return c.json({ error: 'unknown_acting_user' }, 400);
     // The error code is the same for every wallet — `currency` says which one
