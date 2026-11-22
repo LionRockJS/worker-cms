@@ -259,7 +259,7 @@ footer { margin-top: 40px; font-size: 14px; color: var(--dim); line-height: 1.5;
         <ol>
           <li><b>New site:</b> <code>npm run setup</code> writes this clone's <code>wrangler.toml</code> and <code>.dev.vars</code>, can apply the migrations, then builds <code>dist/</code> and makes the first deploy.</li>
           <li><b>Choose features</b> in <code>cms.features.json</code>, then <code>npm run build</code>.</li>
-          <li><b>Migrate first:</b> <code>npx wrangler d1 migrations apply &lt;db&gt; --remote</code> for the CMS database and the published one, plus any <code>migrations/manual/</code> file a release calls for.</li>
+          <li><b>Migrate first:</b> <code>npx wrangler d1 migrations apply &lt;db&gt; --remote</code> for the CMS database and the published one. A database created before a baseline change must be recreated or patched by hand.</li>
           <li><b>Deploy:</b> <code>npm run deploy -- -c wrangler.production.toml</code>. It type-checks and tests, then deploys the committed, pushed revision.</li>
         </ol>
       </div>

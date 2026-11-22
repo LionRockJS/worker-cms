@@ -14,6 +14,5 @@ An identity owned by an active account remains unavailable for linking elsewhere
 No data or roles are transferred between accounts. The retained email remains reserved;
 an ordinary sign-in does not merge accounts based on matching email addresses.
 
-Fresh installations include `disabled_at` in the generated baseline. Before deploying
-to an existing database, apply `migrations/manual/2026-11-14_account_disable.sql` once.
-This migration is separate from the account IP access upgrade.
+`users.disabled_at` is part of the generated baseline. A database created before it
+needs the column added by hand (see README "Schema changes").

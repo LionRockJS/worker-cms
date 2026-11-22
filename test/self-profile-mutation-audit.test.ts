@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { applyD1Migrations, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { rotateAuthSession, validateAccessSession, createAuthSession } from '../src/core/auth/sessions';
@@ -273,16 +273,6 @@ it('rolls back delivery if an outbox-delete trigger corrupts the primary receipt
   await fault("AFTER DELETE ON audit_mutation_outbox BEGIN DELETE FROM audit_events WHERE event_id = OLD.event_id; END");
   expect((await drainAuditMutationOutbox(env)).failed).toBe(1);
   expect(await outbox()).toHaveLength(1); expect(await events()).toEqual([]);
-});
-
-it('applies the existing-installation outbox upgrade idempotently without altering accounts', async () => {
-  const before = await account(); const identities = await links();
-  await env.DB.prepare('DROP TABLE audit_mutation_outbox').run();
-  expect(env.TEST_AUDIT_OUTBOX_UPGRADE).toHaveLength(1);
-  await applyD1Migrations(env.DB, env.TEST_AUDIT_OUTBOX_UPGRADE);
-  await applyD1Migrations(env.DB, env.TEST_AUDIT_OUTBOX_UPGRADE.map(migration => ({ ...migration, name: `again-${migration.name}` })));
-  expect(await auditMutationOutboxHealth(env)).toMatchObject({ pending: 0, exhausted: 0 });
-  expect(await account()).toEqual(before); expect(await links()).toEqual(identities);
 });
 
 const ownAvatar = 'data:image/png;base64,iVBORw0KGgo=';

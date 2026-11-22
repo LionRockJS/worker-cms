@@ -2,7 +2,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -23,7 +23,6 @@ import {
 const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
 const UPGRADE_CONFIG_PATH = new URL('../.wrangler-upgrade.toml', import.meta.url);
 const EXAMPLE_CONFIG_PATH = new URL('../wrangler.example.toml', import.meta.url);
-const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
 const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
 const DEV_VARS_PATH = new URL('../.dev.vars', import.meta.url);
 const WRANGLER_STATE_PATH = new URL('../.wrangler/', import.meta.url);
@@ -1056,24 +1055,18 @@ async function main() {
     if (publishedDatabaseName) run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
   }
 
-  // A fresh database gets the audit/classification tables from the baseline.
-  // An existing one already applied the baseline, so it needs the hand-applied
-  // upgrades that wrangler's migrations_dir does not descend into.
+  // Schema changes go into the baseline only (see README "Schema changes"), so
+  // a database created by an older revision may be missing tables or columns.
   if (databaseReused) {
-    const manual = (await readdir(MANUAL_MIGRATIONS)).filter((file) => file.endsWith('.sql')).sort();
     console.log(`
-${databaseName} already existed. Apply any of these upgrades it does not have yet,
-in this order (read each file's header first; *_sensitivity_trash.sql needs the
-trash tables), before using the deployed code:
-${manual.map((file) => `  npx wrangler d1 execute ${databaseName} --remote --file migrations/manual/${file}`).join('\n')}
-
-A "duplicate column" error means that upgrade is already applied. The deployed
-code fails closed without them (sign-in included), so apply them before deploying.
+${databaseName} already existed. Numbered migrations cannot add what changed in the
+baseline since it was created. If it predates the current schema, recreate it or
+patch it by hand before deploying: the code fails closed (sign-in included).
 `);
   }
 
-  // Default off for a reused database: deploying before its upgrades locks
-  // everyone out, and they are applied by hand outside this wizard.
+  // Default off for a reused database: deploying onto an out-of-date schema
+  // locks everyone out.
   const deployed = !local && await confirm('Deploy 0xCMS now?', !databaseReused);
   if (deployed) {
     const grant = await firstAdminGrant(

@@ -36,10 +36,11 @@ jobs:
       - run: npm test
       - run: npm run check:dms-profile
 
-  # An existing database upgraded through numbered and manual migrations must
-  # end where a fresh install does. --from is the oldest revision still
-  # deployed anywhere; f9719a3 predates every manual migration. Move it forward
-  # only when no deployment is older (W0 records the deployed revisions).
+  # An existing database upgraded through numbered migrations must end where a
+  # fresh install does. --from is the oldest schema still deployed anywhere;
+  # acc57d7 is the last revision with hand-applied migrations; a database whose
+  # schema is older must be recreated or patched by hand. Move it forward only
+  # when no deployment is older.
   upgrade-path:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -52,7 +53,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
-      - run: npm run check:upgrade -- --from f9719a3
+      - run: npm run check:upgrade -- --from acc57d7
 
   # High and critical findings in production dependencies block CI.
   # Record findings that require an exception under the W14 procedure.

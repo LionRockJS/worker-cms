@@ -1,5 +1,4 @@
 import { env, exports } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { signJWT } from './auth-fixtures';
 import { resolveDataClasses, classFor } from '../src/core/db/data-classes';
@@ -293,18 +292,3 @@ it('stops a queued bulk mutation when its retained private read cannot persist',
   expect((await env.DB.prepare('SELECT lect FROM pages WHERE id = 7000').first<{ lect: string }>())?.lect).toContain('historic-private-value');
 });
 
-it('backfills an existing core/trash deployment from current policy and applies upgrades idempotently', async () => {
-  await associate(); await classify('taxonomy', 'clinical');
-  await env.DB.prepare("INSERT INTO trash_pages (id, uuid, name, slug, page_type) VALUES (7020, 'old-trash', 'Old trash', 'old-trash', 'article')").run();
-  await env.DB.prepare('INSERT INTO trash_page_tags (page_id, tag_id) VALUES (7020, 7011)').run();
-  const objects = (await env.DB.prepare("SELECT type, name FROM sqlite_master WHERE type IN ('trigger', 'view') AND name LIKE 'sensitivity_%'").all<{ type: string; name: string }>()).results;
-  for (const type of ['trigger', 'view']) for (const object of objects.filter(object => object.type === type)) await env.DB.prepare(`DROP ${type} ${object.name}`).run();
-  await env.DB.prepare('DROP TABLE page_sensitivity_floors').run(); await env.DB.prepare('DROP TABLE data_class_floors').run();
-  const migrations = env.TEST_SENSITIVITY_UPGRADE;
-  expect(migrations).toHaveLength(2);
-  await applyD1Migrations(env.DB, migrations);
-  expect(await floor()).toBe('phi'); expect(await floor('old-trash')).toBe('phi');
-  // Different receipt names force an actual second execution of every idempotent statement.
-  await applyD1Migrations(env.DB, migrations.map(migration => ({ ...migration, name: `again-${migration.name}` })));
-  expect(await floor()).toBe('phi');
-});

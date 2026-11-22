@@ -22,7 +22,8 @@ describe('flattened migration contract', () => {
     // install whose baseline never had the column, and the rebuild that would
     // be safe on both cascades through DB.pages' foreign keys (D1 runs with
     // foreign_keys=1) and takes page_versions and page_tags with it. Such
-    // changes leave the baseline and ship as a one-off under migrations/manual/.
+    // changes go into the baseline only; a database created before them is
+    // recreated or patched by hand (README "Schema changes").
     const names = env.TEST_MIGRATIONS.map((migration) => migration.name);
     expect(names.filter((name) => !/^\d{4}_enable_/.test(name))).toEqual(['0001_initial_schema.sql', '0008_page_access.sql']);
     expect(names[0]).toBe('0001_initial_schema.sql');

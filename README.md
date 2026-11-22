@@ -126,6 +126,16 @@ the code they belong to — edit those, not `migrations/*.sql`, and run
 `npm run build:migrations`. See [Feature profiles](#feature-profiles) for
 choosing which features a deployment installs.
 
+#### Schema changes
+
+While the CMS is in alpha, a change to a core table goes into its `schema.sql`
+fragment, and so into the regenerated baseline, and nowhere else. There are no
+hand-applied upgrade files. A database created before the change does not get
+it from `wrangler d1 migrations apply`, because it has already recorded
+`0001`: recreate that database, or apply the change to it by hand, before
+deploying code that needs it. The code fails closed (sign-in included) on a
+missing table or column.
+
 ### 4. Create and bind the private R2 media bucket
 
 Picture fields upload files to the `MEDIA_BUCKET` R2 binding. R2 buckets are not public by default; this CMS keeps the bucket private and serves objects through the Worker at `/media/<key>`.
@@ -992,7 +1002,6 @@ already lasts as long), `held_by_other` (someone else's hold, left alone),
 `keep_until` day, so nothing needs releasing when retention ends. Admins with
 `records:hold` see the plugin's holds under **Admin → Holds** (the page editor
 shows a banner on held pages), and can change their date or release them early.
-Existing databases need `migrations/manual/2026-11-21_record_hold_expiry.sql`.
 
 ### List filters on lect fields
 
@@ -1198,6 +1207,10 @@ August 2026 table rename, which has to be applied by hand.
 
 An upgraded deployment may show additional legacy `live_*` tables in `DB`;
 current CMS routes ignore those tables and use `PUBLISHED_DB` instead.
+
+### Moving settings between CMS installations
+
+In **System → Export / import**, choose the sections to download. Each settings file can contain up to **2,000,000 UTF-8 bytes**, including JSON formatting. Export and import use the same limit. If the selected sections fit individually but exceed the limit together, export smaller groups. If a section exceeds the limit by itself, the screen names it. Deselect it to transfer the other sections.
 
 ### Feature profiles
 
