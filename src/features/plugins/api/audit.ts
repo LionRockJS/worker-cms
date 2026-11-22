@@ -25,7 +25,7 @@
 //     host reads). An unclassified page still records — the plugin asked —
 //     under `plugin_access`, which the sweep keeps 365 days hot.
 //   - Reading events back is itself recorded (`audit.read`), and returns only
-//     the calling plugin's own events.
+//     the calling plugin's own events. Actor names and emails are withheld.
 // ============================================================
 
 import { Hono } from 'hono';
@@ -34,7 +34,7 @@ import type { AppContext } from '../../../core/http/context';
 import { writeAuditRows, type AuditRow } from '../../../core/db/audit';
 import { classFor, failsClosed, resolveDataClasses, retentionClassFor, strongestClass } from '../../../core/db/data-classes';
 import { pageSensitivityFloors } from '../../../core/db/sensitivity';
-import { auditBackgroundReads, auditUnavailable } from '../../../core/http/access-log';
+import { auditUnavailable } from '../../../core/http/access-log';
 import { inventoried } from '../../../core/http/regulated-profile';
 import { authenticatePlugin } from './auth';
 import { pluginReadActor } from './read-audit';
@@ -173,12 +173,7 @@ auditApiRoutes.get('/audit/events', async (c) => {
   }>()).results;
   const more = rows.length > limit;
   const events = rows.slice(0, limit);
-  // Names come from the users table now, never from the trail: erasing an account removes them.
-  const userIds = [...new Set(events.map((event) => event.actor_user_id).filter((id): id is string => Boolean(id)))];
-  const users = userIds.length ? (await c.env.DB.prepare('SELECT id, name, email FROM users WHERE id IN (SELECT value FROM json_each(?))')
-    .bind(JSON.stringify(userIds.map(Number))).all<{ id: number; name: string; email: string }>()).results : [];
   const actor = pluginReadActor(c, auth.pluginId);
-  await auditBackgroundReads(c.env, [{ action: 'plugin.audit-actor-read', kind: 'table', key: 'users', targetType: 'users', ids: users.map((user) => String(user.id)), count: users.length }], actor).catch(() => []);
   const detail: Record<string, unknown> = { plugin_id: auth.pluginId, results: events.length, ...(before > 0 ? { before } : {}) };
   noteActingUser(c, detail);
   await writeAuditRows(c, [{
@@ -188,7 +183,6 @@ auditApiRoutes.get('/audit/events', async (c) => {
 
   return c.json({
     events: events.map((event) => {
-      const user = users.find((entry) => String(entry.id) === event.actor_user_id);
       let parsedDetail: Record<string, unknown> = {};
       try { parsedDetail = event.detail ? JSON.parse(event.detail) as Record<string, unknown> : {}; } catch { /* unreadable: none */ }
       return {
@@ -199,8 +193,8 @@ auditApiRoutes.get('/audit/events', async (c) => {
         event_class: event.event_class,
         outcome: event.outcome,
         actor_user_id: event.actor_user_id,
-        actor_name: user?.name ?? null,
-        actor_email: user?.email ?? null,
+        actor_name: null,
+        actor_email: null,
         detail: parsedDetail,
       };
     }),

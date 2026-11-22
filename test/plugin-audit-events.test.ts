@@ -96,8 +96,7 @@ describe('POST /__cms/audit/events', () => {
 });
 
 describe('GET /__cms/audit/events', () => {
-  it('returns the plugin\'s own events on a page, newest first with the actor\'s name, and records the read', async () => {
-    await env.DB.prepare("INSERT INTO users (id, oauth_id, name, email, role) VALUES (42, 'test:42', 'Alice', 'alice@example.invalid', 'editor')").run();
+  it('returns the plugin\'s own events on a page, newest first, and records the read', async () => {
     const id = await page();
     await record([{ action: 'form.view', page_id: id }, { action: 'form.print', page_id: id }]);
     await record([{ action: 'form.link_open', page_id: id, detail: { link: 'ab12' } }], null);
@@ -110,7 +109,7 @@ describe('GET /__cms/audit/events', () => {
     const first = await response.json() as { events: Array<Record<string, unknown>>; next: number | null };
     expect(first.events.map((event) => event.action)).toEqual(['form.link_open', 'form.print']);
     expect(first.events[0]).toMatchObject({ actor_user_id: null, actor_name: null, detail: { link: 'ab12', plugin_id: PLUGIN_ID } });
-    expect(first.events[1]).toMatchObject({ actor_user_id: '42', actor_name: 'Alice', actor_email: 'alice@example.invalid' });
+    expect(first.events[1]).toMatchObject({ actor_user_id: '42', actor_name: null, actor_email: null });
     const second = await (await call('GET', `/audit/events?page_id=${id}&limit=2&before=${first.next}`)).json() as typeof first;
     expect(second.events.map((event) => event.action)).toEqual(['form.view']);
     expect(second.next).toBeNull();
@@ -118,6 +117,17 @@ describe('GET /__cms/audit/events', () => {
     const reads = (await rows()).filter((row) => row.action === 'audit.read');
     expect(reads).toHaveLength(2);
     expect(reads[0]).toMatchObject({ event_class: 'admin', retention_class: 'admin_config', actor_user_id: '42', acting_via: PLUGIN_ID, target_id: String(id) });
+  });
+
+  it('withholds actor names and emails when the plugin has page read access', async () => {
+    await env.DB.prepare("INSERT INTO users (id, oauth_id, name, email, role) VALUES (42, 'test:42', 'Alice', 'alice@example.invalid', 'editor')").run();
+    const id = await page();
+    const written = await record([{ action: 'form.view', page_id: id }]);
+    expect(await written.json()).toEqual({ recorded: 1, errors: [] });
+
+    const response = await call('GET', `/audit/events?page_id=${id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ events: [{ actor_user_id: '42', actor_name: null, actor_email: null }] });
   });
 
   it('reads only pages the plugin may read', async () => {

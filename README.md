@@ -1058,9 +1058,9 @@ GET /__cms/audit/events?page_id=123&limit=50&before=<seq>
 - A classified page keeps its class's retention, and `phi` fails closed (503:
   serve nothing). An unclassified page still records, under the
   `plugin_access` retention class (365 days in D1).
-- Reading returns only the calling plugin's own events on that page, with each
-  actor's current name and email from `users` (never stored in the trail), and
-  is itself recorded as `audit.read`.
+- Reading returns only the calling plugin's own events on that page and is
+  recorded as `audit.read`. `actor_user_id` is included when available.
+  `actor_name` and `actor_email` are `null`.
 
 ### List filters on lect fields
 
