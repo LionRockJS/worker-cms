@@ -1,3 +1,7 @@
+import { exportRows, exportTree } from '../../core/config-export';
+import { getSetting } from '../../core/db/settings';
+import { recordMetadataReads } from '../../core/http/access-log';
+import { CONTENT_DEFAULT_LANGUAGE_SETTING_KEY, DEFAULT_CONTENT_LANGUAGE } from '../../core/i18n';
 import type { FeatureServiceEntry } from '../services';
 import type { AppContext } from '../../core/http/context';
 import {
@@ -43,14 +47,19 @@ const localesSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.locales',
   order: 50,
   permission: 'menu:manage',
-  async exportItems(c) {
-    const { locales, defaultContentLanguage } = await localeRegistry(c.env);
-    return [
-      // Booleans, because the locale form reads 1/0 numbers as unchecked.
-      ...locales.map((locale) => ({ kind: 'locale', code: locale.code, ...localeValues(locale),
-        content_enabled: locale.content_enabled === 1, ui_enabled: locale.ui_enabled === 1 })),
-      { kind: 'default', code: defaultContentLanguage },
-    ];
+  async *exportRecords(c, after) {
+    if (after === '#default') return;
+    yield* exportTree<LocaleRecord>(c, 'locales', after, row => {
+      recordMetadataReads('locale.read', 'locales', [row.code]);
+      return { key: row.code, label: row.code, item: { kind: 'locale', code: row.code, ...localeValues(row),
+        content_enabled: !!row.content_enabled, ui_enabled: !!row.ui_enabled } };
+    });
+    const configured = await getSetting(c.env, CONTENT_DEFAULT_LANGUAGE_SETTING_KEY);
+    const code = await c.env.DB.prepare(`SELECT code FROM locales WHERE content_enabled=1
+      ORDER BY CASE code WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, weight, label COLLATE NOCASE, code LIMIT 1`)
+      .bind(configured?.trim().toLowerCase() ?? '', DEFAULT_CONTENT_LANGUAGE).first<string>('code') ?? DEFAULT_CONTENT_LANGUAGE;
+    recordMetadataReads('locale.read', 'locales', [code]);
+    yield { key: '#default', label: code, item: { kind: 'default', code } };
   },
   async plan(c, items) {
     const { locales, defaultContentLanguage } = await localeRegistry(c.env);
@@ -88,10 +97,14 @@ const translationsSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.translations',
   order: 55,
   permission: 'menu:manage',
-  async exportItems(c) {
-    const { locales } = await localeRegistry(c.env);
-    const messages = await Promise.all(locales.map((locale) => listLocaleMessages(c.env, locale.code)));
-    return messages.flat().map((message) => ({ locale: message.locale_code, key: message.message_key, value: message.value }));
+  exportRecords(c, after) {
+    return exportRows<{ position: number; locale: string; key: string; value: string }>(c,
+      `SELECT rowid AS position, locale_code AS locale, message_key AS key, value FROM locale_messages
+       WHERE rowid > CAST(? AS INTEGER) ORDER BY rowid LIMIT ?`, after, ({ position, locale, key, value }) => {
+        const label = `${locale}:${key}`;
+        recordMetadataReads('translation.read', 'locale_messages', [label]);
+        return { key: String(position), label, item: { locale, key, value } };
+      });
   },
   async plan(c, items) {
     const current = new Map<string, Map<string, string>>();

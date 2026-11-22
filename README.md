@@ -1215,7 +1215,9 @@ current CMS routes ignore those tables and use `PUBLISHED_DB` instead.
 
 ### Moving settings between CMS installations
 
-In **System → Export / import**, choose the sections to download. Each settings file can contain up to **2,000,000 UTF-8 bytes**, including JSON formatting. Export and import use the same limit. If the selected sections fit individually but exceed the limit together, export smaller groups. If a section exceeds the limit by itself, the screen names it. Deselect it to transfer the other sections.
+In **System → Export / import**, select the sections and click **Download settings**. If more records remain, click **Download next part** until **Export complete** appears. Import numbered files in order and finish applying each file before starting the next. Parent tags and fallback languages travel before their dependants.
+
+Each JSON file contains at most 2,000,000 UTF-8 bytes and 64 records. The download link lets you save the most recent file again. A failed request can be retried from the same position. Changing the selection starts a new export. The cursor expires after 24 hours of inactivity. Settings are read live, so keep the source stable during a transfer. If a single record exceeds the byte limit, the screen names the record and its section.
 
 ### Feature profiles
 

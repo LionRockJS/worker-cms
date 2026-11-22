@@ -9,12 +9,17 @@
 // updates by natural key (slug, code, name, URL) and never deletes.
 
 import type { AppContext } from './http/context';
+import type { ExportRecord } from './config-export';
 import type { Permission } from '../types';
 
 export const CONFIG_TRANSFER_FORMAT = '0xcms-config';
 export const CONFIG_TRANSFER_VERSION = 1;
-/** Upload limit for a bundle; the icon sprite alone may be 64 KB. */
+/** UTF-8 byte limit for exported and imported bundles; the icon sprite alone may be 64 KB. */
 export const MAX_CONFIG_BUNDLE_BYTES = 2_000_000;
+
+export function configBundleBytes(text: string): number {
+  return new TextEncoder().encode(text).byteLength;
+}
 
 export type ConfigTransferAction = 'create' | 'update' | 'unchanged' | 'skip';
 
@@ -35,7 +40,7 @@ export interface ConfigTransferSection {
   order: number;
   permission: Permission;
   /** Values exported for this section. Never secrets. */
-  exportItems(c: AppContext): Promise<unknown[]>;
+  exportRecords(c: AppContext, after: string): AsyncIterable<ExportRecord>;
   /** Compares bundle items with this CMS without writing. */
   plan(c: AppContext, items: readonly unknown[]): Promise<ConfigTransferPlanItem[]>;
   /** i18n key for a follow-up shown with the section, e.g. reconnecting plugins. */

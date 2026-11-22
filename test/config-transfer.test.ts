@@ -7,6 +7,7 @@ import { clearConfigCache } from '../src/core/db/content-config';
 import { __clearInjectedFetchers, __injectPluginFetcher, clearManifestCache } from '../src/features/plugins/registry';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { APP_BRANDING_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY } from '../src/core/db/settings';
+import { MAX_CONFIG_BUNDLE_BYTES } from '../src/core/config-transfer';
 import { MAX_CHANGES_PER_REQUEST } from '../src/routes/admin/config-transfer';
 
 const TABLES = ['audit_events', 'data_classes', 'plugin_identity_approvals', 'plugins', 'settings', 'sessions', 'user_oauth_identities',
@@ -160,6 +161,109 @@ it.each([undefined, 'region', ['region', 3]])('defaults to empty portable config
   await seed();
   eventsManifest(fields);
   expect((await exportBundle(['plugins'])).sections.plugins[0].config).toEqual({});
+});
+
+it('uses the exact UTF-8 file limit and resumes across and within sections', async () => {
+  const download = (...ids: string[]) => call('/admin/settings/transfer/export',
+    new URLSearchParams(ids.map(id => ['sections', id])));
+  const size = (text: string) => new TextEncoder().encode(text).byteLength;
+  // Spread the payload over rows so each is comfortably below D1's row limit.
+  for (const slug of ['one', 'two', 'three', 'four']) {
+    await env.DB.prepare('INSERT INTO taxonomies(slug, name) VALUES (?, ?)').bind(slug, slug + '新'.repeat(150_000)).run();
+  }
+  const initial = await download('taxonomies');
+  expect(initial.status).toBe(200);
+  const padding = MAX_CONFIG_BUNDLE_BYTES - size(await initial.text());
+  await env.DB.prepare("UPDATE taxonomies SET name = name || ? WHERE slug = 'four'").bind('a'.repeat(padding)).run();
+  const exact = await download('taxonomies');
+  expect(exact.status).toBe(200);
+  const file = new File([await exact.arrayBuffer()], 'settings.json');
+  expect(file.size).toBe(MAX_CONFIG_BUNDLE_BYTES);
+  const upload = new FormData();
+  upload.set('bundle', file);
+  expect((await call('/admin/settings/transfer/preview', upload)).status).toBe(200);
+
+  const combined = await download('taxonomies', 'tags');
+  expect(combined.status).toBe(200);
+  expect((await combined.arrayBuffer()).byteLength).toBe(MAX_CONFIG_BUNDLE_BYTES);
+  const resume = (cursor: string) => call('/admin/settings/transfer/export', new URLSearchParams({ cursor }));
+  const tail = await resume(combined.headers.get('X-Next-Cursor')!);
+  expect(await tail.json()).toMatchObject({ sections: { tags: [] } });
+  expect(tail.headers.get('X-Next-Cursor')).toBeNull();
+
+  await env.DB.prepare("UPDATE taxonomies SET name = name || 'x' WHERE slug = 'four'").run();
+  const split = await download('taxonomies');
+  const head = await split.text();
+  const last = await resume(split.headers.get('X-Next-Cursor')!);
+  const rest = await last.text();
+  expect(Math.max(size(head), size(rest))).toBeLessThanOrEqual(MAX_CONFIG_BUNDLE_BYTES);
+  expect([...JSON.parse(head).sections.taxonomies, ...JSON.parse(rest).sections.taxonomies].map(row => row.slug))
+    .toEqual(['four', 'one', 'three', 'two']);
+  upload.set('bundle', new File([file, ' '], 'oversized.json'));
+  expect((await call('/admin/settings/transfer/preview', upload)).status).toBe(400);
+});
+
+it('imports numbered parts in order with a parent and child on opposite sides of the cursor', async () => {
+  // Insert the child first so insertion order alone cannot satisfy its dependency.
+  await env.DB.prepare("INSERT INTO tags(id,slug,name) VALUES (101,'child','Child'),(102,'parent','Parent')").run();
+  await env.DB.prepare('UPDATE tags SET parent_tag=102 WHERE id=101').run();
+  const sections = ['taxonomies', 'tags'];
+  await env.DB.prepare("INSERT INTO taxonomies(slug,name) VALUES ('topic','Topics')").run();
+  const description = '新'.repeat(350_000);
+  await env.DB.prepare("UPDATE tags SET taxonomy_slug='topic', lect=?").bind(JSON.stringify({ description: { en: description } })).run();
+  const first = await call('/admin/settings/transfer/export', new URLSearchParams(sections.map(id => ['sections', id])));
+  const cursor = first.headers.get('X-Next-Cursor')!;
+  expect(cursor).toBeTruthy();
+  expect(first.headers.get('Content-Disposition')).toContain('-part-001.json');
+  const resume = (token: string) => call('/admin/settings/transfer/export', new URLSearchParams({ cursor: token }));
+  expect((await resume(cursor + 'x')).status).toBe(400);
+  const second = await resume(cursor);
+  expect(second.headers.get('Content-Disposition')).toContain('-part-002.json');
+  expect(second.headers.get('X-Next-Cursor')).toBeNull();
+  const parts = [await first.text(), await second.text()];
+  expect(await (await resume(cursor)).text()).toBe(parts[1]);
+  expect(JSON.parse(parts[0]).sections.tags.map((row: any) => row.slug)).toEqual(['parent']);
+  expect(JSON.parse(parts[1]).sections.tags).toMatchObject([{ slug: 'child', parent: 'parent' }]);
+  await wipe();
+  for (const part of parts) {
+    const file = new File([part], 'part.json');
+    expect(file.size).toBeLessThanOrEqual(MAX_CONFIG_BUNDLE_BYTES);
+    const preview = new FormData();
+    preview.set('bundle', file);
+    expect((await call('/admin/settings/transfer/preview', preview)).status).toBe(200);
+    let remaining = 1;
+    for (let batch = 0; remaining && batch < 4; batch++) {
+      const applied = await call('/admin/settings/transfer/apply', applyForm(JSON.parse(part), sections));
+      expect(applied.status).toBe(200);
+      const html = await applied.text();
+      expect(html).toContain('"stopped":""');
+      remaining = Number(html.match(/"remaining":(\d+)/)![1]);
+    }
+    expect(remaining).toBe(0);
+  }
+  const restored = await snapshot();
+  expect(restored.taxonomies).toEqual([{ slug: 'topic', name: 'Topics' }]);
+  for (const tag of restored.tags) expect(tag.lect.description.en).toBe(description);
+  expect(restored.tags).toMatchObject([{ slug: 'child', parent: 'parent' }, { slug: 'parent', parent: null }]);
+});
+
+it('names a record that cannot fit alone after JSON escaping', async () => {
+  await env.DB.prepare("INSERT INTO taxonomies(slug,name) VALUES ('large-topic',?)").bind('"'.repeat(1_000_000)).run();
+  const response = await call('/admin/settings/transfer/export', new URLSearchParams({ sections: 'taxonomies' }));
+  expect(response.status).toBe(400);
+  expect(response.headers.get('X-Next-Cursor')).toBeNull();
+  expect(await response.text()).toContain('"large-topic" in taxonomies');
+});
+
+it('pages through the extension setting and preserves its existing normalization', async () => {
+  const values = Object.fromEntries(Array.from({ length: 12 }, (_, i) =>
+    [`type-${i}`, { blocks: ['text', 1], taxonomies: [] }]));
+  await env.DB.prepare("INSERT INTO settings(key,value) VALUES ('content.page_type_extensions',?)")
+    .bind(JSON.stringify({ ...values, constructor: { blocks: ['unsafe'] }, empty: {}, malformed: null })).run();
+  const { sections } = await exportBundle(['page_type_extensions']);
+  expect(sections.page_type_extensions).toEqual(Object.keys(values).sort().map(slug => ({
+    slug, blocks: ['text'], taxonomies: [],
+  })));
 });
 
 it('only exports sections the signed-in user may manage', async () => {

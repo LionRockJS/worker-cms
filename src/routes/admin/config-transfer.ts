@@ -1,3 +1,5 @@
+import { exportRows, exportTree, exportConfigPart, ExportHierarchyError, OversizedConfigRecord, type ExportPosition } from '../../core/config-export';
+import { sign, verify } from 'hono/jwt';
 // Settings export/import screen (/admin/settings/transfer). Core contributes
 // the system settings and taxonomy sections; installed features contribute
 // the rest through features/services. See core/config-transfer.ts.
@@ -12,8 +14,8 @@ import { flushReadAudit, recordTagReads, recordTaxonomyReads } from '../../core/
 import { contextActor } from '../../core/db/audit';
 import { slugify } from '../../core/http/forms';
 import {
-  CONFIG_TRANSFER_FORMAT, CONFIG_TRANSFER_VERSION, MAX_CONFIG_BUNDLE_BYTES,
-  ConfigTransferItemError, isRecord, parseConfigBundle, planChange, skipItem,
+  MAX_CONFIG_BUNDLE_BYTES,
+  ConfigTransferItemError, configBundleBytes, isRecord, parseConfigBundle, planChange, skipItem,
   type ConfigTransferBundle, type ConfigTransferPlanItem, type ConfigTransferSection,
 } from '../../core/config-transfer';
 import {
@@ -80,13 +82,11 @@ const systemSettingsSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.system_settings',
   order: 70,
   permission: 'menu:manage',
-  async exportItems(c) {
-    const items = [];
-    for (const key of SETTING_KEYS) {
+  async *exportRecords(c, after) {
+    for (const key of SETTING_KEYS.slice(after ? SETTING_KEYS.indexOf(after as SettingKey) + 1 : 0)) {
       const value = await getSetting(c.env, key);
-      if (value !== null) items.push({ key, value });
+      if (value !== null) yield { key, label: key, item: { key, value } };
     }
-    return items;
   },
   async plan(c, items) {
     const current = new Map<string, string | null>();
@@ -120,10 +120,12 @@ const taxonomiesSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.taxonomies',
   order: 20,
   permission: 'taxonomy:write',
-  async exportItems(c) {
-    const { results } = await c.env.DB.prepare('SELECT slug, name FROM taxonomies ORDER BY name, slug').all<{ slug: string; name: string }>();
-    recordTaxonomyReads('config.export-read', results);
-    return results.map((row) => ({ slug: row.slug, name: row.name }));
+  exportRecords(c, after) {
+    return exportRows<{ slug: string; name: string }>(c,
+      'SELECT slug, name FROM taxonomies WHERE slug > ? ORDER BY slug LIMIT ?', after, row => {
+        recordTaxonomyReads('config.export-read', [row]);
+        return { key: row.slug, label: row.slug, item: row };
+      });
   },
   async plan(c, items) {
     const { results } = await c.env.DB.prepare('SELECT * FROM taxonomies').all<import('../../types').Taxonomy>();
@@ -145,10 +147,10 @@ const taxonomiesSection: ConfigTransferSection = {
 interface TagTransferItem { slug: string; name: string; weight: number; taxonomy: string | null; parent: string | null; lect: Lect }
 
 /** The comparable, storable form of a tag; parents are named by slug so ids never cross CMSes. */
-function tagTransferItem(tag: Tag, slugById: ReadonlyMap<number, string>): TagTransferItem {
+function tagTransferItem(tag: Tag, parent: string | null): TagTransferItem {
   return {
     slug: tag.slug, name: tag.name, weight: tag.weight, taxonomy: tag.taxonomy_slug,
-    parent: tag.parent_tag === null ? null : slugById.get(tag.parent_tag) ?? null, lect: safeParseLect(tag.lect),
+    parent, lect: safeParseLect(tag.lect),
   };
 }
 
@@ -192,11 +194,11 @@ const tagsSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.tags',
   order: 25,
   permission: 'tag:write',
-  async exportItems(c) {
-    const { results } = await c.env.DB.prepare('SELECT * FROM tags ORDER BY taxonomy_slug, weight, name, slug').all<Tag>();
-    recordTagReads('config.export-read', results);
-    const slugById = new Map(results.map((tag) => [tag.id, tag.slug]));
-    return parentsFirst(results.map((tag) => ({ item: tagTransferItem(tag, slugById) }))).map(({ item }) => item);
+  exportRecords(c, after) {
+    return exportTree<Tag & { parentSlug: string | null }>(c, 'tags', after, row => {
+      recordTagReads('config.export-read', [row]);
+      return { key: String(row.id), label: row.slug, item: tagTransferItem(row, row.parentSlug) };
+    });
   },
   async plan(c, items) {
     const { results } = await c.env.DB.prepare('SELECT * FROM tags').all<Tag>();
@@ -214,7 +216,7 @@ const tagsSection: ConfigTransferSection = {
       if (depth < 0) return skipItem(label, TagParentCycleError.messageText);
       if (item.parent && !existing.has(item.parent) && !inBundle.has(item.parent)) return skipItem(label, `Parent tag ${item.parent} is not on this CMS or in the file.`);
       const before = existing.get(item.slug);
-      return planChange(label, before && tagTransferItem(before, slugById), item, async () => {
+      return planChange(label, before && tagTransferItem(before, before.parent_tag === null ? null : slugById.get(before.parent_tag) ?? null), item, async () => {
         // Re-read at apply time: a parent this import created moments ago now has an id.
         const [current, parent] = await Promise.all([
           c.env.DB.prepare('SELECT * FROM tags WHERE slug = ?').bind(item.slug).first<Tag>(),
@@ -314,7 +316,7 @@ async function readBundle(form: FormData): Promise<ConfigTransferBundle | null> 
     if (upload.size > MAX_CONFIG_BUNDLE_BYTES) return null;
     text = await upload.text();
   }
-  if (!text || new TextEncoder().encode(text).length > MAX_CONFIG_BUNDLE_BYTES) return null;
+  if (!text || configBundleBytes(text) > MAX_CONFIG_BUNDLE_BYTES) return null;
   return parseConfigBundle(text);
 }
 
@@ -332,27 +334,49 @@ configTransferRoutes.get('/settings/transfer', (c) => renderTransfer(c, {}));
 
 configTransferRoutes.post('/settings/transfer/export', async (c) => {
   const form = await c.req.formData();
-  const chosen = new Set(form.getAll('sections').map(String));
-  const sections: Record<string, unknown[]> = {};
-  for (const section of await permittedSections(c)) {
-    if (chosen.has(section.id)) sections[section.id] = await section.exportItems(c);
+  const allowed = await permittedSections(c);
+  let chosen = form.getAll('sections').map(String);
+  let start: ExportPosition | undefined;
+  let part = 1;
+  let exportedAt = new Date().toISOString();
+  const cursor = form.get('cursor');
+  const key = `settings-export-v1:${c.env.JWT_SECRET}`;
+  if (cursor !== null) {
+    if (typeof cursor !== 'string' || cursor.length > 16384) return c.text('Invalid export cursor.', 400);
+    const data = await verify(cursor, key, 'HS256').catch(() => null);
+    if (!data || data.sub !== c.get('user').sub || !Array.isArray(data.sections) ||
+        !data.sections.every(id => typeof id === 'string' && allowed.some(section => section.id === id)) ||
+        typeof data.part !== 'number' || typeof data.exportedAt !== 'string' ||
+        typeof data.section !== 'string' || !data.sections.includes(data.section) || typeof data.after !== 'string') {
+      return c.text('Export permissions or cursor changed. Start a new export.', 400);
+    }
+    chosen = data.sections;
+    part = data.part;
+    exportedAt = data.exportedAt;
+    start = { section: data.section, after: data.after };
   }
-  // The download is a disclosure: record the reads above as an export first.
+  const selected = allowed.filter(section => chosen.includes(section.id));
+  let result;
+  try {
+    result = await exportConfigPart(c, selected, start, exportedAt);
+  } catch (error) {
+    if (error instanceof ExportHierarchyError) return c.text(error.message, 409);
+    if (!(error instanceof OversizedConfigRecord)) throw error;
+    return c.text(`The record "${error.label}" in ${error.section.id} exceeds the 2 MB file limit.`, 400);
+  }
   const refused = await flushReadAudit(c, { destination: 'download', operation: 'config.export' });
   if (refused) return refused;
-  const bundle: ConfigTransferBundle = {
-    format: CONFIG_TRANSFER_FORMAT,
-    version: CONFIG_TRANSFER_VERSION,
-    exportedAt: new Date().toISOString(),
-    source: c.env.CANONICAL_ORIGIN || new URL(c.req.url).origin,
-    sections,
-  };
-  const day = bundle.exportedAt.slice(0, 10);
-  return new Response(JSON.stringify(bundle, null, 2), {
+  const next = result.next && await sign({
+    sub: c.get('user').sub, sections: selected.map(s => s.id), part: part + 1,
+    exportedAt, ...result.next, exp: Math.floor(Date.now() / 1000) + 86400,
+  }, key, 'HS256');
+  const suffix = next || part > 1 ? `-part-${String(part).padStart(3, '0')}` : '';
+  return new Response(result.body, {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Content-Disposition': `attachment; filename="cms-settings-${day}.json"`,
+      'Content-Disposition': `attachment; filename="cms-settings-${exportedAt.slice(0, 10)}${suffix}.json"`,
       'Cache-Control': 'no-store',
+      ...(next ? { 'X-Next-Cursor': next } : {}),
     },
   });
 });

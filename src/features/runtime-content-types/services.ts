@@ -1,3 +1,4 @@
+import { exportRows } from '../../core/config-export';
 import type { FeatureServiceEntry } from '../services';
 import type { AppContext } from '../../core/http/context';
 import {
@@ -5,10 +6,10 @@ import {
   type ConfigTransferPlanItem, type ConfigTransferSection,
 } from '../../core/config-transfer';
 import { cmsConfig } from '../../cms-config';
-import { listDbPageTypes, loadPageTypeExtensions } from '../../core/db/page-type-store';
+import { listDbPageTypes, loadPageTypeExtensions, normalizedPageTypeExtension, PAGE_TYPE_EXTENSIONS_SETTING_KEY } from '../../core/db/page-type-store';
 import { listDbBlockTypes } from '../../core/db/block-type-store';
 import { clearConfigCache, resolveCmsConfig } from '../../core/db/content-config';
-import { recordTableReads } from '../../core/http/access-log';
+import { recordMetadataReads, recordTableReads } from '../../core/http/access-log';
 import { prepareRuntimeTypeMutation } from './mutation-evidence';
 import { validateTypeForm } from './validation';
 import { savePageTypeExtension } from './extension';
@@ -75,7 +76,13 @@ function typeSection(table: Table, order: number): ConfigTransferSection {
     labelKey: page ? 'settings.transfer.sections.page_types' : 'settings.transfer.sections.block_types',
     order,
     permission: page ? 'pagetype:write' : 'blocktype:write',
-    async exportItems(c) { return (await rows(c)).map(exported); },
+    exportRecords(c, after) {
+      return exportRows<Parameters<typeof exported>[0]>(c,
+        `SELECT * FROM ${table} WHERE slug > ? ORDER BY slug LIMIT ?`, after, row => {
+          recordTableReads('config.export-read', table, [row.id]);
+          return { key: row.slug, label: row.slug, item: exported(row) };
+        });
+    },
     async plan(c, items) {
       const existing = new Map((await rows(c)).map((row) => [row.slug, row]));
       const plans: ConfigTransferPlanItem[] = [];
@@ -111,8 +118,19 @@ const pageTypeExtensionSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.page_type_extensions',
   order: 45,
   permission: 'pagetype:write',
-  async exportItems(c) {
-    return Object.entries(await loadPageTypeExtensions(c.env)).map(([slug, value]) => ({ slug, blocks: value.blocks, taxonomies: value.taxonomies }));
+  async *exportRecords(c, after) {
+    // Storage is one JSON settings row. Project only the next keys into the Worker.
+    const sql = `SELECT e.key AS slug, e.value FROM settings s,
+      json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END) e
+      WHERE s.key='${PAGE_TYPE_EXTENSIONS_SETTING_KEY}' AND e.type='object' AND e.key>?
+      ORDER BY e.key LIMIT ?`;
+    for await (const row of exportRows<{ slug: string; value: string }>(c, sql, after, ({ slug, value }) => {
+      recordMetadataReads('settings.read', 'settings', [PAGE_TYPE_EXTENSIONS_SETTING_KEY]);
+      const extension = normalizedPageTypeExtension(slug, JSON.parse(value));
+      return { key: slug, label: slug, item: extension && { slug, ...extension } };
+    })) {
+      if (row.item) yield row;
+    }
   },
   async plan(c, items) {
     clearConfigCache();

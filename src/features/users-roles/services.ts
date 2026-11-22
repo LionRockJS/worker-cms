@@ -1,9 +1,12 @@
+import { EXPORT_READ_BATCH } from '../../core/config-export';
+import { buildRolePermissions, ROLE_LABELS } from '../../core/auth/roles';
+import { recordMetadataReads } from '../../core/http/access-log';
 import type { FeatureServiceEntry } from '../services';
 import type { AppContext } from '../../core/http/context';
 import { ConfigTransferItemError, isRecord, planChange, skipItem, type ConfigTransferSection } from '../../core/config-transfer';
 import { PERMISSIONS, USER_ROLES } from '../../types';
 import { safeRoleAuditValue } from '../../core/auth/role-mutation-sql';
-import { getRoleForEdit, listRolesForAdmin } from './role-store';
+import { getRoleForEdit } from './role-store';
 import { assignableContributedPermissions, createRole, updateRole } from './role-writes';
 
 const ROLE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -25,14 +28,33 @@ const rolesSection: ConfigTransferSection = {
   labelKey: 'settings.transfer.sections.roles',
   order: 60,
   permission: 'roles:manage',
-  async exportItems(c) {
-    const roles = (await listRolesForAdmin(c.env)).filter((role) => !role.locked);
-    const items = [];
-    for (const role of roles) {
-      const state = await roleState(c, role.name);
-      if (state) items.push({ name: role.name, builtin: role.builtin, label: role.label, permissions: state.permissions });
+  async *exportRecords(c, after) {
+    const builtin = USER_ROLES.filter(name => name !== 'admin');
+    for (;;) {
+      const { results: roles } = await c.env.DB.prepare(`SELECT name, label FROM (
+        SELECT value AS name, '' AS label FROM json_each(?) WHERE value > ?
+        UNION ALL SELECT name, label FROM roles WHERE builtin=0 AND name > ? AND name NOT IN (SELECT value FROM json_each(?))
+        AND name <> 'admin') ORDER BY name LIMIT ?`)
+        .bind(JSON.stringify(builtin), after, after, JSON.stringify(builtin), EXPORT_READ_BATCH).all<{ name: string; label: string }>();
+      if (!roles.length) return;
+      const names = roles.map(role => role.name);
+      const keys = JSON.stringify(names);
+      const [managed, grants] = await c.env.DB.batch([
+        c.env.DB.prepare('SELECT name FROM roles WHERE name IN (SELECT value FROM json_each(?))').bind(keys),
+        c.env.DB.prepare('SELECT role, permission FROM role_permissions WHERE role IN (SELECT value FROM json_each(?))').bind(keys),
+      ]);
+      const permissions = buildRolePermissions(managed.results as { name: string }[], grants.results as { role: string; permission: string }[]);
+      recordMetadataReads('role.labels-read', 'roles', names);
+      recordMetadataReads('role.grants-read', 'role_permissions', names, 'role_permission_set');
+      for (const role of roles) {
+        after = role.name;
+        const builtinRole = BUILTIN.has(role.name);
+        yield { key: after, label: role.name, item: { name: role.name, builtin: builtinRole,
+          label: builtinRole ? ROLE_LABELS[role.name as keyof typeof ROLE_LABELS] : role.label,
+          permissions: [...(permissions.get(role.name) ?? [])].sort() } };
+      }
+      if (roles.length < EXPORT_READ_BATCH) return;
     }
-    return items;
   },
   async plan(c, items) {
     const assignable = new Set<string>([...PERMISSIONS, ...(await assignableContributedPermissions(c.env)).map((p) => p.value)]);

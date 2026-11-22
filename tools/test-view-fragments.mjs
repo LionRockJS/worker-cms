@@ -292,3 +292,48 @@ test('page access form keeps its mode selects, grants, and user search', async (
 test('session keepalive ships as an asset', () => {
   assert.ok(assembleViews({}).has('assets/session-keepalive.js'));
 });
+
+test('settings export advances after a download and retries a failed next part', async () => {
+  const views = assembleViews({});
+  const browser = {};
+  runInNewContext(views.get('assets/liquid.browser.min.js').toString(), browser);
+  const liquid = new browser.liquidjs.Liquid();
+  liquid.registerFilter('t', key => key);
+  const html = await liquid.parseAndRender(views.get('sections/config-transfer.liquid').toString(), {
+    hasExportSections: true, exportSections: [{ id: 'tags', checked: true, labelKey: 'tags' }],
+  });
+  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+  const listeners = {};
+  const label = { textContent: 'Download settings' };
+  const button = { querySelector: () => label, setAttribute() {} };
+  const status = {};
+  const downloads = [];
+  const file = { hidden: true, click() { downloads.push(this.download); } };
+  const controls = { button, '[data-export-file]': file, '[data-export-status]': status, '[data-export-label]': label };
+  const form = {
+    dataset: { next: 'Download next part', complete: 'Export complete' },
+    querySelector: key => controls[key], querySelectorAll: () => [],
+    addEventListener(event, handler) { listeners[event] = handler; },
+  };
+  const part = (name, cursor) => new Response('{}', { headers: {
+    'Content-Disposition': `attachment; filename="${name}"`, ...(cursor ? { 'X-Next-Cursor': cursor } : {}),
+  } });
+  const responses = [part('part-001.json', 'next'), new Response('Retry', { status: 503 }), part('part-002.json')];
+  const requests = [];
+  runInNewContext(script, {
+    document: { querySelector: () => form }, FormData: class extends Map { constructor() { super(); } }, URL,
+    fetch: async (_, { body }) => { requests.push(body.get('cursor')); return responses.shift(); },
+  });
+  const click = () => listeners.submit({ preventDefault() {} });
+  await click();
+  assert.equal(label.textContent, 'Download next part');
+  await click();
+  assert.equal(status.textContent, 'Retry');
+  assert.deepEqual(downloads, ['part-001.json']);
+  await click();
+  assert.equal(status.textContent, 'Export complete');
+  assert.deepEqual(downloads, ['part-001.json', 'part-002.json']);
+  assert.deepEqual(requests, [undefined, 'next', 'next']);
+  listeners.change();
+  assert.equal(file.hidden, true);
+});

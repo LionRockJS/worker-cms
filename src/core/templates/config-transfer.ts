@@ -46,7 +46,9 @@ export async function configTransferPage(views: Fetcher, opts: BaseTemplateProps
   }));
   const result = opts.result;
   const body = await renderView(views, '/templates/config-transfer.json', {
-    exportSections: opts.exportSections,
+    exportSections: opts.exportSections.map(section => ({
+      ...section, checked: !opts.selected || opts.selected.includes(section.id),
+    })),
     hasExportSections: opts.exportSections.length > 0,
     hasPreview: !!preview,
     source: preview?.source ?? '',

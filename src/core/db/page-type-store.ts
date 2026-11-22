@@ -77,15 +77,20 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+export function normalizedPageTypeExtension(slug: string, value: unknown): PageTypeExtension | null {
+  if (UNSAFE_KEYS.has(slug) || !value || typeof value !== 'object') return null;
+  const blocks = stringArray((value as PageTypeExtension).blocks);
+  const taxonomies = stringArray((value as PageTypeExtension).taxonomies);
+  return blocks.length || taxonomies.length ? { blocks, taxonomies } : null;
+}
+
 /** Loads the extensions map, dropping malformed or empty entries. */
 export async function loadPageTypeExtensions(env: Env): Promise<PageTypeExtensions> {
   const parsed = parseJson<Record<string, unknown>>(await getSetting(env, PAGE_TYPE_EXTENSIONS_SETTING_KEY), {});
   const extensions: PageTypeExtensions = {};
   for (const [slug, value] of Object.entries(parsed)) {
-    if (UNSAFE_KEYS.has(slug) || !value || typeof value !== 'object') continue;
-    const blocks = stringArray((value as PageTypeExtension).blocks);
-    const taxonomies = stringArray((value as PageTypeExtension).taxonomies);
-    if (blocks.length || taxonomies.length) extensions[slug] = { blocks, taxonomies };
+    const extension = normalizedPageTypeExtension(slug, value);
+    if (extension) extensions[slug] = extension;
   }
   return extensions;
 }

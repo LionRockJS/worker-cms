@@ -1,5 +1,6 @@
 <div class="max-w-3xl px-4 sm:px-6 lg:px-8 mb-8 space-y-5">
-  {% if errorKey != '' %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ errorKey | t }}</div>{% endif %}
+  {% if errorKey != '' %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ errorKey | t }}
+  </div>{% endif %}
 
   {% if hasResult %}
     <div class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{{ result.applied }} {{ "settings.transfer.result.applied" | t }}</div>
@@ -14,7 +15,7 @@
   {% endif %}
 
   {% if hasPreview %}
-    <form action="/admin/settings/transfer/apply" method="post" class="space-y-4" {% if autoContinue %}data-transfer-auto{% endif %}>
+    <form action="/admin/settings/transfer/apply" method="post" enctype="multipart/form-data" class="space-y-4" {% if autoContinue %}data-transfer-auto{% endif %}>
       <textarea name="bundle_json" hidden>{{ bundleJson }}</textarea>
       {% if autoContinue %}
         <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800" data-transfer-countdown hidden>
@@ -123,22 +124,84 @@
       </script>
     {% endif %}
   {% else %}
-    <form action="/admin/settings/transfer/export" method="post" data-allow-resubmit class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <form action="/admin/settings/transfer/export" method="post" data-allow-resubmit data-transfer-export
+          data-next="{{ 'settings.transfer.export.next' | t }}" data-complete="{{ 'settings.transfer.export.complete' | t }}"
+          data-failed="{{ 'settings.transfer.export.failed' | t }}" class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
       <h2 class="text-lg font-bold text-gray-900">{{ "settings.transfer.export.title" | t }}</h2>
       <p class="mt-1 text-sm text-gray-500" data-explanation>{{ "settings.transfer.export.help" | t }}</p>
       {% if hasExportSections %}
         <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {% for section in exportSections %}
-            <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="sections" value="{{ section.id }}" checked> {{ section.labelKey | t }}</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="sections" value="{{ section.id }}" {% if section.checked %}checked{% endif %}> {{ section.labelKey | t }}</label>
           {% endfor %}
         </div>
         <button title="{{ "settings.transfer.export.download" | t }}" aria-label="{{ "settings.transfer.export.download" | t }}"
                 class="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#download"></use></svg>
-          <span>{{ "settings.transfer.export.download" | t }}</span>
+          <span data-export-label>{{ "settings.transfer.export.download" | t }}</span>
         </button>
+        <p role="status" class="mt-2 text-sm" data-export-status></p>
+        <a hidden class="text-sm text-indigo-600 underline" data-export-file></a>
       {% endif %}
     </form>
+    <script nonce="{{ nonce }}">
+      (() => {
+        const form = document.querySelector('[data-transfer-export]');
+        const button = form?.querySelector('button');
+        if (!button) return;
+        const label = button.querySelector('[data-export-label]');
+        const status = form.querySelector('[data-export-status]');
+        const file = form.querySelector('[data-export-file]');
+        const boxes = [...form.querySelectorAll('input[name="sections"]')];
+        const firstLabel = label.textContent;
+        let cursor = '';
+        let busy = false;
+        function reset() {
+          cursor = '';
+          button.disabled = false;
+          button.title = label.textContent = firstLabel;
+          button.setAttribute('aria-label', firstLabel);
+          status.textContent = '';
+          if (!file.hidden) URL.revokeObjectURL(file.href);
+          file.hidden = true;
+        }
+        form.addEventListener('change', reset);
+        form.addEventListener('submit', async event => {
+          event.preventDefault();
+          if (busy) return;
+          busy = true;
+          const data = new FormData(form);
+          if (cursor) data.set('cursor', cursor);
+          button.disabled = true;
+          boxes.forEach(box => box.disabled = true);
+          try {
+            const response = await fetch(form.action, { method: 'POST', body: data });
+            if (!response.ok || !response.headers.get('Content-Disposition')) {
+              const plain = response.headers.get('Content-Type')?.startsWith('text/plain');
+              throw new Error(plain ? await response.text() : form.dataset.failed);
+            }
+            const blob = await response.blob();
+            if (!file.hidden) URL.revokeObjectURL(file.href);
+            file.href = URL.createObjectURL(blob);
+            file.download = response.headers.get('Content-Disposition').match(/filename="([^"]+)"/)[1];
+            file.textContent = file.download;
+            file.hidden = false;
+            file.click();
+            cursor = response.headers.get('X-Next-Cursor') || '';
+            const complete = !cursor;
+            status.textContent = complete ? form.dataset.complete : '';
+            button.title = label.textContent = complete ? firstLabel : form.dataset.next;
+            button.setAttribute('aria-label', label.textContent);
+          } catch (error) {
+            status.textContent = error.message || form.dataset.failed;
+          } finally {
+            busy = false;
+            boxes.forEach(box => box.disabled = false);
+            button.disabled = false;
+          }
+        });
+      })();
+    </script>
 
     <form action="/admin/settings/transfer/preview" method="post" enctype="multipart/form-data" class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
       <h2 class="text-lg font-bold text-gray-900">{{ "settings.transfer.import.title" | t }}</h2>

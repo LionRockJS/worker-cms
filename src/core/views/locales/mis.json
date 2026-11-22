@@ -296,6 +296,9 @@
       "description": "Copy settings, taxonomies and tags, content types, languages, roles and plugin registrations from one CMS to another. Pages, users and media are not included.",
       "invalid_file": "Choose a settings file exported from a CMS (JSON, up to 2 MB).",
       "export": {
+        "next": "Download next part",
+        "complete": "Export complete. Import the files in numbered order.",
+        "failed": "Download failed. Retry this part.",
         "title": "Export",
         "help": "Downloads a JSON file. Plugin secrets are never included.",
         "download": "Download settings"

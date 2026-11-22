@@ -1,3 +1,5 @@
+import { exportRows } from '../../core/config-export';
+import type { PluginRecord } from './types';
 // Plugin registrations for settings export/import. Only the registry row
 // travels: the shared secret is per CMS (a plugin keys it by this CMS's
 // origin), so an imported plugin gets a fresh secret and must be connected
@@ -39,16 +41,19 @@ export const pluginConfigTransferSection: ConfigTransferSection = {
   order: 10,
   permission: 'plugin:manage',
   noteKey: 'settings.transfer.notes.plugins',
-  async exportItems(c) {
-    const plugins = await listPlugins(c.env.DB);
-    recordTableReads('config.export-read', 'plugins', plugins.map((plugin) => plugin.id));
-    return Promise.all(plugins.map(async (plugin) => ({
-      url: plugin.url,
-      label: plugin.label,
-      enabled: !!plugin.enabled,
-      sortOrder: plugin.sort_order,
-      config: await portableConfig(c, plugin.url, configObject(plugin.config), plugin.id),
-    })));
+  async *exportRecords(c, after) {
+    const rows = exportRows<PluginRecord>(c, `SELECT id, url, label, enabled, sort_order, config FROM plugins
+      WHERE id > CAST(? AS INTEGER) ORDER BY id LIMIT ?`, after, plugin => {
+      recordTableReads('config.export-read', 'plugins', [plugin.id]);
+      return { key: String(plugin.id), label: plugin.label, item: plugin };
+    });
+    for await (const row of rows) {
+      const plugin = row.item as PluginRecord;
+      yield { key: row.key, label: row.label, item: {
+        url: plugin.url, label: plugin.label, enabled: !!plugin.enabled, sortOrder: plugin.sort_order,
+        config: await portableConfig(c, plugin.url, configObject(plugin.config), plugin.id),
+      } };
+    }
   },
   async plan(c, items) {
     const existing = await listPlugins(c.env.DB);
