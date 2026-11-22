@@ -22,11 +22,19 @@ export interface PageAccessFilter {
 type PageAccessAction = 'read' | 'write';
 type PageActor = Pick<JWTPayload, 'sub' | 'role'>;
 
+/** The page-UUID column a filter correlates with. It is written into the SQL
+ *  as-is, so only these fixed names are accepted; add one here when a query
+ *  needs a new alias. */
+export type PageUuidColumn =
+  | 'uuid' | 'p.uuid' | 'pages.uuid' | 'trash_pages.uuid'
+  | 'target.uuid' | 'target.value' | 'live.value'
+  | "COALESCE(json_extract(target.value,'$.uuid'),p.uuid)";
+
 /** Correlated SQL used both before pagination and inside mutation batches. */
 export function pageAccessFilter(
   actor: PageActor,
   action: PageAccessAction,
-  uuid: string,
+  uuid: PageUuidColumn,
   legacyAllowed: boolean,
 ): PageAccessFilter {
   const roles = splitRoles(actor.role);
@@ -43,12 +51,12 @@ export function pageAccessFilter(
   };
 }
 
-export function legacyPageFilter(uuid: string): string {
+export function legacyPageFilter(uuid: PageUuidColumn): string {
   return `NOT EXISTS (SELECT 1 FROM page_access_policies acl WHERE acl.page_uuid = ${uuid} AND acl.enabled = 1)`;
 }
 
 export async function requestPageFilter(
-  c: AppContext, action: PageAccessAction, uuid: string, legacyPermission = `content:${action}` as const,
+  c: AppContext, action: PageAccessAction, uuid: PageUuidColumn, legacyPermission = `content:${action}` as const,
 ): Promise<PageAccessFilter> {
   const actor = c.get('user');
   const permissions = effectivePermissions(await resolveRolePermissions(c.env), actor.role);
