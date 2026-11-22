@@ -9,6 +9,9 @@
 // Usage: npm run deploy -- [wrangler deploy options, e.g. -c wrangler.production.toml]
 //        npm run deploy -- --dry-run      (all gates, then wrangler's own dry run)
 //
+// The last gate reads the target databases' schema (tools/check-schema.mjs,
+// read-only) and refuses a deploy onto one that lacks what the code needs.
+//
 // There is no flag to skip a gate. A deployment that has to bypass it runs
 // `npx wrangler deploy` directly, and is recorded as an exception (W14 record).
 // wrangler.toml is gitignored (each clone's own config, created by setup), so
@@ -26,6 +29,15 @@ function run(command, args) {
   console.log(`\n> ${command} ${args.join(' ')}`);
   const result = spawnSync(command, args, { cwd: rootDir, stdio: 'inherit', shell: process.platform === 'win32' });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed; nothing was deployed`);
+}
+
+/** The -c/--config option in wrangler deploy arguments, so the schema check reads the same config. */
+export function configArgs(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-c' || args[i] === '--config') return ['-c', args[i + 1]];
+    if (args[i].startsWith('--config=')) return ['-c', args[i].slice('--config='.length)];
+  }
+  return [];
 }
 
 /** Every reason this checkout is not a releasable revision. */
@@ -57,6 +69,7 @@ function main() {
   // src/generated/build-info.ts with this commit; that is the one file it may change.
   run('npm', ['run', 'type-check']);
   run('npm', ['test']);
+  run('node', ['--no-warnings', 'tools/check-schema.mjs', ...configArgs(passthrough)]);
 
   run('npx', ['wrangler', 'deploy', '--tag', commit, '--message', `${commit} ${subject}`, ...passthrough]);
   console.log(`\nDeployed ${commit}. Record it with the approval for this release; roll back with \`npx wrangler rollback <version-id>\`.`);

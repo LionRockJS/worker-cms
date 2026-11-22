@@ -136,6 +136,11 @@ it from `wrangler d1 migrations apply`, because it has already recorded
 deploying code that needs it. The code fails closed (sign-in included) on a
 missing table or column.
 
+`npm run check:schema -- -c <wrangler config>` reads each database's schema
+(one read-only query, no rows) and lists what is missing compared with this
+clone's baseline; add `--local` for the local databases. `npm run deploy` runs
+it last and refuses to deploy onto a database that is missing something.
+
 ### 4. Create and bind the private R2 media bucket
 
 Picture fields upload files to the `MEDIA_BUCKET` R2 binding. R2 buckets are not public by default; this CMS keeps the bucket private and serves objects through the Worker at `/media/<key>`.
