@@ -1,6 +1,7 @@
 import type { AppContext } from '../../core/http/context';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import type { PermissionDenialReason } from '../../core/auth/denial-contract';
+import { snapshot,guard,json,fingerprint,type Row } from '../../core/db/bounded-mutation';
 import { classFor,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
@@ -13,7 +14,7 @@ import { filePrefixesOverlap } from './file-prefixes';
 import { auditPluginManagement } from './disclosure-audit';
 import { inspectPluginManifest,PLUGIN_ORIGIN } from './registry';
 import { REGISTRY,IDENTITY } from './evidence-common';
-import { capturePluginMutationContext,APPROVAL_TABLES,STATE_TABLE,snapshot,guard,json,fingerprint,invalidate,type Row } from './registration-evidence';
+import { capturePluginMutationContext,APPROVAL_TABLES,STATE_TABLE,invalidate } from './registration-evidence';
 
 type Action='plugin.capability.approve'|'plugin.capability.revoke'|'plugin.identity.approve'|'plugin.asset.approve'|'plugin.asset.approve_all'|'plugin.asset.revoke'|'plugin.file_prefix.approve'|'plugin.file_prefix.revoke'|'plugin.page_type.approve'|'plugin.page_type.revoke'|'plugin.page_type.approve_all';
 export interface PluginApprovalChange {id:number;action:Action;key?:string;access?:string}

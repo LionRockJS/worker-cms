@@ -1,8 +1,7 @@
 import { json,fingerprint,snapshot,guard,type Row } from '../../core/db/bounded-mutation';
-export { json,fingerprint,snapshot,guard,type Row } from '../../core/db/bounded-mutation';
 import type { AppContext } from '../../core/http/context';
-import { captureAccessAuthorization } from '../../core/auth/access-authorization';
-import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
+import { classFor,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
+import { captureMutationAuthority } from '../../core/evidence/mutation-authority';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { nextIdSql } from '../../core/pages/snapshot-id';
@@ -36,8 +35,7 @@ export async function preparePluginRegistrationMutation(c:AppContext){
   try{return await prepare(c);}catch{return unavailable(c);}
 }
 export async function capturePluginMutationContext(c:AppContext){
-  const authority=await captureAccessAuthorization(c.env,c.get('user'),'plugin:manage');if(!authority.allowed)throw new Error('Plugin authority unavailable');
-  const policy=await resolveDataClasses(c.env,true);if(!policy.ok)throw new Error('Plugin classification unavailable');
+  const { authority, policy } = await captureMutationAuthority(c, 'plugin:manage');
   const [plugins,identities]=await Promise.all([snapshot<PluginRecord>(c,'plugins',REGISTRY),snapshot<PluginIdentityApproval>(c,'plugin_identity_approvals',IDENTITY)]);
   const baseClasses=['plugins','plugin_identity_approvals'].map(t=>classFor(policy,'table',t));for(const pin of identities)baseClasses.push(classFor(policy,'plugin',pin.manifest_id));
   const dataClass=(tables:string[]=[])=>{const classes=[...baseClasses,...tables.map(t=>classFor(policy,'table',t))];return strongestClass(classes);};
