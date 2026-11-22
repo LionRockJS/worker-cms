@@ -1,3 +1,4 @@
+import { notice, readNotice } from '../../../core/http/notice';
 import { canManagePageAccess, pagePolicy, requestPageAllowed, requestPageFilter } from '../../../core/auth/page-access';
 import { updateDraftWeights } from '../../../core/evidence/batch-mutation-evidence';
 import { saveDraftContent, removeDraftHistory, contentMutationUnavailable } from '../../../core/evidence/mutation-evidence';
@@ -204,7 +205,7 @@ pageCrudRoutes.post('/pages', requirePermission('content:write'), async (c) => {
 
   announcePageEvent(c, 'create', { id: pageId, uuid:saved.uuid, page_type: pageTypeVal, name, slug: uniqueSlug }, {durableEvidence:true});
 
-  return c.redirect(appendQuery(backHref, 'flash=Page+created+successfully'));
+  return c.redirect(appendQuery(backHref, await notice(c, 'Page created successfully')));
   } catch (error) {
     if (createReservation?.ok) await createReservation.refund();
     return contentMutationUnavailable(c,error);
@@ -374,7 +375,7 @@ pageCrudRoutes.get('/pages/:id/edit', async (c) => {
   const config = await resolveCmsConfig(c.env);
   const language = languageFromRequest(c, undefined, config);
   const requestedVersionId = parseInt(c.req.query('version') ?? '', 10);
-  const flash = c.req.query('flash') ?? '';
+  const flash = await readNotice(c);
   const backHref = safeAdminReturnPath(c.req.query('return_to'));
 
   const visibility = await requestPageFilter(c, 'read', 'p.uuid');
@@ -464,7 +465,7 @@ pageCrudRoutes.post('/pages/:id/weight', requirePermission('content:write'), asy
   if (!Number.isSafeInteger(pageId) || pageId<=0 || !Number.isFinite(weight)) return c.json({error:'Invalid input'},400);
   try { await updateDraftWeights(c.env,c.get('user'),[{id:pageId,weight}],{request:c}); }
   catch (error) { return contentMutationUnavailable(c,error); }
-  return c.redirect(appendQuery(returnPath,'flash=Draft+weight+updated'));
+  return c.redirect(appendQuery(returnPath, await notice(c, 'Draft weight updated')));
 });
 
 // ── Update page ───────────────────────────────────────────────────────────────
@@ -498,13 +499,13 @@ pageCrudRoutes.post('/pages/:id', async (c) => {
     let deleted: boolean;
     try { deleted = await removeDraftHistory(c,page,versionId); } catch (error) { return contentMutationUnavailable(c,error); }
     if (!deleted) return c.notFound();
-    return c.redirect(`/admin/pages/${pageId}/edit?flash=Version+removed`);
+    return c.redirect(`/admin/pages/${pageId}/edit?${await notice(c, 'Version removed')}`);
   }
 
   if (action === 'delete-versions') {
     // History only — the page's own lect is what gets edited and published.
     try { await removeDraftHistory(c,page); } catch (error) { return contentMutationUnavailable(c,error); }
-    return c.redirect(`/admin/pages/${pageId}/edit?flash=Versions+cleaned`);
+    return c.redirect(`/admin/pages/${pageId}/edit?${await notice(c, 'Versions cleaned')}`);
   }
 
 
@@ -524,7 +525,7 @@ pageCrudRoutes.post('/pages/:id', async (c) => {
     try {
       await saveDraftContent(c,{...page,lect:revertedLect},undefined,page,version);
     } catch (error) { return contentMutationUnavailable(c,error); }
-    return c.redirect(`/admin/pages/${pageId}/edit?flash=Version+restored`);
+    return c.redirect(`/admin/pages/${pageId}/edit?${await notice(c, 'Version restored')}`);
   }
 
   if (errors.length) {
@@ -620,7 +621,7 @@ pageCrudRoutes.post('/pages/:id', async (c) => {
     republishRefused = !!outcome.refused;
     if (!outcome.refused) announcePageEvent(c, 'publish', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug });
     if (action === 'publish') {
-      return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&flash=${publishing.publishFlash(outcome)}${returnToParam}${nativeParam}`);
+      return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&${await notice(c, publishing.publishFlash(outcome))}${returnToParam}${nativeParam}`);
     }
   }
 
@@ -631,9 +632,9 @@ pageCrudRoutes.post('/pages/:id', async (c) => {
   if (!autoRepublish) announcePageEvent(c, 'update', { id: pageId, uuid: page.uuid, page_type: pageTypeVal, name, slug: uniqueSlug }, {durableEvidence:true});
 
   const savedFlash = autoRepublish && !republishRefused
-    ? 'Page+updated+and+published+successfully'
+    ? 'Page updated and published successfully'
     : republishRefused
-      ? 'Page+updated,+but+not+published'
-      : 'Page+updated+successfully';
-  return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&flash=${savedFlash}${returnToParam}${nativeParam}`);
+      ? 'Page updated, but not published'
+      : 'Page updated successfully';
+  return c.redirect(`/admin/pages/${pageId}/edit?language=${encodeURIComponent(language)}&${await notice(c, savedFlash)}${returnToParam}${nativeParam}`);
 });

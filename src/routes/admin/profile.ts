@@ -1,3 +1,4 @@
+import { notice, readNotice } from '../../core/http/notice';
 import { accessCookieName, refreshCookieName, oauthStateCookieName, clearAuthCookie } from '../../core/auth/cookies';
 import { Hono } from 'hono';
 import { profilePage } from '../../core/templates/profile';
@@ -61,8 +62,8 @@ function roleLabel(role: string, options: Array<{ name: string; label: string }>
 
 profileRoutes.get('/profile', async (c) => {
   const userId = Number(c.get('user').sub);
-  const flash = c.req.query('flash') ?? '';
-  const error = c.req.query('error') ?? '';
+  const flash = await readNotice(c);
+  const error = await readNotice(c, 'error');
   const [user, identityRows, roleOptions, creditPanel, registry, currentUiLocale] = await Promise.all([
     c.env.DB.prepare('SELECT id, oauth_id, email, name, avatar_url, role FROM users WHERE id = ?')
       .bind(userId)
@@ -141,7 +142,7 @@ profileRoutes.post('/profile', async (c) => {
   const form = await c.req.formData();
   const name = str(form.get('name'));
   if (!name || name.length > 100) {
-    return c.redirect('/admin/profile?error=profile.invalid_name', 303);
+    return c.redirect(`/admin/profile?${await notice(c, 'profile.invalid_name', 'error')}`, 303);
   }
 
   try {
@@ -150,7 +151,7 @@ profileRoutes.post('/profile', async (c) => {
     await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
     return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
   }
-  return c.redirect('/admin/profile?flash=profile.name_saved', 303);
+  return c.redirect(`/admin/profile?${await notice(c, 'profile.name_saved')}`, 303);
 });
 
 profileRoutes.post('/profile/avatar', async (c) => {
@@ -158,7 +159,7 @@ profileRoutes.post('/profile/avatar', async (c) => {
   // A resized data URI built in the browser, or '' to remove the picture.
   const avatar = str(form.get('avatar'));
   if (avatar && (avatar.length > OWN_AVATAR_MAX_LENGTH || !OWN_AVATAR_PATTERN.test(avatar))) {
-    return c.redirect('/admin/profile?error=profile.invalid_avatar', 303);
+    return c.redirect(`/admin/profile?${await notice(c, 'profile.invalid_avatar', 'error')}`, 303);
   }
 
   try {
@@ -167,7 +168,7 @@ profileRoutes.post('/profile/avatar', async (c) => {
     await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
     return c.json({ error: 'Profile change unavailable' }, 503, { 'Cache-Control': 'no-store' });
   }
-  return c.redirect(`/admin/profile?flash=${avatar ? 'profile.avatar_saved' : 'profile.avatar_removed'}`, 303);
+  return c.redirect(`/admin/profile?${await notice(c, avatar ? 'profile.avatar_saved' : 'profile.avatar_removed')}`, 303);
 });
 
 profileRoutes.post('/profile/locale', async (c) => {
@@ -176,16 +177,16 @@ profileRoutes.post('/profile/locale', async (c) => {
   const requested = String(form.get('locale') ?? '');
   const { uiLocales } = await localeRegistry(c.env);
   if (!uiLocales.some((locale) => locale.code === requested)) {
-    return c.redirect(appendQuery(back, 'error=profile.language_not_enabled'), 303);
+    return c.redirect(appendQuery(back, await notice(c, 'profile.language_not_enabled', 'error')), 303);
   }
   setUiLocaleCookie(c, requested);
-  return c.redirect(appendQuery(back, 'flash=profile.language_saved'), 303);
+  return c.redirect(appendQuery(back, await notice(c, 'profile.language_saved')), 303);
 });
 
 profileRoutes.post('/profile/identities/:id/disconnect', async (c) => {
   const identityId = Number(c.req.param('id'));
   if (!Number.isInteger(identityId) || identityId <= 0) {
-    return c.redirect('/admin/profile?error=Invalid+identity');
+    return c.redirect(`/admin/profile?${await notice(c, 'Invalid identity', 'error')}`);
   }
 
   let result;
@@ -196,18 +197,18 @@ profileRoutes.post('/profile/identities/:id/disconnect', async (c) => {
     return c.json({ error: 'Identity disconnection unavailable' }, 503, { 'Cache-Control': 'no-store' });
   }
   if (result === 'missing') {
-    return c.redirect('/admin/profile?error=Identity+not+found');
+    return c.redirect(`/admin/profile?${await notice(c, 'Identity not found', 'error')}`);
   }
 
   if (result === 'last-method') {
-    return c.redirect('/admin/profile?error=At+least+one+sign-in+method+is+required');
+    return c.redirect(`/admin/profile?${await notice(c, 'At least one sign-in method is required', 'error')}`);
   }
 
   if (result === 'review') {
     return c.json({ error: 'Sign-in identity metadata requires review' }, 409, { 'Cache-Control': 'no-store' });
   }
 
-  return c.redirect('/admin/profile?flash=Sign-in+method+disconnected');
+  return c.redirect(`/admin/profile?${await notice(c, 'Sign-in method disconnected')}`);
 });
 
 profileRoutes.post('/profile/disable', async (c) => {

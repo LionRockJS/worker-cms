@@ -7,6 +7,7 @@ import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { auditMutationOutboxHealth, drainAuditMutationOutbox } from '../src/core/db/audit-mutation-outbox';
 import { auditDeliveryEvidence } from '../src/core/db/audit';
 import type { Env } from '../src/types';
+import { unsigned } from './notice-fixtures';
 
 const userId = 9001;
 let cookie = '';
@@ -177,8 +178,8 @@ it.each([
 
 it('preserves the final sign-in method and refuses identities owned by another user', async () => {
   await env.DB.prepare('DELETE FROM user_oauth_identities WHERE id = ?').bind(secondary).run();
-  expect((await disconnect()).headers.get('Location')).toContain('At+least+one');
-  expect((await disconnect(secondary)).headers.get('Location')).toContain('Identity+not+found');
+  expect(unsigned((await disconnect()).headers.get('Location'))).toContain('At%20least%20one');
+  expect((await disconnect(secondary)).headers.get('Location')).toContain('Identity%20not%20found');
   expect((await links()).map(row => row.id)).toEqual([primary]); expect(await events()).toEqual([]);
 });
 
@@ -194,7 +195,7 @@ it('recovers an uncertain committed disconnection without replaying the removal'
   expect((await disconnect(primary, { DB: uncertain.DB })).status).toBe(503);
   expect(uncertain.count()).toBe(1); expect((await links()).map(row => row.id)).toEqual([secondary]);
   const saved = (await outbox())[0]; expect(saved).toBeTruthy();
-  expect((await disconnect()).headers.get('Location')).toContain('Identity+not+found');
+  expect(unsigned((await disconnect()).headers.get('Location'))).toContain('Identity%20not%20found');
   expect((await drainAuditMutationOutbox(env)).delivered).toBe(1);
   expect((await events())[0].event_id).toBe(saved.event_id); expect(await events()).toHaveLength(1);
 });
@@ -287,18 +288,18 @@ it('applies the existing-installation outbox upgrade idempotently without alteri
 const ownAvatar = 'data:image/png;base64,iVBORw0KGgo=';
 const setAvatar = (avatar: string) => call('/admin/profile/avatar', new URLSearchParams({ avatar }));
 it('saves, audits and removes a user-chosen profile picture', async () => {
-  expect((await setAvatar(ownAvatar)).headers.get('Location')).toBe('/admin/profile?flash=profile.avatar_saved');
+  expect(unsigned((await setAvatar(ownAvatar)).headers.get('Location'))).toBe('/admin/profile?flash=profile.avatar_saved');
   expect((await account())!.avatar_url).toBe(ownAvatar);
   const saved = await events();
   expect(saved).toHaveLength(1);
   expect(JSON.parse(String(saved[0].detail)).fields).toEqual(['avatar_url']);
   expect(String(saved[0].detail)).not.toContain('iVBOR');
-  expect((await setAvatar('')).headers.get('Location')).toBe('/admin/profile?flash=profile.avatar_removed');
+  expect(unsigned((await setAvatar('')).headers.get('Location'))).toBe('/admin/profile?flash=profile.avatar_removed');
   expect((await account())!.avatar_url).toBe('');
 });
 it.each(['https://example.invalid/a.png', 'data:image/svg+xml;base64,PHN2Zz4=', `data:image/png;base64,${'A'.repeat(64 * 1024)}`])(
   'refuses a profile picture that is not a small inline PNG/JPEG', async avatar => {
-    expect((await setAvatar(avatar)).headers.get('Location')).toBe('/admin/profile?error=profile.invalid_avatar');
+    expect(unsigned((await setAvatar(avatar)).headers.get('Location'))).toBe('/admin/profile?error=profile.invalid_avatar');
     expect((await account())!.avatar_url).toBe('private-avatar');
     expect(await events()).toEqual([]);
   });

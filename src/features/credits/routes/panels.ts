@@ -13,6 +13,7 @@
 // router and never runs for these.
 
 import { Hono } from 'hono';
+import { notice } from '../../../core/http/notice';
 import type { Env, Variables } from '../../../types';
 import { mutateCreditAdministration,CreditAdministrationUnavailableError } from '../admin-mutation';
 import { requirePermission } from '../../../core/auth/guards';
@@ -54,22 +55,22 @@ creditPanelRoutes.post(PROFILE_TRANSFER_PATH, async (c) => {
   const { amount, note, currency } = creditForm(form);
   const money = currencyLabel(currency);
 
-  if (!email) return c.redirect(`${back}?error=Enter+the+recipient+email`);
+  if (!email) return c.redirect(`${back}?${await notice(c, 'Enter the recipient email', 'error')}`);
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    return c.redirect(`${back}?error=Enter+a+positive+amount`);
+    return c.redirect(`${back}?${await notice(c, 'Enter a positive amount', 'error')}`);
   }
 
   const result = await mutateCreditAdministration(c, {operation:'transfer', recipientEmail:email, amount, currency, note:note||undefined});
   if (!result.ok) {
-    if(result.error==='unknown_user')return c.redirect(`${back}?error=No+user+with+that+email`);
-    if(result.error==='self_recipient')return c.redirect(`${back}?error=You+cannot+send+credits+to+yourself`);
-    if(result.error==='admin_recipient')return c.redirect(`${back}?error=${encodeURIComponent(`An administrator cannot receive ${money}`)}`);
+    if(result.error==='unknown_user')return c.redirect(`${back}?${await notice(c, 'No user with that email', 'error')}`);
+    if(result.error==='self_recipient')return c.redirect(`${back}?${await notice(c, 'You cannot send credits to yourself', 'error')}`);
+    if(result.error==='admin_recipient')return c.redirect(`${back}?${await notice(c, `An administrator cannot receive ${money}`, 'error')}`);
     return c.redirect(result.error === 'insufficient_credits'
-      ? `${back}?error=${encodeURIComponent(`Not enough ${money} (balance ${result.balance})`)}`
-      : `${back}?error=Transfer+failed`);
+      ? `${back}?${await notice(c, `Not enough ${money} (balance ${result.balance})`, 'error')}`
+      : `${back}?${await notice(c, 'Transfer failed', 'error')}`);
   }
 
-  return c.redirect(`${back}?flash=${encodeURIComponent(`Sent ${amount} ${money} to ${result.recipientEmail}`)}`);
+  return c.redirect(`${back}?${await notice(c, `Sent ${amount} ${money} to ${result.recipientEmail}`)}`);
 });
 
 // Donate credits from your OWN balance into the shared pool. The pool is for
@@ -84,17 +85,17 @@ creditPanelRoutes.post(PROFILE_DONATE_PATH, async (c) => {
   const money = currencyLabel(currency);
 
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    return c.redirect(`${back}?error=Enter+a+positive+amount`);
+    return c.redirect(`${back}?${await notice(c, 'Enter a positive amount', 'error')}`);
   }
 
   const result = await mutateCreditAdministration(c, {operation:'donate', amount, currency, note:note||undefined});
   if (!result.ok) {
     return c.redirect(result.error === 'insufficient_credits'
-      ? `${back}?error=${encodeURIComponent(`Not enough ${money} (balance ${result.balance})`)}`
-      : `${back}?error=Donation+failed`);
+      ? `${back}?${await notice(c, `Not enough ${money} (balance ${result.balance})`, 'error')}`
+      : `${back}?${await notice(c, 'Donation failed', 'error')}`);
   }
 
-  return c.redirect(`${back}?flash=${encodeURIComponent(`Moved ${amount} ${money} into the shared pool`)}`);
+  return c.redirect(`${back}?${await notice(c, `Moved ${amount} ${money} into the shared pool`)}`);
 });
 
 // ── Users-admin panel ─────────────────────────────────────────────────────────
@@ -107,18 +108,18 @@ creditPanelRoutes.post(SHARED_POOL_ADJUST_PATH, requirePermission('users:manage'
   const { amount, note, currency } = creditForm(await c.req.formData());
   const money = currencyLabel(currency);
   if (!Number.isSafeInteger(amount) || amount === 0) {
-    return c.redirect(`${back}?error=Enter+a+non-zero+amount`);
+    return c.redirect(`${back}?${await notice(c, 'Enter a non-zero amount', 'error')}`);
   }
   if (!note) {
-    return c.redirect(`${back}?error=A+note+is+required+for+credit+adjustments`);
+    return c.redirect(`${back}?${await notice(c, 'A note is required for credit adjustments', 'error')}`);
   }
 
   const result = await mutateCreditAdministration(c, {operation:'adjust-pool', amount, currency, note});
   if (!result.ok) {
-    return c.redirect(`${back}?error=Cannot+deduct+below+zero+(pool+balance+${result.balance})`);
+    return c.redirect(`${back}?${await notice(c, `Cannot deduct below zero (pool balance ${result.balance})`, 'error')}`);
   }
 
-  return c.redirect(`${back}?flash=${encodeURIComponent(`Shared pool updated: ${result.balanceAfter} ${money}`)}`);
+  return c.redirect(`${back}?${await notice(c, `Shared pool updated: ${result.balanceAfter} ${money}`)}`);
 });
 
 // Grant credits from the shared pool to this user — the privileged direction
@@ -134,17 +135,17 @@ creditPanelRoutes.post('/users/:id/credits/shared', requirePermission('credits:s
   const { amount, note, currency } = creditForm(await c.req.formData());
   const money = currencyLabel(currency);
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    return c.redirect(`${back}?error=Enter+a+positive+amount`);
+    return c.redirect(`${back}?${await notice(c, 'Enter a positive amount', 'error')}`);
   }
 
   const result = await mutateCreditAdministration(c, {operation:'share', amount, currency, note:note||undefined, userId:id});
   if (!result.ok) {
     return result.error === 'unknown_user'
       ? c.notFound()
-      : c.redirect(`${back}?error=${encodeURIComponent(`Not enough shared ${money} (pool balance ${result.balance})`)}`);
+      : c.redirect(`${back}?${await notice(c, `Not enough shared ${money} (pool balance ${result.balance})`, 'error')}`);
   }
 
-  return c.redirect(`${back}?flash=${encodeURIComponent(`Granted ${amount} shared ${money} (balance ${result.recipientBalance})`)}`);
+  return c.redirect(`${back}?${await notice(c, `Granted ${amount} shared ${money} (balance ${result.recipientBalance})`)}`);
 });
 
 // Grant or deduct credits with a mandatory note. Deductions use the same
@@ -157,19 +158,19 @@ creditPanelRoutes.post('/users/:id/credits', requirePermission('users:manage'), 
   const { amount, note, currency } = creditForm(await c.req.formData());
   const money = currencyLabel(currency);
   if (!Number.isSafeInteger(amount) || amount === 0) {
-    return c.redirect(`${back}?error=Enter+a+non-zero+amount`);
+    return c.redirect(`${back}?${await notice(c, 'Enter a non-zero amount', 'error')}`);
   }
   if (!note) {
-    return c.redirect(`${back}?error=A+note+is+required+for+credit+adjustments`);
+    return c.redirect(`${back}?${await notice(c, 'A note is required for credit adjustments', 'error')}`);
   }
 
   const result = await mutateCreditAdministration(c, {operation:'adjust-user', amount, currency, note, userId:id});
   if (!result.ok) {
     if(result.error==='unknown_user')return c.notFound();
     return c.redirect(result.error === 'insufficient_credits'
-      ? `${back}?error=Cannot+deduct+below+zero+(balance+${result.balance})`
-      : `${back}?error=User+not+found`);
+      ? `${back}?${await notice(c, `Cannot deduct below zero (balance ${result.balance})`, 'error')}`
+      : `${back}?${await notice(c, 'User not found', 'error')}`);
   }
 
-  return c.redirect(`${back}?flash=${encodeURIComponent(`Balance updated: ${result.balanceAfter} ${money}`)}`);
+  return c.redirect(`${back}?${await notice(c, `Balance updated: ${result.balanceAfter} ${money}`)}`);
 });

@@ -1,3 +1,4 @@
+import { readNotice } from '../../core/http/notice';
 import { saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/evidence/taxonomy-mutation-evidence';
 import { contentMutationUnavailable } from '../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
@@ -139,8 +140,8 @@ tagsRoutes.get('/tags', async (c) => {
     filterTaxonomy,
     search,
     canSync,
-    syncedCount: str(c.req.query('synced')),
-    syncError: str(c.req.query('error')),
+    syncedCount: /^\d+$/.test(c.req.query('synced') ?? '') ? c.req.query('synced')! : '',
+    syncError: await readNotice(c, 'error'),
   });
 });
 

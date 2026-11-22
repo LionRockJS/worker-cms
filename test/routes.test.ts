@@ -2,6 +2,9 @@ import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cmsConfig } from '../src/cms-config';
 import { hashToken, signJWT } from './auth-fixtures';
+import { unsigned } from './notice-fixtures';
+import { signedNotice } from '../src/core/http/notice';
+import { LOGIN_ERRORS } from '../src/core/templates/login';
 import { blueprintToLect, stringifyLect } from '../src/core/db/lect';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { __injectPluginFetcher, clearManifestCache } from './plugin-fixtures';
@@ -786,21 +789,21 @@ describe('admin routes', () => {
     { name: 'GET /admin/pages/create_by_type/:pageType', path: '/admin/pages/create_by_type/default', authenticated: true, expectedStatus: 302, location: '/admin/pages/new?page_type=default' },
     { name: 'POST /admin/pages/new_post/:pageType', method: 'POST', path: '/admin/pages/new_post/default', body: form({ name: 'Quick Page', slug: 'quick-page' }), authenticated: true, expectedStatus: 302, location: /^\/admin\/pages\/\d+\/edit$/ },
     { name: 'GET /admin/pages/new', path: '/admin/pages/new', authenticated: true, expectedStatus: 200 },
-    { name: 'POST /admin/pages', method: 'POST', path: '/admin/pages', body: form({ name: 'Created', slug: 'created', page_type: 'default' }), authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+created+successfully' },
+    { name: 'POST /admin/pages', method: 'POST', path: '/admin/pages', body: form({ name: 'Created', slug: 'created', page_type: 'default' }), authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20created%20successfully' },
     { name: 'GET /admin/pages/:id/edit', path: '/admin/pages/101/edit', authenticated: true, expectedStatus: 200 },
     { name: 'GET /admin/pages/:id/read', path: '/admin/pages/101/read', authenticated: true, expectedStatus: 200 },
     { name: 'GET /admin/pages/:id/read (missing page)', path: '/admin/pages/99999/read', authenticated: true, expectedStatus: 404 },
-    { name: 'POST /admin/pages/:id/weight', method: 'POST', path: '/admin/pages/101/weight', body: form({ weight: '9', return_to: '/admin/pages/list/default' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/list/default?flash=Draft+weight+updated' },
-    { name: 'POST /admin/pages/:id', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About Updated', slug: 'about-updated', page_type: 'default', weight: '3' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page+updated+successfully' },
-    { name: 'POST /admin/pages/:id (publish from editor)', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About', slug: 'about', page_type: 'default', weight: '3', action: 'publish' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page+published+successfully' },
-    { name: 'POST /admin/pages/:id/publish', method: 'POST', path: '/admin/pages/101/publish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+published+successfully' },
-    { name: 'POST /admin/pages/pull/:uuid', method: 'POST', path: '/admin/pages/pull/page-uuid-101', authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?flash=Draft+already+exists' },
-    { name: 'POST /admin/pages/:id/unpublish', method: 'POST', path: '/admin/pages/101/unpublish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+unpublished' },
-    { name: 'POST /admin/pages/:id/delete', method: 'POST', path: '/admin/pages/101/delete', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+moved+to+trash' },
+    { name: 'POST /admin/pages/:id/weight', method: 'POST', path: '/admin/pages/101/weight', body: form({ weight: '9', return_to: '/admin/pages/list/default' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/list/default?flash=Draft%20weight%20updated' },
+    { name: 'POST /admin/pages/:id', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About Updated', slug: 'about-updated', page_type: 'default', weight: '3' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page%20updated%20successfully' },
+    { name: 'POST /admin/pages/:id (publish from editor)', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About', slug: 'about', page_type: 'default', weight: '3', action: 'publish' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page%20published%20successfully' },
+    { name: 'POST /admin/pages/:id/publish', method: 'POST', path: '/admin/pages/101/publish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20published%20successfully' },
+    { name: 'POST /admin/pages/pull/:uuid', method: 'POST', path: '/admin/pages/pull/page-uuid-101', authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?flash=Draft%20already%20exists' },
+    { name: 'POST /admin/pages/:id/unpublish', method: 'POST', path: '/admin/pages/101/unpublish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20unpublished' },
+    { name: 'POST /admin/pages/:id/delete', method: 'POST', path: '/admin/pages/101/delete', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20moved%20to%20trash' },
     { name: 'GET /admin/trash', path: '/admin/trash', authenticated: true, expectedStatus: 200 },
     { name: 'GET /admin/trash?type= (filtered view)', path: '/admin/trash?type=default', authenticated: true, expectedStatus: 200 },
-    { name: 'POST /admin/trash/:id/restore', method: 'POST', path: '/admin/trash/201/restore', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page+restored+to+draft' },
-    { name: 'POST /admin/trash/:id/delete', method: 'POST', path: '/admin/trash/201/delete', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page+permanently+deleted' },
+    { name: 'POST /admin/trash/:id/restore', method: 'POST', path: '/admin/trash/201/restore', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page%20restored%20to%20draft' },
+    { name: 'POST /admin/trash/:id/delete', method: 'POST', path: '/admin/trash/201/delete', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page%20permanently%20deleted' },
     { name: 'GET /admin/api/pages/:type', path: '/admin/api/pages/default', authenticated: true, expectedStatus: 200, json: [{ id: 101, page: 101, name: 'About', slug: 'about', label: '/about' }] },
     { name: 'GET /admin/api/pages/:type?q=', path: '/admin/api/pages/default?q=about', authenticated: true, expectedStatus: 200, json: [{ id: 101, page: 101, name: 'About', slug: 'about', label: '/about' }] },
     { name: 'GET /admin/api/pages/:type?q= (no match)', path: '/admin/api/pages/default?q=zzz', authenticated: true, expectedStatus: 200, json: [] },
@@ -1057,17 +1060,41 @@ describe('admin routes', () => {
       body: form({ name: '  陳大文 & Co  ', id: '2', role: 'admin', email: 'other@example.com' }),
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.name_saved');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?flash=profile.name_saved');
     expect(await env.DB.prepare('SELECT name, role, email FROM users WHERE id = 1').first()).toEqual({
       name: '陳大文 & Co', role, email: 'admin@example.com',
     });
     expect(await env.DB.prepare('SELECT * FROM users WHERE id = 2').first()).toEqual(otherUser);
 
-    const profile = await fetchWorker('/admin/profile?flash=profile.name_saved', { headers: { Cookie: cookie } });
+    const profile = await fetchWorker(saved.headers.get('Location')!, { headers: { Cookie: cookie } });
     const payload = renderPayload(await profile.text());
     expect(payload.bodyView?.data.name).toBe('陳大文 & Co');
     expect(payload.bodyView?.data.flash).toBe('profile.name_saved');
     expect(payload.layoutData.userName).toBe('陳大文 & Co');
+  });
+
+  it('shows a flash or error only when it was signed for the signed-in user', async () => {
+    const cookie = await authCookie();
+    const shown = async (query: string) => renderPayload(await (await fetchWorker(`/admin/profile?${query}`, { headers: { Cookie: cookie } })).text()).bodyView?.data;
+    expect((await shown('flash=Your+account+is+locked'))?.flash).toBe('');
+    expect((await shown('error=Call+555-0100&error_sig=forged'))?.error).toBe('');
+    expect((await shown(await signedNotice(env.JWT_SECRET, '2', 'Saved')))?.flash).toBe('');
+    expect((await shown((await signedNotice(env.JWT_SECRET, '1', 'Saved')).replace('Saved', 'Deleted')))?.flash).toBe('');
+    expect((await shown(await signedNotice(env.JWT_SECRET, '1', 'Saved')))?.flash).toBe('Saved');
+    expect((await shown(await signedNotice(env.JWT_SECRET, '1', 'Not saved', 'error')))?.error).toBe('Not saved');
+  });
+
+  it('shows only known sign-in error codes on the login page', async () => {
+    const shown = async (error: string) => renderPayload(await (await fetchWorker(`/auth/login?error=${encodeURIComponent(error)}`)).text()).bodyView?.data.error;
+    expect(await shown('provider_error')).toBe('provider_error');
+    expect(await shown('Your account is locked, call 555-0100')).toBeUndefined();
+  });
+
+  it('lists every sign-in error code the CMS redirects with', () => {
+    const sources = import.meta.glob('../src/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+    const codes = new Set(Object.values(sources).flatMap((source) => [...source.matchAll(/\/auth\/login\?error=([a-z_]+)/g)].map((match) => match[1])));
+    expect(codes.size).toBeGreaterThan(10);
+    expect([...codes].filter((code) => !LOGIN_ERRORS.has(code))).toEqual([]);
   });
 
   it.each([
@@ -1083,7 +1110,7 @@ describe('admin routes', () => {
       method: 'POST', headers: { Cookie: cookie }, body: form({ name }),
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.name_saved');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?flash=profile.name_saved');
 
     // The payload is only this account's name. Both accounts, their email
     // addresses and roles, and the users table itself must remain intact.
@@ -1100,7 +1127,7 @@ describe('admin routes', () => {
       method: 'POST', headers: { Cookie: cookie }, body: form({ name }),
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?error=profile.invalid_name');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?error=profile.invalid_name');
     expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Admin User' });
   });
 
@@ -1148,7 +1175,7 @@ describe('admin routes', () => {
     });
 
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.language_saved');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?flash=profile.language_saved');
     expect(saved.headers.getSetCookie().join('\n')).toContain('cms_ui_locale=zh-hant');
 
     const savedInPlace = await fetchWorker('/admin/profile/locale', {
@@ -1156,7 +1183,7 @@ describe('admin routes', () => {
       headers: { Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form({ locale: 'zh-hant', return_to: '/admin?status=live' }),
     });
-    expect(savedInPlace.headers.get('Location')).toBe('/admin?status=live&flash=profile.language_saved');
+    expect(unsigned(savedInPlace.headers.get('Location'))).toBe('/admin?status=live&flash=profile.language_saved');
 
     const profile = await fetchWorker('/admin/profile', {
       headers: { Cookie: `${cookie}; cms_ui_locale=zh-hant` },
@@ -1195,7 +1222,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/profile?flash=Sign-in+method+disconnected');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/profile?flash=Sign-in%20method%20disconnected');
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE oauth_id = ?')
       .bind('google:google-admin')
       .first()).toBeNull();
@@ -1221,7 +1248,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/profile?error=At+least+one+sign-in+method+is+required');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/profile?error=At%20least%20one%20sign-in%20method%20is%20required');
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE oauth_id = ?')
       .bind('eventuai:admin')
       .first()).not.toBeNull();
@@ -1310,7 +1337,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/users?flash=User+removed');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/users?flash=User%20removed');
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(2).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE user_id = ?').bind(2).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM sessions WHERE user_id = ?').bind(2).first()).toBeNull();
@@ -1326,7 +1353,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/users?error=You+cannot+remove+your+own+user');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/users?error=You%20cannot%20remove%20your%20own%20user');
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(1).first()).toEqual({ id: 1 });
   });
 
@@ -1487,7 +1514,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toContain('flash=Page+updated+and+published+successfully');
+    expect(unsigned(response.headers.get('Location'))).toContain('flash=Page%20updated%20and%20published%20successfully');
     expect(await env.PUBLISHED_DB.prepare('SELECT name, slug, page_type FROM pages WHERE uuid = ?')
       .bind('page-uuid-101')
       .first()).toEqual({ name: 'RSVP Fresh', slug: 'rsvp-fresh', page_type: pageType });
@@ -1557,7 +1584,7 @@ describe('admin routes', () => {
     });
 
     expect(publishResponse.status).toBe(302);
-    expect(publishResponse.headers.get('Location')).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20publish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
+    expect(unsigned(publishResponse.headers.get('Location'))).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20publish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: CMS_ADMIN_JOB_KIND });
     const publishJob = await env.DB.prepare('SELECT type, status, body FROM admin_jobs WHERE id = ?')
@@ -1587,7 +1614,7 @@ describe('admin routes', () => {
     });
 
     expect(unpublishResponse.status).toBe(302);
-    expect(unpublishResponse.headers.get('Location')).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20unpublish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
+    expect(unsigned(unpublishResponse.headers.get('Location'))).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20unpublish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
     expect(sent).toHaveLength(2);
 
     await worker.queue(queueBatch([sent[1]]), env as unknown as AppEnv);
@@ -1622,7 +1649,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe(
+    expect(unsigned(response.headers.get('Location'))).toBe(
       `${returnTo}&flash=Bulk%20tag%20addition%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`,
     );
     expect(sent).toHaveLength(1);
@@ -1662,7 +1689,7 @@ describe('admin routes', () => {
       headers: { Cookie: cookie },
     });
     expect(removeResponse.status).toBe(302);
-    expect(removeResponse.headers.get('Location')).toBe(
+    expect(unsigned(removeResponse.headers.get('Location'))).toBe(
       `${returnTo}&flash=Bulk%20tag%20removal%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`,
     );
     expect(sent).toHaveLength(3);
@@ -1764,7 +1791,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=Bulk%20text%20replacement%20queued.%20It%20may%20take%20a%20moment%20to%20finish.');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/list/default?flash=Bulk%20text%20replacement%20queued.%20It%20may%20take%20a%20moment%20to%20finish.');
     expect(sent).toHaveLength(1);
     const queued = await env.DB.prepare('SELECT body FROM admin_jobs WHERE id = ?')
       .bind(sent[0].jobId)
@@ -1818,7 +1845,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=Enter%20text%20to%20find');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/list/default?flash=Enter%20text%20to%20find');
   });
 
   it('bulk-replaces inline without the jobs feature and allows an empty replacement', async () => {
@@ -1844,7 +1871,7 @@ describe('admin routes', () => {
       });
 
       expect(response.status).toBe(302);
-      expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=1%20page%20had%20text%20replaced');
+      expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/list/default?flash=1%20page%20had%20text%20replaced');
       const page = await env.DB.prepare('SELECT name, lect FROM pages WHERE id = ?')
         .bind(101)
         .first<{ name: string; lect: string }>();
@@ -1888,7 +1915,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20deletion%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
+    expect(unsigned(response.headers.get('Location'))).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20deletion%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: CMS_ADMIN_JOB_KIND });
     const deleteJob = await env.DB.prepare('SELECT type, status, body FROM admin_jobs WHERE id = ?')
@@ -1962,7 +1989,7 @@ describe('admin routes', () => {
 
       expect(response.status).toBe(302);
       // The flash reports what was actually done, not that it was queued.
-      expect(response.headers.get('Location'))
+      expect(unsigned(response.headers.get('Location')))
         .toBe('/admin/advanced-search/default?flash=2%20pages%20moved%20to%20trash');
 
       expect(await env.DB.prepare('SELECT COUNT(*) AS total FROM pages WHERE id IN (?, ?)')
@@ -2023,7 +2050,7 @@ describe('admin routes', () => {
     const doneJob = await env.DB.prepare('SELECT status, result_location FROM admin_jobs WHERE id = ?')
       .bind(sent[0].jobId)
       .first<{ status: string; result_location: string }>();
-    expect(doneJob).toEqual({
+    expect({ ...doneJob, result_location: unsigned(doneJob?.result_location) }).toEqual({
       status: 'done',
       result_location: `/admin/advanced-search/default?${query}&flash=125%20pages%20moved%20to%20trash`,
     });
@@ -2178,7 +2205,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toMatch(/^\/admin\/pages\/\d+\/edit\?flash=Published\+page\+pulled\+to\+draft$/);
+    expect(unsigned(response.headers.get('Location'))).toMatch(/^\/admin\/pages\/\d+\/edit\?flash=Published%20page%20pulled%20to%20draft$/);
     const draft = await env.DB.prepare(
       'SELECT id, uuid, name, slug, weight, page_type FROM pages WHERE uuid = ?',
     )
@@ -4035,7 +4062,7 @@ async function expectRoute(route: RouteCase): Promise<Response> {
 
   expect(response.status).toBe(route.expectedStatus);
   if (route.location) {
-    const location = response.headers.get('Location');
+    const location = unsigned(response.headers.get('Location'));
     if (typeof route.location === 'string') expect(location).toBe(route.location);
     else expect(location).toMatch(route.location);
   }

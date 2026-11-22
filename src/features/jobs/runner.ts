@@ -1,3 +1,4 @@
+import { signedNotice } from '../../core/http/notice';
 import { requireTrashLifecycle } from '../services';
 import { pageAccessFilter } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
@@ -164,7 +165,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
 
   await completeAdminJob(env.DB, job.id, 200, appendQuery(
     input.returnTo,
-    `flash=${encodeURIComponent(bulkActionFlash(input.action, updated, refused, failedTargets))}`,
+    await signedNotice(env.JWT_SECRET, job.user.sub, bulkActionFlash(input.action, updated, refused, failedTargets)),
   ), job);
 }
 

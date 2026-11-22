@@ -1,3 +1,4 @@
+import { readNotice } from '../../../core/http/notice';
 import { hasReadablePage, requestPageFilter } from '../../../core/auth/page-access';
 import { saveDraftContent, contentMutationUnavailable } from '../../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
@@ -160,7 +161,7 @@ function pageTypeHasPrivacyFields(entries: BlueprintEntry[] | undefined): boolea
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 async function renderAllPagesList(c: AppContext, routeBase: string) {
-  const flash = c.req.query('flash') ?? '';
+  const flash = await readNotice(c);
   const search = c.req.query('search')?.trim() ?? '';
   const pageSize = dashboardPageSize(c.req.query('pagesize'));
   const requestedPage = dashboardPageNumber(c.req.query('page'));
@@ -223,7 +224,7 @@ pageDashboardRoutes.get('/pages/list', requirePageListing, (c) => renderAllPages
 
 pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read'), async (c) => {
   const pageType = c.req.param('pageType');
-  const flash = c.req.query('flash') ?? '';
+  const flash = await readNotice(c);
   const search = c.req.query('search')?.trim() ?? '';
   const pageSize = dashboardPageSize(c.req.query('pagesize'));
   const requestedPage = dashboardPageNumber(c.req.query('page'));

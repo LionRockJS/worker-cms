@@ -13,6 +13,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { signJWT } from './auth-fixtures';
+import { unsigned } from './notice-fixtures';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import type { JWTPayload } from '../src/types';
 
@@ -441,7 +442,7 @@ describe('the classification screen', () => {
       body: new URLSearchParams({ container_kind: 'whatever', container_key: 'x', class: 'phi' }).toString(),
     });
 
-    expect(response.headers.get('Location')).toBe('/admin/audit/classes?flash=audit.flash.invalid');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/audit/classes?flash=audit.flash.invalid');
     expect(await env.DB.prepare('SELECT id FROM data_classes').first()).toBeNull();
   });
 });

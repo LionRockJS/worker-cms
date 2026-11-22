@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import cmsWorker from '../src/index';
 import { cmsConfig } from '../src/cms-config';
 import { signJWT } from './auth-fixtures';
+import { unsigned } from './notice-fixtures';
 import { blueprintToLect, stringifyLect } from '../src/core/db/lect';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { BUILD_VERSION } from '../src/generated/build-info';
@@ -330,7 +331,7 @@ describe('version revert', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/111/edit?flash=Version+restored');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/111/edit?flash=Version%20restored');
 
     const page = await env.DB.prepare(
       'SELECT lect FROM pages WHERE id = 111',
@@ -410,7 +411,7 @@ describe('version revert', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/114/edit?flash=Version+removed');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/114/edit?flash=Version%20removed');
 
     // Deleting the newest snapshot must not roll the page back to the older
     // one: `lect` is the working copy, and history is only a backup log.
@@ -446,7 +447,7 @@ describe('version revert', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/115/edit?flash=Versions+cleaned');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/115/edit?flash=Versions%20cleaned');
 
     const page = await env.DB.prepare(
       'SELECT lect FROM pages WHERE id = 115',
@@ -520,7 +521,7 @@ describe('trash browser and scoped empty', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/trash?flash=event+pages+emptied');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/trash?flash=event%20pages%20emptied');
     await expect(trashCount()).resolves.toBe(2);
     const remaining = await env.DB.prepare(
       "SELECT COUNT(*) AS total FROM trash_pages WHERE page_type = 'event'",
@@ -538,7 +539,7 @@ describe('trash browser and scoped empty', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/trash?flash=Trash+from+last+hour+emptied');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/trash?flash=Trash%20from%20last%20hour%20emptied');
     const survivors = await env.DB.prepare('SELECT id FROM trash_pages ORDER BY id').all<{ id: number }>();
     expect(survivors.results).toEqual([{ id: 9001 }]); // only the 2-hour-old row survives
   });

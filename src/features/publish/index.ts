@@ -526,16 +526,16 @@ export function describeFailures(outcome: PublishOutcome): string | null {
 /** Flash after an individual publish request. */
 export function publishFlash(outcome: PublishOutcome): string {
   if (outcome.refusedReason === 'writes_unavailable') {
-    return encodeURIComponent('Publication is unavailable while regulated writes are contained');
+    return 'Publication is unavailable while regulated writes are contained';
   }
   if (outcome.refusedReason === 'regulated') {
-    return encodeURIComponent('This page holds regulated data and cannot be published');
+    return 'This page holds regulated data and cannot be published';
   }
   if (outcome.refusedReason === 'classification_unavailable') {
-    return encodeURIComponent('Not published: the data classification could not be read, so regulated data cannot be ruled out');
+    return 'Not published: the data classification could not be read, so regulated data cannot be ruled out';
   }
-  if (outcome.refused) return encodeURIComponent('Submission pages cannot be published — they mirror source data from the published database');
+  if (outcome.refused) return 'Submission pages cannot be published — they mirror source data from the published database';
   const failed = describeFailures(outcome);
-  if (!failed) return 'Page+published+successfully';
-  return encodeURIComponent(`Page published, but these targets failed: ${failed}`);
+  if (!failed) return 'Page published successfully';
+  return `Page published, but these targets failed: ${failed}`;
 }

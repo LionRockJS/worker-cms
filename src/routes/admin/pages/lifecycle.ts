@@ -1,3 +1,4 @@
+import { notice } from '../../../core/http/notice';
 import { requestPageAllowed } from '../../../core/auth/page-access';
 import { Hono } from 'hono';
 import { announcePageEvent } from '../../../core/page-events';
@@ -31,5 +32,5 @@ pageLifecycleRoutes.post('/pages/:id/delete', requirePermission('content:delete'
     page_type: page.page_type,
   },{durableEvidence:true});
 
-  return c.redirect('/admin?flash=Page+moved+to+trash');
+  return c.redirect(`/admin?${await notice(c, 'Page moved to trash')}`);
 });

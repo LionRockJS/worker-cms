@@ -1,3 +1,4 @@
+import { notice } from '../../core/http/notice';
 import { requestPageAllowed, requestPageFilter } from '../../core/auth/page-access';
 import { Hono } from 'hono';
 import type { Env, Variables } from '../../types';
@@ -33,7 +34,7 @@ publishRoutes.post('/pages/:id/publish', requirePermission('content:publish'), a
     });
   }
 
-  return c.redirect(appendQuery(backHref, `flash=${publishFlash(outcome)}`));
+  return c.redirect(appendQuery(backHref, await notice(c, publishFlash(outcome))));
 });
 
 // ── Pull published page (PUBLISHED → DRAFT) ───────────────────────────────────
@@ -55,8 +56,8 @@ publishRoutes.post('/pages/pull/:uuid', requirePermission('content:write'), asyn
     });
   }
 
-  const flash = result.created ? 'Published+page+pulled+to+draft' : 'Draft+already+exists';
-  return c.redirect(`/admin/pages/${result.page.id}/edit?flash=${flash}`);
+  const flash = result.created ? 'Published page pulled to draft' : 'Draft already exists';
+  return c.redirect(`/admin/pages/${result.page.id}/edit?${await notice(c, flash)}`);
 });
 
 // ── Unpublish (remove from published DB) ──────────────────────────────────────
@@ -83,8 +84,8 @@ publishRoutes.post('/pages/:id/unpublish', requirePermission('content:publish'),
 
   const problems = [outcome.failures.length ? 'some targets could not be withdrawn' : '',
     outcome.auditFailures?.length ? 'audit evidence incomplete' : ''].filter(Boolean);
-  const flash = problems.length ? encodeURIComponent(`Withdrawal requested; ${problems.join('; ')}`) : 'Page+unpublished';
-  return c.redirect(appendQuery(backHref, `flash=${flash}`));
+  const flash = problems.length ? `Withdrawal requested; ${problems.join('; ')}` : 'Page unpublished';
+  return c.redirect(appendQuery(backHref, await notice(c, flash)));
 });
 
 // Backfills the published tag catalogue. A database that published pages before
@@ -97,6 +98,6 @@ publishRoutes.post('/tags/sync-published', requirePermission('tag:write'), async
     : outcome.refusedReason === 'classification_unavailable' ? 'Tag classification unavailable'
     : outcome.refusedCount ? `${outcome.refusedCount} regulated tags withheld`
     : outcome.failures.join(',');
-  const status = error ? `error=${encodeURIComponent(error)}` : `synced=${outcome.count}`;
+  const status = error ? await notice(c, error, 'error') : `synced=${outcome.count}`;
   return c.redirect(`/admin/tags?${status}`);
 });
