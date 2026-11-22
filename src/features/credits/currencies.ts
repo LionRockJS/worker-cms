@@ -43,3 +43,30 @@ export function isCreditCurrency(value: unknown): value is CreditCurrency {
 export function creditCurrencyDefinition(currency: CreditCurrency): typeof CREDIT_CURRENCY_DEFINITIONS[number] {
   return DEFINITIONS.get(currency) ?? CREDIT_CURRENCY_DEFINITIONS[0];
 }
+
+/** The currency named by `value`, or 'credit' when it names none. Use for
+ *  form fields and manifest input where the default is the sane fallback;
+ *  declaredCredits() drops an unknown currency instead. */
+export function asCreditCurrency(value: unknown): CreditCurrency {
+  return isCreditCurrency(value) ? value : DEFAULT_CREDIT_CURRENCY;
+}
+
+/** Translation key for a currency's name as a heading: "Credits" / "Diamonds". */
+export function currencyLabelKey(currency: CreditCurrency): string {
+  return `credits.currency.${currency}`;
+}
+
+/** Translation key for a currency after a number: "25 credits" / "25 diamonds". */
+export function currencyUnitKey(currency: CreditCurrency): string {
+  return `credits.unit.${currency}`;
+}
+
+/** English fallback name, for log lines and non-translated surfaces. */
+export function currencyLabel(currency: CreditCurrency): string {
+  return creditCurrencyDefinition(currency).fallbackLabel;
+}
+
+/** A zero-filled per-currency map, so callers can total without presence checks. */
+export function emptyCurrencyTotals(): Record<CreditCurrency, number> {
+  return Object.fromEntries(CREDIT_CURRENCIES.map((currency) => [currency, 0])) as Record<CreditCurrency, number>;
+}
