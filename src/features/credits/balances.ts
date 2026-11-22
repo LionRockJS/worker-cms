@@ -6,6 +6,15 @@ import type { Env } from '../../types';
 import { insertChargeReceipt, type ChargeReceiptKey } from './charge-receipts';
 import { DEFAULT_CREDIT_CURRENCY, isCreditCurrency, emptyCurrencyTotals, type CreditCurrency } from './currencies';
 
+/** A state transition that commits only when this wallet pays. The fixed SQL
+ * predicate is shared by the ledger and wallet writes. The final statement
+ * runs immediately after the wallet UPDATE and must check changes() = 1. */
+export interface DebitSettlement {
+  eligible: string;
+  bindings: readonly (string | number | null)[];
+  advance: D1PreparedStatement;
+}
+
 export interface CreditChargeInput {
   userId: number;
   /** Credits to deduct; must be > 0 (0 is a caller-side no-op). */
@@ -32,6 +41,7 @@ export interface CreditChargeInput {
   /** Who triggered it: a user id, or 'plugin:<id>' for server-to-server. */
   createdBy: string;
   receipt?: ChargeReceiptKey;
+  settlement?: DebitSettlement;
 }
 
 export type CreditChargeResult =
@@ -98,6 +108,9 @@ export async function chargeCredits(env: Env, input: CreditChargeInput): Promise
   if (amount <= 0) throw new Error(`chargeCredits amount must be > 0, got ${input.amount}`);
   const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
 
+  const where = `user_id = ? AND currency = ? AND balance >= ?${input.settlement ? ` AND (${input.settlement.eligible})` : ''}`;
+  const bindings = [input.userId, currency, amount, ...(input.settlement?.bindings ?? [])];
+
   // Success is detected via RETURNING, not meta.changes: production D1
   // reports `changes` from internal row writes (indexes included), so a
   // one-row UPDATE can report changes > 1 there while local D1 reports 1.
@@ -110,23 +123,23 @@ export async function chargeCredits(env: Env, input: CreditChargeInput): Promise
       `INSERT INTO credit_ledger (user_id, currency, delta, balance_after, action, entity_type, entity_id, plugin_id, note, created_by)
        SELECT user_id, currency, ?, balance - ?, ?, ?, ?, ?, ?, ?
          FROM credit_wallets
-        WHERE user_id = ? AND currency = ? AND balance >= ?`,
+        WHERE ${where}`,
     ).bind(
       -amount, amount, input.action, input.entityType ?? null, input.entityId ?? null,
-      input.pluginId ?? null, input.note ?? null, input.createdBy, input.userId, currency, amount,
+      input.pluginId ?? null, input.note ?? null, input.createdBy, ...bindings,
     ),
     ...(input.receipt ? [insertChargeReceipt(env, input.receipt, input.userId, currency, amount, 'user',
-      'EXISTS (SELECT 1 FROM credit_wallets WHERE user_id = ? AND currency = ? AND balance >= ?)',
-      [input.userId, currency, amount])] : []),
+      `EXISTS (SELECT 1 FROM credit_wallets WHERE ${where})`, bindings)] : []),
     env.DB.prepare(
       `UPDATE credit_wallets
           SET balance = balance - ?
-        WHERE user_id = ? AND currency = ? AND balance >= ?
+        WHERE ${where}
         RETURNING balance`,
-    ).bind(amount, input.userId, currency, amount),
+    ).bind(amount, ...bindings),
+    ...(input.settlement ? [input.settlement.advance] : []),
   ]);
 
-  const updated = results.at(-1)!.results;
+  const updated = results.at(input.settlement ? -2 : -1)!.results;
   if (updated.length === 1) {
     return { ok: true, balanceAfter: updated[0].balance };
   }
@@ -272,6 +285,7 @@ interface SharedCreditChangeInput {
   note?: string;
   createdBy: string;
   receipt?: ChargeReceiptKey;
+  settlement?: DebitSettlement;
 }
 
 /** Atomic pool write: ledger INSERT + balance UPDATE sharing one guard, like
@@ -284,8 +298,12 @@ async function writeSharedCredits(
   input: SharedCreditChangeInput,
 ): Promise<SharedCreditResult> {
   const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
-  const guardSql = guarded ? ' AND balance >= ?' : '';
-  const guardArgs = guarded ? [-delta] : [];
+  let guardSql = guarded ? ' AND balance >= ?' : '';
+  const guardArgs: unknown[] = guarded ? [-delta] : [];
+  if (input.settlement) {
+    guardSql += ` AND (${input.settlement.eligible})`;
+    guardArgs.push(...input.settlement.bindings);
+  }
   const results = await env.DB.batch<{ balance: number }>([
     env.DB.prepare('INSERT OR IGNORE INTO shared_credits (currency, balance) VALUES (?, 0)')
       .bind(currency),
@@ -302,9 +320,10 @@ async function writeSharedCredits(
       [currency, ...guardArgs])] : []),
     env.DB.prepare(`UPDATE shared_credits SET balance = balance + ? WHERE currency = ?${guardSql} RETURNING balance`)
       .bind(delta, currency, ...guardArgs),
+    ...(input.settlement ? [input.settlement.advance] : []),
   ]);
 
-  const updated = results.at(-1)!.results;
+  const updated = results.at(input.settlement ? -2 : -1)!.results;
   if (updated.length === 1) return { ok: true, balanceAfter: updated[0].balance };
   return {
     ok: false,
@@ -374,6 +393,7 @@ interface PluginCreditChangeInput {
   note?: string;
   createdBy: string;
   receipt?: ChargeReceiptKey;
+  settlement?: DebitSettlement;
 }
 
 export async function getPluginCreditBalance(
@@ -414,6 +434,10 @@ export async function writePluginCredits(
     guardSql += ' AND EXISTS (SELECT 1 FROM users WHERE id = ?)';
     guardArgs.push(userId);
   }
+  if (input.settlement) {
+    guardSql += ` AND (${input.settlement.eligible})`;
+    guardArgs.push(...input.settlement.bindings);
+  }
   const results = await env.DB.batch<{ balance: number }>([
     env.DB.prepare('INSERT OR IGNORE INTO plugin_credits (plugin_id, currency, balance) VALUES (?, ?, 0)')
       .bind(pluginId, currency),
@@ -430,9 +454,10 @@ export async function writePluginCredits(
       [pluginId, currency, ...guardArgs])] : []),
     env.DB.prepare(`UPDATE plugin_credits SET balance = balance + ? WHERE plugin_id = ? AND currency = ?${guardSql} RETURNING balance`)
       .bind(delta, pluginId, currency, ...guardArgs),
+    ...(input.settlement ? [input.settlement.advance] : []),
   ]);
 
-  const updated = results.at(-1)!.results;
+  const updated = results.at(input.settlement ? -2 : -1)!.results;
   if (updated.length === 1) return { ok: true, balanceAfter: updated[0].balance };
   return {
     ok: false,

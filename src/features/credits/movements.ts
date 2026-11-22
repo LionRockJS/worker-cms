@@ -164,6 +164,7 @@ export async function spendCredits(env: Env, input: CreditChargeInput): Promise<
       note: input.note,
       createdBy: input.createdBy,
       receipt: input.receipt,
+      settlement: input.settlement,
     });
     if (own.ok) return { ok: true, source: 'plugin', balanceAfter: own.balanceAfter };
     pluginBalance = own.balance;
@@ -205,6 +206,7 @@ export async function spendCredits(env: Env, input: CreditChargeInput): Promise<
     note: input.note,
     createdBy: input.createdBy,
     receipt: input.receipt,
+    settlement: input.settlement,
   });
   if (shared.ok) return { ok: true, source: 'shared', balanceAfter: shared.balanceAfter };
   return { ok: false, error: 'insufficient_credits', balance: charge.balance, sharedBalance: shared.balance, pluginBalance, required: amount };

@@ -1240,9 +1240,9 @@ fallback, same currency rules.
   month after creation, so usage cannot dodge the bill by shrinking just before
   the boundary.
 
-The sweep claims a period before spending it (advancing `next_charge_at` under
-a guard on its old value), so concurrent sweeps cannot double-claim and a crash
-misses a charge rather than double-billing. Insufficient credits flip the row to
+The debit, ledger entry, and advance of `next_charge_at` commit together.
+The wallet writes check the subscription's billing fields so concurrent sweeps
+can only settle the period once. Insufficient credits flip the row to
 `past_due` and retry daily; an unreachable plugin defers it an hour; a manifest
 that no longer declares the cost cancels the row.
 

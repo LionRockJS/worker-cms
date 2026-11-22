@@ -17,10 +17,9 @@
 //                can't dodge the bill by shrinking just before the boundary.
 //                First charge lands one month after creation.
 //
-// Idempotency is claim-first: the sweep advances next_charge_at (guarded on
-// its old value, so concurrent sweeps can't double-claim) BEFORE spending.
-// A crash between claim and spend therefore misses a charge instead of
-// double-charging — the safe direction, and admin-fixable from the ledger.
+// The debit, ledger entry, and period advance share one transaction. The
+// wallet writes require the subscription snapshot to still match, so a
+// concurrent sweep or a new usage report invalidates the old calculation.
 //
 // Mode switches (manifest changed between charges) use last_mode:
 //   - advance → arrears: the elapsed period was pre-paid, so the first
@@ -30,8 +29,8 @@
 //     as ONE combined spend so a partial failure can't half-bill the switch.
 //
 // Failure handling: insufficient credits flips the row to 'past_due' and
-// retries daily (the claim is rolled back so the retry re-bills the same
-// period); an unreachable plugin defers the row an hour without changing
+// retries daily while preserving the billing state; an unreachable plugin
+// defers the row an hour without changing
 // status; a manifest that no longer declares the cost cancels the row. When
 // usage drops to zero the sweep settles any arrears at the boundary and then
 // cancels; a later usage report reactivates the row as a fresh subscription.
@@ -196,14 +195,22 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
   for (const row of due.results) {
     result.processed += 1;
 
+    // Amount and mode were calculated from this snapshot. A report or another
+    // sweep can change billing fields between the due query and the write.
+    const current = `id = ? AND next_charge_at = ? AND status = ? AND quantity = ?
+      AND peak_quantity = ? AND last_charged_at IS ? AND last_mode IS ?`;
+    const bindings = [row.id, row.next_charge_at, row.status, row.quantity,
+      row.peak_quantity, row.last_charged_at, row.last_mode];
+
     const contributor = contributors.get(row.plugin_id);
     if (!contributor) {
       // Unreachable or disabled — likely transient, so defer without touching
       // status; a permanently removed plugin keeps deferring hourly until an
       // admin clears it or it comes back.
-      await env.DB.prepare('UPDATE credit_subscriptions SET next_charge_at = ?, updated_at = ? WHERE id = ?')
-        .bind(sqliteDate(new Date(now.getTime() + HOUR_MS)), sqliteDate(now), row.id).run();
-      result.deferred += 1;
+      const deferred = await env.DB.prepare(
+        `UPDATE credit_subscriptions SET next_charge_at = ?, updated_at = ? WHERE ${current} RETURNING id`,
+      ).bind(sqliteDate(new Date(now.getTime() + HOUR_MS)), sqliteDate(now), ...bindings).first();
+      if (deferred) result.deferred += 1;
       continue;
     }
 
@@ -216,9 +223,10 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
     if (!credit || credit.def.charge !== 'recurring') {
       // The manifest is authoritative: the cost no longer exists, so the
       // subscription ends. A future usage report recreates it.
-      await env.DB.prepare("UPDATE credit_subscriptions SET status = 'canceled', updated_at = ? WHERE id = ?")
-        .bind(sqliteDate(now), row.id).run();
-      result.canceled += 1;
+      const canceled = await env.DB.prepare(
+        `UPDATE credit_subscriptions SET status = 'canceled', updated_at = ? WHERE ${current} RETURNING id`,
+      ).bind(sqliteDate(now), ...bindings).first();
+      if (canceled) result.canceled += 1;
       continue;
     }
 
@@ -246,19 +254,18 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
       note = `arrears: peak ${row.peak_quantity} ${unit} @ ${price} ${money}/${per}/month`;
     }
 
-    // Claim before spending (see module header). The anchor advances from the
-    // stored due date to keep the anniversary; if that would still be in the
-    // past (long cron outage, past_due retries), skip missed periods rather
-    // than back-bill them — fail in the user's favor.
+    // Advance from the due date to keep the anniversary. Skip missed periods
+    // when the resulting date is still past due.
     let nextAt = addMonthsUTC(parseSqliteDate(row.next_charge_at), 1);
     if (nextAt.getTime() <= now.getTime()) nextAt = addMonthsUTC(now, 1);
-    const claimed = await env.DB.prepare(
+    const advance = (afterDebit: boolean) => env.DB.prepare(
       `UPDATE credit_subscriptions
-          SET next_charge_at = ?, last_charged_at = ?, last_mode = ?, status = 'active', updated_at = ?
-        WHERE id = ? AND next_charge_at = ? RETURNING id`,
-    ).bind(sqliteDate(nextAt), sqliteDate(now), mode, sqliteDate(now), row.id, row.next_charge_at)
-      .first<{ id: number }>();
-    if (!claimed) continue; // Raced by a concurrent sweep — it owns this row.
+          SET next_charge_at = ?, last_charged_at = ?, last_mode = ?, updated_at = ?,
+              peak_quantity = quantity,
+              status = CASE WHEN quantity = 0 THEN 'canceled' ELSE 'active' END
+        WHERE ${current}${afterDebit ? ' AND changes() = 1' : ''}
+        RETURNING id`,
+    ).bind(sqliteDate(nextAt), sqliteDate(now), mode, sqliteDate(now), ...bindings);
 
     if (amount > 0) {
       const charge = await spendCredits(env, {
@@ -276,34 +283,32 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
         pluginOnly: credit.def.pluginOnly,
         note,
         createdBy: 'system:cron',
+        settlement: {
+          eligible: `EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${current})`,
+          bindings,
+          advance: advance(true),
+        },
       });
       if (!charge.ok) {
-        // Roll the claim back so the daily retry re-bills this same period
-        // with the pre-claim mode/timestamps intact.
+        // A stale snapshot cannot debit any wallet or change the schedule.
+        // A genuine decline keeps the billing state and schedules a retry.
         const status = charge.error === 'unknown_user' ? 'canceled' : 'past_due';
-        const retryAt = charge.error === 'unknown_user' ? row.next_charge_at : sqliteDate(new Date(now.getTime() + DAY_MS));
-        await env.DB.prepare(
-          `UPDATE credit_subscriptions
-              SET status = ?, next_charge_at = ?, last_charged_at = ?, last_mode = ?, updated_at = ?
-            WHERE id = ?`,
-        ).bind(status, retryAt, row.last_charged_at, row.last_mode, sqliteDate(now), row.id).run();
-        if (status === 'canceled') result.canceled += 1;
-        else result.pastDue += 1;
+        const retryAt = status === 'canceled' ? row.next_charge_at : sqliteDate(new Date(now.getTime() + DAY_MS));
+        const declined = await env.DB.prepare(
+          `UPDATE credit_subscriptions SET status = ?, next_charge_at = ?, updated_at = ?
+            WHERE ${current} RETURNING id`,
+        ).bind(status, retryAt, sqliteDate(now), ...bindings).first();
+        if (declined) {
+          if (status === 'canceled') result.canceled += 1;
+          else result.pastDue += 1;
+        }
         continue;
       }
       result.charged += 1;
+    } else if (!await advance(false).first()) {
+      continue;
     }
 
-    // Start the new period: the peak resets to the live quantity (column
-    // reference, so a usage report racing this sweep can't be lost), and a
-    // zero-usage subscription — now fully settled — ends.
-    await env.DB.prepare(
-      `UPDATE credit_subscriptions
-          SET peak_quantity = quantity,
-              status = CASE WHEN quantity = 0 THEN 'canceled' ELSE status END,
-              updated_at = ?
-        WHERE id = ?`,
-    ).bind(sqliteDate(now), row.id).run();
     if (row.quantity === 0) result.canceled += 1;
   }
 

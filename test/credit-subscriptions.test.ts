@@ -240,6 +240,58 @@ describe('sweepCreditSubscriptions — advance', () => {
     expect(await getCreditBalance(env, PAYER_ID)).toBe(300);
   });
 
+  it('leaves the period due if the advance fails after the debit', async () => {
+    await seedUser(PAYER_ID, 100);
+    await reportUsage('record_storage', 100);
+    const due = await subscriptionRow('record_storage');
+    expect(due).not.toBeNull();
+
+    await env.DB.prepare(`CREATE TRIGGER interrupt_subscription_advance
+      BEFORE UPDATE OF last_charged_at ON credit_subscriptions
+      WHEN NEW.last_charged_at IS NOT NULL
+      BEGIN SELECT RAISE(ABORT, 'subscription advance interrupted'); END`).run();
+    try {
+      await expect(sweepCreditSubscriptions(env)).rejects.toThrow('subscription advance interrupted');
+      expect(await subscriptionRow('record_storage')).toEqual(due);
+      expect(await getCreditBalance(env, PAYER_ID)).toBe(100);
+      expect(await ledgerRows(PAYER_ID)).toEqual([]);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER interrupt_subscription_advance').run();
+    }
+
+    expect(await sweepCreditSubscriptions(env)).toMatchObject({ charged: 1 });
+    expect(await getCreditBalance(env, PAYER_ID)).toBe(50);
+    expect(await ledgerRows(PAYER_ID)).toHaveLength(1);
+  });
+
+  it('only debits once when two sweeps read the same due period', async () => {
+    await seedUser(PAYER_ID, 100);
+    await reportUsage('record_storage', 100);
+    const now = new Date();
+    // Run the competing sweep after the first selects the due row and before
+    // its wallet transaction, with enough balance for both to pay.
+    let debitPrepared = false;
+    let competing: Awaited<ReturnType<typeof sweepCreditSubscriptions>> | undefined;
+    const DB = {
+      prepare(sql: string) {
+        if (sql.startsWith('INSERT INTO credit_ledger (')) debitPrepared = true;
+        return env.DB.prepare(sql);
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        if (debitPrepared && !competing) competing = await sweepCreditSubscriptions(env, { now });
+        return env.DB.batch(statements);
+      },
+    } as D1Database;
+
+    const first = await sweepCreditSubscriptions({ ...env, DB }, { now });
+    expect(first).toMatchObject({ processed: 1, charged: 0, pastDue: 0 });
+    expect(competing).toMatchObject({ processed: 1, charged: 1 });
+    expect(await getCreditBalance(env, PAYER_ID)).toBe(50);
+    expect(await ledgerRows(PAYER_ID)).toEqual([expect.objectContaining({ delta: -50 })]);
+    expect(await subscriptionRow('record_storage')).toMatchObject({ status: 'active', last_charged_at: sqliteDate(now) });
+    expect((await sweepCreditSubscriptions(env, { now })).processed).toBe(0);
+  });
+
   it('flips to past_due on insufficient credits and retries daily', async () => {
     await reportUsage('record_storage', 100); // 1 block = 50, balance 0, pool 0
     const sweep = await sweepCreditSubscriptions(env);
