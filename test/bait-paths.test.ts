@@ -9,13 +9,18 @@ import { issueAuthTokens } from '../src/core/auth/sessions';
 let ipCounter = 0;
 const nextIp = () => { ipCounter++; return `10.123.${Math.floor(ipCounter / 250)}.${ipCounter % 250 + 1}`; };
 
-async function call(path: string, ip: string, cookie = '') {
+async function call(path: string, ip: string, cookie = '', ray = 'bait-test') {
   const ctx = createExecutionContext();
   const response = await worker.fetch(new Request(`https://cms.example.com${path}`, {
-    headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-origin', 'CF-Connecting-IP': ip },
+    headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-origin', 'CF-Connecting-IP': ip, 'CF-Ray': ray },
   }), { ...env, REGULATED_MODE: undefined, REGULATED_INVENTORY: undefined }, ctx);
   await waitOnExecutionContext(ctx);
   return response;
+}
+
+async function baitEvents(ray: string) {
+  return (await env.DB.prepare("SELECT detail FROM audit_events WHERE action = 'auth.access' AND request_id = ?")
+    .bind(ray).all<{ detail: string }>()).results.map(row => JSON.parse(row.detail));
 }
 
 async function sessionCookie(type: 'access' | 'refresh'): Promise<string> {
@@ -55,9 +60,18 @@ describe('bait-path ban', () => {
     expect((await call('/login', ip)).status).toBe(302);
   });
 
-  it('does not ban a request that carries a valid session', async () => {
+  it('audits only the hit that places a ban', async () => {
     const ip = nextIp();
-    await call('/xmlrpc.php', ip, await sessionCookie('access'));
+    await call('/.env', ip, '', 'bait-first');
+    await call('/wp-login.php', ip, '', 'bait-second');
+    expect(await baitEvents('bait-first')).toEqual([{ reason: 'bait_path' }]);
+    expect(await baitEvents('bait-second')).toEqual([]);
+  });
+
+  it('does not ban or audit a request that carries a valid session', async () => {
+    const ip = nextIp();
+    await call('/xmlrpc.php', ip, await sessionCookie('access'), 'bait-session');
+    expect(await baitEvents('bait-session')).toEqual([]);
     expect((await call('/auth/login', ip)).status).toBe(200);
   });
 

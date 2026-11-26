@@ -3,7 +3,8 @@
 //
 // The CMS serves no PHP, WordPress or dotfiles, so a request for one is a
 // scanner. Such a request still gets the normal 404, but its IP is barred
-// from /auth/* for BAN_SECONDS so it cannot go on to probe sign-in.
+// from /auth/* for BAN_SECONDS so it cannot go on to probe sign-in. The hit
+// that places the ban is recorded as an auth.access denial (bait_path).
 //
 // Bans live in the Cache API: no binding or config, and they expire on
 // their own. They are per-colo and may be evicted early, which is fine for
@@ -19,6 +20,7 @@ import type { Env, Variables } from '../../types';
 import { accessCookieName, readAuthCookie, refreshCookieName } from '../auth/cookies';
 import { connectingIp } from '../auth/ip-access';
 import { verifyJWT } from '../auth/jwt';
+import { recordAuthDenial } from '../auth/denials';
 import type { AppContext } from './context';
 
 const BAN_SECONDS = 60 * 60;
@@ -61,8 +63,10 @@ export const baitPathBan = createMiddleware<{ Bindings: Env; Variables: Variable
   const path = c.req.path;
 
   if (isBaitPath(path)) {
-    if (!await hasSession(c)) {
-      console.warn('Bait path hit; banning IP from /auth', { path });
+    // Audit only the hit that places a ban, so a scanner sweeping dozens of
+    // paths writes one row per IP per BAN_SECONDS rather than one per path.
+    if (!await hasSession(c) && !await caches.default.match(banKey(c, ip))) {
+      await recordAuthDenial(c, 'auth.access', { reason: 'bait_path' });
       await banRequestIp(c);
     }
     return next();
