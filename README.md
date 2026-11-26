@@ -724,6 +724,13 @@ contributions into the editor. The reverse `/__cms` API requires `x-plugin-id`
 and the matching plugin row's own `x-plugin-secret`; the legacy environment
 `PLUGIN_SECRET` is never accepted for inbound authentication.
 
+Optionally set a decoy with `npx wrangler secret put CANARY_PLUGIN_SECRET` (a
+random value no plugin holds) and plant that value where a leak would expose it.
+Any `/__cms` request presenting it gets the usual wrong-secret response, but is
+recorded as an `auth.access` denial with reason `canary_credential` and its IP is
+refused on `/auth/*` for an hour. Treat a recorded canary as a leak: rotate the
+real secrets, then replace the canary.
+
 A registry row is identified by its URL, but every capability the CMS grants a
 plugin — asset, page-type and file-prefix approvals, host-held `plugin_state`,
 tenant enrollment, limit and credit settings, and the admin proxy's permission

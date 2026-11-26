@@ -243,6 +243,9 @@ export interface Env {
   PLUGINS?: string;
   /** Shared secret forwarded to plugin Workers so they can trust CMS-originated calls. */
   PLUGIN_SECRET?: string;
+  /** Decoy x-plugin-secret no real plugin holds. Presenting it to /__cms is
+   *  recorded as a canary_credential denial and bans the caller's IP from /auth. */
+  CANARY_PLUGIN_SECRET?: string;
   /** Queue for CMS-owned admin background jobs, such as long plugin actions. */
   ADMIN_JOBS_QUEUE?: Queue<CmsAdminJobMessage>;
   /** HMAC-SHA256 secret for signing JWTs – set via `wrangler secret put JWT_SECRET` */

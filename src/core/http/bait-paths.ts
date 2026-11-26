@@ -38,6 +38,16 @@ function banKey(c: AppContext, ip: string): Request {
   return new Request(`${new URL(c.req.url).origin}/__bait-ban/${encodeURIComponent(ip)}`);
 }
 
+/** Bar this request's IP from /auth/* for BAN_SECONDS. Also used by the
+ *  plugin API's canary secret. */
+export async function banRequestIp(c: AppContext): Promise<void> {
+  const ip = connectingIp(c.req.raw.headers);
+  if (!ip) return;
+  await caches.default.put(banKey(c, ip), new Response('banned', {
+    headers: { 'Cache-Control': `max-age=${BAN_SECONDS}` },
+  }));
+}
+
 async function hasSession(c: AppContext): Promise<boolean> {
   const access = readAuthCookie(c, accessCookieName);
   if (access && (await verifyJWT(access, c.env.JWT_SECRET))?.type === 'access') return true;
@@ -53,9 +63,7 @@ export const baitPathBan = createMiddleware<{ Bindings: Env; Variables: Variable
   if (isBaitPath(path)) {
     if (!await hasSession(c)) {
       console.warn('Bait path hit; banning IP from /auth', { path });
-      await caches.default.put(banKey(c, ip), new Response('banned', {
-        headers: { 'Cache-Control': `max-age=${BAN_SECONDS}` },
-      }));
+      await banRequestIp(c);
     }
     return next();
   }
