@@ -5,6 +5,7 @@ import { PageTagEvidenceUnavailableError } from './core/evidence/tag-association
 import { PageLifecycleUnavailableError } from './core/pages/trash-lifecycle';
 import { ContentBatchEvidenceUnavailableError } from './core/evidence/batch-mutation-evidence';
 import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
+import { baitPathBan } from './core/http/bait-paths';
 // ============================================================
 // 0xCMS - main entry point
 //
@@ -120,6 +121,9 @@ app.use('*', limitRequestBody);
 // the routes, so it covers the admin screens, the contributor API and the
 // public media routes alike.
 app.use('*', accessLog);
+
+// Scanner bait (/.env, /wp-login.php, ...) bars the IP from /auth/* for a while.
+app.use('*', baitPathBan);
 
 // ── Auth (OAuth 2.1 + JWT) ────────────────────────────────────────────────────
 app.route('/auth', authRoutes);
