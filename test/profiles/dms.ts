@@ -116,10 +116,15 @@ it('runs the internal document lifecycle with no published database or bucket', 
   const read = await request(`${edit}/read?version=${versionId}`);
   expect(read.status).toBe(200);
   const readPayload = (await read.text()).match(/<script id="cms-render-payload"[^>]*>(.*?)<\/script>/s)?.[1];
-  const history = JSON.parse(readPayload!).layoutData.body;
-  expect(history).toContain('Viewing version from');
-  for (const version of versions.results) expect(history).toContain(`${edit}/read?version=${version.id}`);
-  expect(history).not.toContain('>Live</span>');
+  const history = JSON.parse(readPayload!).bodyView.data;
+  expect(history.versionCreatedAt).not.toBe('');
+  for (const version of versions.results) {
+    expect(history.versions).toContainEqual(expect.objectContaining({
+      href: expect.stringContaining(`${edit}/read?version=${version.id}&`),
+    }));
+  }
+  expect(history.versions.some((entry: { live: boolean }) => entry.live)).toBe(false);
+  expect(history.liveBadgeHtml).toBe('');
 
   expect((await request(`${edit}/delete`, 'POST')).status).toBe(302);
   expect(await env.DB.prepare('SELECT id FROM trash_pages WHERE id = ?').bind(id).first('id')).toBe(id);
