@@ -150,8 +150,10 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 
 ## Updating
 
-Each push to `development` that passes CI publishes a new image
-(`.github/workflows/docker.yml`). The Pi updates only when told to:
+Each push to `development` that passes CI publishes a new `:development`
+image, and each merge into `main` a new `:latest`
+(`.github/workflows/docker.yml`). The Pi follows `:development` and updates
+only when told to:
 
 ```bash
 sh ~/worker-cms/docker/update.sh
@@ -163,8 +165,9 @@ the commits it moved between, for example `df941b6 -> 8c7779d`. If the CMS does
 not answer within two minutes, it prints the recent log and the tag to go back
 to.
 
-To pin an exact build, set `CMS_TAG=sha-<commit>` in `.env` and run
-`docker compose up -d`. `docker compose up -d --build` builds the image from
+To follow `main` instead, set `CMS_TAG=latest` in `.env`; to pin an exact
+build, set `CMS_TAG=sha-<commit>`. Then run the update script, or
+`docker compose up -d` if the image is already pulled. `docker compose up -d --build` builds the image from
 the checkout instead of pulling it.
 
 ## Backup

@@ -1,8 +1,10 @@
 # Publish the self-hosting image (Dockerfile) to ghcr.io/lionrockjs/0xcms.
 #
-# Each push to development publishes:
-#   :development   the newest build; what compose.yaml pulls by default
-#   :sha-<commit>  that exact build, which never moves (pin or roll back to it)
+# Tags, by the branch a build comes from:
+#   :development   newest build of development; what compose.yaml pulls by default
+#   :latest        newest build of main, so each merged pull request
+#   :sha-<commit>  every build, which never moves (pin or roll back to it)
+# A manual run on any other branch publishes only its :sha-<commit>.
 #
 # Nothing builds until the commit passes ci.yml (type-check, npm test, the
 # upgrade path and the production audit); a failure there publishes nothing.
@@ -18,7 +20,7 @@ name: Docker image
 
 on:
   push:
-    branches: [development]
+    branches: [development, main]
   workflow_dispatch:
 
 concurrency:
@@ -109,7 +111,8 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=development
+            type=raw,value=development,enable=${{ github.ref == 'refs/heads/development' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
