@@ -17,6 +17,7 @@ Content management system on Workers
 - **Plugins** – extend the CMS with separate Worker plugins (lifecycle hooks, content types, fields/blocks, admin pages, publish targets). See [Plugins](#plugins).
 - **Pluggable publish targets** – publishing fans out to one or more adapters: the published D1 database (default), static JSON in an R2 bucket, or any plugin Worker (IPFS, webhooks, search indexes). See [Publish targets](#publish-targets).
 - **Credits & diamonds** – two independent per-user currencies that meter chargeable plugin actions; atomic, overdraft-proof, ledger-audited, each with admin grants, user-to-user transfers, and a shared site-wide pool that covers users who run out. See [Credits](#credits).
+- **Self-hosting** – runs off Cloudflare under Miniflare or standalone workerd, or as a Docker image (`ghcr.io/lionrockjs/0xcms`, amd64 and arm64). See [Docker](#docker).
 
 ---
 
@@ -526,6 +527,81 @@ if `CRON_PORT` changes):
 
 The generator uses Miniflare's debug configuration export and validates the
 expected service layout; recheck this path when upgrading Miniflare/Wrangler.
+
+#### Docker
+
+The [Dockerfile](Dockerfile) runs `server.mjs` on Node 26 in one container. The
+image holds only the built bundle (`dist/`), the migrations, `wrangler.toml`,
+`cms.features.json` and Wrangler (which brings Miniflare and workerd); no source
+code ships in it. A [workflow](.github/workflows/docker.yml) publishes it for
+`linux/amd64` and `linux/arm64` on every push to `development`:
+
+| Tag | Meaning |
+| --- | --- |
+| `ghcr.io/lionrockjs/0xcms:development` | The newest build; what `compose.yaml` pulls by default |
+| `ghcr.io/lionrockjs/0xcms:sha-<commit>` | That exact build. It never moves, so pin or roll back to it |
+
+The published image is built from `wrangler.example.toml` and the committed
+`cms.features.json`. A local `--build` uses this clone's `wrangler.toml`
+instead, so its non-secret vars end up in that image.
+
+**Setup.** Put the compose settings in `.env` next to `compose.yaml`, and the
+Worker secrets in `cms.env` (both gitignored):
+
+```bash
+echo 'BASE_URL=https://cms.example.com' > .env
+cp cms.env.example cms.env && chmod 600 cms.env
+```
+
+`BASE_URL` is the origin browsers use. At start the entrypoint derives
+`CANONICAL_ORIGIN` and `OAUTH_REDIRECT_URI` (`<BASE_URL>/auth/callback`) from it,
+so one image serves any host. Optional compose settings: `CMS_TAG` (image tag,
+default `development`) and `CMS_PORT` (host port, default `8787`).
+
+In `cms.env`, set `JWT_SECRET` (the container refuses to start without it), then
+uncomment `ENABLED_PROVIDERS` and the credentials for each provider. The file
+links each provider's registration page and says which reject `.local`
+callbacks (Google and Apple). It also takes `INITIAL_USER_ROLES` and
+`ALLOWED_EMAIL_DOMAINS`, as in [steps 6–7](#6-enable-oauth-providers). The
+container reads these from its environment (`CLOUDFLARE_INCLUDE_PROCESS_ENV`), not
+from `.dev.vars`.
+
+**Run.**
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Build from this checkout instead of pulling:
+
+```bash
+docker compose up -d --build
+```
+
+After editing `cms.env`, apply it without a rebuild:
+
+```bash
+docker compose up -d --force-recreate
+```
+
+On every start the entrypoint applies the D1 migrations to `DB` (and to
+`PUBLISHED_DB` when the `publish` feature is on), then serves. D1, R2, Durable
+Objects and queue state live in the `cms-state` volume (`/app/.wrangler/state`),
+so they survive updates and recreation; back up that volume. `server.mjs` fires
+the `*/N` cron triggers itself.
+
+**Reverse proxy.** `compose.yaml` publishes the port on `127.0.0.1` only, because
+Docker's published ports bypass the host firewall. Put an HTTPS proxy on the
+same host in front of it. [docker/nginx/cms.conf](docker/nginx/cms.conf) is a
+working nginx config for `cms.local`: it redirects HTTP to HTTPS, raises the
+body limit for 25 MB media uploads, passes the websocket upgrade the page editor
+uses, and overwrites `CF-Connecting-IP` with the client address so a client
+cannot choose its own (rate limits and the audit log key on it). For another
+host, change `server_name`, the redirect and the certificate paths.
+
+To use [local plugin view files](docs/plugin-view-loading.md#local-files-self-hosted)
+in the container, bind-mount the directory read-only and set `PLUGIN_VIEWS_DIR`
+in `cms.env` to the path inside the container.
 
 ### 9. Deploy
 
@@ -1680,6 +1756,16 @@ features on and off.
 │                          #   plus the enabled features'. This is the directory
 │                          #   wrangler uploads — never edit it.
 ├── dictionary/            # OpenCC tables for Chinese search (copied into dist/views)
+├── server.mjs             # Serve the bundle under Miniflare (self-hosting)
+├── server-workerd.mjs     # Generate a standalone workerd config.capnp
+├── Dockerfile             # Self-hosting image: dist/ + Wrangler, no source
+├── compose.yaml           # Runs ghcr.io/lionrockjs/0xcms behind a local proxy
+├── cms.env.example        # Container secrets template -> cms.env (gitignored)
+├── docker/
+│   ├── entrypoint.sh      # BASE_URL -> origin settings, migrations, then serve
+│   ├── runtime-lock.mjs   # Wrangler's slice of package-lock.json for the image
+│   └── nginx/cms.conf     # TLS reverse proxy example for the container
+├── .github/workflows/docker.yml  # Publishes the multi-arch image to GHCR
 ├── package.json
 ├── tsconfig.json
 ├── wrangler.example.toml  # config template; tests run against it

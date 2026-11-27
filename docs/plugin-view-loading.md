@@ -60,6 +60,11 @@ Both `server.mjs` and `server-workerd.mjs` inject a read-only
 PLUGIN_VIEWS_DIR=/srv/cms/plugin-views
 ```
 
+In the Docker image, set `PLUGIN_VIEWS_DIR` (and `PLUGIN_VIEWS_NGINX`) in
+`cms.env` instead, and bind-mount the directory read-only at that path, for
+example `- /srv/cms/plugin-views:/srv/cms/plugin-views:ro` under the service's
+`volumes` in `compose.yaml`. Recreate the container to apply it.
+
 Restart the server (or regenerate standalone workerd configuration) and select
 **Local files** in the plugin setting. The choice is saved as
 `cmsViewSource: "local"`. It is unavailable without the disk binding. The CMS
