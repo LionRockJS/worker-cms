@@ -302,7 +302,7 @@ test('settings export advances after a download and retries a failed next part',
   const html = await liquid.parseAndRender(views.get('sections/config-transfer.liquid').toString(), {
     hasExportSections: true, exportSections: [{ id: 'tags', checked: true, labelKey: 'tags' }],
   });
-  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/i)[1];
   const listeners = {};
   const label = { textContent: 'Download settings' };
   const button = { querySelector: () => label, setAttribute() {} };
