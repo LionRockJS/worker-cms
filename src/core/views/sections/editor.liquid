@@ -1,15 +1,16 @@
 <div class="my-4 px-4 sm:px-6 lg:px-8">
   <div class="flex items-center gap-3 mb-6">
-    <a href="{{ backHref }}" class="inline-flex shrink-0 items-center gap-1 text-xs text-gray-500 transition-colors hover:text-indigo-700">
-      <span aria-hidden="true">&larr;</span>
-      {{ "common.back" | t }}
+    <a href="{{ backHref }}" title="{{ "common.back" | t }}" aria-label="{{ "common.back" | t }}" class="inline-flex shrink-0 items-center gap-1 text-xs text-gray-500 transition-colors hover:text-indigo-700 justify-center h-8 min-w-8">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+      <span class="hidden lg:inline">{{ "common.back" | t }}</span>
     </a>
     {% if isEdit %}
       <a href="{{ readHref }}"
          title="{{ "view_strings.sections_editor.read_only_view" | t }}"
-         class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+         aria-label="{{ "view_strings.sections_editor.view" | t }}"
+         class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 justify-center h-8">
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye"></use></svg>
-        {{ "view_strings.sections_editor.view" | t }}
+        <span class="hidden lg:inline">{{ "view_strings.sections_editor.view" | t }}</span>
       </a>
       <div id="presence-bar"
            class="flex items-center gap-1.5 shrink-0"
@@ -38,6 +39,15 @@
     </div>
   {% endif %}
 
+  {% if hold %}
+    {%- assign holdUntil = "" -%}
+    {%- if hold.keepUntil != blank -%}{%- assign holdUntil = "view_strings.sections_editor.held_banner_until" | t | replace: "{date}", hold.keepUntil -%}{%- endif -%}
+    <div class="mb-6 rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800 flex flex-wrap items-center gap-2" role="status">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#lock-closed"></use></svg>
+      <span>{{ "view_strings.sections_editor.held_banner" | t | replace: "{until}", holdUntil }} {{ hold.reason }}{% if hold.plugin != blank %} ({{ hold.plugin }}){% endif %}</span>
+      {% if holdHref != blank %}<a class="text-indigo-600 hover:underline font-medium" href="{{ holdHref }}">{{ "view_strings.sections_editor.manage_hold" | t }}</a>{% endif %}
+    </div>
+  {% endif %}
   {% if hasFlash %}
     <div id="flash" class="mb-6 rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700 flex items-center gap-2">
       <svg class="w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
@@ -88,25 +98,7 @@
                   placeholder="{{ "view_strings.sections_editor.default" | t }}"
                   class="w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium text-indigo-700 outline-none focus:border-transparent focus:outline-none focus:ring-0 sm:text-xs">
           </div>
-          {% if publishEnabled %}
-          {% if publicationStatus == 'scheduled' %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-600">
-              <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>{{ "pages.status.scheduled" | t }}
-            </span>
-          {% elsif publicationStatus == 'ended' %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
-              <span class="h-1.5 w-1.5 rounded-full bg-gray-500"></span>{{ "pages.status.ended" | t }}
-            </span>
-          {% elsif publicationStatus == 'live' %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 text-green-800">
-              <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>{{ "pages.status.live" | t }}
-            </span>
-          {% else %}
-            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800">
-              <span class="h-1.5 w-1.5 rounded-full bg-yellow-500"></span>{{ "pages.status.draft" | t }}
-            </span>
-          {% endif %}
-          {% endif %}
+          {% feature_fragment publish/editor-status %}
           <datalist id="page_type_options">
             {% for option in pageTypeOptions %}
               <option value="{{ option.value }}"></option>
@@ -159,69 +151,8 @@
         </div>
         </div>
 
-        {% if publishEnabled %}
-        <div class="relative w-full">
+        {% feature_fragment publish/editor-schedule %}
 
-        <div class="rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm md:absolute md:left-0 md:right-0">
-        <div class="flex items-center justify-between gap-2">
-          <button type="button"
-                  class="flex w-full items-center justify-between font-bold text-gray-900 text-sm"
-                  data-publish-schedule-toggle
-                  data-collapse-label="{{ "view_strings.sections_editor.collapse_publish_schedule" | t }}"
-                  data-expand-label="{{ "view_strings.sections_editor.expand_publish_schedule" | t }}"
-                  aria-controls="publish_schedule_panel"
-                  aria-expanded="false"
-                  aria-label="{{ "view_strings.sections_editor.expand_publish_schedule" | t }}"
-                  title="{{ "view_strings.sections_editor.expand_publish_schedule" | t }}">
-            <span>{{ "view_strings.sections_editor.publish_schedule" | t }}</span>
-            <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-gray-500">
-              <svg class="hidden h-4 w-4" data-publish-schedule-expanded-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-down"></use></svg>
-              <svg class="h-4 w-4" data-publish-schedule-collapsed-icon fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
-            </span>
-          </button>
-        </div>
-        <div id="publish_schedule_panel" data-publish-schedule-panel class="min-w-0 flex-1 mt-2" hidden>
-          <label for="start" class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-xs text-gray-500">{{ "view_strings.sections_editor.from" | t }}</span>
-            <input type="datetime-local" id="start" name="start"
-                  value="{{ page.start }}"
-                  class="min-w-0 flex-1 border-b border-transparent bg-transparent p-0 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none">
-          </label>
-          <label for="end" class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-xs text-gray-500">{{ "view_strings.sections_editor.until" | t }}</span>
-            <input type="datetime-local" id="end" name="end"
-                  value="{{ page.end }}"
-                  class="min-w-0 flex-1 border-b border-transparent bg-transparent p-0 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none">
-          </label>
-          <label for="timezone" class="flex min-w-0 items-center gap-2 sm:col-span-2">
-            <span class="shrink-0 text-xs text-gray-500">{{ "view_strings.sections_editor.timezone" | t }}</span>
-            <input type="text" id="timezone" name="timezone"
-                  value="{{ page.timezone }}"
-                  placeholder="+0800"
-                  class="min-w-0 flex-1 border-b border-transparent bg-transparent p-0 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none">
-          </label>
-        {% unless isVersionPreview %}
-          {% if isEdit %}
-            {% unless isPublished %}
-            <button type="submit" name="action" value="publish"
-                    class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.publish" | t }}</button>
-            {% endunless %}
-            {% if isPublished and isLiveSynced == false %}
-            <button type="submit" name="action" value="publish"
-                    class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.re_publish" | t }}</button>
-            {% endif %}
-            {% if isPublished %}
-            <button type="submit" formaction="{{ unpublishAction }}" formnovalidate data-unpublish-button data-confirm-message="{{ "view_strings.sections_editor.unpublish_page_confirm" | t }}"
-                    class="mt-4 w-full px-4 py-2 bg-yellow-600 text-white text-sm font-semibold rounded-lg hover:bg-yellow-700 transition-colors shadow-sm">{{ "view_strings.sections_editor.un_publish" | t }}</button>
-            {% endif %}
-          {% endif %}
-        {% endunless %}
-        </div>
-        <!-- end publish schedule panel -->
-        </div>
-        {% endif %}
-
-        </div>
       </div>
     </div>
 
@@ -239,12 +170,18 @@
     {% endif %}
 
     {% if hasTagGroups %}
-      <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-        <p class="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
-          <svg class="h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#tag"></use></svg>
-          <span>{{ "view_strings.sections_editor.tags" | t }}</span>
-        </p>
-        <div class="space-y-4">
+      {% assign selectedTagCount = 0 %}
+      {% for group in tagGroups %}{% for tag in group.tags %}{% if tag.checked %}{% assign selectedTagCount = selectedTagCount | plus: 1 %}{% endif %}{% endfor %}{% endfor %}
+      <details class="group min-w-0 rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 py-2 text-sm font-bold text-gray-900 [&::-webkit-details-marker]:hidden">
+          <span class="flex min-w-0 items-center gap-2">
+            <svg class="h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#tag"></use></svg>
+            <span>{{ "view_strings.sections_editor.tags" | t }}</span>
+            {% if selectedTagCount > 0 %}<span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{{ selectedTagCount }}</span>{% endif %}
+          </span>
+          <svg class="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+        </summary>
+        <div class="space-y-4 pb-3 pt-2">
           {% for group in tagGroups %}
             <div class="min-w-0 space-y-2">
               <p class="min-w-0 break-words text-xs font-semibold uppercase tracking-wide text-gray-400">{{ group.name }}</p>
@@ -299,33 +236,36 @@
             </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
     {% endif %}
 
     {% if hasVersions %}
-      <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-        <div class="mb-3 flex min-w-0 items-center justify-between gap-3">
-          <p class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+      <details class="group min-w-0 rounded-xl border border-gray-200 bg-white px-4 py-1 shadow-sm"{% if isVersionPreview %} open{% endif %}>
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 py-2 text-sm font-bold text-gray-900 [&::-webkit-details-marker]:hidden">
+          <span class="flex min-w-0 items-center gap-2">
             <svg class="h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
             <span>{{ "view_strings.sections_editor.versions" | t }}</span>
-          </p>
+            <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{{ versions.size }}</span>
+          </span>
+          <svg class="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+        </summary>
+        <div class="flex justify-end pb-2 pt-2">
           <button type="submit" name="action" value="delete-versions" formnovalidate data-clean-versions-button data-confirm-message="{{ "view_strings.sections_editor.clean_versions_confirm" | t }}" title="{{ "view_strings.sections_editor.clean_all_versions_2" | t }}" aria-label="{{ "view_strings.sections_editor.clean_all_versions_2" | t }}"
-                  class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50">
-            {{ "view_strings.sections_editor.clean_all_versions" | t }}
+                  class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_editor.clean_all_versions" | t }}</span>
           </button>
         </div>
-        <div class="space-y-2">
+        <div class="space-y-2 pb-3">
           {% for version in versions %}
             <div class="flex min-w-0 items-start gap-2">
               <a href="{{ version.href }}"
-                 class="flex min-h-10 min-w-0 flex-1 items-center break-words rounded-lg border px-3 py-1.5 text-xs {% if version.active %}border-amber-400 bg-amber-50 text-amber-800{% else %}border-gray-300 bg-white text-gray-700 hover:bg-gray-50{% endif %}">
+                 class="flex min-h-10 min-w-0 flex-1 flex-wrap items-center gap-x-1 break-words rounded-lg border px-3 py-1.5 text-xs {% if version.active %}border-amber-400 bg-amber-50 text-amber-800{% else %}border-gray-300 bg-white text-gray-700 hover:bg-gray-50{% endif %}">
                 <span>{{ version.createdAt | l10n_date }}</span>
                 {% if version.description %}
-                  <span class="text-gray-500"> - {{ version.description }}</span>
+                  <span class="text-gray-500">- {{ version.description }}</span>
                 {% endif %}
-                {% if version.live %}
-                  <span class="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-green-700">{{ "view_strings.sections_editor.live" | t }}</span>
-                {% endif %}
+                {% feature_fragment publish/editor-live-version-badge %}
               </a>
               <button type="submit" name="action" value="{{ version.removeAction }}" formnovalidate data-version-delete-button data-confirm-message="{{ "view_strings.sections_editor.remove_version_confirm" | t }}" title="{{ "view_strings.sections_editor.remove_version" | t }}" aria-label="{{ "view_strings.sections_editor.remove_version" | t }}"
                       class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white p-0 text-red-700 hover:bg-red-50">
@@ -335,7 +275,7 @@
             </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
     {% endif %}
       </div>
     </div>
@@ -384,10 +324,20 @@
         </div>
       {% endif %}
 
+      {% if pageAccessHref %}
+      <a href="{{ pageAccessHref }}"
+         title="{{ "page_access.title" | t }}"
+         aria-label="{{ "page_access.title" | t }}"
+         class="inline-flex text-xs font-semibold text-indigo-600 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#shield-check"></use></svg>
+        <span class="hidden lg:inline">{{ "page_access.title" | t }}</span>
+      </a>
+      {% endif %}
+      {% if showLegacyEditors %}
       <div class="flex min-w-0 flex-1 items-center gap-2 sm:max-w-xl">
         <div class="flex shrink-0 items-center gap-2 text-gray-500">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#user-group"></use></svg>
-          <label for="editors_search" class="sr-only">{{ "view_strings.sections_editor.editors" | t }}</label>
+          <label for="editors_search" class="text-xs">{{ "page_access.legacy_labels" | t }}</label>
         </div>
         <div class="relative flex min-w-0 flex-1 flex-wrap items-center gap-1.5" data-editors-combobox>
           <input type="hidden" id="editors" name="editors" value="{{ page.editors }}">
@@ -424,6 +374,7 @@
         </div>
       </div>
 
+    {% endif %}
     {% if structuredModel %}
     <div class="flex min-w-0 flex-col gap-2 sm:shrink-0"
          data-fields-clipboard
@@ -437,28 +388,40 @@
       <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
         <button type="button" data-fields-copy
                 title="{{ "view_strings.snippets_structured_editor.copy_fields_hint" | t }}"
-                class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+                aria-label="{{ "view_strings.snippets_structured_editor.copy_fields" | t }}"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 justify-center h-8">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#copy"></use></svg>
-          {{ "view_strings.snippets_structured_editor.copy_fields" | t }}
+          <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.copy_fields" | t }}</span>
         </button>
         {%- comment -%}Hidden until something copied is available to paste — the editor script reveals it.{%- endcomment -%}
         <button type="button" data-fields-paste
                 title="{{ "view_strings.snippets_structured_editor.paste_fields_hint" | t }}"
-                class="hidden shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+                aria-label="{{ "view_strings.snippets_structured_editor.paste_fields" | t }}"
+                class="hidden shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 justify-center h-8">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#paste"></use></svg>
-          {{ "view_strings.snippets_structured_editor.paste_fields" | t }}
+          <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.paste_fields" | t }}</span>
         </button>
       </div>
       <div data-fields-clipboard-panel class="hidden min-w-0 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-        <p class="text-xs text-gray-500" data-fields-panel-hint></p>
+        <p data-explanation class="text-xs text-gray-500" data-fields-panel-hint></p>
         <label for="fields_clipboard_text" class="sr-only">{{ "view_strings.snippets_structured_editor.copy_fields" | t }}</label>
         <textarea id="fields_clipboard_text" rows="4" spellcheck="false" data-fields-clipboard-text
                   class="block min-w-0 w-full max-w-full rounded border border-gray-300 bg-white px-3 py-2 text-xs font-mono text-gray-800 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"></textarea>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" data-fields-panel-apply
-                  class="hidden shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white">{{ "view_strings.snippets_structured_editor.apply" | t }}</button>
+                  title="{{ "view_strings.snippets_structured_editor.apply" | t }}"
+                  aria-label="{{ "view_strings.snippets_structured_editor.apply" | t }}"
+                  class="hidden shrink-0 rounded-lg bg-gray-900 px-3 text-xs font-semibold text-white items-center justify-center gap-2 h-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.apply" | t }}</span>
+          </button>
           <button type="button" data-fields-panel-close
-                  class="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.snippets_structured_editor.close" | t }}</button>
+                  title="{{ "view_strings.snippets_structured_editor.close" | t }}"
+                  aria-label="{{ "view_strings.snippets_structured_editor.close" | t }}"
+                  class="inline-flex shrink-0 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 items-center justify-center gap-2 h-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.snippets_structured_editor.close" | t }}</span>
+          </button>
         </div>
       </div>
       <p data-fields-status role="status" class="hidden text-xs text-gray-500"></p>
@@ -466,39 +429,34 @@
     {% endif %}
     </div>
 
-    {% if isEdit %}
-    <div class="pb-8 absolute right-8">
-      <button type="submit" formaction="{{ deleteAction }}" formnovalidate data-delete-button data-confirm-message="{% if publishEnabled %}{{ "view_strings.sections_editor.delete_page_confirm" | t }}{% else %}{{ "view_strings.sections_dashboard.move_this_page_to_trash" | t }}{% endif %}" title="{{ "view_strings.sections_editor.delete" | t }}" aria-label="{{ "view_strings.sections_editor.delete" | t }}"
-              class="inline-flex h-10 w-10 shrink-0 self-end items-center justify-center rounded-lg bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 sm:ml-auto">
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
-        <span class="sr-only">{{ "view_strings.sections_editor.delete" | t }}</span>
-      </button>
-    </div>
-    {% endif %}
+    {% feature_fragment trash/editor-delete %}
 
-    <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sticky bottom-4">
+    <div data-editor-actions class="sticky bottom-4 flex min-w-0 flex-wrap items-center gap-3">
       {% if isVersionPreview %}
         <button type="submit" name="action" value="{{ selectedVersion.restoreAction }}"
-                class="w-full px-6 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors shadow-sm sm:w-auto">
-          {{ "view_strings.sections_editor.restore_version" | t }}
+                title="{{ "view_strings.sections_editor.restore_version" | t }}"
+                aria-label="{{ "view_strings.sections_editor.restore_version" | t }}"
+                class="inline-flex px-6 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_editor.restore_version" | t }}</span>
         </button>
-        <a href="{{ selectedVersion.currentHref }}" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">
-          {{ "view_strings.sections_editor.edit_current" | t }}
+        <a href="{{ selectedVersion.currentHref }}" title="{{ "view_strings.sections_editor.edit_current" | t }}" aria-label="{{ "view_strings.sections_editor.edit_current" | t }}" class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_editor.edit_current" | t }}</span>
         </a>
       {% else %}
         <button type="submit"
-                class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">
-          {% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}
+                title="{% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}"
+                aria-label="{% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}"
+                class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if isEdit %}save{% else %}document-plus{% endif %}"></use></svg>
+          <span class="hidden lg:inline">{% if isEdit %}{{ "view_strings.sections_editor.save_changes" | t }}{% else %}{{ "view_strings.sections_editor.create_page" | t }}{% endif %}</span>
         </button>
-        {% if publishEnabled and isEdit and isPublished %}
-          <button type="submit" name="action" value="publish"
-                  class="w-full px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-sm sm:w-auto">
-            {{ "view_strings.sections_editor.save_and_publish" | t }}
-          </button>
-        {% endif %}
+        {% feature_fragment publish/editor-save-and-publish %}
       {% endif %}
-      <a href="{{ backHref }}" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">
-        {{ "view_strings.sections_editor.cancel" | t }}
+      <a href="{{ backHref }}" title="{{ "view_strings.sections_editor.cancel" | t }}" aria-label="{{ "view_strings.sections_editor.cancel" | t }}" class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_editor.cancel" | t }}</span>
       </a>
     </div>
   </form>

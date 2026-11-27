@@ -15,14 +15,7 @@
              placeholder="{{ "view_strings.snippets_pagefield_picture_basic.media_upload" | t }}"
              class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
              {% if field.required %}required{% endif %}>
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <label for="{{ field.id }}_file"
-               class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold leading-[1.2] text-gray-700 hover:bg-gray-50">
-          {{ "view_strings.snippets_pagefield_picture_basic.upload" | t }}
-        </label>
-        <input id="{{ field.id }}_file" data-picture-file type="file" accept="image/*" class="hidden">
-        <span data-picture-status class="min-w-0 text-xs text-gray-500"></span>
-      </div>
+      {% feature_fragment media/picture-upload %}
     </div>
   </div>
 </div>

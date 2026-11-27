@@ -32,6 +32,12 @@ for five minutes. The host returns the tenant identity, CMS URL and pairwise
 secret. Optional `tenantVars` declares safe plugin environment variable names
 for the SDK's tenant setup; the host does not send their values.
 
+## Portable registration settings
+
+A plugin can declare top-level registration config fields in its public manifest, for example `"portableConfigFields": ["region", "displayLanguage"]`. The host transfers the complete JSON value of each named field, including any nested values. Choose fields whose contents are safe to copy to another CMS. An absent or malformed list, an unavailable manifest, or a conflicting pinned plugin identity yields an empty config export.
+
+On import, the destination checks the manifest at the registration URL and merges only declared fields present in the file. Omitted fields retain their destination values. Older files follow the same rule. The shared secret, trusted UI approval and view source belong to each installation.
+
 ## Plugin-to-CMS endpoints
 
 All paths below are relative to `/__cms`. JSON requests should send
@@ -53,6 +59,7 @@ All paths below are relative to `/__cms`. JSON requests should send
 | `DELETE /pages/batch` | Body `{ ids: [...] }`. Trash a bounded set of scoped pages. |
 | `DELETE /pages/children` | Select by `page_type` and `parent_page_id` or pointer filters. Returns `trashed` and `done`; repeat while `done` is false. Published copies are not withdrawn by this endpoint. |
 | `GET /content-meta` | Readable page types, languages, default language, taxonomy names/slugs and searchable `path_specs`; optional `types` filter. |
+| `POST /taxonomies/ensure` | Body `{ names: [name, ...] }`. Returns `{ taxonomies: [{ name, slug }, ...] }` for up to 100 names. Declare `"capabilities": ["taxonomy:create"]` in the manifest and approve **Create taxonomies** under **Plugins → Page types**. Existing taxonomies are reused by exact name. |
 | `POST /tags/ensure` | Body `{ tags: [{ taxonomy, name }, ...] }`. Find or create tags by taxonomy slug and name; requires write scope. |
 | `GET /limits` | Effective declared quotas and usage. Supply `page_id` for parent usage or `pointer_value` for pointer usage; otherwise scoped usage is `null`. |
 | `POST /ingest/submissions` | Run bounded, resumable ingestion of published-only submissions into draft. Requires the manifest's `submission` hook. |
@@ -121,9 +128,23 @@ When the optional `credits` feature is enabled, it adds:
 | --- | --- |
 | `GET /credits` | Effective declared prices and balances. |
 | `GET /credits/quote` | Quote a declared key and quantity; quantity 1–1,000,000. |
-| `POST /credits/charge` | Charge a declared `metered` key; quantity 1–1,000,000 and `x-acting-user-id` required. Insufficient funds return 402 `insufficient_credits`. |
+| `POST /credits/charge` | Charge a declared `metered` key; quantity 1–1,000,000 and `x-acting-user-id` required. Insufficient funds return 402 `insufficient_credits`. Accepts an optional plugin-scoped `charge_id` for safe retries. |
+| `POST /credits/plugin-grant` | Add (positive `amount`) or take back (negative, never below zero) credits in this plugin's own wallet; `grant_id` is required and makes the call idempotent (a reuse with a different amount or currency returns 409 `grant_conflict`). The wallet pays only this plugin's costs, before the member's balance and the shared pool. |
 | `POST /credits/usage` | Report a declared `recurring` key for a user; quantity 0–1,000,000,000. |
 | `GET /credits/subscriptions` | Read this contributor's subscriptions, optionally filtered by user. |
+
+For metered charges, generate one `charge_id` per usage report and reuse it
+on retries. IDs are case sensitive and use 1–128 letters, digits, dots,
+underscores, colons, or hyphens. A retry of a completed charge returns its
+original response, including the original balance. Reusing the ID with a
+different payer, key, quantity, entity, or note returns `409 charge_id_conflict`.
+Declined charges do not reserve the ID.
+
+A declared cost with `plugin_only: true` is paid only from the plugin's own
+wallet (see `POST /credits/plugin-grant`), never the member's balance or the
+shared pool. A short wallet refuses it with 402 and `plugin_only: true` in the
+`credit` payload; `GET /credits` and `GET /credits/quote` report the flag, and
+the quote's `affordable` considers only the wallet.
 
 The host handles `page_create` charges through its creation pipeline; plugins
 should not charge those a second time. Recurring usage is billed by the host's

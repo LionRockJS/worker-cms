@@ -7,18 +7,33 @@
           action="{{ section.settings.deleteAction }}"
           data-confirm="{{ section.settings.deleteConfirm }}"></form>
   {% endif %}
-  <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+  <div class="flex min-w-0 flex-wrap items-center gap-3">
     {% if section.settings.showSave == 'yes' %}
       <button form="{{ section.settings.formId }}"
               type="submit"
-              class="w-full rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 sm:w-auto">{{ section.settings.saveLabel }}</button>
+              title="{{ section.settings.saveLabel }}"
+              aria-label="{{ section.settings.saveLabel }}"
+              class="inline-flex rounded-lg bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+        <span class="hidden lg:inline">{{ section.settings.saveLabel }}</span>
+      </button>
     {% endif %}
     <a href="{{ section.settings.cancelHref }}"
-       class="w-full rounded-lg border border-gray-300 bg-white px-6 py-2 text-center text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 sm:w-auto">{{ section.settings.cancelLabel }}</a>
+       title="{{ section.settings.cancelLabel }}"
+       aria-label="{{ section.settings.cancelLabel }}"
+       class="inline-flex rounded-lg border border-gray-300 bg-white px-6 text-center text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+      <span class="hidden lg:inline">{{ section.settings.cancelLabel }}</span>
+    </a>
     {% if section.settings.deleteAction and section.settings.deleteAction != '' %}
       <button form="{{ section.settings.deleteFormId }}"
               type="submit"
-              class="w-full rounded-lg bg-red-600 px-6 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 sm:ml-auto sm:w-auto">{{ section.settings.deleteLabel }}</button>
+              title="{{ section.settings.deleteLabel }}"
+              aria-label="{{ section.settings.deleteLabel }}"
+              class="inline-flex rounded-lg bg-red-600 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 sm:ml-auto items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+        <span class="hidden lg:inline">{{ section.settings.deleteLabel }}</span>
+      </button>
     {% endif %}
   </div>
 </div>

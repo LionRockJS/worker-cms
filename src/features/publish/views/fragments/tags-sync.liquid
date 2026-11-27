@@ -1,0 +1,11 @@
+{% if canSync %}
+  <form method="POST" action="/admin/tags/sync-published" class="shrink-0">
+    <button type="submit"
+            title="{{ "view_strings.sections_tags.sync_published_help" | t }}"
+            aria-label="{{ "view_strings.sections_tags.sync_published" | t }}"
+            class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_tags.sync_published" | t }}</span>
+    </button>
+  </form>
+{% endif %}

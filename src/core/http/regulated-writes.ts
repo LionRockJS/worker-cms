@@ -26,7 +26,7 @@ export function regulatedRequestWriteBlocked(env: Pick<Env, 'REGULATED_MODE'>, r
   return ![
     /^\/admin\/pages\/\d+\/unpublish$/,
     /^\/admin\/plugins-manage\/\d+\/disconnect$/,
-    /^\/admin\/plugins-manage\/\d+\/(?:assets|files|page-types)\/revoke$/,
+    /^\/admin\/plugins-manage\/\d+\/(?:assets|files|page-types|capabilities\/taxonomy-create)\/revoke$/,
     /^\/admin\/profile\/identities\/\d+\/disconnect$/,
     /^\/admin\/audit\/outages\/[^/]+\/reconcile$/,
   ].some(pattern => pattern.test(path));

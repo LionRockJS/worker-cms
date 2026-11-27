@@ -9,7 +9,8 @@ import type { CreditContributor,CreditPricingRow } from './contracts';
 import type { AppContext } from '../../core/http/context';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 import type { Env } from '../../types';
-import { loadShowCredits } from '../../core/db/settings';
+import { SHOW_CREDITS_SETTING_KEY } from '../../core/db/settings';
+import { loadShowCredits } from './settings';
 import { creditLedgerRowForView } from './ledger-view';
 import { recordTableReads } from '../../core/http/access-log';
 import { recordWalletReads } from './read-audit';
@@ -22,22 +23,26 @@ import {
 import {
   countCreditLedger,
   creditUnitLabel,
-  currencyAmounts,
   currencyLabel,
   currencyLabelKey,
   currencyUnitKey,
   declaredCredits,
   creditsSettingKey,
+  asCreditCurrency,
   effectiveCreditsForId,
-  emptyCurrencyTotals,
+  forfeitPluginCredits,
+  getPluginCreditBalances,
+  listPluginCreditLedger,
   getCreditBalances,
   getSharedCreditBalances,
   listCreditLedger,
   listSharedCreditLedger,
   pageCreateAction,
+  pageCreateAmounts,
   pageCreateCostForType,
   refundCurrencies,
   spendCurrencies,
+  type CurrencyAmount,
   type NormalizedCreditDef,
   type PluginCreditValues,
 } from './service';
@@ -73,7 +78,8 @@ export const creditsServices: FeatureServiceEntry = {
     // credits for it, another diamonds); every part is spent or none is.
     const charge = await spendCurrencies(c.env, {
       userId,
-      amounts: currencyAmounts(cost.totals),
+      // One part per pricing plugin, so each plugin's wallet can pay its own.
+      amounts: pageCreateAmounts(cost),
       action,
       entityType: pageType,
       createdBy: String(userId),
@@ -86,7 +92,9 @@ export const creditsServices: FeatureServiceEntry = {
         code: charge.error === 'unknown_user' ? 'unknown_user' : 'insufficient_credits',
         message: charge.error === 'unknown_user'
           ? `Your user account could not be charged ${money}.`
-          : `Not enough ${money}: creating this needs ${charge.required} ${money} and you have ${charge.balance} (shared pool: ${charge.sharedBalance}).`,
+          : charge.pluginOnly
+            ? `Not enough ${money} in the ${charge.pluginId} plugin's wallet: creating this needs ${charge.required} ${money} from that plugin's own credits and it has ${charge.pluginBalance ?? 0}.`
+            : `Not enough ${money}: creating this needs ${charge.required} ${money} and you have ${charge.balance} (shared pool: ${charge.sharedBalance}).`,
       };
     }
 
@@ -99,11 +107,18 @@ export const creditsServices: FeatureServiceEntry = {
   },
 
   async adminScreenProps(c: AppContext, target): Promise<Record<string, unknown>> {
-    if (!await loadShowCredits(c.env)) return { showCreditsPanel: false };
+    const showCredits = await loadShowCredits(c.env);
+    if (target.screen === 'system-settings') return { hasCreditsFeature: true, showCredits };
+    if (!showCredits) return { showCreditsPanel: false };
     if (target.screen === 'profile') return profileCreditProps(c);
     if (target.screen === 'users') return sharedPoolProps(c.env);
     if (target.screen === 'user') return userCreditProps(c, target.userId);
     return {};
+  },
+
+  systemSettingsWrites(form) {
+    if (!form.has('show_credits')) return [];
+    return [{ key: SHOW_CREDITS_SETTING_KEY, value: String(form.get('show_credits') === 'true') }];
   },
 
   /**
@@ -111,14 +126,14 @@ export const creditsServices: FeatureServiceEntry = {
    * message-formatted: the caller turns a refusal into its own 402 payload.
    */
   async reservePageCreates(env: Env, input) {
-    const totals = emptyCurrencyTotals();
+    const amounts: CurrencyAmount[] = [];
     const breakdown: Record<string, number> = {};
     let action = 'page_create:batch';
     let singleType: string | undefined;
     for (const { pageType, count } of input.pageTypes) {
       const cost = await pageCreateCostForType(env, pageType);
       if (cost.total > 0) {
-        for (const currency of CREDIT_CURRENCIES) totals[currency] += cost.totals[currency] * count;
+        amounts.push(...pageCreateAmounts(cost, count));
         breakdown[pageType] = cost.total * count;
       }
       if (input.pageTypes.length === 1 && count === 1) {
@@ -127,7 +142,6 @@ export const creditsServices: FeatureServiceEntry = {
       }
     }
 
-    const amounts = currencyAmounts(totals);
     const payer = input.payerUserId;
     if (!amounts.length || payer === null) {
       return { ok: true, charged: 0, refund: async () => {} };
@@ -162,6 +176,7 @@ export const creditsServices: FeatureServiceEntry = {
               required: charge.required,
               balance: charge.balance,
               shared_balance: charge.sharedBalance,
+              ...(charge.pluginOnly ? { plugin_only: true, plugin_id: charge.pluginId, plugin_balance: charge.pluginBalance ?? 0 } : {}),
             },
           },
         };
@@ -197,6 +212,14 @@ export const creditsServices: FeatureServiceEntry = {
     if (!contributorId) return operation === 'pricing' ? [] : {};
 
     if (operation === 'pricing') return creditPricing(env, contributorId);
+    if (operation === 'plugin-wallet') return pluginWallet(env, contributorId);
+    if (operation === 'forfeit-plugin-wallet') {
+      const createdBy = typeof (request as { createdBy?: unknown }).createdBy === 'string'
+        ? (request as { createdBy: string }).createdBy
+        : 'system';
+      await forfeitPluginCredits(env, contributorId, createdBy);
+      return {};
+    }
     return undefined;
   },
 
@@ -205,6 +228,32 @@ export const creditsServices: FeatureServiceEntry = {
     return sweep.processed ? `credit subscription sweep: ${JSON.stringify(sweep)}` : null;
   },
 };
+
+/** Ledger rows shown on a plugin's wallet panel. */
+const PLUGIN_WALLET_LEDGER_SIZE = 20;
+
+/** A plugin's own wallets (credits its creator supplied) and their recent
+ *  ledger, for the plugin's credits screen. Read-only for host admins. */
+async function pluginWallet(env: Env, contributorId: string) {
+  const [balances, ledger] = await Promise.all([
+    getPluginCreditBalances(env, contributorId),
+    listPluginCreditLedger(env, contributorId, { limit: PLUGIN_WALLET_LEDGER_SIZE }),
+  ]);
+  recordTableReads('credit.plugin-wallet-read', 'plugin_credits', [contributorId]);
+  recordTableReads('credit.plugin-ledger-read', 'plugin_credit_ledger', ledger.map(row => row.id));
+  return {
+    wallets: CREDIT_CURRENCIES.map((currency) => ({
+      currency,
+      currencyKey: currencyLabelKey(currency),
+      unitKey: currencyUnitKey(currency),
+      balance: balances[currency],
+    })),
+    ledger: ledger.map((row) => ({
+      ...creditLedgerRowForView(row),
+      unitKey: currencyUnitKey(asCreditCurrency(row.currency)),
+    })),
+  };
+}
 
 async function creditPricing(env: Env, contributorId: string): Promise<CreditPricingRow[]> {
   const credits = await effectiveCreditsForId(env, contributorId);
@@ -219,6 +268,7 @@ async function creditPricing(env: Env, contributorId: string): Promise<CreditPri
     defaultValue: credit.def.defaultValue,
     effectiveValue: credit.value,
     configured: credit.configured,
+    pluginOnly: credit.def.pluginOnly,
   }));
 }
 

@@ -1,6 +1,6 @@
 # Durable host API page-tag association evidence
 
-Local W4b continuation after `0583366`, 2 November 2026. `src/core/pages/tag-association-evidence.ts` owns guarded transactions for the always-on host API. It imports no optional feature implementation and requires no new schema.
+Local W4b continuation after `0583366`, 2 November 2026. `src/core/evidence/tag-association-evidence.ts` owns guarded transactions for the always-on host API. It imports no optional feature implementation and requires no new schema.
 
 ## Covered API contracts
 

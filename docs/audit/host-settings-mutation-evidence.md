@@ -12,7 +12,7 @@ Local W4b continuation after `d373fdf`, 2 November 2026. `POST /admin/settings/s
 
 ## Transaction contract
 
-`src/core/db/settings-mutation-evidence.ts` captures all five keys, including absent keys, and uses their exact values/creation/update metadata as transaction preconditions. The stored-value snapshot is capped at 1,000,000 UTF-8 JSON bytes in SQL before values return to the Worker. Write manifests have the same byte limit and allow at most the five unique host keys. Other keys, duplicate entries and oversized plans refuse.
+`src/core/evidence/settings-mutation-evidence.ts` captures all five keys, including absent keys, and uses their exact values/creation/update metadata as transaction preconditions. The stored-value snapshot is capped at 1,000,000 UTF-8 JSON bytes in SQL before values return to the Worker. Write manifests have the same byte limit and allow at most the five unique host keys. Other keys, duplicate entries and oversized plans refuse.
 
 The route builds preserved timezone/sidebar state from that same snapshot. Existing normalization rules are shared as pure functions with the legacy helper APIs: name length/defaults, allowed icons/fonts, colour normalization, admin home filtering, weights, locked System visibility, labels and legacy menu format remain. Missing timezone/credit fields and unsubmitted labels retain their existing preservation rules. Disabled features retain their saved menu state. Optional locale/sidebar providers still define the rendered option catalogue; this is not a transaction-bound versioning contract for their registration or remote manifests.
 

@@ -16,11 +16,13 @@
     "shared_pool_description": "A site-wide pool that covers spending when a user's own balance runs out. Anyone can donate credits from their profile; users with transfer permission can grant pool credits from a user's edit page."
   },
   "view_strings": {
+    "sections_role_form.cms": "CMS",
     "sections_role_form.delete": "Delete",
     "sections_role_form.delete_this_role_it_will_be_removed_from_any_users_that_have_it": "Delete this role? It will be removed from any users that have it.",
     "sections_role_form.name": "Name",
     "sections_role_form.optional_derived_from_the_name_if_blank_used_internally_to_identify_the_": "Optional; derived from the name if blank. Used internally to identify the role.",
     "sections_role_form.permissions": "Permissions",
+    "sections_role_form.plugin_access_needs_plugin_access_and_one_of_the_plugins_permissions": "To reach a plugin, a role needs “Reach plugin admin pages” plus at least one of that plugin's permissions. Untick all of a plugin's permissions to block it.",
     "sections_role_form.slug": "Slug",
     "sections_role_form.the_admin_role_always_has_every_permission_and_cannot_be_edited": "The admin role always has every permission and cannot be edited.",
     "sections_roles.assign_permissions_to_roles_the_admin_role_always_has_every_permission": "Assign permissions to roles. The admin role always has every permission.",

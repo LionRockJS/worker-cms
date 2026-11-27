@@ -1,0 +1,6 @@
+var drift = tr.querySelector('[data-weight-drift]');
+if (!drift) return;
+var live = drift.getAttribute('data-live-weight');
+var drifted = live !== null && Number(live) !== row.weight;
+drift.classList.toggle('hidden', !drifted);
+drift.classList.toggle('inline-flex', drifted);

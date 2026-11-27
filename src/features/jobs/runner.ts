@@ -1,3 +1,6 @@
+import { signedNotice } from '../../core/http/notice';
+import { requireTrashLifecycle } from '../services';
+import { pageAccessFilter } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
 import { abortIf } from '../../core/db/transaction-guard';
 // Running a claimed job: replay a recorded admin request, or walk a bulk page
@@ -95,8 +98,16 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
   }
   const required: Permission = input.action === 'publish' || input.action === 'unpublish' ? 'content:publish'
     : input.action === 'delete' ? 'content:delete' : 'content:write';
-  if (!effectivePermissions(await resolveRolePermissions(env, true), job.user.role).has(required)) throw new Error('Job permission revoked');
+  const current = await env.DB.prepare('SELECT role FROM users WHERE id = ? AND disabled_at IS NULL')
+    .bind(job.user.sub).first<{ role: string }>();
+  if (current?.role !== job.user.role ||
+      !effectivePermissions(await resolveRolePermissions(env, true), current.role).has(required)) {
+    throw new Error('Job permission revoked');
+  }
 
+  if (input.action === 'delete') requireTrashLifecycle();
+
+  const access = pageAccessFilter(job.user, 'write', 'p.uuid', true);
   if (input.scope === 'all' && !input.resolvedAll) {
     input = {
       ...input,
@@ -105,7 +116,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
         criteria: input.criteria,
         operator: input.operator,
         status: input.status,
-      }, { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null }),
+      }, { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null }, access),
       cursor: 0,
       resolvedAll: true,
     };
@@ -114,7 +125,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
   const cursor = Math.max(0, input.cursor ?? 0);
   const pageIds = input.ids.slice(cursor, cursor + BULK_ACTION_PAGE_LIMIT);
   const byType = new Map<string, string[]>();
-  for (const page of await draftPagesByIds(env.DB, pageIds)) {
+  for (const page of await draftPagesByIds(env.DB, pageIds, access)) {
     const key = page.page_type ?? 'default';
     const ids = byType.get(key) ?? [];
     ids.push(String(page.id)); byType.set(key, ids);
@@ -154,7 +165,7 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
 
   await completeAdminJob(env.DB, job.id, 200, appendQuery(
     input.returnTo,
-    `flash=${encodeURIComponent(bulkActionFlash(input.action, updated, refused, failedTargets))}`,
+    await signedNotice(env.JWT_SECRET, job.user.sub, bulkActionFlash(input.action, updated, refused, failedTargets)),
   ), job);
 }
 

@@ -12,14 +12,18 @@ export async function tagsPage(views: Fetcher, opts: BaseTemplateProps & {
   taxonomies: TagTaxonomyOption[];
   tags: Tag[];
   filterTaxonomy: string;
+  search: string;
   canSync: boolean;
   syncedCount: string;
   syncError: string;
 }): Promise<string> {
-  const { taxonomies, tags, filterTaxonomy, canSync, syncedCount, syncError } = opts;
+  const { taxonomies, tags, filterTaxonomy, search, canSync, syncedCount, syncError } = opts;
   const taxonomyMap = new Map(taxonomies.map((type) => [type.id, type.name]));
+  const taxonomyQuery = filterTaxonomy ? `?${new URLSearchParams({ filter_taxonomy: filterTaxonomy })}` : '';
   const body = await renderView(views, '/templates/tags.json', {
     hasTags: tags.length > 0,
+    search,
+    clearSearchHref: `/admin/tags${taxonomyQuery}`,
     canSync,
     syncedCount,
     syncError,

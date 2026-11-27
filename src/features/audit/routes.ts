@@ -1,3 +1,4 @@
+import { notice, readNotice } from '../../core/http/notice';
 import { captureAccessAuthorization } from '../../core/auth/access-authorization';
 import { recordPolicyDenial } from '../../core/auth/denials';
 // The audit log reader.
@@ -163,7 +164,7 @@ auditRoutes.get('/audit/classes', requirePermission('audit:read'), async (c) => 
 
   return renderPage(c, auditClassesPage, {
     classes: rows.results,
-    flash: c.req.query('flash') ?? undefined,
+    flash: await readNotice(c) || undefined,
     canManage: await userCan(c, 'menu:manage'),
   });
 });
@@ -176,7 +177,7 @@ auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) =
   const note = String(form.get('note') ?? '').trim();
 
   if (!CONTAINER_KINDS.includes(kind as ContainerKind) || !DATA_CLASSES.includes(dataClass as DataClass) || !key) {
-    return c.redirect('/admin/audit/classes?flash=audit.flash.invalid');
+    return c.redirect(`/admin/audit/classes?${await notice(c, 'audit.flash.invalid')}`);
   }
   const effective = await resolveDataClasses(c.env, true);
   if (!effective.ok) return auditUnavailable(c);
@@ -221,7 +222,7 @@ auditRoutes.post('/audit/classes', requirePermission('menu:manage'), async (c) =
     clearDataClassCache();
   }
 
-  return c.redirect('/admin/audit/classes?flash=audit.flash.saved');
+  return c.redirect(`/admin/audit/classes?${await notice(c, 'audit.flash.saved')}`);
 });
 
 auditRoutes.post('/audit/classes/:id/delete', requirePermission('menu:manage'), async (c) => {
@@ -230,7 +231,7 @@ auditRoutes.post('/audit/classes/:id/delete', requirePermission('menu:manage'), 
   const row = await c.env.DB.prepare('SELECT container_kind, container_key FROM data_classes WHERE id = ?')
     .bind(id)
     .first<{ container_kind: string; container_key: string }>();
-  if (!row) return c.redirect('/admin/audit/classes?flash=audit.flash.invalid');
+  if (!row) return c.redirect(`/admin/audit/classes?${await notice(c, 'audit.flash.invalid')}`);
   return c.json({ error: 'Classification removal requires a reviewed declassification process' }, 409, { 'Cache-Control': 'no-store' });
 });
 
@@ -262,7 +263,7 @@ auditRoutes.get('/audit/review', requirePermission('audit:read'), async (c) => {
   return renderPage(c, auditReviewPage, { signals, health, outages,
     canReconcile: await userCan(c, 'menu:manage'),
     lastReview, reviewOverdue: reviewOverdue(c.env, lastReview), reviewIntervalDays: reviewIntervalDays(c.env),
-    flash: c.req.query('flash') || undefined });
+    flash: await readNotice(c) || undefined });
 });
 
 // Records that a person examined the signals and what they decided (W13). The
@@ -275,7 +276,7 @@ auditRoutes.post('/audit/review/record', requirePermission('audit:read'), async 
   const reference = String(form.get('reference') ?? '').trim();
   if (!REVIEW_OUTCOMES.includes(outcome) || (reference && !REFERENCE_PATTERN.test(reference))
       || (outcome === 'incident-opened' && !reference)) {
-    return c.redirect('/admin/audit/review?flash=Choose+an+outcome%3B+an+opened+incident+needs+a+case+reference');
+    return c.redirect(`/admin/audit/review?${await notice(c, 'Choose an outcome; an opened incident needs a case reference')}`);
   }
   const signals = await reviewSignals(c.env);
   try {
@@ -285,7 +286,7 @@ auditRoutes.post('/audit/review/record', requirePermission('audit:read'), async 
         flagged: Object.fromEntries(signals.map(signal => [signal.id, signal.rows.length])) },
     }], contextActor(c), true);
   } catch { return auditUnavailable(c); }
-  return c.redirect('/admin/audit/review?flash=Review+recorded');
+  return c.redirect(`/admin/audit/review?${await notice(c, 'Review recorded')}`);
 });
 
 auditRoutes.get('/audit/outages/:id', requirePermission('audit:read'), async (c) => {

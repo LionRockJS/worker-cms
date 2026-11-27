@@ -1,10 +1,11 @@
 import { IpAccessUnavailableError } from './core/auth/ip-access';
 import { auditRequestFrom,ServiceMutationUnavailableError } from './core/db/audit';
-import { SettingsMutationUnavailableError } from './core/db/settings-mutation-evidence';
-import { PageTagEvidenceUnavailableError } from './core/pages/tag-association-evidence';
-import { PageLifecycleUnavailableError } from './core/pages/lifecycle-mutation-evidence';
-import { ContentBatchEvidenceUnavailableError } from './core/pages/batch-mutation-evidence';
+import { SettingsMutationUnavailableError } from './core/evidence/settings-mutation-evidence';
+import { PageTagEvidenceUnavailableError } from './core/evidence/tag-association-evidence';
+import { PageLifecycleUnavailableError } from './core/pages/trash-lifecycle';
+import { ContentBatchEvidenceUnavailableError } from './core/evidence/batch-mutation-evidence';
 import { limitRequestBody, BodyTooLargeError } from './core/http/body-limit';
+import { baitPathBan } from './core/http/bait-paths';
 // ============================================================
 // 0xCMS - main entry point
 //
@@ -34,11 +35,13 @@ import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
 import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
-import { SessionEvidenceUnavailableError } from './core/auth/session-evidence';
+import { SessionEvidenceUnavailableError } from './core/evidence/session-evidence';
 import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
 import { maintainSessionHygiene } from './core/auth/sessions';
 import { coreExtensions } from './core/extensions';
 import { withD1Sessions } from './core/http/d1-sessions';
+import { loadCustomIconSprite } from './core/db/settings';
+import { CUSTOM_ICON_SPRITE_PATH } from './core/render/icon-sprite';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -119,6 +122,9 @@ app.use('*', limitRequestBody);
 // public media routes alike.
 app.use('*', accessLog);
 
+// Scanner bait (/.env, /wp-login.php, ...) bars the IP from /auth/* for a while.
+app.use('*', baitPathBan);
+
 // ── Auth (OAuth 2.1 + JWT) ────────────────────────────────────────────────────
 app.route('/auth', authRoutes);
 
@@ -130,9 +136,16 @@ for (const { router, basePath } of publicRouters) {
   app.route(basePath ?? '/', router);
 }
 
+// The signed-out sign-in page is the only render that loads views from here
+// (layout.ts viewBasePath); every other view is served behind sign-in at
+// /admin/views/*, so the admin screens' markup is not public.
+const PUBLIC_VIEW_PATHS: ReadonlySet<string> = new Set([
+  '/layout/default.liquid', '/templates/login.json', '/sections/login.liquid',
+]);
+
 app.get('/views/*', async (c) => {
   const path = c.req.path.slice('/views'.length);
-  if (!path.startsWith('/') || path.includes('..')) return c.notFound();
+  if (!PUBLIC_VIEW_PATHS.has(path)) return c.notFound();
 
   const response = await c.env.VIEWS.fetch(`https://views.local${path}`);
   if (!response.ok) return c.notFound();
@@ -152,6 +165,16 @@ function isLocalHost(hostname: string): boolean {
 }
 
 // ── Static assets (compiled CSS) from the VIEWS binding ──────────────────────
+app.get(CUSTOM_ICON_SPRITE_PATH, async (c) => {
+  const sprite = await loadCustomIconSprite(c.env);
+  if (!sprite) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  return new Response(sprite.svg, { headers: {
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+  } });
+});
+
 app.get('/assets/*', async (c) => {
   const assetPath = new URL(c.req.url).pathname;
   const response = await c.env.VIEWS.fetch(`https://views.local${assetPath}`);

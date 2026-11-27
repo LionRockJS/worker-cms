@@ -16,6 +16,7 @@ import {
   type PluginHookEvent,
   type PluginIdentityApproval,
   type PluginManifest,
+  type PluginPageTypeApproval,
   type ResolvedPlugin,
   type PluginRecord,
 } from './types';
@@ -130,6 +131,11 @@ async function loadManifest(url: string, fetcher: Fetcher, fresh = false): Promi
   }
 }
 
+/** Public manifest inspection for settings transfer. The caller supplies a validated base URL. */
+export async function transferManifest(url: string): Promise<PluginManifest | null> {
+  return loadManifest(url, fetcherForUrl(url), true);
+}
+
 /** Approval inspection must not take a first-use identity claim or resolve
  * unrelated plugins. Return a fresh declaration tied to the captured row. */
 export async function inspectPluginManifest(record: PluginRecord): Promise<{ manifest: PluginManifest; fetcher: Fetcher } | null> {
@@ -172,6 +178,8 @@ function isPluginManifest(value: unknown): value is PluginManifest {
     if (value[key] !== undefined && !['server-only', 'sandboxed-ui', 'trusted-ui'].includes(String(value[key]))) return false;
   }
   if (value.i18n !== undefined && typeof value.i18n !== 'boolean') return false;
+  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities)
+    || !value.capabilities.every(key => typeof key === 'string'))) return false;
   if (value.autoTenant !== undefined && typeof value.autoTenant !== 'boolean') return false;
   if (value.auto_tenant !== undefined && typeof value.auto_tenant !== 'boolean') return false;
   if (value.filePrefixes !== undefined) {
@@ -334,7 +342,9 @@ async function resolveManifests(env: Env): Promise<{
 }
 
 /** Resolves every active plugin (enabled row + manifest reachable + identity pinned to this row). */
-export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
+export async function getPlugins(env: Env): Promise<Array<ResolvedPlugin & {
+  pageTypeApprovals: PluginPageTypeApproval[];
+}>> {
   const { entries, identities } = await resolveManifests(env);
   const { allowed } = await enforceIdentities(env, entries, identities);
   const resolved = await Promise.all(entries.filter(({ record }) => allowed.has(record.id)).map(async ({ record, manifest }) => {
@@ -369,6 +379,7 @@ export async function getPlugins(env: Env): Promise<ResolvedPlugin[]> {
     };
     return {
       registration: {id:record.id,uuid:record.uuid},
+      pageTypeApprovals: approvals,
       viewSource: pluginViewSource(record.config),
       binding: record.url, fetcher: fetcherForUrl(record.url), manifest: effective,
       requestedManifest: manifest, secret: record.secret || env.PLUGIN_SECRET || '',
@@ -466,15 +477,17 @@ export async function pluginsForHook(env: Env, event: PluginHookEvent): Promise<
  * no longer contribute the same value — which previously let whichever sorted
  * first replace the other's label in the role editor.
  */
-export async function allPluginPermissions(env: Env): Promise<Array<{ value: string; label: string }>> {
+export async function allPluginPermissions(env: Env): Promise<Array<{ value: string; label: string; group: string }>> {
   const plugins = await getPlugins(env);
   const seen = new Set<string>();
-  const result: Array<{ value: string; label: string }> = [];
+  const result: Array<{ value: string; label: string; group: string }> = [];
   for (const plugin of plugins) {
+    // The role editor lists each plugin's permissions under this heading.
+    const group = plugin.manifest.name || plugin.label || plugin.manifest.id;
     for (const perm of pluginPermissions(plugin.manifest)) {
       if (!seen.has(perm.value)) {
         seen.add(perm.value);
-        result.push(perm);
+        result.push({ ...perm, group });
       }
     }
   }

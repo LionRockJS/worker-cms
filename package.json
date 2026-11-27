@@ -5,6 +5,7 @@
   "workspaces": ["assets-source"],
   "scripts": {
     "setup": "node tools/install.mjs",
+    "upgrade": "node tools/install.mjs --upgrade",
     "dev": "npm run build && wrangler dev --local",
     "build": "npm run build:version && npm run build:features && npm run build:migrations && npm run build:views && npm run build:css && npm run build:js",
     "build:version": "node tools/build-version.mjs",
@@ -19,25 +20,29 @@
     "apple:client-secret": "node tools/generate-apple-client-secret.mjs",
     "type-check": "tsc --noEmit",
     "pretest": "npm run build",
-    "test": "node --test tools/test-session-keepalive.mjs tools/test-local-plugin-views.mjs tools/test-install-config.mjs && npm run check:profiles && npm run check:boundaries && npm run check:generated && npm run check:inventory && npm run check:requirements && vitest run",
+    "test": "node --test tools/test-section-engines.mjs tools/test-view-fragments.mjs tools/test-session-keepalive.mjs tools/test-local-plugin-views.mjs tools/test-install-config.mjs tools/test-check-schema.mjs && npm run check:profiles && npm run check:boundaries && npm run check:generated && npm run check:inventory && npm run check:requirements && vitest run",
     "check:dms-profile": "node tools/check-dms-profile.mjs",
     "check:profiles": "node tools/check-profiles.mjs --quiet",
     "check:boundaries": "node tools/check-boundaries.mjs --quiet",
     "build:features": "node tools/build-features.mjs",
     "check:generated": "node tools/build-features.mjs --check && node tools/build-migrations.mjs --check && node tools/build-views.mjs --check",
     "check:upgrade": "node --no-warnings tools/check-upgrade-path.mjs",
+    "check:schema": "node --no-warnings tools/check-schema.mjs",
     "check:inventory": "node tools/check-inventory.mjs --quiet",
     "check:requirements": "node tools/check-requirements.mjs --quiet",
     "check:export": "node --no-warnings tools/check-export.mjs"
   },
   "dependencies": {
     "hono": "^4.13.19",
+    "saxes": "^6.0.0",
     "yjs": "^13.6.33"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
     "@cloudflare/workers-types": "^5.20261118.1",
+    "ejs": "^3.1.10",
     "esbuild": "^0.28.2",
+    "handlebars": "^4.7.10",
     "typescript": "^7.0.2",
     "wrangler": "^4.164.0"
   }

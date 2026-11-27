@@ -1,11 +1,12 @@
-// Advanced-search parsing, blueprint path-spec machinery, and SQL building.
-// Shared by the search route and (for path specs) the CSV import/export helpers.
+import type { PageAccessFilter } from '../auth/page-access';
+// Advanced-search option parsing, blueprint path-spec machinery, and SQL building.
+// Shared by the search route, plugin page queries, and bulk jobs.
 
 import { cmsConfig } from '../../cms-config';
 import type { BlueprintEntry, CmsConfig } from '../../cms-config';
-import type { Page, Tag, Taxonomy } from '../../types';
-import { num, strParam } from '../http/forms';
-import { chineseSearchVariants } from './chinese';
+import type { Page } from '../../types';
+import { strParam } from '../http/forms';
+import { chineseSearchPattern } from './chinese';
 import { countPageMetadata } from './count-metadata';
 
 export type AdvancedSearchOperator = 'AND' | 'OR' | 'NOT';
@@ -38,44 +39,9 @@ export interface BlueprintPathSpec {
   kind: BlueprintPathKind;
 }
 
-export function parseAdvancedSearchCriteria(url: string): AdvancedSearchCriterion[] {
-  const params = new URL(url).searchParams;
-  const criteria: AdvancedSearchCriterion[] = [];
-  const indexes = new Set<number>();
-
-  for (const key of params.keys()) {
-    const match = key.match(/^(?:search|path|tags)(\d+)$/);
-    if (match) indexes.add(parseInt(match[1], 10));
-  }
-
-  for (const index of [...indexes].sort((left, right) => left - right)) {
-    const term = strParam(params.get(`search${index}`));
-    const path = strParam(params.get(`path${index}`));
-    const tags = params.getAll(`tags${index}`)
-      .flatMap((value) => value.split(','))
-      .map((tag) => tag.trim())
-      .filter((tag) => /^\d+$/.test(tag));
-
-    if (term || tags.length) {
-      criteria.push({
-        index,
-        term,
-        path,
-        tags: Array.from(new Set(tags)),
-      });
-    }
-  }
-
-  return criteria;
-}
-
 export function advancedSearchOperator(value: string | null | undefined): AdvancedSearchOperator {
   const operator = strParam(value).toUpperCase();
   return operator === 'OR' || operator === 'NOT' ? operator : 'AND';
-}
-
-export function advancedSearchPageSize(value: string | null | undefined): number {
-  return Math.min(Math.max(num(value, 20), 1), 100);
 }
 
 export function advancedSearchSort(value: string | null | undefined): string {
@@ -85,29 +51,6 @@ export function advancedSearchSort(value: string | null | undefined): string {
 
 export function advancedSearchOrder(value: string | null | undefined): 'ASC' | 'DESC' {
   return strParam(value).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-}
-
-export function advancedSearchQueryString(
-  criteria: AdvancedSearchCriterion[],
-  operator: AdvancedSearchOperator,
-  pageSize: number,
-  extras: Record<string, string | number | undefined> = {},
-): string {
-  const params = new URLSearchParams();
-  params.set('operator', operator);
-  params.set('pagesize', String(pageSize));
-
-  for (const criterion of criteria) {
-    params.set(`search${criterion.index}`, criterion.term);
-    params.set(`path${criterion.index}`, criterion.path);
-    for (const tag of criterion.tags) params.append(`tags${criterion.index}`, tag);
-  }
-
-  for (const [key, value] of Object.entries(extras)) {
-    if (value !== undefined && String(value) !== '') params.set(key, String(value));
-  }
-
-  return params.toString();
 }
 
 export function advancedSearchPageTypes(config: CmsConfig = cmsConfig): string[] {
@@ -213,39 +156,34 @@ export function getPathValue(source: unknown, path: string): unknown {
   return current;
 }
 
-export function advancedSearchCondition(
+export async function advancedSearchCondition(
   criterion: AdvancedSearchCriterion,
   pageAlias: string,
-): { conditions: string[]; params: unknown[] } {
+): Promise<{ conditions: string[]; params: unknown[] }> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
   if (criterion.term) {
-    // A Chinese term also matches its Simplified/Traditional variants, so we OR
-    // a LIKE per variant. Non-Chinese terms yield a single variant.
-    const searchTerms = chineseSearchVariants(criterion.term)
-      .map((variant) => `%${variant.replaceAll(' ', '%')}%`);
-    const orGroup = (clause: string) =>
-      searchTerms.length > 1 ? `(${searchTerms.map(() => clause).join(' OR ')})` : clause;
+    const { operator, pattern } = await chineseSearchPattern(criterion.term);
 
     if (criterion.path) {
       const wildcardParts = wildcardJsonPathParts(criterion.path);
       if (wildcardParts) {
         const beforePath = sqliteJsonPath(wildcardParts.beforePath);
         const afterPath = sqliteJsonPath(wildcardParts.afterPath);
-        conditions.push(orGroup(`EXISTS (
+        conditions.push(`EXISTS (
           SELECT 1 FROM json_each(json_extract(${pageAlias}.lect, ?))
-          WHERE json_extract(value, ?) LIKE ?
-        )`));
-        for (const term of searchTerms) params.push(beforePath, afterPath, term);
+          WHERE json_extract(value, ?) ${operator} ?
+        )`);
+        params.push(beforePath, afterPath, pattern);
       } else {
         const path = sqliteJsonPath(criterion.path);
-        conditions.push(orGroup(`json_extract(${pageAlias}.lect, ?) LIKE ?`));
-        for (const term of searchTerms) params.push(path, term);
+        conditions.push(`json_extract(${pageAlias}.lect, ?) ${operator} ?`);
+        params.push(path, pattern);
       }
     } else {
-      conditions.push(orGroup(`(${pageAlias}.name LIKE ? OR ${pageAlias}.lect LIKE ?)`));
-      for (const term of searchTerms) params.push(term, term);
+      conditions.push(`(${pageAlias}.name ${operator} ? OR ${pageAlias}.lect ${operator} ?)`);
+      params.push(pattern, pattern);
     }
   }
 
@@ -273,9 +211,10 @@ export async function performAdvancedSearch(
     page: number;
     sort: string;
     order: 'ASC' | 'DESC';
+    access?: PageAccessFilter;
   },
 ): Promise<AdvancedSearchResult> {
-  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator);
+  const { whereSql, baseParams } = await advancedSearchWhere(pageTypes, criteria, operator, options.access);
   const total = await countPageMetadata(db, whereSql, baseParams, { types: pageTypes });
   const totalPages = Math.max(1, Math.ceil(total / options.limit));
   const currentPage = Math.min(options.page, totalPages);
@@ -301,11 +240,12 @@ export async function performAdvancedSearch(
   };
 }
 
-export function advancedSearchWhere(
+export async function advancedSearchWhere(
   pageTypes: string[],
   criteria: AdvancedSearchCriterion[],
   operator: AdvancedSearchOperator,
-): { whereSql: string; baseParams: unknown[] } {
+  access?: PageAccessFilter,
+): Promise<{ whereSql: string; baseParams: unknown[] }> {
   // Bulk actions from ordinary page lists intentionally have no search
   // criteria: in that context an empty query means every page of the selected
   // type(s), including records outside the current pagination page.
@@ -314,13 +254,13 @@ export function advancedSearchWhere(
   const pageTypePlaceholders = pageTypes.map(() => '?').join(',');
 
   if (criteria.length > 0 && operator === 'NOT') {
-    const base = advancedSearchCondition(criteria[0], 'p');
+    const base = await advancedSearchCondition(criteria[0], 'p');
     const baseCondition = base.conditions.length ? `(${base.conditions.join(' AND ')})` : '1=1';
     const excludeConditions: string[] = [];
     const excludeParams: unknown[] = [];
 
     for (const criterion of criteria.slice(1)) {
-      const exclusion = advancedSearchCondition(criterion, 'excluded');
+      const exclusion = await advancedSearchCondition(criterion, 'excluded');
       if (!exclusion.conditions.length) continue;
       excludeConditions.push(`(${exclusion.conditions.join(' AND ')})`);
       excludeParams.push(...exclusion.params);
@@ -338,7 +278,7 @@ export function advancedSearchWhere(
   } else if (criteria.length > 0) {
     const criterionConditions: string[] = [];
     for (const criterion of criteria) {
-      const condition = advancedSearchCondition(criterion, 'p');
+      const condition = await advancedSearchCondition(criterion, 'p');
       if (!condition.conditions.length) continue;
       criterionConditions.push(`(${condition.conditions.join(' AND ')})`);
       searchParams.push(...condition.params);
@@ -346,8 +286,8 @@ export function advancedSearchWhere(
     searchCondition = criterionConditions.length ? `(${criterionConditions.join(` ${operator} `)})` : '1=0';
   }
 
-  const whereSql = `p.page_type IN (${pageTypePlaceholders}) AND ${searchCondition}`;
-  const baseParams = [...pageTypes, ...searchParams];
+  const whereSql = `p.page_type IN (${pageTypePlaceholders}) AND ${searchCondition} AND ${access?.sql ?? '1'}`;
+  const baseParams = [...pageTypes, ...searchParams, ...(access?.args ?? [])];
 
   return { whereSql, baseParams };
 }
@@ -357,8 +297,9 @@ export async function advancedSearchMatchingPageIds(
   pageTypes: string[],
   criteria: AdvancedSearchCriterion[],
   operator: AdvancedSearchOperator,
+  access?: PageAccessFilter,
 ): Promise<number[]> {
-  const { whereSql, baseParams } = advancedSearchWhere(pageTypes, criteria, operator);
+  const { whereSql, baseParams } = await advancedSearchWhere(pageTypes, criteria, operator, access);
   const rows = await db.prepare(
     `SELECT p.id FROM pages p
      WHERE ${whereSql}
@@ -368,36 +309,4 @@ export async function advancedSearchMatchingPageIds(
     .all<AdvancedSearchIdRow>();
 
   return rows.results.map((row) => row.id);
-}
-
-export function advancedSearchFormCriteria(criteria: AdvancedSearchCriterion[], taxonomies: Taxonomy[], tags: Tag[]) {
-  const formCriteria = criteria.length ? criteria : [{ index: 1, term: '', path: '', tags: [] }];
-
-  return formCriteria.map((criterion) => ({
-    ...criterion,
-    tagGroups: taxonomies.map((taxonomy) => ({
-      name: taxonomy.name,
-      tags: tags
-        .filter((tag) => tag.taxonomy_slug === taxonomy.slug)
-        .map((tag) => ({
-          id: tag.id,
-          idString: String(tag.id),
-          name: tag.name,
-          selected: criterion.tags.includes(String(tag.id)),
-        })),
-    })).filter((group) => group.tags.length > 0),
-  }));
-}
-
-export function advancedSearchTagGroups(taxonomies: Taxonomy[], tags: Tag[]) {
-  return taxonomies.map((taxonomy) => ({
-    name: taxonomy.name,
-    tags: tags
-      .filter((tag) => tag.taxonomy_slug === taxonomy.slug)
-      .map((tag) => ({
-        id: tag.id,
-        idString: String(tag.id),
-        name: tag.name,
-      })),
-  })).filter((group) => group.tags.length > 0);
 }

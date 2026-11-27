@@ -5,7 +5,7 @@ import { oauthLinkSessionGuard } from './oauth-link-session';
 import { identityGuard } from './oauth-identity-guard';
 import { safeRoleAuditValue } from './role-mutation-sql';
 import { oauthAccountAuditEvidence } from '../db/audit';
-import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
 import { isOwnAvatar } from './self-profile';
 
@@ -34,7 +34,7 @@ async function accountClass(c: AppContext) {
   if (!policy.ok) throw new Error('OAuth account classification unavailable');
   const classes = ['users', 'user_oauth_identities', 'roles', 'role_permissions', 'sessions']
     .map(table => classFor(policy, 'table', table));
-  return { policy, dataClass: classes.includes('phi') ? 'phi' as const : classes.includes('pii') ? 'pii' as const : 'none' as const };
+  return { policy, dataClass: strongestClass(classes) };
 }
 
 function snapshotGuard(c: AppContext, user: AccountSnapshot) {

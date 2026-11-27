@@ -11,6 +11,7 @@ import { resolveCmsConfig } from '../../../core/db/content-config';
 import { editorTaxonomy } from '../../../core/db/admin-queries';
 import { capturePluginPageMutationAuthority } from '../page-update-evidence';
 import { ensurePluginTags } from '../tag-ensure-evidence';
+import { ensurePluginTaxonomies } from '../taxonomy-ensure';
 import { advancedSearchPathSpecs } from '../../../core/db/search';
 import { pageTypeScopeAllows } from '../page-types';
 
@@ -55,4 +56,12 @@ contentApiRoutes.post('/tags/ensure', async (c) => {
   if (!authority.allowed.size) return ensurePluginTags(c, authority, null);
   const body = await c.req.json().catch(() => null);
   return ensurePluginTags(c, authority, body);
+});
+
+contentApiRoutes.post('/taxonomies/ensure', async (c) => {
+  const auth = await authenticatePlugin(c);
+  if (auth instanceof Response) return auth;
+  const authority = await capturePluginPageMutationAuthority(c, auth, 'taxonomy-ensure');
+  if (!authority.taxonomyCreationApproved) return c.json({ error: 'forbidden_capability', capability: 'taxonomy:create' }, 403);
+  return ensurePluginTaxonomies(c, authority, await c.req.json().catch(() => null));
 });

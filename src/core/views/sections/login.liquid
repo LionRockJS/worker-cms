@@ -6,7 +6,7 @@
   <div class="w-full max-w-md">
     <div class="text-center mb-8">
       <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 shadow-lg mb-4">
-        <svg class="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+        <svg class="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ appIconHref }}"></use></svg>
       </div>
       <h1 class="text-2xl font-bold text-gray-900 sm:text-3xl">{{ siteTitle }}</h1>
       <p class="mt-2 text-gray-500">{{ "view_strings.sections_login.sign_in_to_manage_your_content" | t }}</p>
@@ -28,10 +28,12 @@
       <div class="flex flex-col gap-3">
         {% for provider in providers %}
           <a href="{{ provider.href }}"
+             title="{{ "login.continue_with" | t }} {{ provider.label }}"
+             aria-label="{{ "login.continue_with" | t }} {{ provider.label }}"
              data-auth-provider
              data-provider-label="{{ provider.label }}"
              class="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-xl border-2 {{ provider.buttonClass }} font-semibold transition-all duration-150 group">
-            <span class="{{ provider.iconClass }} transition-colors">{{ provider.icon | raw }}</span>
+            <span class="{{ provider.iconClass }} transition-colors" aria-hidden="true">{{ provider.icon | raw }}</span>
             <span data-auth-provider-text>{{ "login.continue_with" | t }} {{ provider.label }}</span>
           </a>
         {% endfor %}

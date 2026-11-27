@@ -1,0 +1,9 @@
+{% if isEdit and canDeletePage %}
+<div class="flex justify-end sm:block sm:pb-8 sm:absolute sm:right-8 sm:z-10">
+  <button type="submit" formaction="{{ deleteAction }}" formnovalidate data-delete-button data-confirm-message="{% if publishEnabled %}{{ "view_strings.sections_editor.delete_page_confirm" | t }}{% else %}{{ "view_strings.sections_dashboard.move_this_page_to_trash" | t }}{% endif %}" title="{{ "view_strings.sections_editor.delete" | t }}" aria-label="{{ "view_strings.sections_editor.delete" | t }}"
+          class="inline-flex h-10 w-10 shrink-0 self-end items-center justify-center rounded-lg bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 sm:ml-auto">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+    <span class="sr-only">{{ "view_strings.sections_editor.delete" | t }}</span>
+  </button>
+</div>
+{% endif %}

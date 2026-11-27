@@ -3,7 +3,7 @@ import { beforeEach, afterEach, expect, it } from 'vitest';
 import { unpublishPageFromTargets, unpublishPagesFromTargets, removeTagFromTargets } from '../src/features/publish';
 import { d1Adapter } from '../src/features/publish/d1';
 import { r2Adapter } from '../src/features/publish/r2';
-import { trashDraftPage } from '../src/core/db/admin-queries';
+import { trashDraftPage } from './trash-fixtures';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, pluginById } from '../src/features/plugins/registry';
 import { enrollPluginTenant, revokePluginTenant } from '../src/features/plugins/enroll';
 import { approvePageTypeAccess } from '../src/features/plugins/page-types';

@@ -13,17 +13,18 @@ import {
   strParam,
 } from '../src/core/http/forms';
 import { validatePageBasics } from '../src/core/db/validation';
-import { planPageReorder, publicationStatusForPage } from '../src/core/db/page-logic';
+import { planPageReorder } from '../src/core/db/page-logic';
+import { publicationStatusForPage } from '../src/features/publish/status';
 import {
   advancedSearchCondition,
   advancedSearchOperator,
   advancedSearchOrder,
   advancedSearchSort,
   getPathValue,
-  parseAdvancedSearchCriteria,
   sqliteJsonPath,
 } from '../src/core/db/search';
-import { chineseSearchVariants, toSimplified, toTraditional } from '../src/core/db/chinese';
+import { parseAdvancedSearchCriteria } from '../src/features/search/query';
+import { chineseSearchPattern, toSimplified, toTraditional } from '../src/core/db/chinese';
 
 describe('forms helpers', () => {
   it('coerces form values to trimmed strings', () => {
@@ -158,37 +159,38 @@ describe('advanced search parsing', () => {
   });
 });
 
-describe('Chinese Simplified/Traditional search variants', () => {
-  it('converts between scripts character by character', () => {
-    expect(toTraditional('苏玮')).toBe('蘇瑋');
-    expect(toSimplified('蘇瑋')).toBe('苏玮');
+describe('Chinese script and regional search variants', () => {
+  it('converts between scripts character by character', async () => {
+    expect(await toTraditional('苏玮')).toBe('蘇瑋');
+    expect(await toSimplified('蘇瑋')).toBe('苏玮');
     // Unmapped (shared) characters are left untouched.
-    expect(toTraditional('中文')).toBe('中文');
+    expect(await toTraditional('中文')).toBe('中文');
   });
 
-  it('adds the opposite-script variant for a Chinese term', () => {
-    expect(chineseSearchVariants('苏玮').sort()).toEqual(['苏玮', '蘇瑋'].sort());
-    expect(chineseSearchVariants('蘇瑋').sort()).toEqual(['苏玮', '蘇瑋'].sort());
+  it('includes both scripts in either query direction', async () => {
+    expect(await chineseSearchPattern('苏玮')).toEqual({ operator: 'GLOB', pattern: '*[苏蘇][玮瑋]*' });
+    expect(await chineseSearchPattern('蘇瑋')).toEqual({ operator: 'GLOB', pattern: '*[蘇苏][瑋玮]*' });
   });
 
-  it('returns a single variant for non-Chinese or shared-character terms', () => {
-    expect(chineseSearchVariants('hello')).toEqual(['hello']);
-    expect(chineseSearchVariants('')).toEqual(['']);
-    // 中文 is identical in both scripts, so no extra variant is produced.
-    expect(chineseSearchVariants('中文')).toEqual(['中文']);
+  it('uses LIKE for non-Chinese or shared-character terms', async () => {
+    expect(await chineseSearchPattern('hello')).toEqual({ operator: 'LIKE', pattern: '%hello%' });
+    expect(await chineseSearchPattern('中文')).toEqual({ operator: 'LIKE', pattern: '%中文%' });
   });
 
-  it('ORs a LIKE per variant in the SQL condition for a Chinese term', () => {
-    const { conditions, params } = advancedSearchCondition(
-      { index: 1, term: '苏玮', path: '', tags: [] },
+  it('uses one bound pattern per field even when a term has many variants', async () => {
+    const term = '裏綫'.repeat(20);
+    const { pattern } = await chineseSearchPattern(term);
+    const { conditions, params } = await advancedSearchCondition(
+      { index: 1, term, path: '', tags: [] },
       'p',
     );
-    expect(conditions).toEqual(['((p.name LIKE ? OR p.lect LIKE ?) OR (p.name LIKE ? OR p.lect LIKE ?))']);
-    expect(params).toEqual(['%苏玮%', '%苏玮%', '%蘇瑋%', '%蘇瑋%']);
+    expect(conditions).toEqual(['(p.name GLOB ? OR p.lect GLOB ?)']);
+    expect(pattern).toBe(`*${'[裏裡里][綫線线]'.repeat(20)}*`);
+    expect(params).toEqual([pattern, pattern]);
   });
 
-  it('matches the name or content for a non-Chinese term', () => {
-    const { conditions, params } = advancedSearchCondition(
+  it('matches the name or content for a non-Chinese term', async () => {
+    const { conditions, params } = await advancedSearchCondition(
       { index: 1, term: 'hello world', path: '', tags: [] },
       'p',
     );
@@ -196,13 +198,13 @@ describe('Chinese Simplified/Traditional search variants', () => {
     expect(params).toEqual(['%hello%world%', '%hello%world%']);
   });
 
-  it('ORs variants within a json path condition', () => {
-    const { conditions, params } = advancedSearchCondition(
+  it('binds a variant pattern within a JSON path condition', async () => {
+    const { conditions, params } = await advancedSearchCondition(
       { index: 1, term: '苏玮', path: 'name', tags: [] },
       'p',
     );
-    expect(conditions).toEqual(['(json_extract(p.lect, ?) LIKE ? OR json_extract(p.lect, ?) LIKE ?)']);
-    expect(params).toEqual(['$.name', '%苏玮%', '$.name', '%蘇瑋%']);
+    expect(conditions).toEqual(['json_extract(p.lect, ?) GLOB ?']);
+    expect(params).toEqual(['$.name', '*[苏蘇][玮瑋]*']);
   });
 });
 

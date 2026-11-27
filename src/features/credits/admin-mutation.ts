@@ -3,7 +3,7 @@ import { captureAccessAuthorization,captureSelfAuthorization } from '../../core/
 import { splitRoles } from '../../core/auth/roles';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import type { PermissionDenialReason } from '../../core/auth/denial-contract';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { classFor,resolveDataClasses,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { json,snapshot,guard,resultGuard,type Row } from '../../core/db/bounded-mutation';
@@ -58,7 +58,7 @@ async function mutate(c:AppContext,input:Input):Promise<Result>{
       {table:'shared_credit_ledger',fields:LEDGER,where:'currency=?',args:[currency]}]:[])];
   const scopes:Scope[]=await Promise.all(specs.map(async s=>({...s,rows:await snapshot<Row>(c,s.table,s.fields,s.where,s.args)})));
   const classes=['users','roles','role_permissions','sessions',...scopes.map(s=>s.table)].map(t=>classFor(policy,'table',t));
-  const dataClass=classes.includes('phi')?'phi' as const:classes.includes('pii')?'pii' as const:'none' as const;
+  const dataClass=strongestClass(classes);
   await auditBackgroundReads(c.env,[{table:'users',rows:users},...scopes].map(s=>({action:'credit.administration-source-read',kind:'table' as const,key:s.table,targetType:s.table,
     ids:s.rows.map(r=>String(r.id??r.user_id??currency)),count:s.rows.length,minimumClass:dataClass==='none'?undefined:dataClass})),contextActor(c));
   const admission=()=>[authority.guard(),classificationPolicyGuard(c.env,policy),guard(c,'users',USER,users,userWhere,userArgs),...scopes.map(s=>guard(c,s.table,s.fields,s.rows,s.where,s.args))];

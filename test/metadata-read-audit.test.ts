@@ -10,7 +10,8 @@ import { countPageMetadata } from '../src/core/db/count-metadata';
 import { countTrashMetadataByType } from '../src/features/trash/queries';
 import { readD1PageSource } from '../src/features/publish/d1';
 import { auditLiveReads } from '../src/features/publish/read-audit';
-import { allRoleOptions, getRoleForEdit, listRolesForAdmin } from '../src/core/auth/role-store';
+import { allRoleOptions } from '../src/core/auth/role-options';
+import { getRoleForEdit, listRolesForAdmin } from '../src/features/users-roles/role-store';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { listLocales, listLocaleMessages } from '../src/core/i18n';
 

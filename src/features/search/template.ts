@@ -1,3 +1,4 @@
+import { featureInstalled } from '../index';
 import { adminLayout, type BaseTemplateProps } from '../../core/render/layout';
 import { renderView } from '../../core/render/liquid';
 import type { DashboardPage } from '../../core/templates/dashboard';
@@ -52,9 +53,15 @@ export async function advancedSearchPage(views: Fetcher, opts: BaseTemplateProps
   pages: DashboardPage[];
 }): Promise<string> {
   const pageActionReturnQuery = `?return_to=${encodeURIComponent(opts.currentHref)}`;
+  const publishEnabled = opts.publishEnabled !== false;
+  const trashEnabled = featureInstalled('trash');
+  const hasBulkActions = publishEnabled || trashEnabled;
   const body = await renderView(views, '/templates/advanced-search.json', {
-    publishEnabled: opts.publishEnabled !== false,
     ...opts,
+    publishEnabled,
+    trashEnabled,
+    hasBulkActions,
+    emptyColspan: 4 + Number(hasBulkActions) + Number(publishEnabled),
     hasResults: opts.pages.length > 0,
     resultCountLabel: `${opts.count} result${opts.count === 1 ? '' : 's'}`,
     hasPreviousPage: !!opts.previousHref,

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ status }} - {{ title }} - {{ siteTitle }}</title>
   <link rel="stylesheet" href="/assets/admin.css{{ assetRevisionQuery }}">
 </head>
@@ -12,7 +13,11 @@
     {% if hasMessage %}
       <p class="mt-2 text-gray-500">{{ message }}</p>
     {% endif %}
-    <a href="/admin" class="mt-6 inline-block text-indigo-600 hover:underline">{{ "view_strings.sections_error.back_to_dashboard" | t }}</a>
+    <a href="/admin" title="{{ "view_strings.sections_error.back_to_dashboard" | t }}" aria-label="{{ "view_strings.sections_error.back_to_dashboard" | t }}"
+       class="mt-6 inline-flex h-10 items-center justify-center gap-2 px-4 text-indigo-600 hover:underline">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="/assets/icons.svg{{ assetRevisionQuery }}#arrow-left"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_error.back_to_dashboard" | t }}</span>
+    </a>
   </div>
 </body>
 </html>

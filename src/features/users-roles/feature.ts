@@ -5,11 +5,9 @@ import type { CmsFeature } from '../../core/feature';
  * editor. The credits panel on both screens is contributed by the credits
  * feature, not owned here.
  *
- * The tables and the permission resolver stay core — every authenticated
- * request resolves permissions through utils/roles and role_permissions, and
- * utils/role-store is also read by the profile page, which the admin chrome
- * links to for the language switcher. What is optional is the admin UI for
- * editing them; without it, roles come from their code defaults.
+ * Core owns the role tables, picker options, and permission resolution.
+ * Existing roles and grants continue to apply when the administration
+ * screens and their role store are disabled.
  */
 export const usersRolesFeature: CmsFeature = {
   id: 'users-roles',

@@ -7,13 +7,34 @@
     <div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ errorKey | t }}</div>
   {% endif %}
 
-  {% if hasI18nFeature %}
-    <section class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.login_labels.title" | t }}</h3>
-      <p class="mt-2 text-sm text-gray-500">{{ "settings.login_labels.description" | t }}</p>
-      <a href="/admin/settings/translations?scope=login" class="mt-3 inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "settings.login_labels.edit" | t }}</a>
-    </section>
-  {% endif %}
+  {% feature_fragment i18n/login-label-settings %}
+  <section class="mb-6 min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+    <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.icon_sprite.title" | t }}</h3>
+    <p class="mt-2 text-sm text-gray-500">{{ "settings.icon_sprite.help" | t }}</p>
+    <form method="POST" action="/admin/settings/system/icon-sprite" enctype="multipart/form-data" class="mt-3 flex min-w-0 flex-wrap items-center gap-3">
+      <label for="icon_sprite" class="sr-only">{{ "settings.icon_sprite.file" | t }}</label>
+      <input id="icon_sprite" name="icon_sprite" type="file" accept=".svg,image/svg+xml" required
+             data-max-bytes="{{ iconSpriteMaxBytes }}" data-size-error="{{ "settings.icon_sprite.too_large" | t }}"
+             class="block min-w-0 max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+      <button type="submit"
+              title="{{ "settings.icon_sprite.upload" | t }}"
+              aria-label="{{ "settings.icon_sprite.upload" | t }}"
+              class="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+        <span class="hidden lg:inline">{{ "settings.icon_sprite.upload" | t }}</span>
+      </button>
+    </form>
+    {% if uploadedIcons.size > 0 %}
+      <ul class="mt-4 flex flex-wrap gap-2" aria-label="{{ "settings.icon_sprite.previews" | t }}">
+        {% for icon in uploadedIcons %}
+          <li class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+            <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ icon.href }}"></use></svg>
+            <span class="min-w-0 break-words">{{ icon.label }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
   <form id="menu-settings-form" method="POST" action="/admin/settings/system" class="min-w-0 space-y-6">
     <section class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
       <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_menu_settings.app_branding" | t }}</h3>
@@ -27,19 +48,17 @@
                  class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
         </label>
         <label class="block min-w-0">
-          <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_menu_settings.app_icon" | t }}</span>
-          <select name="app_icon" class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-            {% for option in iconOptions %}
-              <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.labelKey | t }}</option>
-            {% endfor %}
-          </select>
+          {% assign appIconLabel = "view_strings.sections_menu_settings.app_icon" | t %}
+          <span class="block text-sm font-medium text-gray-700 mb-1">{{ appIconLabel }}</span>
+          {% render "snippets/settings-icon-picker.liquid", name: 'app_icon', label: appIconLabel,
+            selectedIcon: appIcon, selectedHref: appIconHref, iconOptions: iconOptions, iconHrefPrefix: iconHrefPrefix %}
         </label>
       </div>
     </section>
 
     <section class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
       <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.appearance.title" | t }}</h3>
-      <p class="mt-1 text-xs text-gray-500">{{ "settings.appearance.help" | t }}</p>
+      <p data-explanation class="mt-1 text-xs text-gray-500">{{ "settings.appearance.help" | t }}</p>
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label class="block min-w-0">
           <span class="block text-sm font-medium text-gray-700 mb-1">{{ "settings.appearance.primary_color" | t }}</span>
@@ -50,7 +69,7 @@
                    class="h-10 w-16 shrink-0 rounded-lg border border-gray-300 bg-transparent p-1">
             <span class="font-mono text-sm text-gray-500">{{ primaryColor }}</span>
           </span>
-          <span class="mt-1 block text-xs text-gray-500">{{ "settings.appearance.primary_color_help" | t }}</span>
+          <span data-explanation class="mt-1 block text-xs text-gray-500">{{ "settings.appearance.primary_color_help" | t }}</span>
         </label>
         <label class="block min-w-0">
           <span class="block text-sm font-medium text-gray-700 mb-1">{{ "settings.appearance.font" | t }}</span>
@@ -59,7 +78,7 @@
               <option value="{{ option.value }}" style="font-family: {{ option.stack }}"{% if option.selected %} selected{% endif %}>{{ option.labelKey | t }}</option>
             {% endfor %}
           </select>
-          <span class="mt-1 block text-xs text-gray-500">{{ "settings.appearance.font_help" | t }}</span>
+          <span data-explanation class="mt-1 block text-xs text-gray-500">{{ "settings.appearance.font_help" | t }}</span>
         </label>
       </div>
     </section>
@@ -75,7 +94,7 @@
             <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
         </select>
-        <span class="mt-1 block text-xs text-gray-500">{{ "settings.regional.timezone_help" | t }}</span>
+        <span data-explanation class="mt-1 block text-xs text-gray-500">{{ "settings.regional.timezone_help" | t }}</span>
       </label>
     </section>
 
@@ -91,19 +110,7 @@
       </label>
     </section>
 
-    {% if hasCreditsFeature %}
-    <section class="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500">{{ "settings.credits.title" | t }}</h3>
-      <label class="mt-4 block min-w-0 max-w-md">
-        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "settings.credits.show" | t }}</span>
-        <select name="show_credits" class="block min-w-0 w-full max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-          <option value="true"{% if showCredits %} selected{% endif %}>{{ "settings.credits.visible" | t }}</option>
-          <option value="false"{% unless showCredits %} selected{% endunless %}>{{ "settings.credits.hidden" | t }}</option>
-        </select>
-        <span class="mt-1 block text-xs text-gray-500">{{ "settings.credits.help" | t }}</span>
-      </label>
-    </section>
-    {% endif %}
+    {% feature_fragment credits/visibility-setting %}
 
     {% render "snippets/menu-settings-links.liquid",
       legendKey: "view_strings.sections_menu_settings.main_sidebar_links",
@@ -119,3 +126,16 @@
   </form>
 
 </div>
+
+<script nonce="{{ nonce }}">
+  document.getElementById('icon_sprite')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    input.setCustomValidity(input.files[0]?.size > Number(input.dataset.maxBytes) ? input.dataset.sizeError : '');
+  });
+  document.getElementById('menu-settings-form')?.addEventListener('change', (event) => {
+    const select = event.target;
+    if (!(select instanceof HTMLSelectElement) || !select.hasAttribute('data-icon-select')) return;
+    const href = select.selectedOptions[0]?.dataset.iconHref;
+    if (href) select.closest('[data-icon-picker]')?.querySelector('use')?.setAttribute('href', href);
+  });
+</script>

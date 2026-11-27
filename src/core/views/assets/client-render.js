@@ -45,15 +45,41 @@
       },
     },
   };
-  // Template renders HTML-escape every output by default (fail-safe); templates
-  // opt out per-output with `| raw` for pre-rendered, server-sanitized HTML.
-  const engine = new liquidjs.Liquid({ ...engineOptions, outputEscape: 'escape' });
-  // JSON-template settings interpolation produces DATA (fed back into template
-  // renders, which escape on output) — escaping here would double-escape it.
-  const dataEngine = new liquidjs.Liquid(engineOptions);
+  const compiledSections = new Map(/* compiled section entries */ []);
+  const scripts = new Map();
+  let liquidEngines;
 
-  registerCustomFilters(engine);
-  registerCustomFilters(dataEngine);
+  function loadScript(path, approval) {
+    if (!scripts.has(path)) {
+      const script = document.createElement('script');
+      script.src = withRevision(path, approval?.revision);
+      if (approval) script.integrity = approval.integrity;
+      script.nonce = payload.nonce;
+      const loaded = new Promise((resolve, reject) => {
+        script.onload = () => resolve(script);
+        script.onerror = () => reject(new Error('Unable to load ' + path));
+      });
+      scripts.set(path, loaded.catch(error => {
+        scripts.delete(path);
+        throw error;
+      }));
+      document.head.appendChild(script);
+    }
+    return scripts.get(path);
+  }
+
+  async function getLiquidEngines() {
+    await loadScript('/assets/liquid.browser.min.js');
+    if (!liquidEngines) {
+      const html = new liquidjs.Liquid({ ...engineOptions, outputEscape: 'escape' });
+      // Settings produce data. Each section escapes it when rendering HTML.
+      const data = new liquidjs.Liquid(engineOptions);
+      registerCustomFilters(html);
+      registerCustomFilters(data);
+      liquidEngines = { html, data };
+    }
+    return liquidEngines;
+  }
 
   function registerCustomFilters(target) {
     target.registerFilter('t', function (key, fallback) {
@@ -208,6 +234,7 @@
       assetRevisionQueries,
       pluginAssetRevisionQueries: assetRevisionQueries,
       iconHrefPrefix: '/assets/icons.svg' + cmsRevisionQuery,
+      appIconHref: payload.layoutData?.appIconHref || '/assets/icons.svg' + cmsRevisionQuery + '#' + (payload.layoutData?.appIcon || 'document'),
     };
   }
 
@@ -290,8 +317,40 @@
     const normalized = normalizePath(templatePath);
     const basePath = currentViewBasePath(normalized);
     const template = await loadTemplate(normalized);
+    const { html: engine } = await getLiquidEngines();
     const html = String(await engine.parseAndRender(template, { ...data, ...renderGlobals(basePath) }));
     return isPluginTemplate(normalized) ? sanitizePluginHtml(html) : html;
+  }
+
+  async function renderSection(type, data) {
+    const basePath = currentViewBasePath('/sections/' + type);
+    const pluginId = pluginIdForBasePath(basePath);
+    if (pluginId && payload.bodyView?.plugin) {
+      const declared = payload.bodyView.sectionAssets || [];
+      const matches = ['ejs', 'hbs', 'handlebars']
+        .map(ext => '/assets/sections/' + type + '.' + ext + '.js')
+        .filter(path => declared.includes(path));
+      if (matches.length > 1) throw new Error('Ambiguous plugin section: ' + type);
+      if (matches.length) {
+        const approval = approvedAsset(pluginId, matches[0]);
+        if (!approval) throw new Error('Plugin section requires asset approval: ' + matches[0]);
+        if (!/^sha384-[A-Za-z0-9+/]{64}$/.test(approval.integrity)) {
+          throw new Error('Missing integrity approval for ' + approval.path);
+        }
+        const html = await renderCompiledSection('/admin/plugins/' + pluginId + approval.path, data, basePath, approval);
+        return sanitizePluginHtml(html);
+      }
+    } else if (!payload.bodyView?.plugin && basePath === (payload.viewBasePath || '/admin/views')) {
+      const ext = compiledSections.get(type);
+      if (ext) return renderCompiledSection('/assets/sections/' + type + '.' + ext + '.js', data, basePath);
+    }
+    return renderLiquid('/sections/' + type + '.liquid', data);
+  }
+
+  async function renderCompiledSection(path, data, basePath, approval) {
+    if (!path.endsWith('.ejs.js')) await loadScript('/assets/handlebars.runtime.min.js');
+    const script = await loadScript(path, approval);
+    return script.renderSection({ ...data, ...renderGlobals(basePath) });
   }
 
   async function renderJsonTemplate(templatePath, data) {
@@ -320,7 +379,7 @@
         await Promise.all(section.blocks.map((block) => parseSettings(block, renderData)));
       }
 
-      const sectionHtml = await renderLiquid('/sections/' + section.type + '.liquid', {
+      const sectionHtml = await renderSection(section.type, {
         ...renderData,
         section,
       });
@@ -354,6 +413,7 @@
   }
 
   async function renderString(value, data, secondPass) {
+    const { data: dataEngine } = await getLiquidEngines();
     let text = String(await dataEngine.parseAndRender(value, data));
     if (secondPass && hasLiquidSyntax(text)) {
       text = String(await dataEngine.parseAndRender(text, data));

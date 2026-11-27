@@ -30,6 +30,9 @@ export interface ContributedCreditDef {
   per?: number;
   period?: 'month';
   billing?: CreditBillingMode;
+  /** Pay only from the contributor's own wallet; never the member's balance
+   *  or the shared pool. Omitted / anything but `true` means false. */
+  plugin_only?: boolean;
 }
 
 /** Someone who declares priced actions. */
@@ -69,4 +72,6 @@ export interface CreditPricingRow {
   defaultValue: number;
   effectiveValue: number;
   configured: boolean;
+  /** Paid only from the contributor's own wallet. */
+  pluginOnly: boolean;
 }

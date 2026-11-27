@@ -1,0 +1,6 @@
+{%- comment -%} A read-only value: the text, or a muted em dash when empty. {%- endcomment -%}
+{%- if value != blank -%}
+  <span class="whitespace-pre-wrap break-words">{{ value }}</span>
+{%- else -%}
+  <span class="text-gray-400">&mdash;</span>
+{%- endif -%}

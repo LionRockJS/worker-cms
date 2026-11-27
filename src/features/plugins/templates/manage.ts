@@ -25,6 +25,7 @@ export interface PluginListItem {
   assetStatusError?: boolean;
   /** True when the manifest defines page types/taxonomies or declares delegated access. */
   hasPageTypes?: boolean;
+  pageTypeStatus?: 'pending' | 'approved';
   /** True when the manifest declares configurable quota limits. */
   hasLimits?: boolean;
   /** True when the manifest declares configurable credit costs. */
@@ -69,6 +70,7 @@ export async function pluginsManagePage(views: Fetcher, opts: BaseTemplateProps 
       hasFilePrefixes: !!plugin.hasFilePrefixes,
       filePrefixesHref: `/admin/plugins-manage/${plugin.id}/files`,
       hasPageTypes: !!plugin.hasPageTypes,
+      pageTypeStatus: plugin.pageTypeStatus,
       pageTypesHref: `/admin/plugins-manage/${plugin.id}/page-types`,
       hasLimits: !!plugin.hasLimits,
       limitsHref: `/admin/plugins-manage/${plugin.id}/limits`,
@@ -232,7 +234,9 @@ export async function pluginAssetsPage(views: Fetcher, opts: BaseTemplateProps &
   flash?: string;
 }): Promise<string> {
   const { pluginLabel, unreachable, assets, flash } = opts;
-  const flashMessageKey = flash === 'approved'
+  const flashMessageKey = flash === 'approved-all'
+    ? 'view_strings.sections_plugin_assets.flash_approved_all'
+    : flash === 'approved'
     ? 'view_strings.sections_plugin_assets.flash_approved'
     : flash === 'revoked'
       ? 'view_strings.sections_plugin_assets.flash_revoked'
@@ -244,6 +248,8 @@ export async function pluginAssetsPage(views: Fetcher, opts: BaseTemplateProps &
     pluginLabel,
     unreachable,
     hasAssets: assets.length > 0,
+    hasPendingApprovals: assets.some((asset) => !asset.approved || asset.drifted),
+    approveAllAction: `/admin/plugins-manage/${opts.pluginId}/assets/approve-all`,
     assets: assets.map((asset) => ({
       ...asset,
       statusKey: asset.drifted
@@ -377,6 +383,8 @@ export interface PluginCreditRow {
   usesDefault: boolean;
   /** Configured price as a string, or '' when unset (default applies). */
   value: string;
+  /** Paid only from the plugin's own wallet. */
+  pluginOnly: boolean;
 }
 
 export async function pluginCreditsPage(views: Fetcher, opts: BaseTemplateProps & {
@@ -384,10 +392,15 @@ export async function pluginCreditsPage(views: Fetcher, opts: BaseTemplateProps 
   pluginLabel: string;
   unreachable: boolean;
   credits: PluginCreditRow[];
+  /** Credits the plugin's creator supplied, spendable only on its costs. */
+  wallet: {
+    wallets: Array<{ currency: string; currencyKey: string; unitKey: string; balance: number }>;
+    ledger: Array<{ delta: string; isSpend: boolean; balanceAfter: number; action: string; note: string; createdBy: string; createdAt: string; unitKey: string }>;
+  } | null;
   saveAction: string;
   flash?: string;
 }): Promise<string> {
-  const { pluginLabel, unreachable, credits, saveAction, flash } = opts;
+  const { pluginLabel, unreachable, credits, wallet, saveAction, flash } = opts;
   const flashMessageKey = flash === 'saved'
     ? 'view_strings.sections_plugin_credits.flash_saved'
     : '';
@@ -397,6 +410,10 @@ export async function pluginCreditsPage(views: Fetcher, opts: BaseTemplateProps 
     unreachable,
     hasCredits: credits.length > 0,
     credits,
+    hasWallet: !!wallet,
+    wallets: wallet?.wallets ?? [],
+    walletLedger: wallet?.ledger ?? [],
+    hasWalletLedger: !!wallet?.ledger.length,
     saveAction,
     hasFlash: !!flashMessageKey,
     flashMessageKey,
@@ -440,6 +457,8 @@ export async function pluginPageTypesPage(views: Fetcher, opts: BaseTemplateProp
   definedPageTypes: PluginDefinedPageTypeRow[];
   definedTaxonomies: PluginDefinedTaxonomyRow[];
   pageTypes: PluginPageTypeRow[];
+  taxonomyRequested?: boolean;
+  taxonomyApproved?: boolean;
   flash?: string;
 }): Promise<string> {
   const { pluginLabel, unreachable, definedPageTypes, definedTaxonomies, pageTypes, flash } = opts;
@@ -454,6 +473,9 @@ export async function pluginPageTypesPage(views: Fetcher, opts: BaseTemplateProp
   const body = await renderView(views, '/templates/plugin-page-types.json', {
     pluginLabel,
     unreachable,
+    showTaxonomyCapability: !!(opts.taxonomyRequested || opts.taxonomyApproved),
+    taxonomyApproved: !!opts.taxonomyApproved,
+    taxonomyAction: `/admin/plugins-manage/${opts.pluginId}/capabilities/taxonomy-create/${opts.taxonomyApproved ? 'revoke' : 'approve'}`,
     hasDefinedPageTypes: definedPageTypes.length > 0,
     definedPageTypes,
     hasDefinedTaxonomies: definedTaxonomies.length > 0,

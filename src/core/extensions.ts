@@ -17,8 +17,7 @@ import type { AuditActor } from './db/audit';
 import type { Env } from '../types';
 import type { JWTPayload } from '../types';
 import type { AppContext } from './http/context';
-import type { PublishAdapter, PublishPluginTarget } from './publish/adapter';
-import type { PublishLectRule } from './publish/adapter';
+import type { PublishAdapter, PublishLectRule, PublishPluginTarget } from '../contracts/publish';
 import type { BulkPageAction } from './pages/bulk-action';
 import type { AdvancedSearchCriterion, AdvancedSearchOperator } from './db/search';
 
@@ -134,6 +133,8 @@ export interface ImportExportHrefs {
 export interface ContributedPermission {
   value: string;
   label: string;
+  /** Heading the role editor lists this permission under (e.g. the plugin name). */
+  group?: string;
 }
 
 /** A quota a contributor declares, resolved to its effective value. For the

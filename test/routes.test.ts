@@ -2,6 +2,9 @@ import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cmsConfig } from '../src/cms-config';
 import { hashToken, signJWT } from './auth-fixtures';
+import { unsigned } from './notice-fixtures';
+import { signedNotice } from '../src/core/http/notice';
+import { LOGIN_ERRORS } from '../src/core/templates/login';
 import { blueprintToLect, stringifyLect } from '../src/core/db/lect';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { __injectPluginFetcher, clearManifestCache } from './plugin-fixtures';
@@ -139,8 +142,31 @@ describe('app shell routes', () => {
       fetchWorker('/admin', { headers: { Cookie: await authCookie() } }),
     ]);
 
-    expect(await admin.text()).toContain("fetch('/auth/refresh'");
-    expect(await login.text()).not.toContain("fetch('/auth/refresh'");
+    expect(await admin.text()).toContain('/assets/session-keepalive.js');
+    expect(await login.text()).not.toContain('/assets/session-keepalive.js');
+  });
+
+  it('serves the session keepalive script as a static asset', async () => {
+    const response = await fetchWorker('/assets/session-keepalive.js');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("fetch('/auth/refresh'");
+  });
+
+  it('serves signed-out visitors only the view files the sign-in page renders', async () => {
+    const page = await (await fetchWorker('/auth/login')).text();
+    const payload = JSON.parse(page.match(/<script[^>]*id="cms-render-payload"[^>]*>([\s\S]*?)<\/script>/)![1]);
+    expect(payload.viewBasePath).toBe('/views');
+    const template = await fetchWorker(`/views${payload.bodyView.viewPath}`);
+    expect(template.status).toBe(200);
+    const sections = Object.values((await template.json() as { sections: Record<string, { type: string }> }).sections);
+    for (const path of [payload.layoutPath, ...sections.map(({ type }) => `/sections/${type}.liquid`)]) {
+      expect((await fetchWorker(`/views${path}`)).status, path).toBe(200);
+    }
+
+    for (const path of ['/templates/dashboard.json', '/sections/editor.liquid', '/locales/en.json', '/snippets/read-value.liquid']) {
+      expect((await fetchWorker(`/views${path}`)).status, path).toBe(404);
+      expect((await fetchWorker(`/admin/views${path}`, { headers: { Cookie: await authCookie() } })).status, path).toBe(200);
+    }
   });
 
   it('rejects cross-origin mutations before protected routes run', async () => {
@@ -780,21 +806,21 @@ describe('admin routes', () => {
     { name: 'GET /admin/pages/create_by_type/:pageType', path: '/admin/pages/create_by_type/default', authenticated: true, expectedStatus: 302, location: '/admin/pages/new?page_type=default' },
     { name: 'POST /admin/pages/new_post/:pageType', method: 'POST', path: '/admin/pages/new_post/default', body: form({ name: 'Quick Page', slug: 'quick-page' }), authenticated: true, expectedStatus: 302, location: /^\/admin\/pages\/\d+\/edit$/ },
     { name: 'GET /admin/pages/new', path: '/admin/pages/new', authenticated: true, expectedStatus: 200 },
-    { name: 'POST /admin/pages', method: 'POST', path: '/admin/pages', body: form({ name: 'Created', slug: 'created', page_type: 'default' }), authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+created+successfully' },
+    { name: 'POST /admin/pages', method: 'POST', path: '/admin/pages', body: form({ name: 'Created', slug: 'created', page_type: 'default' }), authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20created%20successfully' },
     { name: 'GET /admin/pages/:id/edit', path: '/admin/pages/101/edit', authenticated: true, expectedStatus: 200 },
     { name: 'GET /admin/pages/:id/read', path: '/admin/pages/101/read', authenticated: true, expectedStatus: 200 },
     { name: 'GET /admin/pages/:id/read (missing page)', path: '/admin/pages/99999/read', authenticated: true, expectedStatus: 404 },
-    { name: 'POST /admin/pages/:id/weight', method: 'POST', path: '/admin/pages/101/weight', body: form({ weight: '9', return_to: '/admin/pages/list/default' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/list/default?flash=Draft+weight+updated' },
-    { name: 'POST /admin/pages/:id', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About Updated', slug: 'about-updated', page_type: 'default', weight: '3' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page+updated+successfully' },
-    { name: 'POST /admin/pages/:id (publish from editor)', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About', slug: 'about', page_type: 'default', weight: '3', action: 'publish' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page+published+successfully' },
-    { name: 'POST /admin/pages/:id/publish', method: 'POST', path: '/admin/pages/101/publish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+published+successfully' },
-    { name: 'POST /admin/pages/pull/:uuid', method: 'POST', path: '/admin/pages/pull/page-uuid-101', authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?flash=Draft+already+exists' },
-    { name: 'POST /admin/pages/:id/unpublish', method: 'POST', path: '/admin/pages/101/unpublish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+unpublished' },
-    { name: 'POST /admin/pages/:id/delete', method: 'POST', path: '/admin/pages/101/delete', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page+moved+to+trash' },
+    { name: 'POST /admin/pages/:id/weight', method: 'POST', path: '/admin/pages/101/weight', body: form({ weight: '9', return_to: '/admin/pages/list/default' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/list/default?flash=Draft%20weight%20updated' },
+    { name: 'POST /admin/pages/:id', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About Updated', slug: 'about-updated', page_type: 'default', weight: '3' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page%20updated%20successfully' },
+    { name: 'POST /admin/pages/:id (publish from editor)', method: 'POST', path: '/admin/pages/101', body: form({ name: 'About', slug: 'about', page_type: 'default', weight: '3', action: 'publish' }), authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?language=mis&flash=Page%20published%20successfully' },
+    { name: 'POST /admin/pages/:id/publish', method: 'POST', path: '/admin/pages/101/publish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20published%20successfully' },
+    { name: 'POST /admin/pages/pull/:uuid', method: 'POST', path: '/admin/pages/pull/page-uuid-101', authenticated: true, expectedStatus: 302, location: '/admin/pages/101/edit?flash=Draft%20already%20exists' },
+    { name: 'POST /admin/pages/:id/unpublish', method: 'POST', path: '/admin/pages/101/unpublish', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20unpublished' },
+    { name: 'POST /admin/pages/:id/delete', method: 'POST', path: '/admin/pages/101/delete', authenticated: true, expectedStatus: 302, location: '/admin?flash=Page%20moved%20to%20trash' },
     { name: 'GET /admin/trash', path: '/admin/trash', authenticated: true, expectedStatus: 200 },
     { name: 'GET /admin/trash?type= (filtered view)', path: '/admin/trash?type=default', authenticated: true, expectedStatus: 200 },
-    { name: 'POST /admin/trash/:id/restore', method: 'POST', path: '/admin/trash/201/restore', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page+restored+to+draft' },
-    { name: 'POST /admin/trash/:id/delete', method: 'POST', path: '/admin/trash/201/delete', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page+permanently+deleted' },
+    { name: 'POST /admin/trash/:id/restore', method: 'POST', path: '/admin/trash/201/restore', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page%20restored%20to%20draft' },
+    { name: 'POST /admin/trash/:id/delete', method: 'POST', path: '/admin/trash/201/delete', authenticated: true, expectedStatus: 302, location: '/admin/trash?flash=Page%20permanently%20deleted' },
     { name: 'GET /admin/api/pages/:type', path: '/admin/api/pages/default', authenticated: true, expectedStatus: 200, json: [{ id: 101, page: 101, name: 'About', slug: 'about', label: '/about' }] },
     { name: 'GET /admin/api/pages/:type?q=', path: '/admin/api/pages/default?q=about', authenticated: true, expectedStatus: 200, json: [{ id: 101, page: 101, name: 'About', slug: 'about', label: '/about' }] },
     { name: 'GET /admin/api/pages/:type?q= (no match)', path: '/admin/api/pages/default?q=zzz', authenticated: true, expectedStatus: 200, json: [] },
@@ -893,6 +919,32 @@ describe('admin routes', () => {
       expect.objectContaining({ id: 'categories', selected: true }),
     ]));
     expect((data.tags as Array<{ slug: string }>).map((tag) => tag.slug)).toEqual(['news', 'updates']);
+  });
+
+  it('searches tag names, translated names, and slugs within the selected taxonomy', async () => {
+    const insert = env.DB.prepare('INSERT INTO tags (name, slug, taxonomy_slug, lect) VALUES (?, ?, ?, ?)');
+    await env.DB.batch([
+      insert.bind('Press', 'daily-bulletin', 'categories', JSON.stringify({ name: { 'zh-hant': '最新消息' } })),
+      insert.bind('Daily roundup', 'roundup', 'topics', null),
+      insert.bind('Daily briefing', 'briefing', 'categories', '{'),
+    ]);
+    const headers = { Cookie: await authCookie() };
+
+    const response = await fetchWorker('/admin/tags?filter_taxonomy=categories&search=+DAILY+', { headers });
+    expect(response.status).toBe(200);
+    expect(bodyData(await response.text())).toMatchObject({
+      search: 'DAILY',
+      clearSearchHref: '/admin/tags?filter_taxonomy=categories',
+      tags: [expect.objectContaining({ slug: 'briefing' }), expect.objectContaining({ slug: 'daily-bulletin' })],
+    });
+
+    const translated = await fetchWorker(`/admin/tags?search=${encodeURIComponent('消息')}`, { headers });
+    expect(translated.status).toBe(200);
+    expect(bodyData(await translated.text()).tags).toEqual([expect.objectContaining({ slug: 'daily-bulletin' })]);
+
+    const noMatches = await fetchWorker('/admin/tags?search=%25', { headers });
+    expect(noMatches.status).toBe(200);
+    expect(bodyData(await noMatches.text())).toMatchObject({ hasTags: false, search: '%', tags: [] });
   });
 
   it('persists tag weights and orders tag lists by weight', async () => {
@@ -1025,17 +1077,41 @@ describe('admin routes', () => {
       body: form({ name: '  陳大文 & Co  ', id: '2', role: 'admin', email: 'other@example.com' }),
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.name_saved');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?flash=profile.name_saved');
     expect(await env.DB.prepare('SELECT name, role, email FROM users WHERE id = 1').first()).toEqual({
       name: '陳大文 & Co', role, email: 'admin@example.com',
     });
     expect(await env.DB.prepare('SELECT * FROM users WHERE id = 2').first()).toEqual(otherUser);
 
-    const profile = await fetchWorker('/admin/profile?flash=profile.name_saved', { headers: { Cookie: cookie } });
+    const profile = await fetchWorker(saved.headers.get('Location')!, { headers: { Cookie: cookie } });
     const payload = renderPayload(await profile.text());
     expect(payload.bodyView?.data.name).toBe('陳大文 & Co');
     expect(payload.bodyView?.data.flash).toBe('profile.name_saved');
     expect(payload.layoutData.userName).toBe('陳大文 & Co');
+  });
+
+  it('shows a flash or error only when it was signed for the signed-in user', async () => {
+    const cookie = await authCookie();
+    const shown = async (query: string) => renderPayload(await (await fetchWorker(`/admin/profile?${query}`, { headers: { Cookie: cookie } })).text()).bodyView?.data;
+    expect((await shown('flash=Your+account+is+locked'))?.flash).toBe('');
+    expect((await shown('error=Call+555-0100&error_sig=forged'))?.error).toBe('');
+    expect((await shown(await signedNotice(env.JWT_SECRET, '2', 'Saved')))?.flash).toBe('');
+    expect((await shown((await signedNotice(env.JWT_SECRET, '1', 'Saved')).replace('Saved', 'Deleted')))?.flash).toBe('');
+    expect((await shown(await signedNotice(env.JWT_SECRET, '1', 'Saved')))?.flash).toBe('Saved');
+    expect((await shown(await signedNotice(env.JWT_SECRET, '1', 'Not saved', 'error')))?.error).toBe('Not saved');
+  });
+
+  it('shows only known sign-in error codes on the login page', async () => {
+    const shown = async (error: string) => renderPayload(await (await fetchWorker(`/auth/login?error=${encodeURIComponent(error)}`)).text()).bodyView?.data.error;
+    expect(await shown('provider_error')).toBe('provider_error');
+    expect(await shown('Your account is locked, call 555-0100')).toBeUndefined();
+  });
+
+  it('lists every sign-in error code the CMS redirects with', () => {
+    const sources = import.meta.glob('../src/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+    const codes = new Set(Object.values(sources).flatMap((source) => [...source.matchAll(/\/auth\/login\?error=([a-z_]+)/g)].map((match) => match[1])));
+    expect(codes.size).toBeGreaterThan(10);
+    expect([...codes].filter((code) => !LOGIN_ERRORS.has(code))).toEqual([]);
   });
 
   it.each([
@@ -1051,7 +1127,7 @@ describe('admin routes', () => {
       method: 'POST', headers: { Cookie: cookie }, body: form({ name }),
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.name_saved');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?flash=profile.name_saved');
 
     // The payload is only this account's name. Both accounts, their email
     // addresses and roles, and the users table itself must remain intact.
@@ -1068,7 +1144,7 @@ describe('admin routes', () => {
       method: 'POST', headers: { Cookie: cookie }, body: form({ name }),
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?error=profile.invalid_name');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?error=profile.invalid_name');
     expect(await env.DB.prepare('SELECT name FROM users WHERE id = 1').first()).toEqual({ name: 'Admin User' });
   });
 
@@ -1116,7 +1192,7 @@ describe('admin routes', () => {
     });
 
     expect(saved.status).toBe(303);
-    expect(saved.headers.get('Location')).toBe('/admin/profile?flash=profile.language_saved');
+    expect(unsigned(saved.headers.get('Location'))).toBe('/admin/profile?flash=profile.language_saved');
     expect(saved.headers.getSetCookie().join('\n')).toContain('cms_ui_locale=zh-hant');
 
     const savedInPlace = await fetchWorker('/admin/profile/locale', {
@@ -1124,7 +1200,7 @@ describe('admin routes', () => {
       headers: { Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form({ locale: 'zh-hant', return_to: '/admin?status=live' }),
     });
-    expect(savedInPlace.headers.get('Location')).toBe('/admin?status=live&flash=profile.language_saved');
+    expect(unsigned(savedInPlace.headers.get('Location'))).toBe('/admin?status=live&flash=profile.language_saved');
 
     const profile = await fetchWorker('/admin/profile', {
       headers: { Cookie: `${cookie}; cms_ui_locale=zh-hant` },
@@ -1163,7 +1239,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/profile?flash=Sign-in+method+disconnected');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/profile?flash=Sign-in%20method%20disconnected');
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE oauth_id = ?')
       .bind('google:google-admin')
       .first()).toBeNull();
@@ -1189,7 +1265,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/profile?error=At+least+one+sign-in+method+is+required');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/profile?error=At%20least%20one%20sign-in%20method%20is%20required');
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE oauth_id = ?')
       .bind('eventuai:admin')
       .first()).not.toBeNull();
@@ -1278,7 +1354,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/users?flash=User+removed');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/users?flash=User%20removed');
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(2).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM user_oauth_identities WHERE user_id = ?').bind(2).first()).toBeNull();
     expect(await env.DB.prepare('SELECT id FROM sessions WHERE user_id = ?').bind(2).first()).toBeNull();
@@ -1294,7 +1370,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/users?error=You+cannot+remove+your+own+user');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/users?error=You%20cannot%20remove%20your%20own%20user');
     expect(await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(1).first()).toEqual({ id: 1 });
   });
 
@@ -1455,7 +1531,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toContain('flash=Page+updated+and+published+successfully');
+    expect(unsigned(response.headers.get('Location'))).toContain('flash=Page%20updated%20and%20published%20successfully');
     expect(await env.PUBLISHED_DB.prepare('SELECT name, slug, page_type FROM pages WHERE uuid = ?')
       .bind('page-uuid-101')
       .first()).toEqual({ name: 'RSVP Fresh', slug: 'rsvp-fresh', page_type: pageType });
@@ -1525,7 +1601,7 @@ describe('admin routes', () => {
     });
 
     expect(publishResponse.status).toBe(302);
-    expect(publishResponse.headers.get('Location')).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20publish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
+    expect(unsigned(publishResponse.headers.get('Location'))).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20publish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: CMS_ADMIN_JOB_KIND });
     const publishJob = await env.DB.prepare('SELECT type, status, body FROM admin_jobs WHERE id = ?')
@@ -1555,7 +1631,7 @@ describe('admin routes', () => {
     });
 
     expect(unpublishResponse.status).toBe(302);
-    expect(unpublishResponse.headers.get('Location')).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20unpublish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
+    expect(unsigned(unpublishResponse.headers.get('Location'))).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20unpublish%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
     expect(sent).toHaveLength(2);
 
     await worker.queue(queueBatch([sent[1]]), env as unknown as AppEnv);
@@ -1590,7 +1666,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe(
+    expect(unsigned(response.headers.get('Location'))).toBe(
       `${returnTo}&flash=Bulk%20tag%20addition%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`,
     );
     expect(sent).toHaveLength(1);
@@ -1630,7 +1706,7 @@ describe('admin routes', () => {
       headers: { Cookie: cookie },
     });
     expect(removeResponse.status).toBe(302);
-    expect(removeResponse.headers.get('Location')).toBe(
+    expect(unsigned(removeResponse.headers.get('Location'))).toBe(
       `${returnTo}&flash=Bulk%20tag%20removal%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`,
     );
     expect(sent).toHaveLength(3);
@@ -1732,7 +1808,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=Bulk%20text%20replacement%20queued.%20It%20may%20take%20a%20moment%20to%20finish.');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/list/default?flash=Bulk%20text%20replacement%20queued.%20It%20may%20take%20a%20moment%20to%20finish.');
     expect(sent).toHaveLength(1);
     const queued = await env.DB.prepare('SELECT body FROM admin_jobs WHERE id = ?')
       .bind(sent[0].jobId)
@@ -1786,7 +1862,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=Enter%20text%20to%20find');
+    expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/list/default?flash=Enter%20text%20to%20find');
   });
 
   it('bulk-replaces inline without the jobs feature and allows an empty replacement', async () => {
@@ -1812,7 +1888,7 @@ describe('admin routes', () => {
       });
 
       expect(response.status).toBe(302);
-      expect(response.headers.get('Location')).toBe('/admin/pages/list/default?flash=1%20page%20had%20text%20replaced');
+      expect(unsigned(response.headers.get('Location'))).toBe('/admin/pages/list/default?flash=1%20page%20had%20text%20replaced');
       const page = await env.DB.prepare('SELECT name, lect FROM pages WHERE id = ?')
         .bind(101)
         .first<{ name: string; lect: string }>();
@@ -1856,7 +1932,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20deletion%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
+    expect(unsigned(response.headers.get('Location'))).toBe(`/admin/advanced-search/default?${query}&flash=Bulk%20deletion%20queued.%20It%20may%20take%20a%20moment%20to%20finish.`);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: CMS_ADMIN_JOB_KIND });
     const deleteJob = await env.DB.prepare('SELECT type, status, body FROM admin_jobs WHERE id = ?')
@@ -1930,7 +2006,7 @@ describe('admin routes', () => {
 
       expect(response.status).toBe(302);
       // The flash reports what was actually done, not that it was queued.
-      expect(response.headers.get('Location'))
+      expect(unsigned(response.headers.get('Location')))
         .toBe('/admin/advanced-search/default?flash=2%20pages%20moved%20to%20trash');
 
       expect(await env.DB.prepare('SELECT COUNT(*) AS total FROM pages WHERE id IN (?, ?)')
@@ -1991,7 +2067,7 @@ describe('admin routes', () => {
     const doneJob = await env.DB.prepare('SELECT status, result_location FROM admin_jobs WHERE id = ?')
       .bind(sent[0].jobId)
       .first<{ status: string; result_location: string }>();
-    expect(doneJob).toEqual({
+    expect({ ...doneJob, result_location: unsigned(doneJob?.result_location) }).toEqual({
       status: 'done',
       result_location: `/admin/advanced-search/default?${query}&flash=125%20pages%20moved%20to%20trash`,
     });
@@ -2107,6 +2183,28 @@ describe('admin routes', () => {
     expect(await search({ search1: '苏玮', path1: 'body.en' })).toEqual(['Content match']);
   });
 
+  it('matches Chinese regional variants in mixed-script names and content', async () => {
+    await env.DB.batch([
+      [103, 'aBC 裡線[1]*?', null],
+      [104, 'ABC unrelated', JSON.stringify({ body: { en: 'abc 里線[1]*?' } })],
+      [105, 'ABC 裡線11xx', null],
+    ].map(([id, name, lect]) =>
+      env.DB.prepare('INSERT INTO pages (id, name, slug, page_type, lect) VALUES (?, ?, ?, ?, ?)')
+        .bind(id, name, `regional-search-${id}`, 'default', lect)));
+
+    const cookie = await authCookie();
+    for (const [path1, expected] of [
+      ['', ['ABC unrelated', 'aBC 裡線[1]*?']],
+      ['body.en', ['ABC unrelated']],
+    ] as const) {
+      const query = new URLSearchParams({ search1: 'AbC 裏綫[1]*?', path1 });
+      const response = await fetchWorker(`/admin/advanced-search/default?${query}`, { headers: { Cookie: cookie } });
+      expect(response.status).toBe(200);
+      const data = bodyData(await response.text());
+      expect((data.pages as Array<{ name: string }>).map((page) => page.name).sort()).toEqual(expected);
+    }
+  });
+
   it('POST /admin/pages/pull/:uuid recreates a missing draft from published content', async () => {
     await env.PUBLISHED_DB.prepare(
       `INSERT INTO pages (id, uuid, name, slug, weight, page_type, lect, creator, editors)
@@ -2124,7 +2222,7 @@ describe('admin routes', () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toMatch(/^\/admin\/pages\/\d+\/edit\?flash=Published\+page\+pulled\+to\+draft$/);
+    expect(unsigned(response.headers.get('Location'))).toMatch(/^\/admin\/pages\/\d+\/edit\?flash=Published%20page%20pulled%20to%20draft$/);
     const draft = await env.DB.prepare(
       'SELECT id, uuid, name, slug, weight, page_type FROM pages WHERE uuid = ?',
     )
@@ -3323,7 +3421,7 @@ describe('permission-aware admin UI', () => {
       method: 'POST',
       body: new URLSearchParams([
         ['app_name', 'Control Room'],
-        ['app_icon', 'settings'],
+        ['app_icon', 'info-circle'],
         ['admin_home_path', '/admin/plugins/events/dashboard'],
         ['system_timezone', '+0800'],
         ['visible_items', 'pages'],
@@ -3348,7 +3446,7 @@ describe('permission-aware admin UI', () => {
     expect(dashboardPayload.layoutData.showSidebarMenu).toBe(true);
     expect(dashboardPayload.layoutData.siteTitle).toBe('Control Room');
     expect(pageTypeDashboard.layoutData.siteTitle).toBe('Control Room');
-    expect(dashboardPayload.layoutData.appIcon).toBe('settings');
+    expect(dashboardPayload.layoutData.appIcon).toBe('info-circle');
     expect(dashboardPayload.layoutData.systemTimezone).toBe('+0800');
     expect((dashboardPayload.layoutData.sidebarNav as Array<{ label: string }>).map((item) => item.label)).toEqual([
       'Trash',
@@ -3358,26 +3456,25 @@ describe('permission-aware admin UI', () => {
 
     const loginPayload = renderPayload(await (await fetchWorker('/auth/login')).text());
     expect(loginPayload.layoutData.siteTitle).toBe('Control Room');
-    expect(loginPayload.layoutData.appIcon).toBe('settings');
+    expect(loginPayload.layoutData.appIcon).toBe('info-circle');
     expect(loginPayload.bodyView?.data.siteTitle).toBe('Control Room');
-    expect(loginPayload.bodyView?.data.appIcon).toBe('settings');
+    expect(loginPayload.bodyView?.data.appIcon).toBe('info-circle');
 
     const settingsData = bodyData(await (await fetchWorker('/admin/settings/system', { headers: { Cookie: await authCookie() } })).text());
     expect(settingsData.appName).toBe('Control Room');
-    expect(settingsData.appIcon).toBe('settings');
+    expect(settingsData.appIcon).toBe('info-circle');
     expect(settingsData.adminHomePath).toBe('/admin/plugins/events/dashboard');
     expect(settingsData.systemTimezone).toBe('+0800');
     expect(settingsData.timezoneOptions).toEqual(expect.arrayContaining([
       { value: '+0800', label: 'UTC+08:00 (+0800)', selected: true },
       expect.objectContaining({ value: '+0000', selected: false }),
     ]));
-    expect(settingsData.iconOptions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ value: 'settings', selected: true }),
-      expect.objectContaining({ value: 'calendar' }),
-      expect.objectContaining({ value: 'contact-card' }),
-      expect.objectContaining({ value: 'mail-check' }),
-    ]));
-    expect(settingsData.iconOptions).toHaveLength(48);
+    const sprite = await (await env.VIEWS.fetch('https://views.local/assets/icons.svg')).text();
+    const spriteIconIds = [...sprite.matchAll(/<symbol\s+id="([^"]+)"/g)].map((match) => match[1]);
+    expect(settingsData.iconOptions).toEqual(expect.arrayContaining(spriteIconIds.map((value) =>
+      expect.objectContaining({ value, labelKey: `settings.icons.${value}`, selected: value === 'info-circle' }),
+    )));
+    expect(settingsData.iconOptions).toHaveLength(spriteIconIds.length);
     expect(settingsData.options).toEqual(expect.arrayContaining([
       expect.objectContaining({ value: 'pages', checked: true, weight: 50 }),
       expect.objectContaining({ value: 'tags', checked: false }),
@@ -3390,6 +3487,60 @@ describe('permission-aware admin UI', () => {
       'settings_group_weight',
       'weight_pages',
     ]);
+  });
+
+  it('publishes sanitized icon sprites, exposes their previews, and falls back when an icon is replaced', async () => {
+    const headers = { Cookie: await authCookie() };
+    const upload = (source: string, requestHeaders = headers) => {
+      const body = new FormData();
+      body.set('icon_sprite', new File([source], 'icons.svg', { type: 'image/svg+xml' }));
+      return fetchWorker('/admin/settings/system/icon-sprite', { method: 'POST', headers: requestHeaders, body });
+    };
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><defs><symbol id="info-circle" viewBox="0 0 24 24">'
+      + '<circle cx="12" cy="12" r="9" data-private="ignored" onload="ignored"/></symbol></defs></svg>';
+    expect((await fetchWorker('/assets/custom-icons.svg')).status).toBe(404);
+    const editor = await signTestToken({ sub: '2', email: 'editor@example.com', role: 'editor' });
+    expect((await upload(svg, { Cookie: `access_token=${editor}` })).status).toBe(403);
+    const uploaded = await upload(svg);
+    expect(uploaded.status).toBe(303);
+    expect(uploaded.headers.get('Location')).toBe('/admin/settings/system?flash=icon-sprite-uploaded');
+
+    const iconHref = '/assets/custom-icons.svg#custom-info-circle';
+    const settings = bodyData(await (await fetchWorker('/admin/settings/system', { headers })).text());
+    expect(settings.uploadedIcons).toEqual([expect.objectContaining({ value: 'custom-info-circle', href: iconHref })]);
+    expect(settings.iconOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'info-circle' }),
+      expect.objectContaining({ value: 'custom-info-circle', label: 'info circle', href: iconHref }),
+    ]));
+
+    const asset = await fetchWorker('/assets/custom-icons.svg');
+    expect(asset.headers.get('Content-Type')).toContain('image/svg+xml');
+    expect(asset.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+    const sanitized = await asset.text();
+    expect(sanitized).toContain('<symbol id="custom-info-circle" viewBox="0 0 24 24"');
+    expect(sanitized).toContain('<circle cx="12" cy="12" r="9">');
+    expect(sanitized).not.toMatch(/onload|data-private/);
+
+    for (const invalid of [
+      '<svg><symbol id="a"><script/></symbol></svg>',
+      '<svg><symbol id="a"><rect fill="url(#paint)"/></symbol></svg>',
+      '<svg><symbol id="a"><rect/></symbol><symbol id="a"><rect/></symbol></svg>',
+      '<!DOCTYPE svg><svg><symbol id="a"><rect/></symbol></svg>',
+      '<svg><symbol id="a"><rect></symbol></svg>',
+    ]) {
+      expect((await upload(invalid)).headers.get('Location')).toBe('/admin/settings/system?error=invalid-icon-sprite');
+    }
+    expect((await upload(' '.repeat(64 * 1024 + 1))).headers.get('Location')).toBe('/admin/settings/system?error=icon-sprite-too-large');
+    expect(await (await fetchWorker('/assets/custom-icons.svg')).text()).toBe(sanitized);
+
+    const saved = await fetchWorker('/admin/settings/system', {
+      method: 'POST', headers, body: new URLSearchParams({ app_icon: 'custom-info-circle' }),
+    });
+    expect(saved.status).toBe(302);
+    const loginIcon = async () => renderPayload(await (await fetchWorker('/auth/login')).text()).layoutData.appIconHref;
+    expect(await loginIcon()).toBe(iconHref);
+    expect((await upload('<svg><symbol id="other"><rect width="24" height="24"/></symbol></svg>')).status).toBe(303);
+    expect(await loginIcon()).toMatch(/^\/assets\/icons\.svg\?.*#document$/);
   });
 
   it('renames sidebar links per interface language and restores defaults when cleared', async () => {
@@ -3826,6 +3977,23 @@ describe('structured editor weights', () => {
 });
 
 describe('Lect JSON version diff', () => {
+  it('marks the matching published version in the editor and read-only history', async () => {
+    const headers = { Cookie: await authCookie() };
+    const editor = await fetchWorker('/admin/pages/101/edit', { headers });
+    expect(editor.status).toBe(200);
+    expect(bodyData(await editor.text()).versions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ live: true, href: '/admin/pages/101/edit?version=501' }),
+    ]));
+
+    const read = await fetchWorker('/admin/pages/101/read?version=501', { headers });
+    expect(read.status).toBe(200);
+    const history = bodyData(await read.text());
+    expect(history.versions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ live: true, href: expect.stringContaining('version=501') }),
+    ]));
+    expect(history.liveBadgeHtml).toMatch(/<span[^>]*>Live<\/span>/);
+  });
+
   it('shows version timestamps in the CMS default timezone', async () => {
     const changed = stringifyLect({ ...basePageLectObject, name: localizedFixture('About TZ') });
     await env.DB.prepare(
@@ -3911,7 +4079,7 @@ async function expectRoute(route: RouteCase): Promise<Response> {
 
   expect(response.status).toBe(route.expectedStatus);
   if (route.location) {
-    const location = response.headers.get('Location');
+    const location = unsigned(response.headers.get('Location'));
     if (typeof route.location === 'string') expect(location).toBe(route.location);
     else expect(location).toMatch(route.location);
   }

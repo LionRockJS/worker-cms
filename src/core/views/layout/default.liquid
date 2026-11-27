@@ -68,6 +68,7 @@
           var switchToDark = toggle.getAttribute('data-theme-switch-dark') || 'Switch to dark theme';
           toggle.setAttribute('aria-pressed', isLight ? 'true' : 'false');
           toggle.setAttribute('aria-label', isLight ? switchToDark : switchToLight);
+          if (toggle.hasAttribute('title')) toggle.setAttribute('title', isLight ? switchToDark : switchToLight);
           if (toggle.hasAttribute('data-sidebar-tooltip')) {
             toggle.setAttribute('data-sidebar-label', isLight ? switchToDark : switchToLight);
           }
@@ -106,67 +107,6 @@
         bindThemeToggle();
       }
     })();
-
-    {% if admin %}
-    (function() {
-      if (window.__cmsSessionKeepaliveBound) return;
-      window.__cmsSessionKeepaliveBound = true;
-      var INTERVAL = 5 * 60 * 1000;
-      // Interaction after this long without a report is sent at once, so the
-      // server's view of activity lags the person by at most this much.
-      var REPORT_AFTER = 5 * 60 * 1000;
-      var RETRY_AFTER = 30 * 1000;
-      var inFlight = false;
-      // Loading the page was itself a request the server counted.
-      var lastInteraction = Date.now();
-      var lastReported = lastInteraction;
-      var lastAttempt = 0;
-
-      // A visible page counts as reading, even when its window is inactive.
-      // Hidden tabs only report actual interaction, so they still go idle.
-      async function refresh() {
-        if (inFlight) return;
-        inFlight = true;
-        lastAttempt = Date.now();
-        if (document.visibilityState === 'visible') {
-          lastInteraction = Date.now();
-        }
-        var interaction = lastInteraction;
-        var headers = { Accept: 'application/json' };
-        if (interaction > lastReported) {
-          headers['X-CMS-Idle-For'] = String(Math.max(0, Math.floor((Date.now() - interaction) / 1000)));
-        } else {
-          headers['X-CMS-Background'] = '1';
-        }
-        try {
-          var res = await fetch('/auth/refresh', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: headers
-          });
-          if (res.status === 401) window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
-          else if (res.ok) lastReported = Math.max(lastReported, interaction);
-        } catch (error) {
-          /* retry on the next tick */
-        } finally {
-          inFlight = false;
-        }
-      }
-
-      function noteInteraction() {
-        lastInteraction = Date.now();
-        if (lastInteraction - lastReported > REPORT_AFTER && lastInteraction - lastAttempt > RETRY_AFTER) refresh();
-      }
-
-      ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function(type) {
-        window.addEventListener(type, noteInteraction, { capture: true, passive: true });
-      });
-      window.setInterval(refresh, INTERVAL);
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') refresh();
-      });
-    })();
-    {% endif %}
 
     // Confirmation prompts for forms marked with data-confirm (CSP-safe
     // replacement for inline onsubmit handlers).
@@ -645,16 +585,38 @@
         renderState();
       }
 
+      function bindSidebarHelpToggle() {
+        var toggle = document.querySelector('[data-sidebar-help-toggle]');
+        if (!(toggle instanceof HTMLInputElement)) return;
+
+        var storageKey = 'worker-cms-verbose-mode';
+        try {
+          toggle.checked = window.localStorage.getItem(storageKey) === 'true';
+        } catch (error) {
+          /* ignore */
+        }
+
+        toggle.addEventListener('change', function() {
+          try {
+            window.localStorage.setItem(storageKey, toggle.checked ? 'true' : 'false');
+          } catch (error) {
+            /* ignore */
+          }
+        });
+      }
+
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
           bindMobileMenu();
           bindMobileHeaderAutoHide();
           bindDesktopSidebar();
+          bindSidebarHelpToggle();
         });
       } else {
         bindMobileMenu();
         bindMobileHeaderAutoHide();
         bindDesktopSidebar();
+        bindSidebarHelpToggle();
       }
     })();
   </script>
@@ -666,13 +628,14 @@
   {%- endcomment -%}
   {% for asset in clientAssets %}<script src="{{ asset }}{{ assetRevisionQuery }}" nonce="{{ nonce }}" defer></script>
   {% endfor %}
+  {% if admin %}<script src="/assets/session-keepalive.js{{ assetRevisionQuery }}" nonce="{{ nonce }}" defer></script>{% endif %}
 </head>
 <body class="h-full overflow-x-hidden">
   {{ content_for_layout }}
   {% if admin %}
     <header class="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-4 py-3 text-white shadow-xl md:hidden" data-admin-mobile-bar>
       <a href="/admin" aria-label="{{ "shell.go_to_dashboard" | t }}" class="flex min-w-0 items-center gap-3">
-        <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+        <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ appIconHref }}"></use></svg>
         <span class="min-w-0 truncate text-lg font-bold tracking-tight">{{ siteTitle }}</span>
       </a>
       <button type="button"
@@ -694,7 +657,7 @@
            class="flex min-w-0 items-center gap-3"
            data-sidebar-tooltip
            data-sidebar-label="{{ "shell.go_to_dashboard" | t }}">
-          <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ appIcon }}"></use></svg>
+          <svg class="h-7 w-7 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ appIconHref }}"></use></svg>
           <span class="min-w-0 truncate text-lg font-bold tracking-tight" data-sidebar-text>{{ siteTitle }}</span>
         </a>
         <button type="button"
@@ -713,7 +676,7 @@
                        data-sidebar-tooltip
                        data-sidebar-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}"
                        aria-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}">
-                <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ item.icon }}"></use></svg>
+                <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{% if item.iconHref %}{{ item.iconHref }}{% else %}{{ iconHrefPrefix }}#{{ item.icon }}{% endif %}"></use></svg>
                 <span data-sidebar-text>{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}</span>
                 <svg class="ml-auto h-4 w-4 transition-transform group-open:rotate-90" data-sidebar-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
               </summary>
@@ -723,7 +686,7 @@
                      {% if settingItem.isActive %}aria-current="page"{% endif %}
                      aria-label="{% if settingItem.translationKey %}{{ settingItem.translationKey | t: settingItem.label }}{% else %}{{ settingItem.label }}{% endif %}"
                      class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors {% if settingItem.isActive %}bg-indigo-600 font-semibold text-white shadow-sm hover:bg-indigo-700{% else %}text-gray-300 hover:bg-gray-700 hover:text-white{% endif %}">
-                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ settingItem.icon }}"></use></svg>
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{% if settingItem.iconHref %}{{ settingItem.iconHref }}{% else %}{{ iconHrefPrefix }}#{{ settingItem.icon }}{% endif %}"></use></svg>
                     {% if settingItem.translationKey %}{{ settingItem.translationKey | t: settingItem.label }}{% else %}{{ settingItem.label }}{% endif %}
                   </a>
                 {% endfor %}
@@ -736,7 +699,7 @@
                data-sidebar-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}"
                aria-label="{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}"
                class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors {% if item.isActive %}bg-indigo-600 font-semibold text-white shadow-sm hover:bg-indigo-700{% else %}text-gray-300 hover:bg-gray-700 hover:text-white{% endif %}">
-              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#{{ item.icon }}"></use></svg>
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{% if item.iconHref %}{{ item.iconHref }}{% else %}{{ iconHrefPrefix }}#{{ item.icon }}{% endif %}"></use></svg>
               <span data-sidebar-text>{% if item.translationKey %}{{ item.translationKey | t: item.label }}{% else %}{{ item.label }}{% endif %}</span>
             </a>
           {% endif %}
@@ -770,17 +733,7 @@
             </span>
 
             <p class="text-xs text-gray-400">{% for role in userRoleItems %}{% if role.labelKey != blank %}{{ role.labelKey | t }}{% else %}{{ role.label }}{% endif %}{% unless forloop.last %}, {% endunless %}{% endfor %}</p>
-            {% for wallet in sidebarWallets %}
-            <p class="mt-1 flex items-center gap-1 text-xs font-medium {{ wallet.className }}">
-              <svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <use href="{{ iconHrefPrefix }}#{{ wallet.icon }}"></use>
-              </svg>
-              <span class="min-w-0">
-                <span class="whitespace-nowrap">{{ wallet.userBalance }} {{ wallet.unitKey | t }}</span>
-                {% if wallet.sharedBalance > 0 %}<span class="whitespace-nowrap">{{ wallet.sharedBalance }} {{ "shell.shared" | t }}</span>{% endif %}
-              </span>
-            </p>
-            {% endfor %}
+            {% feature_fragment credits/sidebar-wallets %}
           </div>
         </a>
 
@@ -811,10 +764,11 @@
                   data-theme-switch-light="{{ "shell.theme.switch_to_light" | t }}"
                   data-theme-switch-dark="{{ "shell.theme.switch_to_dark" | t }}"
                   aria-pressed="false"
+                  title="{{ "shell.theme.switch_to_light" | t }}"
                   aria-label="{{ "shell.theme.switch_to_light" | t }}">
-            <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="light"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="dark"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
-            <span data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
+            <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="light" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="dark" aria-hidden="true"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
+            <span class="hidden lg:inline" data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
           </button>
         </div>
 
@@ -824,9 +778,10 @@
                     class="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
                     data-sidebar-tooltip
                     data-sidebar-label="{{ "shell.sign_out" | t }}"
+                    title="{{ "shell.sign_out" | t }}"
                     aria-label="{{ "shell.sign_out" | t }}">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
-              <span data-sidebar-text>{{ "shell.sign_out" | t }}</span>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
+              <span class="hidden lg:inline" data-sidebar-text>{{ "shell.sign_out" | t }}</span>
             </button>
           </form>
           <div class="flex items-center gap-1">
@@ -934,22 +889,26 @@
       save(dragTable);
       dragSrc = null; dragTable = null; mdTarget = null; dragBefore = null;
     });
-    // Write the server's post-reorder weights back into the rows so the weight
-    // fields stop showing pre-drag numbers. A reorder rewrites the draft weight
-    // only, so a row that matched its published copy may now drift — the marker
-    // is rendered hidden on every published row for exactly this moment.
+    // Weight save buttons ([data-weight-save]) stay hidden until the weight
+    // input in the same form differs from its saved value.
+    function syncWeightSave(input) {
+      var btn = input.form && input.form.querySelector('[data-weight-save]');
+      if (!btn) return;
+      var changed = input.value !== input.defaultValue;
+      btn.classList.toggle('hidden', !changed);
+      btn.classList.toggle('inline-flex', changed);
+    }
+    document.addEventListener('input', function(e) {
+      if (e.target.matches && e.target.matches('input[name="weight"]')) syncWeightSave(e.target);
+    });
+    // Keep the draft weight inputs in sync after reordering.
     function applyWeights(table, weights) {
       (weights || []).forEach(function(row) {
         var tr = table.querySelector('tbody tr[data-id="' + row.id + '"]');
         if (!tr) return;
         var input = tr.querySelector('input[name="weight"]');
-        if (input) input.value = row.weight;
-        var drift = tr.querySelector('[data-weight-drift]');
-        if (!drift) return;
-        var live = tr.getAttribute('data-live-weight');
-        var drifted = live !== null && Number(live) !== row.weight;
-        drift.classList.toggle('hidden', !drifted);
-        drift.classList.toggle('inline-flex', drifted);
+        if (input) { input.value = row.weight; input.defaultValue = String(row.weight); syncWeightSave(input); }
+        {% feature_fragment publish/update-weight-drift %}
       });
     }
     function rowIds(table) {

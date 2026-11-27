@@ -4,7 +4,7 @@ import { createExecutionContext } from 'cloudflare:test';
 import worker from '../src/index';
 import { getLiveLect, liveMapForDraftPages, listLiveByTypes } from '../src/features/publish';
 import { r2Adapter } from '../src/features/publish/r2';
-import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from '../src/core/publish/adapter';
+import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from '../src/contracts/publish';
 import { coreExtensions, registerCoreExtensions } from '../src/core/extensions';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';

@@ -1,4 +1,19 @@
 {
+  "settings": {
+    "credits": {
+      "title": "Credits",
+      "show": "Show credits",
+      "visible": "Show",
+      "hidden": "Hide",
+      "help": "Show balances, credit panels, and credit links in the admin interface. Hide them for installations without credits or with unlimited credits. This display setting does not change prices or charges."
+    }
+  },
+  "profile": {
+    "shared_pool_balance": "Shared pool balance"
+  },
+  "shell": {
+    "shared": "shared"
+  },
   "credits": {
     "currency": {
       "credit": "Credits",

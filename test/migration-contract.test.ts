@@ -10,7 +10,7 @@ async function objectNames(db: D1Database, type: 'table' | 'index' | 'trigger'):
 
 describe('flattened migration contract', () => {
   it('ships one complete baseline per D1 database', () => {
-    // Exactly one baseline each. Additive `000N_enable_<feature>.sql` files may
+    // Exactly one baseline each. Additive core upgrades and feature enable migrations may
     // sit alongside it: D1 tracks applied migrations by name, so regenerating a
     // baseline never reaches a database that already ran it, and a feature's
     // tables get there through an enable migration instead (see
@@ -22,9 +22,10 @@ describe('flattened migration contract', () => {
     // install whose baseline never had the column, and the rebuild that would
     // be safe on both cascades through DB.pages' foreign keys (D1 runs with
     // foreign_keys=1) and takes page_versions and page_tags with it. Such
-    // changes leave the baseline and ship as a one-off under migrations/manual/.
+    // changes go into the baseline only; a database created before them is
+    // recreated or patched by hand (README "Schema changes").
     const names = env.TEST_MIGRATIONS.map((migration) => migration.name);
-    expect(names.filter((name) => !/^\d{4}_enable_/.test(name))).toEqual(['0001_initial_schema.sql']);
+    expect(names.filter((name) => !/^\d{4}_enable_/.test(name))).toEqual(['0001_initial_schema.sql', '0008_page_access.sql']);
     expect(names[0]).toBe('0001_initial_schema.sql');
     // The published database has no feature switches, so an additive file there
     // is hand-written and short-lived: `0002_published_tags.sql` created the tag
@@ -39,9 +40,9 @@ describe('flattened migration contract', () => {
   it('creates the complete private schema without transitional tables', async () => {
     expect(await objectNames(env.DB, 'table')).toEqual([
       'admin_jobs', 'audit_archive_intents', 'audit_archive_orphans', 'audit_archive_state', 'audit_events', 'audit_log', 'audit_mutation_outbox', 'audit_seals', 'block_types', 'classification_policy_version', 'credit_ledger', 'credit_subscriptions', 'credit_wallets',
-      'data_class_floors', 'data_classes', 'locale_messages', 'locales', 'media_files', 'page_sensitivity_floors', 'page_tags', 'page_types',
-      'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_file_prefix_approvals',
-      'plugin_identity_approvals', 'plugin_page_type_approvals',
+      'data_class_floors', 'data_classes', 'locale_messages', 'locales', 'media_files', 'page_access_policies', 'page_edit_grants', 'page_sensitivity_floors', 'page_tags', 'page_types',
+      'page_versions', 'pages', 'plugin_asset_approvals', 'plugin_capability_approvals', 'plugin_charge_receipts', 'plugin_credit_ledger', 'plugin_credits',
+      'plugin_file_prefix_approvals', 'plugin_identity_approvals', 'plugin_page_type_approvals',
       'plugin_sequences', 'plugin_state', 'plugins', 'record_holds', 'role_permissions', 'roles', 'sessions', 'settings',
       'shared_credit_ledger', 'shared_credits', 'submission_erasures', 'tags', 'taxonomies',
       'trash_page_tags', 'trash_page_versions', 'trash_pages',

@@ -4,7 +4,7 @@
       "type": "page-header",
       "settings": {
         "title": "{{ titleKey | t }}",
-        "description": "{{ descriptionKey | t }}"
+        "explanation": "{{ descriptionKey | t }}"
       },
       "blocks": {
         "new": {

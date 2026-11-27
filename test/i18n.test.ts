@@ -1,22 +1,47 @@
 import { env } from 'cloudflare:workers';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
+import worker from '../src/index';
+import { signJWT } from './auth-fixtures';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Env } from '../src/types';
 import { clearConfigCache, resolveCmsConfig } from '../src/core/db/content-config';
 import {
   buildTranslationCatalog,
   CONTENT_DEFAULT_LANGUAGE_SETTING_KEY,
-  deleteLocale,
   flattenMessages,
   loadDefaultContentLanguage,
   listLocales,
-  saveDefaultContentLanguage,
-  saveLocale,
-  saveLocaleMessage,
 } from '../src/core/i18n';
 import { APP_ICON_OPTIONS, SIDEBAR_MENU_ITEMS } from '../src/core/db/settings';
 import { USER_ROLES } from '../src/types';
 
 const cmsEnv = env as unknown as Env;
+
+let requestCount = 0;
+
+async function editLocale(path: string, fields: Record<string, string> = {}): Promise<URL> {
+  const token = await signJWT({
+    sub: '1', email: 'admin@example.invalid', name: 'Admin', role: 'admin', type: 'access',
+    exp: Math.floor(Date.now() / 1000) + 900,
+  }, env.JWT_SECRET);
+  const context = createExecutionContext();
+  const response = await worker.fetch(new Request(`https://cms.example.com/admin/settings/${path}`, {
+    method: 'POST',
+    headers: {
+      Cookie: `access_token=${token}`,
+      'Sec-Fetch-Site': 'same-origin',
+      'CF-Connecting-IP': `192.0.2.${++requestCount}`,
+    },
+    body: new URLSearchParams(fields),
+  }), cmsEnv, context);
+  await waitOnExecutionContext(context);
+  expect(response.status).toBe(303);
+  return new URL(response.headers.get('Location')!, 'https://cms.example.com');
+}
+
+async function saveLocaleEdit(path: string, fields: Record<string, string>): Promise<void> {
+  expect((await editLocale(path, fields)).searchParams.get('error')).toBeNull();
+}
 
 beforeEach(async () => {
   await env.DB.prepare("DELETE FROM locale_messages WHERE locale_code = 'fr'").run();
@@ -31,16 +56,16 @@ describe('database locale registry', () => {
     const locales = await listLocales(cmsEnv);
     const unspecified = locales.find((locale) => locale.code === 'mis');
     expect(unspecified).toMatchObject({ content_enabled: 1, ui_enabled: 0, builtin: 1 });
-    await expect(deleteLocale(cmsEnv, 'mis')).rejects.toThrow('cannot be deleted');
+    expect((await editLocale('languages/mis/delete')).searchParams.get('error')).toContain('cannot be deleted');
   });
 
   it('allows another enabled content language to become default and then disables mis', async () => {
-    await saveDefaultContentLanguage(cmsEnv, 'zh-hant');
+    await saveLocaleEdit('languages/default', { default_language: 'zh-hant' });
     expect(await loadDefaultContentLanguage(cmsEnv)).toBe('zh-hant');
 
-    await saveLocale(cmsEnv, {
+    await saveLocaleEdit('languages/mis', {
       label: 'Unspecified language', content_enabled: '', ui_enabled: '', fallback_code: '', weight: '0',
-    }, 'mis');
+    });
 
     const locales = await listLocales(cmsEnv);
     expect(locales.find((locale) => locale.code === 'mis')?.content_enabled).toBe(0);
@@ -48,19 +73,19 @@ describe('database locale registry', () => {
   });
 
   it('keeps the selected default content language enabled', async () => {
-    await expect(saveLocale(cmsEnv, {
+    await saveLocaleEdit('languages/mis', {
       label: 'Unspecified language', content_enabled: '', ui_enabled: '', fallback_code: '', weight: '0',
-    }, 'mis')).resolves.toBe('mis');
+    });
     expect((await listLocales(cmsEnv)).find((locale) => locale.code === 'mis')?.content_enabled).toBe(1);
   });
 
   it('does not allow the selected default content language to be deleted', async () => {
-    await saveDefaultContentLanguage(cmsEnv, 'zh-hant');
-    await expect(deleteLocale(cmsEnv, 'zh-hant')).rejects.toThrow('default content language');
+    await saveLocaleEdit('languages/default', { default_language: 'zh-hant' });
+    expect((await editLocale('languages/zh-hant/delete')).searchParams.get('error')).toContain('default content language');
   });
 
   it('extends the effective content languages from the database', async () => {
-    await saveLocale(cmsEnv, {
+    await saveLocaleEdit('languages', {
       code: 'fr', label: 'Français', content_enabled: 'on', ui_enabled: 'on', fallback_code: 'en', weight: '40',
     });
     clearConfigCache();
@@ -70,11 +95,11 @@ describe('database locale registry', () => {
   });
 
   it('merges bundled fallback strings with database overrides', async () => {
-    await saveLocale(cmsEnv, {
+    await saveLocaleEdit('languages', {
       code: 'fr', label: 'Français', content_enabled: 'on', ui_enabled: 'on', fallback_code: 'en', weight: '40',
     });
-    await saveLocaleMessage(cmsEnv, 'fr', 'common.save', 'Enregistrer');
-    await saveLocaleMessage(cmsEnv, 'fr', 'plugin.demo.label', 'Extension démo');
+    await saveLocaleEdit('translations', { locale: 'fr', key: 'common.save', value: 'Enregistrer' });
+    await saveLocaleEdit('translations', { locale: 'fr', key: 'plugin.demo.label', value: 'Extension démo' });
 
     const catalog = await buildTranslationCatalog(cmsEnv, 'fr');
     expect(catalog['common.add']).toBe('Add');
@@ -189,6 +214,7 @@ describe('database locale registry', () => {
   });
 
   it('rejects Liquid syntax in database messages', async () => {
-    await expect(saveLocaleMessage(cmsEnv, 'en', 'unsafe.label', '{{ user.name }}')).rejects.toThrow('plain text');
+    const redirect = await editLocale('translations', { locale: 'en', key: 'unsafe.label', value: '{{ user.name }}' });
+    expect(redirect.searchParams.get('error')).toContain('plain text');
   });
 });

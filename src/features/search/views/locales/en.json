@@ -1,5 +1,12 @@
 {
   "view_strings": {
+    "sections_dashboard.all_matching_pages": "All matching pages",
+    "sections_dashboard.bulk_all_matching_pages_subject": "all matching pages, including pages outside this pagination page",
+    "sections_dashboard.bulk_confirm_template": "Confirm {action} for {subject}?",
+    "sections_dashboard.bulk_selected_page": "selected page",
+    "sections_dashboard.bulk_selected_pages": "selected pages",
+    "sections_dashboard.search": "Search",
+    "sections_dashboard.search_pages": "Search pages",
     "sections_advanced_search.actions": "Actions",
     "sections_advanced_search.add_criterion": "Add Criterion",
     "sections_advanced_search.all_types": "All Types",

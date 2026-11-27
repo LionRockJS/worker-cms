@@ -54,7 +54,13 @@
 
     {% if hasNextPage %}
       <div class="mt-4 flex justify-end">
-        <a href="{{ nextHref }}" class="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_content_list.next_page" | t }}</a>
+        <a href="{{ nextHref }}"
+           title="{{ "view_strings.sections_content_list.next_page" | t }}"
+           aria-label="{{ "view_strings.sections_content_list.next_page" | t }}"
+           class="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.sections_content_list.next_page" | t }}</span>
+        </a>
       </div>
     {% endif %}
   {% endunless %}

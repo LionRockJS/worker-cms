@@ -7,7 +7,7 @@
     <div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ "view_strings.sections_tags.sync_failed" | t }} {{ syncError }}</div>
   {% endif %}
   <div class="mb-4 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-    <form method="GET" class="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+    <form method="GET" action="/admin/tags" class="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
       <label for="filter_taxonomy" class="sr-only">{{ "view_strings.sections_tags.filter_by_taxonomy" | t }}</label>
       <select id="filter_taxonomy" name="filter_taxonomy" class="min-w-0 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm sm:w-auto">
         <option value="">{{ "view_strings.sections_tags.all_taxonomies" | t }}</option>
@@ -15,30 +15,34 @@
           <option value="{{ option.id }}" {% if option.selected %}selected{% endif %}>{{ option.name }}</option>
         {% endfor %}
       </select>
-      <button type="submit"
-              title="{{ "view_strings.sections_tags.filter" | t }}"
-              aria-label="{{ "view_strings.sections_tags.filter_tags" | t }}"
-              class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#list-filter"></use></svg>
-      </button>
-    </form>
-    {% if canSync %}
-      <form method="POST" action="/admin/tags/sync-published" class="shrink-0">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <label for="tag_search" class="sr-only">{{ "view_strings.sections_tags.search_tags" | t }}</label>
+        <input id="tag_search" type="search" name="search" value="{{ search }}" placeholder="{{ "view_strings.sections_tags.search_tags" | t }}"
+               class="h-10 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
         <button type="submit"
-                title="{{ "view_strings.sections_tags.sync_published_help" | t }}"
-                aria-label="{{ "view_strings.sections_tags.sync_published" | t }}"
-                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
-          <span class="hidden lg:inline">{{ "view_strings.sections_tags.sync_published" | t }}</span>
+                title="{{ "view_strings.sections_tags.search_tags" | t }}"
+                aria-label="{{ "view_strings.sections_tags.search_tags" | t }}"
+                class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#search"></use></svg>
         </button>
-      </form>
-    {% endif %}
+        {% if search != blank %}
+          <a href="{{ clearSearchHref }}"
+             title="{{ "view_strings.sections_tags.clear_search" | t }}"
+             aria-label="{{ "view_strings.sections_tags.clear_search" | t }}"
+             class="inline-flex shrink-0 text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center gap-2 h-8 min-w-8">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_tags.clear_search" | t }}</span>
+          </a>
+        {% endif %}
+      </div>
+    </form>
+    {% feature_fragment publish/tags-sync %}
   </div>
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
-    <table class="w-full min-w-[620px] text-left" data-reorder="/admin/tags/batch-weight" data-reorder-key="updates" data-reorder-handle-only>
+    <table class="w-full min-w-[620px] text-left"{% if search == blank %} data-reorder="/admin/tags/batch-weight" data-reorder-key="updates" data-reorder-handle-only{% endif %}>
       <thead class="bg-gray-50 border-b border-gray-200">
         <tr>
-          <th class="w-10 px-3 py-3"></th>
+          {% if search == blank %}<th class="w-10 px-3 py-3"></th>{% endif %}
           <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_tags.name" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_tags.weight" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_tags.type" | t }}</th>
@@ -49,11 +53,13 @@
         {% if hasTags %}
           {% for tag in tags %}
             <tr class="hover:bg-gray-50" data-id="{{ tag.id }}">
-              <td class="px-3 py-3 text-gray-300">
-                <span data-reorder-handle title="{{ "view_strings.sections_tags.drag_to_reorder" | t }}" aria-label="{{ "view_strings.sections_tags.drag_to_reorder" | t }}" class="inline-flex h-8 w-8 cursor-grab items-center justify-center rounded-md hover:bg-gray-100 hover:text-gray-500">
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#menu"></use></svg>
-                </span>
-              </td>
+              {% if search == blank %}
+                <td class="px-3 py-3 text-gray-300">
+                  <span data-reorder-handle title="{{ "view_strings.sections_tags.drag_to_reorder" | t }}" aria-label="{{ "view_strings.sections_tags.drag_to_reorder" | t }}" class="inline-flex h-8 w-8 cursor-grab items-center justify-center rounded-md hover:bg-gray-100 hover:text-gray-500">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#menu"></use></svg>
+                  </span>
+                </td>
+              {% endif %}
               <td class="px-6 py-3 text-sm font-medium text-gray-900">
                 <a href="{{ tag.editHref }}" class="block text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ tag.name }}</a>
                 <div class="text-xs font-mono text-gray-500">{{ tag.slug }}</div>
@@ -72,7 +78,11 @@
             </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="6" class="px-6 py-10 text-center text-gray-400">{{ "view_strings.sections_tags.no_tags_yet" | t }}</td></tr>
+          {% if search != blank %}
+            <tr><td colspan="4" class="px-6 py-10 text-center text-gray-400">{{ "view_strings.sections_tags.no_matching_tags" | t }}</td></tr>
+          {% else %}
+            <tr><td colspan="5" class="px-6 py-10 text-center text-gray-400">{{ "view_strings.sections_tags.no_tags_yet" | t }}</td></tr>
+          {% endif %}
         {% endif %}
       </tbody>
     </table>

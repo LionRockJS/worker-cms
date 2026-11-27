@@ -8,7 +8,7 @@ import {
   getLectPointer,
   getLectScalar,
 } from '../db/lect';
-import { publicationStatusForPage, type PagePublicationStatus } from '../db/page-logic';
+import type { PagePublicationStatus } from '../../contracts/publish';
 import type { BlueprintProps, FieldProps, Lect, LectItem } from '../db/lect';
 import type { CmsConfig } from '../../cms-config';
 import type { UiTranslator } from '../i18n';
@@ -542,6 +542,10 @@ function renderLectDiff(draftJson: string, versionJson: string): string {
 export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   page?: Page;
   creatorName?: string;
+  pageAccessHref?: string;
+  canPublishPage?: boolean;
+  canDeletePage?: boolean;
+  showLegacyEditors?: boolean;
   modifierName?: string;
   /** Resolved display names for the page's `editors` ids (for the editors
    *  combobox chips); unresolved ids fall back to the raw id. */
@@ -552,6 +556,9 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   isPublished?: boolean;
   publicationStatus?: PagePublicationStatus;
   isLiveSynced?: boolean;
+  /** An active record hold on the page (it cannot be purged), and the Holds screen for those who may change it. */
+  hold?: { reason: string; keepUntil: string; plugin: string } | null;
+  holdHref?: string;
   parentPages: Page[];
   tags: Tag[];
   taxonomies: Taxonomy[];
@@ -604,9 +611,7 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   } = opts;
 
   const isEdit = !!page;
-  const publicationStatus: PagePublicationStatus = page
-    ? opts.publicationStatus ?? publicationStatusForPage(page, isPublished)
-    : 'draft';
+  const publicationStatus = opts.publicationStatus ?? 'draft';
   const selectedVersion = isVersionPreview && version ? version : undefined;
   const translate = opts.t ?? ((_key: string, fallback: string) => fallback);
   const pageTitle = isEdit
@@ -649,6 +654,10 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
   const body = await renderView(views, '/templates/editor.json', {
     publishEnabled: opts.publishEnabled !== false,
     pageTitle,
+    pageAccessHref: opts.pageAccessHref,
+    canPublishPage: opts.canPublishPage !== false,
+    canDeletePage: opts.canDeletePage !== false,
+    showLegacyEditors: !!opts.showLegacyEditors,
     action,
     backHref,
     deleteAction: page ? `/admin/pages/${page.id}/delete` : '',
@@ -671,14 +680,16 @@ export async function editorPage(views: Fetcher, opts: BaseTemplateProps & {
     hasErrors: errors.length > 0,
     flash,
     hasFlash: !!flash,
+    hold: opts.hold ?? null,
+    holdHref: opts.holdHref ?? '',
     page: {
       id: page?.id ?? '',
       name: page?.name ?? '',
       slug: page?.slug ?? '',
       pageType: page?.page_type ?? defaultPageType,
       weight: page?.weight ?? 5,
-      start: page?.start ? page.start.replace(' ', 'T').slice(0, 16) : '',
-      end: page?.end ? page.end.replace(' ', 'T').slice(0, 16) : '',
+      start: page?.start ?? '',
+      end: page?.end ?? '',
       timezone: page?.timezone ?? defaultTimezone,
       creator: page?.creator ?? '',
       creatorName: creatorName ?? '',

@@ -2,7 +2,8 @@
 # surface: it builds (pretest), then runs the profile, boundary, generated,
 # inventory and security-requirements checks before vitest, so a stale
 # generated registry, a broken feature boundary or a deleted security test
-# fails here rather than at deploy.
+# fails here rather than at deploy. docker.yml calls this workflow too, so no
+# image is published from a commit that fails it.
 #
 # Actions are pinned to full commit SHAs (W14); Dependabot's github-actions
 # updates move the pin and its version comment together.
@@ -12,6 +13,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -36,10 +38,11 @@ jobs:
       - run: npm test
       - run: npm run check:dms-profile
 
-  # An existing database upgraded through numbered and manual migrations must
-  # end where a fresh install does. --from is the oldest revision still
-  # deployed anywhere; f9719a3 predates every manual migration. Move it forward
-  # only when no deployment is older (W0 records the deployed revisions).
+  # An existing database upgraded through numbered migrations must end where a
+  # fresh install does. --from is the oldest schema still deployed anywhere;
+  # acc57d7 is the last revision with hand-applied migrations; a database whose
+  # schema is older must be recreated or patched by hand. Move it forward only
+  # when no deployment is older.
   upgrade-path:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -52,7 +55,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
-      - run: npm run check:upgrade -- --from f9719a3
+      - run: npm run check:upgrade -- --from acc57d7
 
   # High and critical findings in production dependencies block CI.
   # Record findings that require an exception under the W14 procedure.

@@ -7,7 +7,7 @@ import { abortIf } from '../db/transaction-guard';
 import { safeRoleAuditValue } from './role-mutation-sql';
 import { identityGuard } from './oauth-identity-guard';
 import { sessionOperation, sessionPolicy, sessionUserGuard, sessionSnapshotCondition,
-  SESSION_SNAPSHOT_COLUMNS, removeSessionSnapshots, type SessionSnapshot } from './session-evidence';
+  SESSION_SNAPSHOT_COLUMNS, removeSessionSnapshots, type SessionSnapshot } from '../evidence/session-evidence';
 
 export const ACCESS_TOKEN_TTL = 15 * 60;        // 15 minutes
 export const REFRESH_TOKEN_TTL = 7 * 24 * 3600; // 7 days

@@ -6,7 +6,6 @@ import {
   PAGE_TYPE_EXTENSIONS_SETTING_KEY,
   applyPageTypeExtensions,
   loadPageTypeExtensions,
-  savePageTypeExtension,
 } from '../src/core/db/page-type-store';
 import { cmsConfig } from '../src/cms-config';
 import type { CmsConfig } from '../src/cms-config';
@@ -50,7 +49,9 @@ describe('applyPageTypeExtensions', () => {
 describe('page-type extension storage', () => {
   it('round-trips through the settings table and resolveCmsConfig', async () => {
     const slug = Object.keys(cmsConfig.blueprint)[0];
-    await savePageTypeExtension(cmsEnv, slug, { blocks: ['extra_block'], taxonomies: ['extra_taxonomy'] });
+    await saveSetting(cmsEnv, PAGE_TYPE_EXTENSIONS_SETTING_KEY, JSON.stringify({
+      [slug]: { blocks: ['extra_block'], taxonomies: ['extra_taxonomy'] },
+    }));
 
     const stored = await loadPageTypeExtensions(cmsEnv);
     expect(stored[slug]).toEqual({ blocks: ['extra_block'], taxonomies: ['extra_taxonomy'] });
@@ -59,13 +60,6 @@ describe('page-type extension storage', () => {
     const resolved = await resolveCmsConfig(cmsEnv);
     expect(resolved.blockLists[slug]).toEqual(expect.arrayContaining([...(cmsConfig.blockLists[slug] ?? []), 'extra_block']));
     expect(resolved.taxonomyLists[slug]).toEqual(expect.arrayContaining(['extra_taxonomy']));
-  });
-
-  it('deletes the entry when both lists are emptied', async () => {
-    const slug = Object.keys(cmsConfig.blueprint)[0];
-    await savePageTypeExtension(cmsEnv, slug, { blocks: ['extra_block'], taxonomies: [] });
-    await savePageTypeExtension(cmsEnv, slug, { blocks: [], taxonomies: [] });
-    expect(await loadPageTypeExtensions(cmsEnv)).toEqual({});
   });
 
   it('drops malformed and unsafe entries on load', async () => {
@@ -78,4 +72,22 @@ describe('page-type extension storage', () => {
     await saveSetting(cmsEnv, PAGE_TYPE_EXTENSIONS_SETTING_KEY, raw);
     expect(await loadPageTypeExtensions(cmsEnv)).toEqual({ good: { blocks: ['ok'], taxonomies: [] } });
   });
+});
+
+it('resolves compiled types when optional type tables are absent', async () => {
+  await env.DB.batch([
+    env.DB.prepare('ALTER TABLE page_types RENAME TO saved_page_types'),
+    env.DB.prepare('ALTER TABLE block_types RENAME TO saved_block_types'),
+  ]);
+  try {
+    const config = await resolveCmsConfig(cmsEnv);
+    expect(config.blueprint).toEqual(cmsConfig.blueprint);
+    expect(config.blocks).toEqual(cmsConfig.blocks);
+  } finally {
+    await env.DB.batch([
+      env.DB.prepare('ALTER TABLE saved_page_types RENAME TO page_types'),
+      env.DB.prepare('ALTER TABLE saved_block_types RENAME TO block_types'),
+    ]);
+    clearConfigCache();
+  }
 });

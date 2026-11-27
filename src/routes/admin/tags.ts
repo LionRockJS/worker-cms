@@ -1,5 +1,6 @@
-import { saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/pages/taxonomy-mutation-evidence';
-import { contentMutationUnavailable } from '../../core/pages/mutation-evidence';
+import { readNotice } from '../../core/http/notice';
+import { TagParentCycleError,saveTag,deleteTag,saveTaxonomy,deleteTaxonomy,updateTagWeights } from '../../core/evidence/taxonomy-mutation-evidence';
+import { contentMutationUnavailable } from '../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // Tag and taxonomy management.
 
@@ -73,7 +74,7 @@ tagsRoutes.get('/taxonomies/view/:slug', async (c) => {
   const config = await resolveCmsConfig(c.env);
   const name = config.taxonomies[slug];
   if (!name) return c.notFound();
-  return taxonomyForm(c, { name, slug }, true);
+  return taxonomyForm(c, { name, slug }, true, true);
 });
 
 tagsRoutes.post('/taxonomies', requirePermission('taxonomy:write'), async (c) => {
@@ -126,9 +127,10 @@ tagsRoutes.post('/taxonomies/:id/delete', requirePermission('taxonomy:write'), a
 
 tagsRoutes.get('/tags', async (c) => {
   const filterTaxonomy = str(c.req.query('filter_taxonomy'));
+  const search = str(c.req.query('search'));
   const [taxonomies, tags, canSync] = await Promise.all([
     tagTaxonomyOptions(c),
-    listTags(c.env.DB, filterTaxonomy),
+    listTags(c.env.DB, filterTaxonomy, search),
     publication() ? userCan(c, 'tag:write') : false,
   ]);
   recordTagReads('tag.list', tags);
@@ -136,9 +138,10 @@ tagsRoutes.get('/tags', async (c) => {
     taxonomies,
     tags,
     filterTaxonomy,
+    search,
     canSync,
-    syncedCount: str(c.req.query('synced')),
-    syncError: str(c.req.query('error')),
+    syncedCount: /^\d+$/.test(c.req.query('synced') ?? '') ? c.req.query('synced')! : '',
+    syncError: await readNotice(c, 'error'),
   });
 });
 
@@ -172,7 +175,10 @@ tagsRoutes.post('/tags', requirePermission('tag:write'), async (c) => {
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
   let id:number;
-  try{id=await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)});}catch(error){return contentMutationUnavailable(c,error);}
+  try{id=await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)});} catch (error) {
+    if (error instanceof TagParentCycleError) return c.text(error.message, 400);
+    return contentMutationUnavailable(c, error);
+  }
   await publication()?.publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
@@ -199,7 +205,10 @@ tagsRoutes.post('/tags/:id', requirePermission('tag:write'), async (c) => {
   ensureDefaultLectName(lect, name);
   const taxonomySlug = nullableStr(form.get('taxonomy_slug'));
   const parentTagId = optionalNumericId(form.get('parent_tag'));
-  try{await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)},existing);}catch(error){return contentMutationUnavailable(c,error);}
+  try{await saveTag(c,{name,slug,weight,taxonomy_slug:taxonomySlug,parent_tag:parentTagId,lect:stringifyLect(lect)},existing);} catch (error) {
+    if (error instanceof TagParentCycleError) return c.text(error.message, 400);
+    return contentMutationUnavailable(c, error);
+  }
   await publication()?.publishTagToTargets(c.env,id,contextActor(c));
   return c.redirect('/admin/tags');
 });
@@ -211,11 +220,12 @@ tagsRoutes.post('/tags/:id/delete', requirePermission('tag:write'), async (c) =>
   return c.redirect('/admin/tags');
 });
 
-async function taxonomyForm(c: AppContext, taxonomy?: TaxonomyFormData, readOnly = false) {
+async function taxonomyForm(c: AppContext, taxonomy?: TaxonomyFormData, readOnly = false, fromConfig = false) {
   if (taxonomy) recordTaxonomyReads('taxonomy.read', [taxonomy]);
   return renderPage(c, taxonomyFormPage, {
     taxonomy,
     readOnly,
+    fromConfig,
   });
 }
 
@@ -233,7 +243,7 @@ async function tagSchema(db: D1DatabaseClient): Promise<TagSchema> {
   };
 }
 
-async function listTags(db: D1DatabaseClient, filterTaxonomy = ''): Promise<Tag[]> {
+async function listTags(db: D1DatabaseClient, filterTaxonomy: string, search: string): Promise<Tag[]> {
   const schema = await tagSchema(db);
   const weightExpr = schema.hasWeight ? 'tags.weight' : '5';
   const taxonomyExpr = schema.hasTaxonomySlug ? 'tags.taxonomy_slug' : 'taxonomies.slug';
@@ -242,12 +252,24 @@ async function listTags(db: D1DatabaseClient, filterTaxonomy = ''): Promise<Tag[
     ${weightExpr} AS weight, ${taxonomyExpr} AS taxonomy_slug, tags.parent_tag, tags.lect
     FROM tags${taxonomyJoin}`;
 
+  const conditions: string[] = [];
+  const bindings: string[] = [];
   if (filterTaxonomy) {
-    return (await db.prepare(`${select} WHERE ${taxonomyExpr} = ? ORDER BY weight ASC, name ASC`)
-      .bind(filterTaxonomy)
-      .all<Tag>()).results;
+    conditions.push(`${taxonomyExpr} = ?`);
+    bindings.push(filterTaxonomy);
   }
-  return (await db.prepare(`${select} ORDER BY weight ASC, name ASC`).all<Tag>()).results;
+  if (search) {
+    conditions.push(`(
+      instr(lower(tags.name), lower(?)) > 0 OR instr(lower(tags.slug), lower(?)) > 0
+      OR EXISTS (
+        SELECT 1 FROM json_each(CASE WHEN json_valid(tags.lect) THEN tags.lect ELSE '{}' END, '$.name') AS translation
+        WHERE translation.type = 'text' AND instr(lower(translation.value), lower(?)) > 0
+      )
+    )`);
+    bindings.push(search, search, search);
+  }
+  const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+  return (await db.prepare(`${select}${where} ORDER BY weight ASC, name ASC`).bind(...bindings).all<Tag>()).results;
 }
 
 function optionalNumericId(value: FormValue): number | null {

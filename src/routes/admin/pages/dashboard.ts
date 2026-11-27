@@ -1,4 +1,6 @@
-import { saveDraftContent, contentMutationUnavailable } from '../../../core/pages/mutation-evidence';
+import { readNotice } from '../../../core/http/notice';
+import { hasReadablePage, requestPageFilter } from '../../../core/auth/page-access';
+import { saveDraftContent, contentMutationUnavailable } from '../../../core/evidence/mutation-evidence';
 import { recordTagReads, recordTaxonomyReads } from '../../../core/http/access-log';
 // The dashboard and page listings: all pages, per-type lists, and the
 // create-by-type entry points.
@@ -7,24 +9,24 @@ import { Hono } from 'hono';
 import { dashboardPage } from '../../../core/templates/dashboard';
 import { viewerHomePage } from '../../../core/templates/viewer-home';
 import { resolveCmsConfig } from '../../../core/db/content-config';
+import { featureInstalled } from '../../../features';
 import { advancedSearchPageTypes } from '../../../core/db/search';
 import { announcePageEvent } from '../../../core/page-events';
 import { blueprintToLect, stringifyLect } from '../../../core/db/lect';
-import type { Env, Variables, Page, Tag, Taxonomy } from '../../../types';
+import type { Env, Variables, Page } from '../../../types';
 import type { BlueprintEntry } from '../../../cms-config';
 import { dashboardPageHref, dashboardPageNumber, dashboardPageSize, dashboardStatusFilter, editorsFromForm, languageFromRequest, num, slugify, str, userIdFromContext } from '../../../core/http/forms';
 import { coreExtensions } from '../../../core/extensions';
-import { publication, reservePageCreate } from '../../../features/services';
-import { lectFromForm, withDraftMetadata, withLiveStatus } from '../../../core/db/page-logic';
+import { type DashboardPageRow, publication, reservePageCreate } from '../../../features/services';
+import { lectFromForm, withDraftMetadata } from '../../../core/db/page-logic';
 import { editorTaxonomy, ensureUniqueDraftSlug, listDashboardDraftPages } from '../../../core/db/admin-queries';
 import { recordPageReads } from '../../../core/http/access-log';
 import { dashboardPagination, renderPage } from '../../../core/render/chrome';
 import { uiTranslator } from '../../../core/i18n';
 import { userCan } from '../../../core/auth/permissions';
 import { loadAdminHomeSettings } from '../../../core/db/settings';
-import { requirePermission } from '../../../core/auth/guards';
+import { requirePageListing, requirePermission } from '../../../core/auth/guards';
 import type { AppContext } from '../../../core/http/context';
-import type { DashboardPageRow } from '../../../core/publish/service';
 
 
 export const pageDashboardRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -40,21 +42,14 @@ async function importExportLinks(
 
 type DashboardStatusFilter = ReturnType<typeof dashboardStatusFilter>;
 type DashboardPageTagNameRow = { page_id: number; id: number; name: string; taxonomy_slug: string | null };
-function statusFilterLinks(routeBase: string, active: DashboardStatusFilter) {
-  return [
-    { label: 'All', translationKey: 'pages.status.all', href: routeBase, isActive: active === '' },
-    { label: 'Draft', translationKey: 'pages.status.draft', href: `${routeBase}?status=draft`, isActive: active === 'draft' },
-    { label: 'Scheduled', translationKey: 'pages.status.scheduled', href: `${routeBase}?status=scheduled`, isActive: active === 'scheduled' },
-    { label: 'Live', translationKey: 'pages.status.live', href: `${routeBase}?status=live`, isActive: active === 'live' },
-    { label: 'Ended', translationKey: 'pages.status.ended', href: `${routeBase}?status=ended`, isActive: active === 'ended' },
-  ];
-}
-
-function dashboardBulkTagGroups(
-  tags: Tag[],
-  dbTaxonomies: Taxonomy[],
+async function dashboardBulkTagGroups(
+  env: Env,
   configTaxonomies: Record<string, string>,
 ) {
+  if (!featureInstalled('search')) return undefined;
+  const { tags, taxonomies: dbTaxonomies } = await editorTaxonomy(env.DB);
+  recordTagReads('tag.filter-options', tags);
+  recordTaxonomyReads('taxonomy.filter-options', dbTaxonomies);
   const taxonomyNames = new Map(Object.entries(configTaxonomies));
   for (const taxonomy of dbTaxonomies) taxonomyNames.set(taxonomy.slug, taxonomy.name);
 
@@ -128,16 +123,15 @@ async function dashboardPagesForRequest(
   } else {
     const draftPages = await listDashboardDraftPages(c.env.DB, {
       pageType,
+      access: await requestPageFilter(c, 'read', 'p.uuid'),
       page: requestedPage,
       limit: pageSize,
     });
-    const [liveMap, projectDraft] = await Promise.all([
-      publishing?.liveMapForDraftPages(c.env, draftPages.results) ?? new Map(),
-      publishing?.draftLectProjector(c.env),
-    ]);
     result = {
       ...draftPages,
-      results: withLiveStatus(draftPages.results, liveMap, projectDraft, now),
+      results: publishing
+        ? await publishing.annotateDraftPages(c.env, draftPages.results, now)
+        : draftPages.results.map(page => ({ ...page, isPublished: false })),
     };
   }
 
@@ -167,13 +161,13 @@ function pageTypeHasPrivacyFields(entries: BlueprintEntry[] | undefined): boolea
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 async function renderAllPagesList(c: AppContext, routeBase: string) {
-  const flash = c.req.query('flash') ?? '';
+  const flash = await readNotice(c);
   const search = c.req.query('search')?.trim() ?? '';
   const pageSize = dashboardPageSize(c.req.query('pagesize'));
   const requestedPage = dashboardPageNumber(c.req.query('page'));
   const statusFilter = publication() ? dashboardStatusFilter(c.req.query('status')) : '';
 
-  if (search) {
+  if (search && featureInstalled('search')) {
     return c.redirect(`/admin/advanced-search?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
   }
 
@@ -183,13 +177,10 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     pageSize,
   });
   const statusParams = statusFilter ? { status: statusFilter } : {};
-  const [{ importHref, exportHref }, config, taxonomy] = await Promise.all([
+  const [{ importHref, exportHref }, config] = await Promise.all([
     importExportLinks(c.env),
     resolveCmsConfig(c.env),
-    editorTaxonomy(c.env.DB),
   ]);
-  recordTagReads('tag.filter-options', taxonomy.tags);
-  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
   const t = await uiTranslator(c);
 
   return renderPage(c, dashboardPage, {
@@ -197,13 +188,13 @@ async function renderAllPagesList(c: AppContext, routeBase: string) {
     flash: flash || undefined,
     returnPath: dashboardPageHref(routeBase, draftPages.pagination.currentPage, pageSize, statusParams),
     statusFilter,
-    statusFilters: publication() ? statusFilterLinks(routeBase, statusFilter) : [],
+    statusFilters: publication()?.dashboardStatusFilterLinks(routeBase, statusFilter) ?? [],
     searchAction: '/admin/advanced-search',
     advancedSearchHref: '/admin/advanced-search',
     importHref,
     exportHref,
     pageTypeChoices: advancedSearchPageTypes(config),
-    bulkTagGroups: dashboardBulkTagGroups(taxonomy.tags, taxonomy.taxonomies, config.taxonomies),
+    bulkTagGroups: await dashboardBulkTagGroups(c.env, config.taxonomies),
     pagination: dashboardPagination(routeBase, draftPages, statusParams),
     t,
   });
@@ -220,6 +211,7 @@ pageDashboardRoutes.get('/', async (c) => {
   }
 
   if (!canReadContent) {
+    if (await hasReadablePage(c)) return c.redirect('/admin/pages/list');
     return renderPage(c, viewerHomePage, {});
   }
 
@@ -228,17 +220,17 @@ pageDashboardRoutes.get('/', async (c) => {
 
 // The configurable /admin home may point at a plugin dashboard. Keep this
 // permanent page-list URL available for navigation and deep links.
-pageDashboardRoutes.get('/pages/list', requirePermission('content:read'), (c) => renderAllPagesList(c, '/admin/pages/list'));
+pageDashboardRoutes.get('/pages/list', requirePageListing, (c) => renderAllPagesList(c, '/admin/pages/list'));
 
 pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read'), async (c) => {
   const pageType = c.req.param('pageType');
-  const flash = c.req.query('flash') ?? '';
+  const flash = await readNotice(c);
   const search = c.req.query('search')?.trim() ?? '';
   const pageSize = dashboardPageSize(c.req.query('pagesize'));
   const requestedPage = dashboardPageNumber(c.req.query('page'));
   const statusFilter = publication() ? dashboardStatusFilter(c.req.query('status')) : '';
 
-  if (search) {
+  if (search && featureInstalled('search')) {
     return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
   }
 
@@ -250,14 +242,11 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
   });
   const routeBase = `/admin/pages/list/${encodeURIComponent(pageType)}`;
   const statusParams = statusFilter ? { status: statusFilter } : {};
-  const [config, taxonomy, { importHref, exportHref }, canWrite] = await Promise.all([
+  const [config, { importHref, exportHref }, canWrite] = await Promise.all([
     resolveCmsConfig(c.env),
-    editorTaxonomy(c.env.DB),
     importExportLinks(c.env, pageType),
     userCan(c, 'content:write'),
   ]);
-  recordTagReads('tag.filter-options', taxonomy.tags);
-  recordTaxonomyReads('taxonomy.filter-options', taxonomy.taxonomies);
   // Serving these names in clear is its own disclosure, recorded separately
   // from the list read so the log distinguishes a masked view from a revealed
   // one. Without the capability the names never reach the response at all.
@@ -272,25 +261,19 @@ pageDashboardRoutes.get('/pages/list/:pageType', requirePermission('content:read
     returnPath: dashboardPageHref(routeBase, draftPages.pagination.currentPage, pageSize, statusParams),
     pageTypeFilter: pageType,
     statusFilter,
-    statusFilters: publication() ? statusFilterLinks(routeBase, statusFilter) : [],
+    statusFilters: publication()?.dashboardStatusFilterLinks(routeBase, statusFilter) ?? [],
     searchAction: `/admin/advanced-search/${encodeURIComponent(pageType)}`,
     advancedSearchHref: `/admin/advanced-search/${encodeURIComponent(pageType)}`,
     importHref,
     exportHref,
     pageTypeChoices: advancedSearchPageTypes(config),
-    bulkTagGroups: dashboardBulkTagGroups(taxonomy.tags, taxonomy.taxonomies, config.taxonomies),
+    bulkTagGroups: await dashboardBulkTagGroups(c.env, config.taxonomies),
     pagination: dashboardPagination(routeBase, draftPages, statusParams),
     reorder: canWrite,
     privacyFields,
     canRevealPii,
     t,
   });
-});
-
-pageDashboardRoutes.get('/pages/search/:pageType', requirePermission('content:read'), async (c) => {
-  const pageType = c.req.param('pageType');
-  const search = c.req.query('search') ?? '';
-  return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
 });
 
 pageDashboardRoutes.get('/pages/create_by_type/:pageType', requirePermission('content:write'), async (c) => {

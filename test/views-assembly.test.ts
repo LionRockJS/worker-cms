@@ -21,7 +21,7 @@ const FEATURE_VIEWS: Record<string, string[]> = {
     'sections/audit-classes.liquid', 'templates/audit-classes.json',
     'sections/audit-review.liquid', 'templates/audit-review.json',
   ],
-  'trash': ['sections/trash.liquid', 'templates/trash.json', 'sections/holds.liquid', 'templates/holds.json'],
+  'trash': ['sections/trash.liquid', 'templates/trash.json', 'sections/holds.liquid', 'templates/holds.json', 'assets/editor-trash.js'],
   'users-roles': ['sections/users.liquid', 'sections/roles.liquid', 'sections/user-form.liquid', 'sections/role-form.liquid'],
   'i18n': ['sections/languages.liquid', 'sections/translations.liquid'],
   'search': ['sections/advanced-search.liquid'],
@@ -201,7 +201,7 @@ describe('view assembly', () => {
     expect(editor).toContain('pages.status.draft');
   });
 
-  it('keeps the editor whitelist control beside the bottom page metadata', async () => {
+  it('keeps the legacy editor label control beside the bottom page metadata', async () => {
     const editor = await (await env.VIEWS.fetch('https://views.local/sections/editor.liquid')).text();
     expect(editor.indexOf('data-editors-combobox')).toBeGreaterThan(editor.indexOf('id="lect_json_details"'));
     expect(editor.indexOf('data-editors-combobox')).toBeGreaterThan(editor.indexOf('view_strings.sections_editor.created_by'));
@@ -327,10 +327,13 @@ describe('view assembly', () => {
 
   it('offers save and publish beside save for published pages', async () => {
     const editor = await (await env.VIEWS.fetch('https://views.local/sections/editor.liquid')).text();
-    const footer = editor.slice(editor.indexOf('<div class="flex min-w-0 flex-col gap-3 sm:flex-row'));
+    const footerStart = editor.indexOf('<div data-editor-actions');
+    expect(footerStart).toBeGreaterThanOrEqual(0);
+    const footer = editor.slice(footerStart);
     const save = footer.indexOf('view_strings.sections_editor.save_changes');
     const saveAndPublish = footer.indexOf('view_strings.sections_editor.save_and_publish');
-    expect(editor).toContain('{% if publishEnabled and isEdit and isPublished %}');
+    expect(editor).toContain('{% if publishEnabled and canPublishPage and isEdit and isPublished %}');
+    expect(save).toBeGreaterThanOrEqual(0);
     expect(saveAndPublish).toBeGreaterThan(save);
     expect(footer).toContain('name="action" value="publish"');
   });
@@ -340,7 +343,7 @@ describe('view assembly', () => {
     // and the client engine's root list must keep working unchanged.
     for (const path of full) {
       expect(path).not.toContain('features/');
-      expect(path).toMatch(/^(layout|sections|templates|snippets|assets|locales)\//);
+      expect(path).toMatch(/^(layout|sections|templates|snippets|assets|locales|data)\//);
     }
   });
 

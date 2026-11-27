@@ -299,6 +299,7 @@ request ──► per-request buffer ──► DB.batch() ──► audit_events
 | `content_mutation` | 1y | 6y | unclassified content changes: low volume, high forensic value |
 | `auth` | 90d | 2y | PCI DSS 10.5.1 (12mo, 3mo hot) |
 | `pii_access` | 90d | 1y | GDPR storage limitation |
+| `plugin_access` | 1y | 1y | access a plugin recorded on an unclassified page (`POST /__cms/audit/events`) |
 | `admin_config` | 1y | 6y | low volume, high forensic value |
 | `none` | 90d | none | operational only |
 
@@ -478,6 +479,11 @@ These are real gaps this design does not close. Each needs its own decision.
   unlogged there is PII and unclassified content.
 - **Plugin-internal databases.** The events plugin's own guest tables are read
   without passing through `/__cms`. Only its CMS-side reads are covered.
+- **Plugin-declared access** (`/__cms/audit/events`, added 2026-11-23) closes
+  part of the gap above: a plugin can record what it served (a view, a file, a
+  print, a no-login link opened) under a `plugin.*` action. It is the plugin's
+  word, like its acting user: the host verifies the page and the plugin's
+  scope, not that the access happened.
 - **Direct infrastructure access.** D1 or R2 reached through the Cloudflare
   dashboard, Wrangler or the API bypasses the Worker entirely. That is
   Cloudflare account-level audit logging plus access control, not this.

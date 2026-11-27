@@ -1,20 +1,20 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 import type { AppContext } from '../../core/http/context';
 import type { Page } from '../../types';
 import type { PreparedCreate } from './api/types';
 import { assertPluginPageAuthority, type PluginPageMutationAuthority as Authority } from './page-update-evidence';
 import { serviceMutationAuditEvidence, ServiceMutationUnavailableError } from '../../core/db/audit';
-import { classFor } from '../../core/db/data-classes';
+import { classFor,strongestClass } from '../../core/db/data-classes';
 import { snapshot, guard, resultGuard, fingerprint, json, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
 import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
-import { NEXT_SNAPSHOT_ID_SQL } from '../../core/pages/snapshot-id';
+import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../../core/pages/snapshot-id';
 import { createCandidate, limitsForPageType, scopeGroups, countLimitUsage, type LimitViolation, type NormalizedLimitDef } from './limits';
 import { pageTypeScopeAllows } from './page-types';
+import { REGISTRY, IDENTITY, noteActingUser } from './evidence-common';
 
-const REGISTRY=['id','uuid','created_at','updated_at','label','url','enabled','config','sort_order','secret'];
-const PIN=['plugin_row_id','manifest_id','created_at','updated_at','approved_by'];
 const APPROVAL=['id','created_at','updated_at','plugin_id','page_type','access','approved_by'];
 const SETTING=['key','value','created_at','updated_at'];
 const SETTINGS="key LIKE 'plugin.limits.%' OR key LIKE 'plugin.credits.%'";
@@ -23,7 +23,6 @@ const PARENT=['id','uuid','page_type'];
 const PAGE=['id','uuid','created_at','updated_at','name','slug','weight','start','end','timezone','page_type','lect','page_id','creator','editors'];
 const LINK=['uuid','created_at','updated_at','page_id','tag_id','weight'];
 type Class='none'|'pii'|'phi';
-function maximum(values:Array<Class|null|undefined>):Class{return values.includes('phi')?'phi':values.includes('pii')?'pii':'none';}
 export interface PluginPageCreate extends Omit<PreparedCreate,'id'>{id:number;uuid:string;slug:string}
 interface Quota {definition:NormalizedLimitDef;scopeValue:string|number|null;sql:string;args:Array<string|number|null>;attempted:number;current:number;limit:number;violation:LimitViolation}
 /** Trusted duplication adapter: selected immutable source provenance and SQL
@@ -56,7 +55,7 @@ export async function preparePluginPageCreates(c:AppContext,authority:Authority,
     const journal=await c.env.DB.prepare("SELECT COALESCE(MAX(seq),0) generation FROM audit_events WHERE target_type='plugin'").first<{generation:number}>();
     if(!journal||!Number.isSafeInteger(journal.generation))throw new Error('Contributor witness unavailable');
     const registries=await snapshot<Row>(c,'plugins',REGISTRY);
-    const pins=await snapshot<Row>(c,'plugin_identity_approvals',PIN);
+    const pins=await snapshot<Row>(c,'plugin_identity_approvals',IDENTITY);
     const approvals=await snapshot<Row>(c,'plugin_page_type_approvals',APPROVAL);
     const settings=await snapshot<Row>(c,'settings',SETTING,SETTINGS);
     const hasTrash=!!await c.env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trash_pages'").first();
@@ -73,10 +72,10 @@ export async function preparePluginPageCreates(c:AppContext,authority:Authority,
     const parentFloorArgs=[json(parents.map(p=>p.uuid))];
     const parentFloors=await snapshot<Row>(c,'page_sensitivity_floors',['uuid','level'],'uuid IN (SELECT value FROM json_each(?))',parentFloorArgs);
     if(parentFloors.some(f=>f.level!==1&&f.level!==2))throw new Error('Invalid parent floor');
-    const inspected=maximum([authority.dataClass,copy?.dataClass,...(copy?.sources.map(s=>s.floor===2?'phi' as const:s.floor===1?'pii' as const:undefined)??[]),classFor(authority.policy,'table','settings'),classFor(authority.policy,'table','trash_pages'),...pins.map(p=>classFor(authority.policy,'plugin',String(p.manifest_id))),...parents.map(p=>classFor(authority.policy,'page_type',String(p.page_type??'default'))),...parentFloors.map(p=>p.level===2?'phi' as const:'pii' as const)]);
-    const classification=(plan:PluginPageCreate)=>maximum([inspected,classFor(authority.policy,'page_type',plan.pageType),...tags.filter(tag=>plan.tags.includes(Number(tag.id))).map(tag=>classFor(authority.policy,'taxonomy',String(tag.taxonomy_slug??'default')))]);
-    let dataClass=maximum([inspected,...plans.map(classification),...forbiddenTypes.map(type=>classFor(authority.policy,'page_type',type))]);
-    const metadata=()=>[abortIf(c.env,"EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='trash_pages')<>?",[hasTrash?1:0]),...authority.check(),...(copy?.check()??[]),guard(c,'plugins',REGISTRY,registries),guard(c,'plugin_identity_approvals',PIN,pins),guard(c,'plugin_page_type_approvals',APPROVAL,approvals),guard(c,'settings',SETTING,settings,SETTINGS),guard(c,'pages',PARENT,parents,'id IN (SELECT value FROM json_each(?))',parentArgs),guard(c,'tags',TAG,tags,'id IN (SELECT value FROM json_each(?))',tagArgs),guard(c,'page_sensitivity_floors',['uuid','level'],parentFloors,'uuid IN (SELECT value FROM json_each(?))',parentFloorArgs),abortIf(c.env,"(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin')<>?",[journal.generation])];
+    const inspected=strongestClass([authority.dataClass,copy?.dataClass,...(copy?.sources.map(s=>s.floor===2?'phi' as const:s.floor===1?'pii' as const:undefined)??[]),classFor(authority.policy,'table','settings'),classFor(authority.policy,'table','trash_pages'),...pins.map(p=>classFor(authority.policy,'plugin',String(p.manifest_id))),...parents.map(p=>classFor(authority.policy,'page_type',String(p.page_type??'default'))),...parentFloors.map(p=>p.level===2?'phi' as const:'pii' as const)]);
+    const classification=(plan:PluginPageCreate)=>strongestClass([inspected,classFor(authority.policy,'page_type',plan.pageType),...tags.filter(tag=>plan.tags.includes(Number(tag.id))).map(tag=>classFor(authority.policy,'taxonomy',String(tag.taxonomy_slug??'default')))]);
+    let dataClass=strongestClass([inspected,...plans.map(classification),...forbiddenTypes.map(type=>classFor(authority.policy,'page_type',type))]);
+    const metadata=()=>[abortIf(c.env,"EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='trash_pages')<>?",[hasTrash?1:0]),...authority.check(),...(copy?.check()??[]),guard(c,'plugins',REGISTRY,registries),guard(c,'plugin_identity_approvals',IDENTITY,pins),guard(c,'plugin_page_type_approvals',APPROVAL,approvals),guard(c,'settings',SETTING,settings,SETTINGS),guard(c,'pages',PARENT,parents,'id IN (SELECT value FROM json_each(?))',parentArgs),guard(c,'tags',TAG,tags,'id IN (SELECT value FROM json_each(?))',tagArgs),guard(c,'page_sensitivity_floors',['uuid','level'],parentFloors,'uuid IN (SELECT value FROM json_each(?))',parentFloorArgs),abortIf(c.env,"(SELECT COALESCE(MAX(seq),0) FROM audit_events WHERE target_type='plugin')<>?",[journal.generation])];
     const absent=(selected:PluginPageCreate[])=>{
       const selectedIds=[json(selected.map(p=>p.id))],selectedUuids=[json(selected.map(p=>p.uuid))];
       return [
@@ -106,7 +105,7 @@ export async function preparePluginPageCreates(c:AppContext,authority:Authority,
         }
       }
     }
-    dataClass=maximum([dataClass,...[...typeFloors.values()].map(level=>level===2?'phi' as const:level===1?'pii' as const:undefined)]);
+    dataClass=strongestClass([dataClass,...[...typeFloors.values()].map(level=>level===2?'phi' as const:level===1?'pii' as const:undefined)]);
     const minimum=dataClass==='none'?undefined:dataClass;
     await auditBackgroundReads(c.env,[
       ...['plugins','plugin_identity_approvals','plugin_page_type_approvals','settings','tags'].map(table=>({action:'plugin.page-create-source-read',kind:'table' as const,key:table,targetType:table,ids:table==='plugins'?registries.map(r=>String(r.id)):table==='plugin_identity_approvals'?pins.map(r=>String(r.plugin_row_id)):table==='plugin_page_type_approvals'?approvals.map(r=>String(r.id)):table==='tags'?tags.map(r=>String(r.id)):[],count:table==='plugins'?registries.length:table==='plugin_identity_approvals'?pins.length:table==='plugin_page_type_approvals'?approvals.length:table==='tags'?tags.length:settings.length,minimumClass:minimum})),
@@ -115,7 +114,7 @@ export async function preparePluginPageCreates(c:AppContext,authority:Authority,
       ...parents.map(parent=>({action:'plugin.page-create-parent-read',kind:'page_type' as const,key:String(parent.page_type??'default'),targetType:'page',ids:[String(parent.id)],count:1,uuidById:{[String(parent.id)]:String(parent.uuid)},minimumClass:minimum}))],authority.actor);
     if(await flushReadAudit(c))throw new Error('Create source evidence unavailable');
     const detail:Record<string,unknown>={operation_id:operationId,registry_id:authority.registryId,identity_fingerprint:authority.identityFingerprint,principal:'credential_authenticated_plugin',targets:plans.map(p=>({id:p.id,uuid:p.uuid})),count:plans.length,...(copy?{operation:'duplicate',...copy.detail,sources:copy.sources}: {})};
-    const asserted=c.req.header('x-acting-user-id');if(asserted!==undefined){const id=Number(asserted);detail.acting_user_verified=false;if(/^\d+$/.test(asserted)&&Number.isSafeInteger(id)&&id>0)detail.asserted_user_id=id;else detail.acting_user_unrecordable=true;}
+    noteActingUser(c,detail);
     const scopeDenials=await Promise.all(forbiddenTypes.map(async type=>serviceMutationAuditEvidence(c.env,{action:`page.${kind}.denied`,entityType:copy?'page_duplicate_operation':'page_create_operation',entityId:operationId,outcome:'denied',detail:{...detail,reason:'forbidden_page_type',type_fingerprint:await fingerprint(type)}},authority.actor,dataClass,authority.policy,c)));
     const floorAdmission=()=>[...typeFloors].map(([type,level])=>abortIf(c.env,`(${typeFloorSql})<>?`,[...typeFloorArgs(type),level]));
     const admission=(selected=plans)=>[...metadata(),...absent(selected),...floorAdmission()];
@@ -171,8 +170,8 @@ export async function commitPluginPageCreates(c:AppContext,source:PluginPageCrea
       if(provenance?.floor)statements.push(c.env.DB.prepare('INSERT INTO page_sensitivity_floors(uuid,level) VALUES (?,?) ON CONFLICT(uuid) DO UPDATE SET level=MAX(level,excluded.level)').bind(plan.uuid,provenance.floor));
       const version={uuid:crypto.randomUUID(),page_id:plan.id,lect:plan.lect};versions.push(version);
       statements.push(c.env.DB.prepare(`INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,'create')`).bind(version.uuid,plan.id,plan.lect),abortIf(c.env,'changes()<>1'));
-      for(const tag of [...new Set(plan.tags)]){const uuid=crypto.randomUUID();links.push({uuid,page_id:plan.id,tag_id:tag,weight:5,created_at:null,updated_at:null});statements.push(c.env.DB.prepare(`INSERT INTO page_tags(id,uuid,page_id,tag_id) SELECT (SELECT MAX(COALESCE(MAX(id),0),(CAST(strftime('%s','now') AS INTEGER)-1563741060)*100000+(RANDOM() & 65535))+1 FROM page_tags),?,?,?`).bind(uuid,plan.id,tag),abortIf(c.env,'changes()<>1'));}
-      const receipt=serviceMutationAuditEvidence(c.env,{action:source.copy?'page.duplicate':'page.create',entityType:'page',entityId:plan.uuid,detail:{operation_id:source.operationId,registry_id:source.authority.registryId,identity_fingerprint:source.authority.identityFingerprint,principal:'credential_authenticated_plugin',version_uuid:version.uuid,fields:['content','history','tags'],...(provenance?{source_id:provenance.id,source_uuid:provenance.uuid,copied_floor:provenance.floor}:{}),tag_ids:[...new Set(plan.tags)],operation_reservation_charged:charged,...(source.detail.acting_user_verified===false?{acting_user_verified:false,...(source.detail.asserted_user_id?{asserted_user_id:source.detail.asserted_user_id}:{acting_user_unrecordable:true})}:{})}},source.authority.actor,maximum([source.dataClass,source.classification(plan)]),source.authority.policy,c);
+      for(const tag of [...new Set(plan.tags)]){const uuid=crypto.randomUUID();links.push({uuid,page_id:plan.id,tag_id:tag,weight:5,created_at:null,updated_at:null});statements.push(c.env.DB.prepare(`INSERT INTO page_tags(id,uuid,page_id,tag_id) SELECT ${nextIdSql('page_tags')},?,?,?`).bind(uuid,plan.id,tag),abortIf(c.env,'changes()<>1'));}
+      const receipt=serviceMutationAuditEvidence(c.env,{action:source.copy?'page.duplicate':'page.create',entityType:'page',entityId:plan.uuid,detail:{operation_id:source.operationId,registry_id:source.authority.registryId,identity_fingerprint:source.authority.identityFingerprint,principal:'credential_authenticated_plugin',version_uuid:version.uuid,fields:['content','history','tags'],...(provenance?{source_id:provenance.id,source_uuid:provenance.uuid,copied_floor:provenance.floor}:{}),tag_ids:[...new Set(plan.tags)],operation_reservation_charged:charged,...(source.detail.acting_user_verified===false?{acting_user_verified:false,...(source.detail.asserted_user_id?{asserted_user_id:source.detail.asserted_user_id}:{acting_user_unrecordable:true})}:{})}},source.authority.actor,strongestClass([source.dataClass,source.classification(plan)]),source.authority.policy,c);
       statements.push(receipt.write,receipt.guard);receiptGuards.push(receipt.guard);
     }
     if(source.copy){
@@ -189,7 +188,7 @@ export async function commitPluginPageCreates(c:AppContext,source:PluginPageCrea
       const classes=[classFor(source.authority.policy,'page_type',plan.pageType),...source.tags.filter(tag=>plan.tags.includes(Number(tag.id))).map(tag=>classFor(source.authority.policy,'taxonomy',String(tag.taxonomy_slug??'default')))];
       const level=Math.max(source.copy?.sources.find(s=>s.targetUuid===plan.uuid)?.floor??0,classes.includes('phi')?2:classes.includes('pii')?1:0);
       statements.push(abortIf(c.env,'COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)<>? OR (SELECT COUNT(*) FROM pages WHERE slug=?)<>1',[plan.uuid,level,plan.slug]));
-      if(plan.parentId!==null)statements.push(abortIf(c.env,'NOT EXISTS(SELECT 1 FROM pages WHERE id=?)',[plan.parentId]));
+      if(plan.parentId!==null)statements.push(abortIf(c.env,`NOT EXISTS(SELECT 1 FROM pages WHERE id=? AND ${legacyPageFilter('pages.uuid')})`,[plan.parentId]));
     }
     for(const quota of source.quotas)statements.push(abortIf(c.env,`(SELECT COUNT(*) FROM pages p WHERE ${quota.sql})>?`,[...quota.args,quota.limit]));
     for(const [type,previous] of source.typeFloors){const classes=source.plans.filter(p=>p.pageType===type).flatMap(p=>[classFor(source.authority.policy,'page_type',type),...source.tags.filter(t=>p.tags.includes(Number(t.id))).map(t=>classFor(source.authority.policy,'taxonomy',String(t.taxonomy_slug??'default')))]);const next=source.copy?previous:Math.max(previous,classes.includes('phi')?2:classes.includes('pii')?1:0);statements.push(abortIf(c.env,`(${source.typeFloorSql})<>?`,[...source.typeFloorArgs(type),next]));}

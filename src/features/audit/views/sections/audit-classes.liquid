@@ -1,7 +1,13 @@
 <div class="my-4 px-4 sm:px-6 lg:px-8">
   <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-    <p class="text-sm text-gray-500">{{ "audit.classification_help" | t }}</p>
-    <a href="{{ auditHref }}" class="text-sm text-indigo-600 hover:underline">{{ "view_strings.sections_audit.audit_log" | t }}</a>
+    <p data-explanation class="text-sm text-gray-500">{{ "audit.classification_help" | t }}</p>
+    <a href="{{ auditHref }}"
+       title="{{ "view_strings.sections_audit.audit_log" | t }}"
+       aria-label="{{ "view_strings.sections_audit.audit_log" | t }}"
+       class="inline-flex text-sm text-indigo-600 hover:underline items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#clock"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_audit.audit_log" | t }}</span>
+    </a>
   </div>
 
   {% if hasFlash %}
@@ -36,7 +42,13 @@
         <input type="text" name="note"
                class="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case text-gray-900">
       </label>
-      <button type="submit" class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.add" | t }}</button>
+      <button type="submit"
+              title="{{ "common.add" | t }}"
+              aria-label="{{ "common.add" | t }}"
+              class="inline-flex h-9 items-center rounded-lg border border-transparent bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 justify-center shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg>
+        <span class="hidden lg:inline">{{ "common.add" | t }}</span>
+      </button>
     </form>
   {% endif %}
 
@@ -73,7 +85,13 @@
                 <td class="px-6 py-4">
                   <form method="POST" action="{{ row.deleteAction }}" class="inline"
                         data-confirm="{{ "audit.confirm_declassify" | t }}">
-                    <button type="submit" class="text-red-500 hover:text-red-700 text-sm font-medium">{{ "common.delete" | t }}</button>
+                    <button type="submit"
+                            title="{{ "common.delete" | t }}"
+                            aria-label="{{ "common.delete" | t }}"
+                            class="inline-flex text-red-500 hover:text-red-700 text-sm font-medium items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+                      <span class="hidden lg:inline">{{ "common.delete" | t }}</span>
+                    </button>
                   </form>
                 </td>
               {% endif %}

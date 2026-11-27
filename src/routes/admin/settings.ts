@@ -1,12 +1,14 @@
-import { prepareHostSettingsMutation } from '../../core/db/settings-mutation-evidence';
+import { HOST_SETTINGS_KEYS, prepareHostSettingsMutation } from '../../core/evidence/settings-mutation-evidence';
 import { Hono } from 'hono';
 import { requirePermission } from '../../core/auth/guards';
 import { coreExtensions } from '../../core/extensions';
 import { localeRegistry } from '../../core/i18n';
 import { featureInstalled } from '../../features';
+import { featureAdminScreenProps, featureSystemSettingsWrites } from '../../features/services';
 import { systemSettingsPage } from '../../core/templates/settings';
 import type { Env, Variables } from '../../types';
 import { renderPage } from '../../core/render/chrome';
+import { customIconHref, MAX_ICON_SPRITE_BYTES, parseIconSprite } from '../../core/render/icon-sprite';
 import {
   APP_FONT_OPTIONS,
   APP_ICON_OPTIONS,
@@ -16,10 +18,11 @@ import {
   SYSTEM_TIMEZONE_OPTIONS,
   defaultPluginNavWeight,
   loadAppBrandingSettings,
+  loadCustomIconSprite,
+  customIconSpriteFromRaw,
   loadAdminHomeSettings,
   loadSidebarChromeSettings,
   loadSystemTimezone,
-  loadShowCredits,
   normalizeSystemTimezone,
   pluginSidebarKey,
   normalizeAdminHomeSettings,
@@ -27,12 +30,13 @@ import {
   buildSidebarMenuSettings,
   sidebarChromeSettingsFromRaw,
   APP_BRANDING_SETTING_KEY, ADMIN_HOME_SETTING_KEY, SYSTEM_TIMEZONE_SETTING_KEY,
-  SHOW_CREDITS_SETTING_KEY, SIDEBAR_MENU_SETTING_KEY, DEFAULT_SYSTEM_TIMEZONE,
+  SIDEBAR_MENU_SETTING_KEY, DEFAULT_SYSTEM_TIMEZONE, CUSTOM_ICON_SPRITE_SETTING_KEY,
 } from '../../core/db/settings';
 
 export const settingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 settingsRoutes.use('/settings/system', requirePermission('menu:manage'));
+settingsRoutes.use('/settings/system/icon-sprite', requirePermission('menu:manage'));
 settingsRoutes.use('/settings/menu', requirePermission('menu:manage'));
 // The credit summary is a read-only view any admin user may see; editing the
 // prices happens under /plugins-manage/* which stays gated by plugin:manage.
@@ -45,17 +49,26 @@ settingsRoutes.get('/settings/menu', (c) => c.redirect('/admin/settings/system')
 // Shared row comparator: group by plugin, then by human label, then key.
 settingsRoutes.get('/settings/system', async (c) => {
   const fallbackName = c.env.SITE_TITLE ?? '0xCMS';
-  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, showCredits, { uiLocales }] = await Promise.all([
-    loadSidebarChromeSettings(c.env),
-    loadAppBrandingSettings(c.env, fallbackName),
+  const customIcons = loadCustomIconSprite(c.env).then((sprite) => new Set(sprite?.icons));
+  const [sidebarSettings, branding, adminHome, pluginItems, systemTimezone, featureProps, { uiLocales }, uploaded] = await Promise.all([
+    loadSidebarChromeSettings(c.env, customIcons),
+    loadAppBrandingSettings(c.env, fallbackName, customIcons),
     loadAdminHomeSettings(c.env),
     coreExtensions().sidebarNav?.(c.env) ?? [],
     loadSystemTimezone(c.env),
-    loadShowCredits(c.env),
+    featureAdminScreenProps(c, { screen: 'system-settings' }),
     localeRegistry(c.env),
+    customIcons,
   ]);
+  const uploadedIcons = [...uploaded].map((value) => ({
+    value,
+    label: value.slice('custom-'.length).replace(/[-_.]+/g, ' '),
+    labelKey: '',
+    href: customIconHref(value),
+  }));
   // An entry owned by a feature that is not installed has nothing to configure
   // — the chrome would hide it whatever this screen saved.
+  const showCredits = featureProps.showCredits === true;
   const menuItems = installedMenuItems(featureInstalled);
   const menuOption = (item: typeof SIDEBAR_MENU_ITEMS[number], index: number) => ({
     value: item.key,
@@ -124,6 +137,7 @@ settingsRoutes.get('/settings/system', async (c) => {
     weight: option.weight,
     icon: option.icon,
     iconName: `plugin_icon_${option.formKey}`,
+    iconHref: customIconHref(option.icon),
     index: option.index,
   });
   const byWeight = <T extends { weight: number; index: number }>(a: T, b: T) => a.weight - b.weight || a.index - b.index;
@@ -165,7 +179,7 @@ settingsRoutes.get('/settings/system', async (c) => {
       selected: option.value === branding.appFont,
     })),
     adminHomePath: adminHome.href,
-    hasCreditsFeature: featureInstalled('credits'),
+    hasCreditsFeature: featureProps.hasCreditsFeature === true,
     showCredits,
     systemTimezone,
     timezoneOptions: [
@@ -174,11 +188,11 @@ settingsRoutes.get('/settings/system', async (c) => {
         : [{ value: systemTimezone, label: systemTimezone }]),
       ...SYSTEM_TIMEZONE_OPTIONS,
     ].map((option) => ({ ...option, selected: option.value === systemTimezone })),
-    iconOptions: [...APP_ICON_OPTIONS].sort((a, b) => a.label.localeCompare(b.label)).map((option) => ({
-      ...option,
-      labelKey: `settings.icons.${option.value}`,
-      selected: option.value === branding.appIcon,
-    })),
+    iconOptions: [
+      ...APP_ICON_OPTIONS.map((option) => ({ ...option, labelKey: `settings.icons.${option.value}`, href: '' })),
+      ...uploadedIcons,
+    ].sort((a, b) => a.label.localeCompare(b.label)).map((option) => ({ ...option, selected: option.value === branding.appIcon })),
+    uploadedIcons,
     settingsGroupWeight: sidebarSettings.settingsGroupWeight,
     mainOptions: options.filter((option) => option.group === 'main'),
     settingsOptions: options.filter((option) => option.group === 'settings'),
@@ -186,18 +200,38 @@ settingsRoutes.get('/settings/system', async (c) => {
     pluginOptions,
     mainSidebarOptions,
     settingsSidebarOptions,
-    flashKey: c.req.query('flash') === 'saved' ? 'settings.system_saved' : '',
-    errorKey: c.req.query('error') === 'invalid-timezone' ? 'settings.timezone_invalid' : '',
+    flashKey: c.req.query('flash') === 'icon-sprite-uploaded' ? 'settings.icon_sprite.uploaded'
+      : c.req.query('flash') === 'saved' ? 'settings.system_saved' : '',
+    errorKey: c.req.query('error') === 'invalid-icon-sprite' ? 'settings.icon_sprite.invalid'
+      : c.req.query('error') === 'icon-sprite-too-large' ? 'settings.icon_sprite.too_large'
+      : c.req.query('error') === 'invalid-timezone' ? 'settings.timezone_invalid' : '',
   });
 });
 
 settingsRoutes.post('/settings/menu', async (c) => c.redirect('/admin/settings/system', 303));
 
+settingsRoutes.post('/settings/system/icon-sprite', async (c) => {
+  const invalid = '/admin/settings/system?error=invalid-icon-sprite';
+  let sprite: ReturnType<typeof parseIconSprite>;
+  try {
+    const file = (await c.req.formData()).get('icon_sprite');
+    if (!(file instanceof File) || !file.size) return c.redirect(invalid, 303);
+    if (file.size > MAX_ICON_SPRITE_BYTES) return c.redirect('/admin/settings/system?error=icon-sprite-too-large', 303);
+    sprite = parseIconSprite(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(await file.arrayBuffer()));
+  } catch {
+    return c.redirect(invalid, 303);
+  }
+  const mutation = await prepareHostSettingsMutation(c, [CUSTOM_ICON_SPRITE_SETTING_KEY]);
+  await mutation.commit([{ key: CUSTOM_ICON_SPRITE_SETTING_KEY, value: JSON.stringify(sprite) }]);
+  return c.redirect('/admin/settings/system?flash=icon-sprite-uploaded', 303);
+});
+
 settingsRoutes.post('/settings/system', async (c) => {
   const form = await c.req.formData();
   const submittedTimezone = form.get('system_timezone');
   if (submittedTimezone !== null && !normalizeSystemTimezone(submittedTimezone)) return c.redirect('/admin/settings/system?error=invalid-timezone', 303);
-  const mutation = await prepareHostSettingsMutation(c);
+  const mutation = await prepareHostSettingsMutation(c, [...HOST_SETTINGS_KEYS, CUSTOM_ICON_SPRITE_SETTING_KEY]);
+  const customIcons = new Set(customIconSpriteFromRaw(mutation.value(CUSTOM_ICON_SPRITE_SETTING_KEY))?.icons);
   const systemTimezone = submittedTimezone === null
     ? normalizeSystemTimezone(mutation.value(SYSTEM_TIMEZONE_SETTING_KEY)) ?? DEFAULT_SYSTEM_TIMEZONE
     : normalizeSystemTimezone(submittedTimezone)!;
@@ -205,7 +239,7 @@ settingsRoutes.post('/settings/system', async (c) => {
   // Entries this build does not show were never rendered, so the form says
   // nothing about them. Carry their saved state forward instead of reading the
   // silence as "hidden" — otherwise re-enabling a feature brings it back off.
-  const saved = sidebarChromeSettingsFromRaw(mutation.value(SIDEBAR_MENU_SETTING_KEY));
+  const saved = sidebarChromeSettingsFromRaw(mutation.value(SIDEBAR_MENU_SETTING_KEY), customIcons);
   const isShown = (item: typeof SIDEBAR_MENU_ITEMS[number]) => featureInstalled(menuItemFeature(item));
   const visibleKeys = [
     ...form.getAll('visible_items').map(String),
@@ -239,17 +273,17 @@ settingsRoutes.post('/settings/system', async (c) => {
   const branding = normalizeAppBrandingSettings({
     appName: form.get('app_name'), appIcon: form.get('app_icon'),
     primaryColor: form.get('primary_color'), appFont: form.get('app_font'),
-  }, c.env.SITE_TITLE ?? '0xCMS');
+  }, c.env.SITE_TITLE ?? '0xCMS', customIcons);
   const sidebar = buildSidebarMenuSettings(visibleKeys, weights, {
     labels, settingsGroupWeight: form.get('settings_group_weight'), pluginWeights, pluginIcons, pluginVisibleKeys,
+    savedPluginMenu: saved,
+    customIcons,
   });
   await mutation.commit([
     { key: APP_BRANDING_SETTING_KEY, value: JSON.stringify(branding) },
     { key: ADMIN_HOME_SETTING_KEY, value: JSON.stringify(normalizeAdminHomeSettings({href: form.get('admin_home_path')})) },
     { key: SYSTEM_TIMEZONE_SETTING_KEY, value: systemTimezone },
-    ...(featureInstalled('credits') && form.has('show_credits')
-      ? [{key: SHOW_CREDITS_SETTING_KEY, value: String(form.get('show_credits') === 'true')} as const]
-      : []),
+    ...featureSystemSettingsWrites(form),
     { key: SIDEBAR_MENU_SETTING_KEY, value: sidebar.value },
   ]);
   return c.redirect('/admin/settings/system?flash=saved');

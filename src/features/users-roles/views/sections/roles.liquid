@@ -19,10 +19,22 @@
               </td>
               <td class="px-6 py-3 text-sm text-gray-700">{{ role.permissionCount }}</td>
               <td class="px-6 py-3 text-right whitespace-nowrap">
-                <a href="{{ role.editHref }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_roles.edit" | t }}</a>
+                <a href="{{ role.editHref }}"
+                   title="{{ "view_strings.sections_roles.edit" | t }}"
+                   aria-label="{{ "view_strings.sections_roles.edit" | t }}"
+                   class="inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-800 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                  <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
+                  <span class="hidden lg:inline">{{ "view_strings.sections_roles.edit" | t }}</span>
+                </a>
                 {% if role.canDelete %}
                   <form method="POST" action="{{ role.deleteAction }}" class="inline" data-confirm="{{ "view_strings.sections_roles.delete_this_role_it_will_be_removed_from_any_users_that_have_it" | t }}">
-                    <button type="submit" class="ml-3 text-sm font-medium text-red-600 hover:text-red-700">{{ "view_strings.sections_roles.delete" | t }}</button>
+                    <button type="submit"
+                            title="{{ "view_strings.sections_roles.delete" | t }}"
+                            aria-label="{{ "view_strings.sections_roles.delete" | t }}"
+                            class="inline-flex ml-3 text-sm font-medium text-red-600 hover:text-red-700 items-center justify-center shrink-0 gap-2 h-8 min-w-8">
+                      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+                      <span class="hidden lg:inline">{{ "view_strings.sections_roles.delete" | t }}</span>
+                    </button>
                   </form>
                 {% endif %}
               </td>

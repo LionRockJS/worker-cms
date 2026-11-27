@@ -305,7 +305,7 @@ describe('plugin credit API', () => {
     expect(res.status).toBe(402);
     const body = await res.json() as { error: string; credit: Record<string, unknown> };
     expect(body.error).toBe('insufficient_credits');
-    expect(body.credit).toEqual({ currency: 'diamond', required: 20, balance: 5, shared_balance: 0 });
+    expect(body.credit).toEqual({ currency: 'diamond', required: 20, balance: 5, shared_balance: 0, plugin_balance: 0 });
     expect(await getCreditBalances(env, PAYER_ID)).toEqual({ credit: 10_000, diamond: 5 });
   });
 

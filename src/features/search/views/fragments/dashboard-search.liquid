@@ -1,0 +1,16 @@
+<form method="GET" action="{{ searchAction }}" class="flex min-w-0 flex-1 gap-2">
+  <input type="hidden" name="operator" value="AND">
+  <input type="hidden" name="pagesize" value="20">
+  <input type="hidden" name="sort" value="updated_at">
+  <input type="hidden" name="order" value="DESC">
+  <input type="hidden" name="path1" value="">
+  <label for="dashboard_search" class="sr-only">{{ "view_strings.sections_dashboard.search_pages" | t }}</label>
+  <input id="dashboard_search" type="search" name="search1" value="{{ searchValue }}" placeholder="{% if pageTypeFilter != '' %}{{ "view_strings.sections_dashboard.search" | t }} {{ pageTypeFilter }} {{ "nav.pages" | t }}{% else %}{{ "view_strings.sections_dashboard.search_pages" | t }}{% endif %}"
+         class="h-10 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
+  <button type="submit"
+          title="{{ "view_strings.sections_dashboard.search" | t }}"
+          aria-label="{{ "view_strings.sections_dashboard.search_pages" | t }}"
+          class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#search"></use></svg>
+  </button>
+</form>

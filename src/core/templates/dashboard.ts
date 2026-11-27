@@ -1,3 +1,4 @@
+import type { DashboardStatusFilterLink } from '../../features/services';
 import { adminLayout, type BaseTemplateProps } from '../render/layout';
 import { renderView } from '../render/liquid';
 import { maskPrivateValue } from '../render/privacy';
@@ -24,13 +25,6 @@ interface DashboardPagination {
   previousHref: string;
   nextHref: string;
   lastHref: string;
-}
-
-interface DashboardStatusFilterLink {
-  label: string;
-  translationKey?: string;
-  href: string;
-  isActive: boolean;
 }
 
 interface DashboardBulkTagGroup {
@@ -82,7 +76,7 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
     importHref = '',
     exportHref = '',
     bulkAction: requestedBulkAction,
-    bulkTagGroups = [],
+    bulkTagGroups,
     pageTypeChoices = [],
     pagination,
   } = opts;
@@ -153,14 +147,11 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
     pageTypeOptions,
     allTypesHref: '/admin/pages/list',
     privacyTable: withheldNames ? false : !!opts.privacyFields,
-    emptyColspan: 4,
-    searchValue,
-    searchAction,
-    searchPlaceholder: pageTypeFilter ? `Search ${pageTypeFilter} pages` : 'Search pages',
+    hasRowControls: !!bulkTagGroups || canReorder,
+    emptyColspan: bulkTagGroups || canReorder ? 4 : 3,
     statusFilter,
     hasStatusFilters: statusFilters.length > 0,
     statusFilters,
-    advancedSearchHref,
     importHref,
     hasImportHref: !!importHref,
     exportHref,
@@ -172,10 +163,16 @@ export async function dashboardPage(views: Fetcher, opts: BaseTemplateProps & {
     paginationEnd,
     singularCount: pageCount === 1,
     hasPages: pages.length > 0,
-    hasSelectablePages: pages.some((page) => !page.isDraftMissing),
-    bulkAction,
-    bulkTagGroups,
-    hasBulkTagOptions: bulkTagGroups.some((group) => group.tags.length > 0),
+    ...(bulkTagGroups && {
+      searchValue,
+      searchAction,
+      advancedSearchHref,
+      searchPlaceholder: pageTypeFilter ? `Search ${pageTypeFilter} pages` : 'Search pages',
+      bulkAction,
+      bulkTagGroups,
+      hasSelectablePages: pages.some((page) => !page.isDraftMissing),
+      hasBulkTagOptions: bulkTagGroups.some((group) => group.tags.length > 0),
+    }),
     canReorder,
     reorderAction: canReorder ? '/admin/pages/reorder' : '',
     reorderPageType: pageTypeFilter ?? '',

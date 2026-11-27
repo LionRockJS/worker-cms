@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import type { Env, Variables } from '../../types';
+import { MAX_ICON_SPRITE_BYTES } from '../render/icon-sprite';
 
 export class BodyTooLargeError extends Error {}
 
@@ -35,6 +36,7 @@ export const limitRequestBody = createMiddleware<{ Bindings: Env; Variables: Var
   if (!c.req.raw.body) return next();
   const path = c.req.path;
   const max = path === '/admin/upload' ? 32 * 1024 * 1024
+    : path === '/admin/settings/system/icon-sprite' ? MAX_ICON_SPRITE_BYTES + 8 * 1024
     : path === '/__cms/files' ? 16 * 1024 * 1024
     : path.startsWith('/__cms/state/') ? 72 * 1024
     : path === '/__cms/tenant/claim' ? 4096

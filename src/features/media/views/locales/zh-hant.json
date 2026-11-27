@@ -1,5 +1,6 @@
 {
   "view_strings": {
+    "snippets_pagefield_picture_basic.upload": "上載",
     "sections_content_list.actions": "操作",
     "sections_content_list.content_list": "內容清單",
     "sections_content_list.delete": "刪除",

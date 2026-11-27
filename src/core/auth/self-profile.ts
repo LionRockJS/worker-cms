@@ -1,6 +1,6 @@
 import type { AppContext } from '../http/context';
 import type { User } from '../../types';
-import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass } from '../db/data-classes';
 import { contextActor, mutationAuditEnvelope, mutationAuditEvidence } from '../db/audit';
 import { auditOutboxEvidence, drainAuditMutationOutbox } from '../db/audit-mutation-outbox';
 import { abortIf } from '../db/transaction-guard';
@@ -38,7 +38,7 @@ async function classification(c: AppContext, revocation: boolean) {
     const policy = await resolveDataClasses(c.env, true);
     if (policy.ok) {
       const classes = ['users', 'user_oauth_identities', 'roles', 'role_permissions', 'sessions'].map(table => classFor(policy, 'table', table));
-      return { policy, dataClass: classes.includes('phi') ? 'phi' as const : classes.includes('pii') ? 'pii' as const : 'none' as const, unavailable: false };
+      return { policy, dataClass: strongestClass(classes), unavailable: false };
     }
   } catch { /* Revocation retains conservative private evidence on lookup failure. */ }
   if (!revocation) throw new Error('Profile classification unavailable');

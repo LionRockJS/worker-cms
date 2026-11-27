@@ -142,6 +142,27 @@ CREATE TABLE IF NOT EXISTS pages(
 );
 
 -- 7. Page Versions – supports version browsing and snapshots
+-- Page policies survive trash and restore, which preserve the page UUID.
+-- A missing or disabled policy retains legacy role-based access.
+CREATE TABLE IF NOT EXISTS page_access_policies (
+    page_uuid TEXT PRIMARY KEY NOT NULL,
+    owner_id INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    group_role TEXT,
+    mode INTEGER NOT NULL CHECK (
+        mode BETWEEN 0 AND 666 AND mode / 100 IN (0, 4, 6)
+        AND mode / 10 % 10 IN (0, 4, 6) AND mode % 10 IN (0, 4, 6)
+    ),
+    revision INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS page_edit_grants (
+    page_uuid TEXT NOT NULL REFERENCES page_access_policies(page_uuid) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (page_uuid, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_page_edit_grants_user ON page_edit_grants(user_id, page_uuid);
+
 CREATE TABLE IF NOT EXISTS page_versions(
     id INTEGER UNIQUE DEFAULT ((( strftime('%s','now') - 1563741060 ) * 100000) + (RANDOM() & 65535)) NOT NULL,
     uuid TEXT UNIQUE DEFAULT (lower(hex( randomblob(4)) || '-' || hex( randomblob(2)) || '-' || '4' || substr( hex( randomblob(2)), 2)
@@ -537,7 +558,7 @@ CREATE TRIGGER IF NOT EXISTS classification_version_data_class_floors_delete AFT
 END;
 
 -- Records under hold (W12). Purging a held page from trash is refused, by hand
--- or by retention, until the hold is released. Keyed by page uuid, which a page
+-- or by retention, until the hold is released or its keep_until date passes. Keyed by page uuid, which a page
 -- keeps through trash and restore, so a hold can be placed before deletion.
 -- Released holds are kept as the record of who held what, when and why.
 CREATE TABLE IF NOT EXISTS record_holds (
@@ -547,7 +568,12 @@ CREATE TABLE IF NOT EXISTS record_holds (
     placed_by INTEGER NOT NULL,
     placed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     released_by INTEGER,
-    released_at TEXT
+    released_at TEXT,
+    -- Set when a plugin placed the hold (its id); placed_by is then the acting user, or 0.
+    placed_by_plugin TEXT,
+    -- Last day kept (YYYY-MM-DD). After it the hold no longer counts, with
+    -- nothing to release; NULL holds until someone releases it.
+    keep_until TEXT CHECK (keep_until IS NULL OR keep_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_record_holds_active ON record_holds (page_uuid) WHERE released_at IS NULL;
 
@@ -727,10 +753,51 @@ CREATE TABLE IF NOT EXISTS credit_subscriptions(
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+-- Plugin wallets: credits a plugin's creator supplies to this site, one row
+-- per (plugin, currency). Spendable only on that plugin's own costs, before
+-- the member's wallet and the shared pool. Missing rows are zero balances.
+-- Forfeited (zeroed with a ledger row) when the plugin is unregistered, so a
+-- Worker that later claims the same manifest id inherits nothing.
+CREATE TABLE IF NOT EXISTS plugin_credits(
+    plugin_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    balance INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (plugin_id, currency)
+);
+
+-- Append-only plugin wallet ledger. user_id is the member a spend benefited;
+-- grant_id makes a plugin's grant/revoke idempotent (NULL for spends).
+CREATE TABLE IF NOT EXISTS plugin_credit_ledger(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plugin_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    delta INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    user_id INTEGER,
+    entity_type TEXT,
+    entity_id TEXT,
+    grant_id TEXT,
+    note TEXT,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE (plugin_id, grant_id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_credit_ledger_user ON credit_ledger(user_id, currency, id DESC);
+CREATE INDEX IF NOT EXISTS idx_plugin_credit_ledger_plugin ON plugin_credit_ledger(plugin_id, currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_shared_credit_ledger_user ON shared_credit_ledger(user_id, currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_shared_credit_ledger_currency ON shared_credit_ledger(currency, id DESC);
 CREATE INDEX IF NOT EXISTS idx_credit_subscriptions_due ON credit_subscriptions(status, next_charge_at);
+-- Completed metered charges, scoped to the authenticated plugin.
+CREATE TABLE IF NOT EXISTS plugin_charge_receipts(
+    plugin_id TEXT NOT NULL,
+    charge_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    response TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, charge_id)
+);
 
 -- Feature: jobs — durable admin background jobs backed by the queue binding.
 -- feature: jobs
@@ -837,6 +904,17 @@ CREATE TABLE IF NOT EXISTS plugin_asset_approvals(
     integrity TEXT NOT NULL,
     approved_by TEXT NOT NULL,
     UNIQUE(plugin_id, path)
+);
+
+-- Manifest-requested host capabilities require separate local approval.
+CREATE TABLE IF NOT EXISTS plugin_capability_approvals(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    plugin_id TEXT NOT NULL REFERENCES plugin_identity_approvals(manifest_id) ON DELETE CASCADE,
+    capability TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    UNIQUE(plugin_id, capability)
 );
 
 -- Admin-approved delegated plugin page-type access.

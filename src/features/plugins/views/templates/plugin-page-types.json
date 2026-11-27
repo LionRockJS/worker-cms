@@ -6,7 +6,7 @@
         "backHref": "{{ backHref }}",
         "backLabel": "{{ 'view_strings.sections_plugin_page_types.plugins' | t }}",
         "title": "{{ pluginLabel }} · {{ 'view_strings.sections_plugin_page_types.page_types' | t }}",
-        "description": "{{ 'view_strings.sections_plugin_page_types.page_types_and_taxonomies_this_plugin_defines_plus_delegated_page_type_a' | t }}"
+        "explanation": "{{ 'view_strings.sections_plugin_page_types.page_types_and_taxonomies_this_plugin_defines_plus_delegated_page_type_a' | t }}"
       }
     },
     "content": {

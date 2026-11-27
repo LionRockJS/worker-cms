@@ -15,11 +15,6 @@
 //   src/features/<id>/views/**        merged in when <id> is enabled
 //   -> dist/views/**                  what [assets] points at
 //
-// Runtime paths do not change. A section still resolves as
-// /sections/<name>.liquid, so renderView(), the client engine's root list and
-// the plugin fallback chain in features/plugins/views.ts are untouched — only
-// the set of files that reaches the bundle is.
-//
 // Two paths colliding is a build error rather than a last-writer-wins merge:
 // two features owning one section, or a feature shadowing a core view, is a
 // mistake worth failing on.
@@ -48,6 +43,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compileSections } from './compile-sections.mjs';
 import { readManifest } from './build-migrations.mjs';
 import { writeIfChanged } from './write-if-changed.mjs';
 
@@ -57,6 +53,7 @@ const coreViewsDir = path.join(rootDir, 'src', 'core', 'views');
 const distDir = path.join(rootDir, 'dist', 'views');
 const tailwindSources = path.join(rootDir, 'assets-source', 'tailwind-sources.css');
 const LOCALES = 'locales';
+const CHINESE_DICTIONARY = 'data/chinese-chars.json';
 
 /**
  * Build outputs that land in dist/views without passing through here:
@@ -150,6 +147,7 @@ function mergeCatalog(into, from, owner, trail = []) {
 export function assembleViews(features) {
   const enabled = featuresWithViews(features);
   const files = new Map();
+  const fragments = new Map();
   const owners = new Map();
 
   const add = (rel, contents, owner) => {
@@ -180,11 +178,18 @@ export function assembleViews(features) {
 
   if (catalogs.size === 0) throw new Error('src/core/views/locales holds no catalogs; the core catalog defines the supported languages');
 
+  // Chinese search tables (src/core/db/chinese.ts) stay out of the Worker bundle.
+  add(CHINESE_DICTIONARY, readFileSync(path.join(rootDir, 'dictionary', 'chinese-chars.json')), 'dictionary');
+
   for (const id of enabled) {
     const dir = path.join(featuresDir, id, 'views');
     const seenLangs = new Set();
     for (const rel of walk(dir)) {
       if (isSourceOnlyLocale(rel)) continue;
+      if (rel.startsWith('fragments/')) {
+        fragments.set(id + '/' + rel.slice('fragments/'.length), readFileSync(path.join(dir, rel), 'utf8'));
+        continue;
+      }
       const lang = localeOf(rel);
       if (lang) {
         if (!catalogs.has(lang)) {
@@ -206,10 +211,32 @@ export function assembleViews(features) {
     }
   }
 
+  // Inline optional controls in their host Liquid scope. A disabled feature
+  // contributes no markup and its source directory need not exist.
+  const fragmentTag = /^( *)\{% feature_fragment ([a-z0-9-]+)\/([a-z0-9-]+) %\}$/gm;
+  function expandFragments(source, rel, ancestors = []) {
+    const assembled = source.replace(fragmentTag, (_, indent, owner, name) => {
+      if (features[owner] !== true) return '';
+      const key = owner + '/' + name + '.liquid';
+      const fragment = fragments.get(key);
+      if (fragment === undefined) throw new Error(`Missing feature fragment ${key} in ${rel}`);
+      if (ancestors.includes(key)) throw new Error(`Circular feature fragment ${key} in ${rel}`);
+      return expandFragments(fragment, rel, [...ancestors, key]).trimEnd().replace(/^(.+)$/gm, indent + '$1');
+    });
+    if (assembled.includes('{% feature_fragment')) throw new Error(`Invalid feature fragment in ${rel}`);
+    return assembled;
+  }
+  for (const [rel, contents] of files) {
+    if (rel.endsWith('.liquid') && contents.includes('{% feature_fragment')) {
+      files.set(rel, Buffer.from(expandFragments(contents.toString(), rel)));
+    }
+  }
+
   for (const [lang, catalog] of catalogs) {
     files.set(`${LOCALES}/${lang}.json`, Buffer.from(`${JSON.stringify(sortDeep(catalog), null, 2)}\n`));
   }
 
+  compileSections(files, features.plugins === true);
   return new Map([...files].sort(([a], [b]) => (a < b ? -1 : 1)));
 }
 

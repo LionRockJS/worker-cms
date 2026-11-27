@@ -11,6 +11,8 @@ import { timingSafeEqualStr } from '../proxy';
 import { listPageTypeApprovals } from '../page-types';
 import { requestContext } from '../../../core/http/request-context';
 import { pluginReadActor } from './read-audit';
+import { recordAuthDenial } from '../../../core/auth/denials';
+import { banRequestIp } from '../../../core/http/bait-paths';
 
 // ── Auth + scoping ────────────────────────────────────────────────────────────
 
@@ -20,6 +22,17 @@ import { pluginReadActor } from './read-audit';
  * any failure, otherwise the resolved plugin + its allowed page types.
  */
 export async function authenticatePlugin(c: AppContext): Promise<PluginAuth | Response> {
+  // A decoy secret no plugin holds: whoever presents it found it in leaked
+  // config or data. Record and ban, then answer exactly as for any other
+  // wrong secret so the caller cannot tell it tripped a canary.
+  const canary = !!c.env.CANARY_PLUGIN_SECRET
+    && timingSafeEqualStr(c.req.header('x-plugin-secret') ?? '', c.env.CANARY_PLUGIN_SECRET);
+  if (canary) {
+    console.error('Canary plugin secret presented to /__cms');
+    await recordAuthDenial(c, 'auth.access', { reason: 'canary_credential' });
+    await banRequestIp(c);
+  }
+
   // Resolve the caller first so we can check its OWN secret: per-plugin secrets
   // make this scope a real boundary, and let one plugin be rotated/revoked
   // without touching the others.
@@ -33,7 +46,7 @@ export async function authenticatePlugin(c: AppContext): Promise<PluginAuth | Re
     console.error(`Plugin ${pluginId} called the write-back API but has no secret configured`);
     return c.json({ error: 'plugin_api_unavailable' }, 503);
   }
-  if (!timingSafeEqualStr(c.req.header('x-plugin-secret') ?? '', plugin.apiSecret)) {
+  if (canary || !timingSafeEqualStr(c.req.header('x-plugin-secret') ?? '', plugin.apiSecret)) {
     return c.json({ error: 'forbidden' }, 403);
   }
   const context = requestContext.getStore();

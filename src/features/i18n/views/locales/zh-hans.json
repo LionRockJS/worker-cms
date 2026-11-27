@@ -1,4 +1,11 @@
 {
+  "settings": {
+    "login_labels": {
+      "title": "登录页面文字",
+      "description": "按语言自定义登录说明、按钮文字和访问提示。",
+      "edit": "编辑登录页面文字"
+    }
+  },
   "i18n": {
     "fields": {
       "code": "语言代码",

@@ -1,11 +1,15 @@
 {
   "trash": {
     "all_types": "所有類型",
+    "change_keep_until": "更改",
     "held": "保留中",
     "hold": "保留",
+    "hold_expired": "已結束（已過保留日期）",
     "hold_reason": "原因",
     "holds": "保留",
     "holds_description": "保留中的頁面在解除保留前無法永久刪除。",
+    "keep_until": "保留至",
+    "keep_until_help": "保留的最後一天。留空即保留至解除為止。",
     "last_hour": "最近一小時",
     "no_holds": "沒有保留。",
     "page_in_trash": "個垃圾桶頁面",
@@ -13,6 +17,7 @@
     "pages_in_trash": "個垃圾桶頁面",
     "place_hold": "設定保留",
     "placed": "設定於",
+    "plugin_hold": "外掛",
     "purge_expired": "清除過期項目",
     "release": "解除",
     "release_confirm": "解除此保留？之後頁面便可被永久刪除。",

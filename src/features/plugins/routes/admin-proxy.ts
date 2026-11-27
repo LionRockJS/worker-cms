@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../../core/auth/page-access';
 import { fetchPluginView } from '../view-source';
 import { auditPluginDisclosure } from '../disclosure-audit';
 import { limitedBytes } from '../../../core/http/body-limit';
@@ -360,7 +361,7 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
     const pageId = Number(upstreamResponse.headers.get('x-cms-editor-page-id'));
     let editPresence: { pageId: string; currentUserId: string; userAvatar: string } | null = null;
     if (clientView && Number.isSafeInteger(pageId) && pageId > 0) {
-      const page = await c.env.DB.prepare('SELECT page_type FROM pages WHERE id = ?').bind(pageId).first<{ page_type: string }>();
+      const page = await c.env.DB.prepare(`SELECT page_type FROM pages WHERE id = ? AND ${legacyPageFilter('pages.uuid')}`).bind(pageId).first<{ page_type: string }>();
       if (page && Object.hasOwn(plugin.manifest.contentTypes?.blueprint ?? {}, page.page_type)) {
         const user = c.get('user');
         const canWrite = effectivePermissions(await resolveRolePermissions(c.env), user.role).has('content:write');
@@ -379,6 +380,7 @@ async function proxyToPlugin(c: AppContext): Promise<Response> {
           `/admin/plugins/${pluginId}/views`,
           pluginViewRevision(plugin.manifest),
           plugin.manifest.i18n === true,
+          plugin.manifest.assets,
         )
       : await sanitizePluginHtmlFragment(await upstreamResponse.text());
     const title = decodePluginTitle(upstreamResponse.headers.get('x-cms-title')) || plugin.manifest.name || 'Plugin';

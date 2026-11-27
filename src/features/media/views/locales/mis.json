@@ -1,5 +1,6 @@
 {
   "view_strings": {
+    "snippets_pagefield_picture_basic.upload": "Upload",
     "sections_content_list.actions": "Actions",
     "sections_content_list.content_list": "Content List",
     "sections_content_list.delete": "Delete",

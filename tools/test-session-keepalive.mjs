@@ -1,21 +1,21 @@
-// Run the actual scripts from both admin shells with a browser/clock fixture.
+// Run the actual keepalive script with a browser/clock fixture.
 // Node is used because the Worker test runtime correctly disallows dynamic eval.
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const sources = [
-  ['bootstrap', '../src/core/render/layout.ts'],
-  ['Liquid layout', '../src/core/views/layout/default.liquid'],
-];
+const read = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
+const script = read('../src/core/views/assets/session-keepalive.js');
 
-for (const [name, file] of sources) {
-  const source = readFileSync(new URL(file, import.meta.url), 'utf8');
-  const start = source.lastIndexOf('(function()', source.indexOf('if (window.__cmsSessionKeepaliveBound)'));
-  const end = source.indexOf('})();', start) + 5;
-  const script = source.slice(start, end);
+// Both admin shells load the one asset instead of carrying inline copies.
+test('bootstrap shell and Liquid layout both load the keepalive asset', () => {
+  assert.match(read('../src/core/render/layout.ts'), /'\/assets\/session-keepalive\.js'/);
+  assert.match(read('../src/core/views/layout/default.liquid'), /\{% if admin %\}<script src="\/assets\/session-keepalive\.js/);
+});
 
+{
+  const name = 'keepalive';
   function browser() {
     let now = 1_000_000;
     let tick;

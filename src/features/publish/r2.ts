@@ -11,7 +11,7 @@
 // index.json, which self-heals on the next publish/unpublish.
 // ============================================================
 
-import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from '../../core/publish/adapter';
+import type { LivePageSnapshot, PublishAdapter, PublishSnapshot } from '../../contracts/publish';
 import { safeParseLect } from '../../core/db/lect';
 import { ReadAuditUnavailableError } from '../../core/http/access-log';
 

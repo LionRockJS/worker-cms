@@ -1,6 +1,6 @@
 # Durable draft-editor content evidence
 
-Local W4b continuation, 2 November 2026, after `38aa132`. The core request service is `src/core/pages/mutation-evidence.ts`; the native/plugin-form admin editor uses it through `src/routes/admin/pages/crud.ts`. This is the first content-writer slice, not completion of all content mutations.
+Local W4b continuation, 2 November 2026, after `38aa132`. The core request service is `src/core/evidence/mutation-evidence.ts`; the native/plugin-form admin editor uses it through `src/routes/admin/pages/crud.ts`. This is the first content-writer slice, not completion of all content mutations.
 
 | Covered operation | Atomic evidence and state |
 |---|---|

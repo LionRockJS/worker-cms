@@ -9,7 +9,7 @@ import { applyBulkPageAction, BULK_ACTION_PAGE_LIMIT } from '../src/core/pages/b
 import { publishPagesToTargets } from '../src/features/publish';
 import { r2Adapter } from '../src/features/publish/r2';
 import { clearManifestCache } from '../src/features/plugins/registry';
-import type { PublishSnapshot } from '../src/core/publish/adapter';
+import type { PublishSnapshot } from '../src/contracts/publish';
 import type { Env, JWTPayload, Page } from '../src/types';
 
 const USER = { sub: '1', email: 'admin@example.com', role: 'admin' } as unknown as JWTPayload;

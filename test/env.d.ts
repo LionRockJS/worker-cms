@@ -6,8 +6,6 @@ declare global {
     interface Env extends AppEnv {
       TEST_MIGRATIONS: D1Migration[];
       TEST_PUBLISHED_MIGRATIONS: D1Migration[];
-      TEST_SENSITIVITY_UPGRADE: D1Migration[];
-      TEST_AUDIT_OUTBOX_UPGRADE: D1Migration[];
       /** Raw text of the committed migrations/0001_initial_schema.sql. */
       TEST_COMMITTED_BASELINE: string;
       /** Freshly assembled baseline for the profile in cms.features.json. */
@@ -35,7 +33,5 @@ declare module 'cloudflare:workers' {
   interface ProvidedEnv extends AppEnv {
     TEST_MIGRATIONS: D1Migration[];
     TEST_PUBLISHED_MIGRATIONS: D1Migration[];
-    TEST_SENSITIVITY_UPGRADE: D1Migration[];
-    TEST_AUDIT_OUTBOX_UPGRADE: D1Migration[];
   }
 }

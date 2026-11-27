@@ -59,7 +59,13 @@
   <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
     <p class="text-sm text-gray-500">{{ affectedPageCount }} {{ "view_strings.sections_bulk_replace_preview.affected_pages_in_preview" | t }}</p>
     <div class="flex items-center gap-3">
-      <a href="{{ returnTo }}" class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "common.cancel" | t }}</a>
+      <a href="{{ returnTo }}"
+         title="{{ "common.cancel" | t }}"
+         aria-label="{{ "common.cancel" | t }}"
+         class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+        <span class="hidden lg:inline">{{ "common.cancel" | t }}</span>
+      </a>
       {% if canConfirm %}
         <form method="POST" action="{{ confirmAction }}">
           <input type="hidden" name="confirmed" value="1">
@@ -69,8 +75,9 @@
           <input type="hidden" name="replacement_text" value="{{ replacementText }}">
           <input type="hidden" name="return_to" value="{{ returnTo }}">
           {% for pageId in selectedPageIds %}<input type="hidden" name="page_ids" value="{{ pageId }}">{% endfor %}
-          <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
-            {{ "view_strings.sections_bulk_replace_preview.confirm" | t }}
+          <button type="submit" title="{{ "view_strings.sections_bulk_replace_preview.confirm" | t }}" aria-label="{{ "view_strings.sections_bulk_replace_preview.confirm" | t }}" class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_bulk_replace_preview.confirm" | t }}</span>
           </button>
         </form>
       {% endif %}

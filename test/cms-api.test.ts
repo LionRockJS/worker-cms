@@ -1,8 +1,9 @@
+import { signJWT } from './auth-fixtures';
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
-import { restoreTrashedPages } from '../src/core/db/admin-queries';
+import { restoreTrashedPages } from './trash-fixtures';
 import { approvePageTypeAccess } from '../src/features/plugins/page-types';
 
 // Plugin API — plugin write-back API (/__cms/*). Exercises the real Worker so the
@@ -33,9 +34,9 @@ const MANIFEST = {
 
 let savedSecret: unknown;
 
-async function registerPlugin(manifest: Record<string, unknown> = MANIFEST): Promise<void> {
+async function registerPlugin(manifest: Record<string, unknown> = MANIFEST): Promise<number> {
   const url = `https://plugin-${crypto.randomUUID()}.local`;
-  await env.DB.prepare('INSERT INTO plugins (label, url, enabled, secret) VALUES (?, ?, 1, ?)').bind('Events', url, PLUGIN_SECRET).run();
+  const registration = await env.DB.prepare('INSERT INTO plugins (label, url, enabled, secret) VALUES (?, ?, 1, ?) RETURNING id').bind('Events', url, PLUGIN_SECRET).first<{ id: number }>();
   __injectPluginFetcher(url, {
     fetch: async (input: RequestInfo | URL): Promise<Response> => {
       const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -45,6 +46,7 @@ async function registerPlugin(manifest: Record<string, unknown> = MANIFEST): Pro
       return new Response('nf', { status: 404 });
     },
   } as unknown as Fetcher);
+  return registration!.id;
 }
 
 /** Issues a Plugin API request through the real Worker with plugin auth headers. */
@@ -59,6 +61,18 @@ function cmsApi(method: string, path: string, body?: unknown, headers: Record<st
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   }));
+}
+
+async function taxonomyApprovalScreen(registrationId: number) {
+  // The manage screen resolves the plugin and takes its first-use identity pin.
+  const cookie = 'access_token=' + await signJWT({ sub: '19000', name: 'Admin', email: 'admin@example.invalid',
+    role: 'admin', type: 'access', exp: Math.floor(Date.now()/1000) + 900 }, env.JWT_SECRET);
+  const screen = (path: string, method = 'GET') => worker.fetch(new Request(
+    `https://cms.example.com/admin/plugins-manage/${registrationId}/${path}`, {
+      method, redirect: 'manual', headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-origin' },
+    }));
+  expect((await screen('page-types')).status).toBe(200);
+  return screen;
 }
 
 beforeEach(async () => {
@@ -557,7 +571,7 @@ describe('Plugin API create / read / list / update / delete', () => {
     await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest',
       name: 'Su Sheng',
-      lect: { name: { en: 'Su Sheng' }, zh_hans_name: '苏生', email: 'su@example.com' },
+      lect: { name: { en: 'Su Sheng' }, zh_hans_name: '苏生', note: '里線', email: 'su@example.com' },
     });
     await cmsApi('POST', '/__cms/pages', {
       page_type: 'guest',
@@ -572,6 +586,10 @@ describe('Plugin API create / read / list / update / delete', () => {
     const simplified = await (await cmsApi('GET', '/__cms/pages?page_type=guest&q=%E8%8B%8F')).json() as { total: number; pages: Array<{ name: string }> };
     expect(simplified.total).toBe(1);
     expect(simplified.pages[0].name).toBe('Su Sheng');
+
+    const regional = await cmsApi('GET', `/__cms/pages?page_type=guest&q=${encodeURIComponent('裏綫')}`);
+    expect(regional.status).toBe(200);
+    expect(await regional.json()).toMatchObject({ total: 1, pages: [{ name: 'Su Sheng' }] });
   });
 
   it('filters search results by multiple pointer values', async () => {
@@ -1533,6 +1551,72 @@ describe('Plugin API content-meta, tag ensure, and lookup projections', () => {
     const response = await cmsApi('GET', '/__cms/content-meta?types=default');
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: 'forbidden_page_type', page_type: 'default' });
+  });
+
+  it('requires separate taxonomy approval and blocks subsequent writes after revocation', async () => {
+    const endpoint = '/__cms/taxonomies/ensure';
+    const request = { names: ['Industry'] };
+    expect((await cmsApi('POST', endpoint, request)).status).toBe(403);
+
+    const importer = { 'x-plugin-id': 'import-export' };
+    const registrationId = await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', capabilities: ['taxonomy:create'], contentTypes: { writeTypes: ['contact'] } });
+    expect((await cmsApi('POST', endpoint, request, importer)).status).toBe(403);
+    await approvePageTypeAccess(env.DB, 'import-export', 'contact', 'write', 'admin');
+    expect((await cmsApi('POST', endpoint, request, importer)).status).toBe(403);
+    expect(await env.DB.prepare("SELECT id FROM taxonomies WHERE name='Industry'").first()).toBeNull();
+    const screen = await taxonomyApprovalScreen(registrationId);
+    expect(await (await screen('page-types')).text()).toContain('"showTaxonomyCapability":true');
+    expect((await screen('capabilities/taxonomy-create/approve', 'POST')).status).toBe(302);
+    expect(await (await screen('page-types')).text()).toContain('"taxonomyApproved":true');
+    expect((await cmsApi('POST', endpoint, request, { ...importer, 'x-plugin-secret': 'wrong' })).status).toBe(403);
+    expect((await cmsApi('POST', endpoint, { names: ['Industry', '  '] }, importer)).status).toBe(400);
+    expect((await cmsApi('POST', endpoint, request, importer)).status).toBe(200);
+    expect((await screen('capabilities/taxonomy-create/revoke', 'POST')).status).toBe(302);
+    expect((await cmsApi('POST', endpoint, { names: ['After revocation'] }, importer)).status).toBe(403);
+    expect(await env.DB.prepare("SELECT id FROM taxonomies WHERE name='After revocation'").first()).toBeNull();
+    await env.DB.prepare("DELETE FROM taxonomies WHERE name='Industry'").run();
+  });
+
+  it('ensures taxonomy names idempotently and records new taxonomies under the plugin identity', async () => {
+    const registrationId = await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', capabilities: ['taxonomy:create'], contentTypes: { writeTypes: ['*'] } });
+    const screen = await taxonomyApprovalScreen(registrationId);
+    expect((await screen('capabilities/taxonomy-create/approve', 'POST')).status).toBe(302);
+    await env.DB.prepare("INSERT INTO taxonomies (name, slug) VALUES ('Industry', 'industry-custom'), ('Existing', 'interest')").run();
+    const request = { names: ['Industry', 'Interest', 'Interest', '興趣'] };
+    const headers = { 'x-plugin-id': 'import-export', 'x-acting-user-id': '123' };
+    const expected = { taxonomies: [
+      { name: 'Industry', slug: 'industry-custom' },
+      { name: 'Interest', slug: 'interest-2' },
+      { name: '興趣', slug: 'taxonomy' },
+    ] };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await cmsApi('POST', '/__cms/taxonomies/ensure', request, headers);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expected);
+    }
+
+    const events = await env.DB.prepare(`SELECT a.acting_via, a.actor_user_id, a.detail FROM audit_events a
+      JOIN taxonomies t ON a.target_id = t.uuid WHERE a.action = 'taxonomy.create' AND t.name IN ('Industry', 'Interest', '興趣')`).all();
+    expect(events.results).toHaveLength(2);
+    for (const event of events.results) {
+      expect(event).toMatchObject({ acting_via: expect.stringMatching(/^plugin:/), actor_user_id: null });
+      expect(JSON.parse(String(event.detail))).toMatchObject({ acting_user_verified: false, asserted_user_id: 123 });
+    }
+  });
+
+  it('rolls back the taxonomy batch when its audit evidence cannot be committed', async () => {
+    const registrationId = await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', capabilities: ['taxonomy:create'], contentTypes: { writeTypes: ['*'] } });
+    const screen = await taxonomyApprovalScreen(registrationId);
+    expect((await screen('capabilities/taxonomy-create/approve', 'POST')).status).toBe(302);
+    await env.DB.prepare(`CREATE TRIGGER refuse_taxonomy_ensure_receipt BEFORE INSERT ON audit_events
+      WHEN NEW.action='taxonomy.create' BEGIN SELECT RAISE(IGNORE); END`).run();
+    try {
+      const response = await cmsApi('POST', '/__cms/taxonomies/ensure', { names: ['Rollback Interest', 'Rollback Industry'] }, { 'x-plugin-id': 'import-export' });
+      expect(response.status).toBe(503);
+      expect(await env.DB.prepare("SELECT id FROM taxonomies WHERE name IN ('Rollback Interest','Rollback Industry')").first()).toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER refuse_taxonomy_ensure_receipt').run();
+    }
   });
 
   it('ensures tags by taxonomy and name, reusing existing rows', async () => {

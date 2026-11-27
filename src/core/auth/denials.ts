@@ -3,7 +3,7 @@ import { routePath } from 'hono/route';
 import { authDenialEnvelope, auditDeliveryEvidence, contextActor, type AuditActor } from '../db/audit';
 import { auditOutboxEvidence } from '../db/audit-mutation-outbox';
 import { recordAuditOutage } from '../db/audit-outages';
-import { sessionPolicy } from './session-evidence';
+import { sessionPolicy } from '../evidence/session-evidence';
 import { safeRoleAuditValue } from './role-mutation-sql';
 import { denialPermission, denialReason, denialRoute, permissionDenialReason, validDenialDetail, type AuthDenialAction, type PermissionDenialReason } from './denial-contract';
 

@@ -17,7 +17,7 @@
     <label for="page_type_slug" class="block min-w-0">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_page_type_form.slug" | t }}</span>
       <input id="page_type_slug" name="slug" value="{{ slug }}"{% if readOnly %} readonly{% endif %} class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono{% if readOnly %} bg-gray-50 text-gray-600{% endif %}">
-      {% unless readOnly %}<span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.the_page_type_key_used_on_pages_e_g" | t }} <code>{{ "view_strings.sections_page_type_form.event" | t }}</code>{{ "view_strings.sections_page_type_form.cannot_collide_with_a_config_or_existing_type" | t }}</span>{% endunless %}
+      {% unless readOnly %}<span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.the_page_type_key_used_on_pages_e_g" | t }} <code>{{ "view_strings.sections_page_type_form.event" | t }}</code>{{ "view_strings.sections_page_type_form.cannot_collide_with_a_config_or_existing_type" | t }}</span>{% endunless %}
     </label>
     <label for="page_type_weight" class="block min-w-0">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_page_type_form.weight" | t }}</span>
@@ -26,7 +26,7 @@
     <label for="page_type_blueprint" class="block min-w-0">
       <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_page_type_form.blueprint_json_array" | t }}</span>
       <textarea id="page_type_blueprint" name="blueprint" rows="8"{% if readOnly %} readonly{% endif %} class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono{% if readOnly %} bg-gray-50 text-gray-600{% endif %}" spellcheck="false">{{ blueprint }}</textarea>
-      {% unless readOnly %}<span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.field_definitions_e_g" | t }} <code>["@date", "name", "body:text", {"items": ["name"]}]</code></span>{% endunless %}
+      {% unless readOnly %}<span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.field_definitions_e_g" | t }} <code>["@date", "name", "body:text", {"items": ["name"]}]</code></span>{% endunless %}
     </label>
 
     <fieldset class="min-w-0">
@@ -43,7 +43,7 @@
       {% else %}
         <p class="text-sm text-gray-400">{{ "view_strings.sections_page_type_form.no_block_types_defined_yet_add_some_under" | t }} <a href="/admin/block_types" class="text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_page_type_form.block_types" | t }}</a>.</p>
       {% endif %}
-      {% unless readOnly %}<span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.blocks_available_to_pages_of_this_type" | t }}</span>{% endunless %}
+      {% unless readOnly %}<span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.blocks_available_to_pages_of_this_type" | t }}</span>{% endunless %}
     </fieldset>
 
     <fieldset class="min-w-0">
@@ -60,18 +60,57 @@
       {% else %}
         <p class="text-sm text-gray-400">{{ "view_strings.sections_page_type_form.no_taxonomies_defined_yet_add_some_under" | t }} <a href="/admin/taxonomies" class="text-indigo-600 hover:text-indigo-800">{{ "view_strings.sections_page_type_form.taxonomies" | t }}</a>.</p>
       {% endif %}
-      {% unless readOnly %}<span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.taxonomies_shown_when_editing_pages_of_this_type" | t }}</span>{% endunless %}
+      {% unless readOnly %}<span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_page_type_form.taxonomies_shown_when_editing_pages_of_this_type" | t }}</span>{% endunless %}
     </fieldset>
 
   </form>
   {% if isEdit %}
     <form id="page-type-delete-form" method="POST" action="{{ deleteAction }}" data-confirm="{{ "view_strings.sections_page_type_form.delete_this_page_type_existing_pages_keep_their_type_string" | t }}"></form>
   {% endif %}
-  <div class="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-    {% if canSave %}<button form="page-type-form" type="submit" class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">{{ "view_strings.sections_page_type_form.save" | t }}</button>{% endif %}
-    <a href="/admin/page_types" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">{% if readOnly %}Back{% else %}Cancel{% endif %}</a>
+  <div class="mt-4 flex min-w-0 flex-wrap items-center gap-3">
+    {% if canSave %}<button form="page-type-form" type="submit"
+            title="{{ "view_strings.sections_page_type_form.save" | t }}"
+            aria-label="{{ "view_strings.sections_page_type_form.save" | t }}"
+            class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+      <span class="hidden lg:inline">{{ "view_strings.sections_page_type_form.save" | t }}</span>
+    </button>{% endif %}
+    <a href="/admin/page_types"
+       title="{% if readOnly %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}"
+       aria-label="{% if readOnly %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}"
+       class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if readOnly %}arrow-left{% else %}x{% endif %}"></use></svg>
+      <span class="hidden lg:inline">{% if readOnly %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}</span>
+    </a>
     {% if isEdit %}{% unless readOnly %}
-      <button form="page-type-delete-form" type="submit" class="w-full px-6 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto sm:w-auto">{{ "view_strings.sections_page_type_form.delete" | t }}</button>
+      <button form="page-type-delete-form" type="submit"
+              title="{{ "view_strings.sections_page_type_form.delete" | t }}"
+              aria-label="{{ "view_strings.sections_page_type_form.delete" | t }}"
+              class="inline-flex px-6 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_page_type_form.delete" | t }}</span>
+      </button>
     {% endunless %}{% endif %}
   </div>
 </div>
+
+{% unless isEdit or readOnly %}
+<script nonce="{{ nonce }}">
+  // New page type: the slug follows the name until the slug is typed in directly.
+  (() => {
+    const nameInput = document.getElementById('page_type_name');
+    const slugInput = document.getElementById('page_type_slug');
+    if (!nameInput || !slugInput) return;
+    const slugForName = (name) => name.toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    let slugEdited = slugInput.value.trim() !== '' && slugInput.value.trim() !== slugForName(nameInput.value);
+    slugInput.addEventListener('input', () => { slugEdited = slugInput.value.trim() !== ''; });
+    nameInput.addEventListener('input', () => {
+      if (!slugEdited) slugInput.value = slugForName(nameInput.value);
+    });
+  })();
+</script>
+{% endunless %}

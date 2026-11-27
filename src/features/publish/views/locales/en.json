@@ -1,0 +1,28 @@
+{
+  "view_strings": {
+    "sections_editor.live": "Live",
+    "sections_dashboard.draft": "Draft",
+    "sections_dashboard.ingest_submission": "Ingest submission",
+    "sections_dashboard.live_content_differs_from_draft": "Live content differs from draft",
+    "sections_dashboard.live_content_differs_from_draft_publish_to_sync": "Live content differs from draft; publish to sync",
+    "sections_dashboard.live_weight_differs_from_draft": "Live weight differs from draft",
+    "sections_dashboard.live_weight_differs_from_draft_publish_to_sync": "Live weight differs from draft; publish to sync",
+    "sections_dashboard.publish": "Publish",
+    "sections_dashboard.published_page_is_missing_from_drafts": "Published page is missing from drafts",
+    "sections_dashboard.unpublish": "Unpublish",
+    "sections_dashboard.unpublish_this_page": "Unpublish this page?",
+    "sections_editor.collapse_publish_schedule": "Collapse Publish Schedule",
+    "sections_editor.expand_publish_schedule": "Expand Publish Schedule",
+    "sections_editor.from": "From:",
+    "sections_editor.publish": "Publish",
+    "sections_editor.publish_schedule": "Publish Schedule",
+    "sections_editor.re_publish": "Re-publish",
+    "sections_editor.save_and_publish": "Save and Publish",
+    "sections_editor.timezone": "Timezone:",
+    "sections_editor.un_publish": "Un-publish",
+    "sections_editor.unpublish_page_confirm": "Un-publish this page?",
+    "sections_editor.until": "Until:",
+    "sections_tags.sync_published": "Sync published",
+    "sections_tags.sync_published_help": "Copy every tag to the published database so live pages can resolve them."
+  }
+}

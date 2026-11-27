@@ -1,0 +1,10 @@
+<div class="flex min-w-0 flex-wrap items-center gap-2">
+  <label for="{{ field.id }}_file"
+         title="{{ "view_strings.snippets_pagefield_picture_basic.upload" | t }}"
+         class="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold leading-[1.2] text-gray-700 hover:bg-gray-50">
+    <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+    <span class="sr-only lg:not-sr-only">{{ "view_strings.snippets_pagefield_picture_basic.upload" | t }}</span>
+  </label>
+  <input id="{{ field.id }}_file" data-picture-file type="file" accept="image/*" class="hidden">
+  <span data-picture-status class="min-w-0 text-xs text-gray-500"></span>
+</div>

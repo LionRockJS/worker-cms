@@ -4,7 +4,7 @@
       "type": "page-header",
       "settings": {
         "title": "{{ 'i18n.languages.title' | t }}",
-        "description": "{{ 'i18n.languages.description' | t }}"
+        "explanation": "{{ 'i18n.languages.description' | t }}"
       },
       "blocks": {
         "translations": {

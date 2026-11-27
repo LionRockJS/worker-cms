@@ -72,6 +72,8 @@ const HOT_DAYS: Record<string, number> = {
   pii_access: 90,
   auth: 90,
   admin_config: 365,
+  // Access a plugin recorded on an unclassified page (/__cms/audit/events).
+  plugin_access: 365,
   none: 90,
 };
 

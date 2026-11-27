@@ -1,0 +1,11 @@
+{% for wallet in sidebarWallets %}
+<p class="mt-1 flex items-center gap-1 text-xs font-medium {{ wallet.className }}">
+  <svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <use href="{{ iconHrefPrefix }}#{{ wallet.icon }}"></use>
+  </svg>
+  <span class="min-w-0">
+    <span class="whitespace-nowrap">{{ wallet.userBalance }} {{ wallet.unitKey | t }}</span>
+    {% if wallet.sharedBalance > 0 %}<span class="whitespace-nowrap">{{ wallet.sharedBalance }} {{ "shell.shared" | t }}</span>{% endif %}
+  </span>
+</p>
+{% endfor %}

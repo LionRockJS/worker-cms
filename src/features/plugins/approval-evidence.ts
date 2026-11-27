@@ -1,7 +1,8 @@
 import type { AppContext } from '../../core/http/context';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import type { PermissionDenialReason } from '../../core/auth/denial-contract';
-import { classFor } from '../../core/db/data-classes';
+import { snapshot,guard,json,fingerprint,type Row } from '../../core/db/bounded-mutation';
+import { classFor,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
@@ -12,9 +13,10 @@ import { computeIntegrity } from './assets';
 import { filePrefixesOverlap } from './file-prefixes';
 import { auditPluginManagement } from './disclosure-audit';
 import { inspectPluginManifest,PLUGIN_ORIGIN } from './registry';
-import { capturePluginMutationContext,REGISTRY,IDENTITY,OWNED,snapshot,guard,json,fingerprint,invalidate,type Row } from './registration-evidence';
+import { REGISTRY,IDENTITY } from './evidence-common';
+import { capturePluginMutationContext,APPROVAL_TABLES,STATE_TABLE,invalidate } from './registration-evidence';
 
-type Action='plugin.identity.approve'|'plugin.asset.approve'|'plugin.asset.revoke'|'plugin.file_prefix.approve'|'plugin.file_prefix.revoke'|'plugin.page_type.approve'|'plugin.page_type.revoke'|'plugin.page_type.approve_all';
+type Action='plugin.capability.approve'|'plugin.capability.revoke'|'plugin.identity.approve'|'plugin.asset.approve'|'plugin.asset.approve_all'|'plugin.asset.revoke'|'plugin.file_prefix.approve'|'plugin.file_prefix.revoke'|'plugin.page_type.approve'|'plugin.page_type.revoke'|'plugin.page_type.approve_all';
 export interface PluginApprovalChange {id:number;action:Action;key?:string;access?:string}
 type Result='missing'|'unreachable'|'identity-ok'|'identity-claimed'|'identity-approved'|'invalid'|'fetch-failed'|'conflict'|'approved'|'revoked'|'approved-all';
 interface Plan {table:string;fields:string[];keys:string[];before:Row[];after:Row[];where:string;args:string[]}
@@ -26,7 +28,7 @@ const sameKey=(a:Row,b:Row,keys:string[])=>keys.every(k=>a[k]===b[k]);
 /** Explicit host approvals only. Inspection never takes automatic TOFU claims;
  * remote declarations/bytes are observations, not a cross-service transaction. */
 export async function mutatePluginApproval(c:AppContext,change:PluginApprovalChange):Promise<Result>{
-  const containment=['plugin.asset.revoke','plugin.file_prefix.revoke','plugin.page_type.revoke'].includes(change.action);
+  const containment=['plugin.capability.revoke','plugin.asset.revoke','plugin.file_prefix.revoke','plugin.page_type.revoke'].includes(change.action);
   if(!containment)assertRegulatedWritesAllowed(c.env);
   try {const result=await mutate(c,change);invalidate();return result;}catch(error){
     invalidate();
@@ -40,8 +42,13 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
   const row=base.plugins.find(p=>p.id===id);if(!row)return 'missing';
   const pin=base.identities.find(p=>p.plugin_row_id===id);
   if(pin&&!safeId(pin.manifest_id))throw new Error('Unsafe identity pin');
-  const inspected=await inspectPluginManifest(row);if(!inspected)return 'unreachable';
-  const {manifest,fetcher}=inspected,pluginId=manifest.id;
+  // Removing a host grant needs only the pinned local identity, even if the plugin is offline.
+  const revokingCapability = action === 'plugin.capability.revoke';
+  const inspected = revokingCapability ? null : await inspectPluginManifest(row);
+  if (!revokingCapability && !inspected) return 'unreachable';
+  const manifest = inspected?.manifest;
+  const pluginId = revokingCapability ? pin?.manifest_id : manifest?.id;
+  if (!pluginId) return 'missing';
   const identity=action==='plugin.identity.approve';
   // Any manifest owner decision is rechecked by the complete pin snapshot.
   const claimed=base.identities.some(p=>p.manifest_id===pluginId&&p.plugin_row_id!==id);
@@ -50,10 +57,12 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
   if(!identity&&pin?.manifest_id!==pluginId)return refusal('missing','plugin_identity_required');
   if(identity&&pin?.manifest_id===pluginId){await c.env.DB.batch([...base.admission(),...base.finish()]);return 'identity-ok';}
 
-  const plans:Plan[]=await Promise.all(OWNED.slice(0,3).map(async spec=>({...spec,keys:['id'],before:await snapshot<Row>(c,spec.table,spec.fields),after:[],where:'1',args:[]})));
+  const approvalTables = APPROVAL_TABLES.filter(spec =>
+    spec.table !== 'plugin_capability_approvals' || identity || action.startsWith('plugin.capability.'));
+  const plans:Plan[]=await Promise.all(approvalTables.map(async spec=>({...spec,keys:['id'],before:await snapshot<Row>(c,spec.table,spec.fields),after:[],where:'1',args:[]})));
   if(identity){
     const ids=[...new Set([pin?.manifest_id,pluginId].filter((v):v is string=>!!v))];
-    for(const spec of [OWNED[3],{table:'plugin_sequences',fields:['plugin_id','key','value','created_at','updated_at']}]){
+    for(const spec of [STATE_TABLE,{table:'plugin_sequences',fields:['plugin_id','key','value','created_at','updated_at']}]){
       plans.push({...spec,keys:['plugin_id','key'],before:await snapshot<Row>(c,spec.table,spec.fields,`plugin_id IN (${ids.map(()=>'?').join(',')})`,ids),after:[],where:`plugin_id IN (${ids.map(()=>'?').join(',')})`,args:ids});
     }
   }
@@ -63,19 +72,19 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
   // Grants cover classified target scopes too, including wildcard types and
   // sensitive descendants beneath an approved parent storage prefix.
   const pageScopes=[...plans[1].before.map(r=>String(r.page_type)),
-    ...(action.startsWith('plugin.page_type.')?[key,...(manifest.contentTypes?.readTypes??[]),...(manifest.contentTypes?.writeTypes??[]),...Object.keys(manifest.contentTypes?.blueprint??{})]:[])];
+    ...(action.startsWith('plugin.page_type.')?[key,...(manifest?.contentTypes?.readTypes??[]),...(manifest?.contentTypes?.writeTypes??[]),...Object.keys(manifest?.contentTypes?.blueprint??{})]:[])];
   for(const scope of pageScopes){
     if(scope==='*')for(const [target,classification] of base.policy.exact)if(target.startsWith('page_type:'))classes.push(classification);
     classes.push(classFor(base.policy,'page_type',scope));
   }
-  for(const prefix of [...plans[2].before.map(r=>String(r.prefix)),...(manifest.filePrefixes??[])]){
+  for(const prefix of [...plans[2].before.map(r=>String(r.prefix)),...(manifest?.filePrefixes??[])]){
     for(const entry of base.policy.prefixes)if(filePrefixesOverlap(entry.key,prefix))classes.push(entry.class);
   }
-  const dataClass=classes.includes('phi')?'phi' as const:classes.includes('pii')?'pii' as const:'none' as const;
+  const dataClass=strongestClass(classes);
   await auditBackgroundReads(c.env,await Promise.all(plans.map(async p=>({action:'plugin.approval-source-read',kind:'table' as const,key:p.table,targetType:p.table,
     ids:await Promise.all(p.before.map(r=>p.keys[0]==='id'?String(r.id):fingerprint(json([r.plugin_id,r.key])))),count:p.before.length,minimumClass:dataClass==='none'?undefined:dataClass}))),contextActor(c));
   const now=await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP now').first<{now:string}>();if(!now)throw new Error('Clock unavailable');
-  const detail:Record<string,unknown>={operation_id:crypto.randomUUID(),id,identity_fingerprint:await fingerprint(pluginId),manifest_fingerprint:await fingerprint(json(manifest))};
+  const detail:Record<string,unknown>={operation_id:crypto.randomUUID(),id,identity_fingerprint:await fingerprint(pluginId),...(manifest ? {manifest_fingerprint:await fingerprint(json(manifest))} : {})};
   const actor=c.get('user');
   const result:Result=action.endsWith('.revoke')?'revoked':action.endsWith('_all')?'approved-all':identity?'identity-approved':'approved';
   const allocated=new Map<string,number>();
@@ -88,7 +97,7 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
     if(!Number.isSafeInteger(next)||next<=0)throw new Error('Approval IDs exhausted');allocated.set(plan.table,next);return next;
   };
   const approve=async(plan:Plan,values:Row,keepExisting=false)=>{
-    const keys=plan.table==='plugin_asset_approvals'?['plugin_id','path']:plan.table==='plugin_file_prefix_approvals'?['plugin_id','prefix']:['plugin_id','page_type','access'];
+    const keys=plan.table==='plugin_capability_approvals'?['plugin_id','capability']:plan.table==='plugin_asset_approvals'?['plugin_id','path']:plan.table==='plugin_file_prefix_approvals'?['plugin_id','prefix']:['plugin_id','page_type','access'];
     const old=plan.after.find(r=>sameKey(r,values,keys));
     if(old&&(keepExisting||Object.entries(values).every(([k,v])=>old[k]===v)))return;
     const next:Row={...old,...values,id:old?.id??await nextId(plan),created_at:old?.created_at??null,updated_at:null};
@@ -97,8 +106,8 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
   if(identity){
     detail.previous_identity_fingerprint=pin?await fingerprint(pin.manifest_id):null;
     // A renamed identity must not inherit orphaned destination capabilities.
-    for(const plan of plans.slice(0,3))plan.after=plan.after.filter(r=>r.plugin_id!==pin?.manifest_id&&r.plugin_id!==pluginId);
-    for(const plan of plans.slice(3)){
+    for(const plan of plans.slice(0,approvalTables.length))plan.after=plan.after.filter(r=>r.plugin_id!==pin?.manifest_id&&r.plugin_id!==pluginId);
+    for(const plan of plans.slice(approvalTables.length)){
       const moved=pin?plan.before.filter(r=>r.plugin_id===pin.manifest_id):[];
       if(plan.table==='plugin_sequences'&&plan.before.some(r=>!Number.isSafeInteger(r.value)))throw new Error('Unsafe sequence');
       const keys=new Set(moved.map(r=>r.key));
@@ -109,21 +118,46 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
     detail.retained_limit_pricing_settings=true;
   }else if(action.startsWith('plugin.asset.')){
     const plan=plans[0];
-    if(action.endsWith('.approve')){
-      if(!(manifest.assets??[]).some(a=>a.path===key))return 'invalid';
+    if(action.endsWith('_all')){
+      // Every declared asset not already pinned to its current bytes: new
+      // files are approved and drifted ones re-pinned, all or nothing.
+      const paths=[...new Set((manifest?.assets??[]).map(a=>a.path))];
+      if(paths.length){
+        await auditPluginManagement(c.env,pluginId,'asset-approve-fetch',contextActor(c));
+        await c.env.DB.batch([...base.admission(),...base.finish()]);
+      }
+      const pinned=await Promise.all(paths.map(async path=>{
+        const upstream=await inspected!.fetcher.fetch(`${PLUGIN_ORIGIN}${path}`);
+        return upstream.ok?{path,integrity:await computeIntegrity(await limitedBytes(upstream))}:null;
+      }));
+      if(pinned.some(p=>!p))return 'fetch-failed';
+      for(const {path,integrity} of pinned as {path:string;integrity:string}[]){
+        if(plan.after.some(r=>r.plugin_id===pluginId&&r.path===path&&r.integrity===integrity))continue;
+        await approve(plan,{plugin_id:pluginId,path,integrity,approved_by:actor.email});
+      }
+    }else if(action.endsWith('.approve')){
+      if(!(manifest?.assets??[]).some(a=>a.path===key))return 'invalid';
       await auditPluginManagement(c.env,pluginId,'asset-approve-fetch',contextActor(c));
       // Guard captured authority/registry before disclosing to the plugin too.
       await c.env.DB.batch([...base.admission(),...base.finish()]);
-      const upstream=await fetcher.fetch(`${PLUGIN_ORIGIN}${key}`);if(!upstream.ok)return 'fetch-failed';
+      const upstream=await inspected!.fetcher.fetch(`${PLUGIN_ORIGIN}${key}`);if(!upstream.ok)return 'fetch-failed';
       const integrity=await computeIntegrity(await limitedBytes(upstream));
       await approve(plan,{plugin_id:pluginId,path:key,integrity,approved_by:actor.email});
       detail.integrity=integrity;
     }else plan.after=plan.after.filter(r=>r.plugin_id!==pluginId||r.path!==key);
-    detail.key_fingerprint=await fingerprint(key);
+    if(!action.endsWith('_all'))detail.key_fingerprint=await fingerprint(key);
+  }else if(action.startsWith('plugin.capability.')){
+    if(key !== 'taxonomy:create')return 'invalid';
+    const plan=plans[3];
+    if(action.endsWith('.approve')){
+      if(!manifest?.capabilities?.includes(key))return 'invalid';
+      await approve(plan,{plugin_id:pluginId,capability:key,approved_by:actor.email});
+    }else plan.after=plan.after.filter(r=>r.plugin_id!==pluginId||r.capability!==key);
+    detail.capability=key;
   }else if(action.startsWith('plugin.file_prefix.')){
     const plan=plans[2];
     if(action.endsWith('.approve')){
-      if(!(manifest.filePrefixes??[]).includes(key))return 'invalid';
+      if(!(manifest?.filePrefixes??[]).includes(key))return 'invalid';
       if(plan.before.some(r=>r.plugin_id!==pluginId&&filePrefixesOverlap(String(r.prefix),key))){
         await c.env.DB.batch([...base.admission(),...plans.map(p=>guard(c,p.table,p.fields,p.before,p.where,p.args)),...base.finish()]);
         throw new PolicyRefusal('conflict','plugin_file_prefix_conflict');
@@ -132,7 +166,7 @@ async function mutate(c:AppContext,{id,action,key='',access=''}:PluginApprovalCh
     }else plan.after=plan.after.filter(r=>r.plugin_id!==pluginId||r.prefix!==key);
     detail.key_fingerprint=await fingerprint(key);
   }else{
-    const plan=plans[1],types=manifest.contentTypes;
+    const plan=plans[1],types=manifest?.contentTypes;
     const scopes=action.endsWith('_all')?[
       ...[...new Set(types?.readTypes??[])].map(pageType=>({pageType,access:'read'})),
       ...[...new Set([...(types?.writeTypes??[]),...Object.keys(types?.blueprint??{})])].map(pageType=>({pageType,access:'write'})),

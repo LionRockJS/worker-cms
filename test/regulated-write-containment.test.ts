@@ -3,7 +3,7 @@ import { createExecutionContext } from 'cloudflare:test';
 import { beforeEach, afterEach, expect, it } from 'vitest';
 import worker from '../src/index';
 import { regulatedRequestWriteBlocked, assertRegulatedWritesAllowed } from '../src/core/http/regulated-writes';
-import { createCustomRole, deleteCustomRole, saveRolePermissions } from '../src/core/auth/role-store';
+import { createCustomRole, deleteCustomRole, saveRolePermissions } from '../src/features/users-roles/role-store';
 import { coreExtensions, registerCoreExtensions } from '../src/core/extensions';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, getPlugins } from '../src/features/plugins/registry';
@@ -122,7 +122,7 @@ it.each([
   ['POST', '/auth/callback'], ['POST', '/auth/refresh'], ['POST', '/auth/logout'], ['POST', '/admin/profile/locale'],
   ['POST', '/admin/pages/8251/unpublish'], ['POST', '/admin/plugins-manage/8252/disconnect'],
   ['POST', '/admin/plugins-manage/8252/assets/revoke'], ['POST', '/admin/plugins-manage/8252/files/revoke'],
-  ['POST', '/admin/plugins-manage/8252/page-types/revoke'], ['POST', '/admin/profile/identities/9/disconnect'],
+  ['POST', '/admin/plugins-manage/8252/page-types/revoke'], ['POST', '/admin/plugins-manage/8252/capabilities/taxonomy-create/revoke'], ['POST', '/admin/profile/identities/9/disconnect'],
   ['POST', '/admin/audit/outages/incident/reconcile'],
 ])('leaves %s %s to its existing authorization/containment guard', (method, path) => {
   expect(regulatedRequestWriteBlocked(configured(), new Request(`https://cms.example.com${path}`, { method }))).toBe(false);

@@ -17,6 +17,7 @@ Content management system on Workers
 - **Plugins** – extend the CMS with separate Worker plugins (lifecycle hooks, content types, fields/blocks, admin pages, publish targets). See [Plugins](#plugins).
 - **Pluggable publish targets** – publishing fans out to one or more adapters: the published D1 database (default), static JSON in an R2 bucket, or any plugin Worker (IPFS, webhooks, search indexes). See [Publish targets](#publish-targets).
 - **Credits & diamonds** – two independent per-user currencies that meter chargeable plugin actions; atomic, overdraft-proof, ledger-audited, each with admin grants, user-to-user transfers, and a shared site-wide pool that covers users who run out. See [Credits](#credits).
+- **Self-hosting** – runs off Cloudflare under Miniflare or standalone workerd, or as a Docker image (`ghcr.io/lionrockjs/0xcms`, amd64 and arm64). See [Docker](#docker).
 
 ---
 
@@ -28,9 +29,32 @@ Content management system on Workers
 npm install
 ```
 
-`npm run setup` interactively configures resources, migrations, and OAuth, and
-can grant the first administrator role on sign-in. When the plugins feature is
-enabled, it also offers an optional private R2 cache for plugin views
+For a local Wrangler instance, run `npm run setup` and accept **Set up this
+clone for local development with Wrangler?** on a fresh setup. The wizard
+creates `wrangler.toml` from the example, sets the localhost origin and callback in the
+gitignored `.dev.vars`, generates a signing key if needed, and applies the D1
+migrations for the enabled databases. It also offers to set up OAuth sign-in:
+register `http://localhost:8787/auth/callback` with each provider, then enter
+the providers, client IDs, and secrets, which go to `.dev.vars`. Then run
+`npm run dev` and open **http://localhost:8787**.
+
+If you already have `wrangler.toml`, choose **continue** to create or complete
+`.dev.vars` with your existing settings. The wizard keeps `wrangler.toml`,
+generates a local signing key if needed, and offers the same OAuth provider
+setup as a fresh local setup. Providers and client IDs already in `.dev.vars`
+or `wrangler.toml` are shown as defaults you can keep, change, or drop. Standard Wrangler development defaults to
+`http://localhost:8787` when the existing config has a public origin. Use
+`npm run setup -- --local` to reuse that public origin for local hosting.
+
+Choose **start over** to save the previous config files under
+`.wrangler/setup-backup-*/` and open the fresh setup wizard. Local database
+files and Cloudflare resources are preserved.
+
+Decline the Wrangler development option to open the full hosting wizard.
+It interactively configures resources, migrations, OAuth, and the
+default timezone for new page schedules. It can also grant the first
+administrator role on sign-in. When the plugins feature is enabled, setup
+offers an optional private R2 cache for plugin views
 (`PLUGIN_VIEWS_BUCKET`, named `<namespace>-plugin-views` by default). To do them by hand, start
 this clone's config from the template. `wrangler.toml` is gitignored, so each
 clone keeps its own and a pull never overwrites it:
@@ -102,6 +126,42 @@ The baseline migrations are generated from the `schema.sql` fragments beside
 the code they belong to — edit those, not `migrations/*.sql`, and run
 `npm run build:migrations`. See [Feature profiles](#feature-profiles) for
 choosing which features a deployment installs.
+
+#### Schema changes
+
+While the CMS is in alpha, a change to a core table goes into its `schema.sql`
+fragment, and so into the regenerated baseline, and nowhere else. There are no
+hand-applied upgrade files. A database created before the change does not get
+it from `wrangler d1 migrations apply`, because it has already recorded
+`0001`: recreate that database, or apply the change to it by hand, before
+deploying code that needs it. The code fails closed (sign-in included) on a
+missing table or column.
+
+`npm run check:schema -- -c <wrangler config>` reads each database's schema
+(one read-only query, no rows) and lists what is missing compared with this
+clone's baseline; add `--local` for the local databases. `npm run deploy` runs
+it last and refuses to deploy onto a database that is missing something.
+
+#### Existing-installation release check
+
+From the release candidate checkout, look up the currently deployed Worker's
+Git commit in its version tag and run the upgrade drill from that commit:
+
+```bash
+npm run check:upgrade -- --from <deployed-commit>
+```
+
+Repeat for each distinct deployed revision you plan to upgrade. The drill
+lists numbered migrations for the private and published databases in apply
+order, checks that both upgraded schemas match a fresh install, and reports
+rollback hazards for review. A mismatch means the numbered migrations alone
+cannot bring that revision up to date. Use the reported differences to plan
+the database changes before deploying.
+
+The drill reconstructs the old revision in local SQLite. Check the actual
+target databases with `npm run check:schema -- -c <wrangler config>` after
+applying any required database changes. Use the same Wrangler config for the
+check and the deploy.
 
 ### 4. Create and bind the private R2 media bucket
 
@@ -206,8 +266,19 @@ Create a `.dev.vars` file for local development (see `.dev.vars.example`).
 
 ### 6. Enable OAuth providers
 
+For an existing Cloudflare Worker, run `npm run upgrade` from the checkout
+whose `wrangler.toml` names that Worker. The wizard reads the deployed callback
+URL and provider list, then prompts for the new provider's credentials.
+It applies the OAuth variables and secret together through the
+[Worker settings API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/methods/edit/)
+without building or uploading Worker code. After Cloudflare accepts the update,
+the wizard saves the provider list and public settings in `wrangler.toml`.
+Sign in with `npx wrangler login` or use a Cloudflare API token with Workers
+Scripts Write permission. If the credentials can access multiple accounts,
+select one with `account_id` in `wrangler.toml` or `CLOUDFLARE_ACCOUNT_ID`.
+
 Set `ENABLED_PROVIDERS` in `wrangler.toml` to a comma-separated list of the
-providers you want to offer on the login page:
+providers you want to offer on the login page when configuring them manually:
 
 ```toml
 ENABLED_PROVIDERS = "eventuai,github,google,microsoft,apple"
@@ -307,7 +378,9 @@ not silently merge logged-out accounts just because their emails match.
 
 `npm run setup` and `npm run setup -- --local` can grant `admin` on account
 creation. Choose an enabled OAuth provider and enter its stable account subject
-(`sub`), or the numeric user ID for GitHub. The wizard saves the grant in
+(`sub`), or the numeric user ID for GitHub. For Google and Apple you can enter
+the account's email instead, which matches when the provider reports it as
+verified. The wizard saves the grant in
 `.dev.vars` for local setup or uploads it after a Cloudflare deployment. Local
 setup keeps existing grants in `.dev.vars`. For Cloudflare, accepting the prompt
 replaces the existing `INITIAL_USER_ROLES` secret if one is set.
@@ -355,6 +428,30 @@ To promote an account created without a grant, update its role to `admin` in the
 npx wrangler d1 execute cms --remote \
   --command "UPDATE users SET role='admin,viewer' WHERE email='you@example.com'"
 ```
+
+#### Page access
+
+Open **Page access** from the built-in page editor. For pages with a custom
+editor, append `?native=1` to the edit URL to open the built-in editor.
+The creator starts as owner,
+and the owner or a site admin can transfer ownership. New pages created in the
+CMS editor start at `600`. Existing pages continue to use site-wide roles
+until the owner or a site admin selects **Enable page access**. Previous editor
+labels can be reviewed and converted during enrollment.
+
+The three digits represent the owner, members of one selected CMS role, and
+other signed-in users. Use `0` for no access, `4` for read, and `6` for read
+and edit. **Add user** grants read and edit on that page. Publishing and deleting
+also require their site-wide capability. The page policy applies to drafts and
+survives trash and restore. Published visibility follows the publish workflow.
+Pages with page access enabled use the built-in editor and are excluded from
+plugin service requests and lifecycle hooks.
+
+Permissions are stored in their own tables, not in the page's `lect`; see
+[docs/page-access.md](docs/page-access.md) for why.
+
+Apply `migrations/0008_page_access.sql` to the private CMS database before deploying
+this version. The published database schema is unchanged.
 
 ### 8. Run locally
 
@@ -430,6 +527,81 @@ if `CRON_PORT` changes):
 
 The generator uses Miniflare's debug configuration export and validates the
 expected service layout; recheck this path when upgrading Miniflare/Wrangler.
+
+#### Docker
+
+The [Dockerfile](Dockerfile) runs `server.mjs` on Node 26 in one container. The
+image holds only the built bundle (`dist/`), the migrations, `wrangler.toml`,
+`cms.features.json` and Wrangler (which brings Miniflare and workerd); no source
+code ships in it. A [workflow](.github/workflows/docker.yml) publishes it for
+`linux/amd64` and `linux/arm64` on every push to `development`:
+
+| Tag | Meaning |
+| --- | --- |
+| `ghcr.io/lionrockjs/0xcms:development` | The newest build; what `compose.yaml` pulls by default |
+| `ghcr.io/lionrockjs/0xcms:sha-<commit>` | That exact build. It never moves, so pin or roll back to it |
+
+The published image is built from `wrangler.example.toml` and the committed
+`cms.features.json`. A local `--build` uses this clone's `wrangler.toml`
+instead, so its non-secret vars end up in that image.
+
+**Setup.** Put the compose settings in `.env` next to `compose.yaml`, and the
+Worker secrets in `cms.env` (both gitignored):
+
+```bash
+echo 'BASE_URL=https://cms.example.com' > .env
+cp cms.env.example cms.env && chmod 600 cms.env
+```
+
+`BASE_URL` is the origin browsers use. At start the entrypoint derives
+`CANONICAL_ORIGIN` and `OAUTH_REDIRECT_URI` (`<BASE_URL>/auth/callback`) from it,
+so one image serves any host. Optional compose settings: `CMS_TAG` (image tag,
+default `development`) and `CMS_PORT` (host port, default `8787`).
+
+In `cms.env`, set `JWT_SECRET` (the container refuses to start without it), then
+uncomment `ENABLED_PROVIDERS` and the credentials for each provider. The file
+links each provider's registration page and says which reject `.local`
+callbacks (Google and Apple). It also takes `INITIAL_USER_ROLES` and
+`ALLOWED_EMAIL_DOMAINS`, as in [steps 6–7](#6-enable-oauth-providers). The
+container reads these from its environment (`CLOUDFLARE_INCLUDE_PROCESS_ENV`), not
+from `.dev.vars`.
+
+**Run.**
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Build from this checkout instead of pulling:
+
+```bash
+docker compose up -d --build
+```
+
+After editing `cms.env`, apply it without a rebuild:
+
+```bash
+docker compose up -d --force-recreate
+```
+
+On every start the entrypoint applies the D1 migrations to `DB` (and to
+`PUBLISHED_DB` when the `publish` feature is on), then serves. D1, R2, Durable
+Objects and queue state live in the `cms-state` volume (`/app/.wrangler/state`),
+so they survive updates and recreation; back up that volume. `server.mjs` fires
+the `*/N` cron triggers itself.
+
+**Reverse proxy.** `compose.yaml` publishes the port on `127.0.0.1` only, because
+Docker's published ports bypass the host firewall. Put an HTTPS proxy on the
+same host in front of it. [docker/nginx/cms.conf](docker/nginx/cms.conf) is a
+working nginx config for `cms.local`: it redirects HTTP to HTTPS, raises the
+body limit for 25 MB media uploads, passes the websocket upgrade the page editor
+uses, and overwrites `CF-Connecting-IP` with the client address so a client
+cannot choose its own (rate limits and the audit log key on it). For another
+host, change `server_name`, the redirect and the certificate paths.
+
+To use [local plugin view files](docs/plugin-view-loading.md#local-files-self-hosted)
+in the container, bind-mount the directory read-only and set `PLUGIN_VIEWS_DIR`
+in `cms.env` to the path inside the container.
 
 ### 9. Deploy
 
@@ -543,6 +715,51 @@ For example:
 
 With no plugins registered, the system is inert and adds no plugin traffic.
 
+### Section template engines
+
+Admin views start with `views/templates/<name>.json`. Each entry in `sections` names a
+`type`, and `order` controls placement. In a core or enabled feature's `views/sections/`
+directory, provide one file per type. For a section named `summary`, any one of
+these files can render its title:
+
+| File | Template |
+| --- | --- |
+| `summary.liquid` | `<h2>{{ section.settings.title }}</h2>` |
+| `summary.hbs` or `summary.handlebars` | `<h2>{{section.settings.title}}</h2>` |
+| `summary.ejs` | `<h2><%= section.settings.title %></h2>` |
+
+JSON settings can use Liquid expressions and filters with any section engine.
+Each section receives page data, render globals, and its own `section` with resolved
+settings and ordered blocks. The build precompiles standalone EJS and Handlebars
+sections. The browser loads each compiled section on first use, shares one
+Handlebars runtime, and loads Liquid when a section, setting, snippet, or layout
+needs it. The default admin layout uses Liquid. EJS templates are executable
+developer-authored code.
+
+### Plugin sections
+
+A trusted UI plugin can mix these same file types in `views/sections/` and reference
+them by extensionless type in its usual `views/templates/*.json` entry point.
+During the plugin build, run the host's compiler against the plugin views directory:
+
+```sh
+node ../cms/tools/build-plugin-sections.mjs ./views
+```
+
+The compiler writes one script per EJS or Handlebars section under
+`views/assets/sections/` and prints the corresponding manifest `assets` entries.
+For example, `sections/summary.hbs` produces `{"path":"/assets/sections/summary.hbs.js"}`.
+Merge those entries with your existing asset declarations, remove declarations for
+retired sections, and serve the generated files at those bare asset paths on the
+plugin Worker. Admins approve the compiled files through the existing plugin asset
+screen and re-approve them when the bytes change.
+
+The browser resolves section types against the current plugin's declared section
+assets and loads each approved script on first use with its pinned integrity hash.
+Declared scripts require approval before rendering. Other types use the existing
+Liquid lookup. Handlebars uses the lazy host runtime.
+All three engines pass their plugin output through the plugin HTML sanitizer.
+
 ### Localized Liquid views
 
 Core and plugin Liquid views share the CMS translation catalog. Use a namespaced
@@ -582,6 +799,13 @@ plus that plugin's dedicated secret on outbound calls, and merges approved
 contributions into the editor. The reverse `/__cms` API requires `x-plugin-id`
 and the matching plugin row's own `x-plugin-secret`; the legacy environment
 `PLUGIN_SECRET` is never accepted for inbound authentication.
+
+Optionally set a decoy with `npx wrangler secret put CANARY_PLUGIN_SECRET` (a
+random value no plugin holds) and plant that value where a leak would expose it.
+Any `/__cms` request presenting it gets the usual wrong-secret response, but is
+recorded as an `auth.access` denial with reason `canary_credential` and its IP is
+refused on `/auth/*` for an hour. Treat a recorded canary as a leak: rotate the
+real secrets, then replace the canary.
 
 A registry row is identified by its URL, but every capability the CMS grants a
 plugin — asset, page-type and file-prefix approvals, host-held `plugin_state`,
@@ -868,6 +1092,59 @@ Counters are namespaced by the caller's manifest id like state, keys share the
 state-key shape, and a plugin may hold 1000. They are **not** dropped when a
 plugin is unregistered, so re-registering never reissues a number.
 
+### Plugin record holds
+
+A plugin keeps its own records from being purged for a retention period (for
+example a completed form kept 7 years) by placing a record hold with a last
+day:
+
+```http
+POST /__cms/holds
+{ "holds": [{ "page_id": 123, "keep_until": "2033-06-30", "reason": "Completed form: 7-year retention" }] }
+→ { "holds": [{ "page_id": 123, "status": "placed", "keep_until": "2033-06-30" }] }
+```
+
+Up to 100 pages per call, each a page of a type the plugin owns or may write.
+`status` is `placed`, `extended` (a later date), `unchanged` (the plugin's hold
+already lasts as long), `held_by_other` (someone else's hold, left alone),
+`not_found` or `forbidden_page_type`. A hold only counts through its
+`keep_until` day, so nothing needs releasing when retention ends. Admins with
+`records:hold` see the plugin's holds under **Admin → Holds** (the page editor
+shows a banner on held pages), and can change their date or release them early.
+
+### Plugin access events
+
+A plugin records access the host cannot see — a page it rendered, a file it
+streamed, a no-login link someone opened — into the host audit log, the same
+`audit_events` stream as the host's own reads:
+
+```http
+POST /__cms/audit/events
+x-acting-user-id: 42          (omit for someone with no CMS account)
+{ "events": [{ "action": "form.download", "page_id": 123, "detail": { "file": "a1b2.pdf" } }] }
+→ { "recorded": 1, "errors": [] }
+
+GET /__cms/audit/events?page_id=123&limit=50&before=<seq>
+→ { "events": [{ "seq", "occurred_at", "action": "form.download", "event_class", "actor_user_id",
+                 "actor_name", "actor_email", "detail" }], "next": <seq or null> }
+```
+
+- Up to 100 events per call, each on a page the plugin may read; others come
+  back in `errors` (`not_found`, `forbidden_page_type`). `event_class` is
+  `read` (default) or `export`.
+- The stored action is `plugin.<action>` with the plugin in `acting_via`, so a
+  plugin cannot write events the host's own signals trust. The acting user is
+  the plugin's assertion and is marked unverified in the detail.
+- `detail` is up to 20 flat scalars (text up to 200 characters). A value that
+  looks like an email is refused (`detail_contains_email`): the trail never
+  holds one. Name a no-login link by a hash of its token instead.
+- A classified page keeps its class's retention, and `phi` fails closed (503:
+  serve nothing). An unclassified page still records, under the
+  `plugin_access` retention class (365 days in D1).
+- Reading returns only the calling plugin's own events on that page and is
+  recorded as `audit.read`. `actor_user_id` is included when available.
+  `actor_name` and `actor_email` are `null`.
+
 ### List filters on lect fields
 
 Besides `pointer_key`/`pointer_value(s)`, `GET /__cms/pages` filters on one
@@ -926,6 +1203,8 @@ volumes.
   2026 security review covered OAuth, sessions, RBAC, cross-origin mutations,
   plugins, uploads/media, rendering/CSP, structured JSON, publishing, and
   dependencies; it is not a substitute for an independent penetration test.
+- For upgrades, run the [existing-installation release check](#existing-installation-release-check)
+  using the currently deployed revision.
 
 ---
 
@@ -969,6 +1248,25 @@ pool credits into that user's balance (`shared:send` / `shared:receive`) —
 users can never pull pool credits into their own account themselves. Admins
 always hold the permission, and it can be granted to any custom role under
 **Roles**.
+
+**Plugin wallets.** A plugin's creator can supply credits to the site through
+`POST /__cms/credits/plugin-grant`. They land in that plugin's own wallet
+(`plugin_credits`, one per plugin and currency, with its own append-only
+`plugin_credit_ledger`) and pay **only that plugin's** costs. Its `metered`
+charges, its `recurring` subscriptions and its share of a `page_create` cost
+try the plugin wallet first, for the full amount or not at all, before the
+member's balance and the shared pool. When a page type is priced by several
+plugins, each plugin's share is offered to its own wallet and whatever is
+left is charged to the member as one spend. Plugin credits never move to a
+member or the pool, so a plugin minting them can only waive its own fees.
+A cost declared with `plugin_only: true` in the manifest is paid **only**
+from the plugin's wallet: when the wallet is short the action is refused
+with 402 (`plugin_only: true` in the payload) instead of falling back to the
+member or the pool — for features a plugin gives away only as far as its own
+credits go. Such costs are marked "Plugin credits only" on the pricing screen.
+Admins see the balance and ledger under **Plugins → Credits**, read-only.
+Unregistering the plugin forfeits the wallet (`plugin:forfeit`), so a Worker
+that later claims the same id inherits nothing.
 
 ### Currencies: credits and diamonds
 
@@ -1025,11 +1323,12 @@ fallback, same currency rules.
   month after creation, so usage cannot dodge the bill by shrinking just before
   the boundary.
 
-The sweep claims a period before spending it (advancing `next_charge_at` under
-a guard on its old value), so concurrent sweeps cannot double-claim and a crash
-misses a charge rather than double-billing. Insufficient credits flip the row to
+The debit, ledger entry, and advance of `next_charge_at` commit together.
+The wallet writes check the subscription's billing fields so concurrent sweeps
+can only settle the period once. Insufficient credits flip the row to
 `past_due` and retry daily; an unreachable plugin defers it an hour; a manifest
-that no longer declares the cost cancels the row.
+that no longer declares the cost cancels the row. An unexpected failure leaves
+that subscription due, logs its ID, and lets the sweep continue.
 
 ---
 
@@ -1054,6 +1353,12 @@ August 2026 table rename, which has to be applied by hand.
 An upgraded deployment may show additional legacy `live_*` tables in `DB`;
 current CMS routes ignore those tables and use `PUBLISHED_DB` instead.
 
+### Moving settings between CMS installations
+
+In **System → Export / import**, select the sections and click **Download settings**. If more records remain, click **Download next part** until **Export complete** appears. Import numbered files in order and finish applying each file before starting the next. Parent tags and fallback languages travel before their dependants.
+
+Each JSON file contains at most 2,000,000 UTF-8 bytes and 64 records. The download link lets you save the most recent file again. A failed request can be retried from the same position. Changing the selection starts a new export. The cursor expires after 24 hours of inactivity. Settings are read live, so keep the source stable during a transfer. If a single record exceeds the byte limit, the screen names the record and its section.
+
 ### Feature profiles
 
 `cms.features.json` is the single switch per feature. Editing it and running
@@ -1065,6 +1370,12 @@ the profile, discovering each slice by convention (`feature.ts` exports one
 `CmsFeature`; `routes.ts` / `routes/*.ts` export `*Routes`). Because those
 generated files are the only thing importing a slice, dropping a feature takes
 its modules out of the bundle.
+
+**Shared screens.** A standalone `{% feature_fragment publish/editor-schedule %}`
+line in a Liquid source view includes `src/features/publish/views/fragments/editor-schedule.liquid`
+when publishing is enabled. The view build removes the line when the feature is
+disabled. Fragments inherit the surrounding Liquid scope and require no additional
+requests from the browser.
 
 **Schema.** Each feature keeps its SQL fragment next to its code —
 `src/features/trash/schema.sql`, `src/features/plugins/schema.sql`, and so on —
@@ -1091,7 +1402,7 @@ A feature may own code, tables, or both.
 | `search` | The advanced-search screen and bulk actions (code only; the query builder is core) |
 | `users-roles` | The user and role admin screens (code only; the tables and permission resolver are core) |
 | `i18n` | The languages and translations screens (code only; see the note below) |
-| `trash` | `trash_pages`, `trash_page_tags`, `trash_page_versions` (+2 indexes, 2 triggers) |
+| `trash` | Soft-delete, restore, and purge. Disabling it preserves retained trash records and refuses page deletion across admin, bulk jobs, and plugin APIs. |
 | `runtime-content-types` | `page_types`, `block_types` (+1 trigger) |
 | `media` | R2 uploads, `/media` delivery, the Files browser — plus `media_files` |
 | `plugin-pointer-indexes` | the 4 `idx_pages_pointer_*` expression indexes (requires `plugins`) — schema only, in its own slice directory |
@@ -1191,8 +1502,8 @@ without them. The optional part is the `i18n` *code* feature — the screens for
 editing locales and translations. Serving the UI's own catalog
 (`GET /admin/i18n/catalog/:locale`) stays core too.
 
-The credits fragment owns `credit_wallets`, both ledgers, shared pools, and
-subscriptions. Disabling the feature therefore leaves no credit-specific
+The credits fragment owns `credit_wallets`, the ledgers, shared pools, plugin
+wallets, and subscriptions. Disabling the feature therefore leaves no credit-specific
 objects in a fresh core-only database.
 
 #### Deleting a feature's source
@@ -1401,6 +1712,7 @@ features on and off.
 ├── src/
 │   ├── index.ts           # Worker entry: fetch, queue, scheduled, DO exports
 │   ├── types.ts           # Env bindings and shared content types
+│   ├── contracts/publish.ts  # Shared types for publish targets and plugin contributors
 │   ├── cms-config.ts      # Compiled base blueprint, blocks and taxonomies
 │   ├── core/              # Never optional
 │   │   ├── extensions.ts  # What core will call if a feature provides it
@@ -1415,10 +1727,10 @@ features on and off.
 │   │   │                  #   config, audit log, submission ingest, validation
 │   │   ├── render/        # Liquid, layout, admin chrome (buildBaseProps/renderPage)
 │   │   ├── pages/         # Bulk page actions (publish/unpublish/trash a set)
-│   │   ├── publish/       # Draft -> live pipeline and the d1/r2 adapters
 │   │   └── durable-objects/  # PageSyncDO (live editing), FormOnceDO (form tokens)
 │   ├── generated/         # GENERATED feature registries; do not edit
 │   ├── features/          # Optional; each directory is one switchable feature
+│   │   ├── publish/       # Publication pipeline, targets, routes and view fragments
 │   │   ├── plugins/       # The plugin platform: registry, hooks, proxy,
 │   │   │                  #   manage UI, and the /__cms write-back API
 │   │   ├── credits/       # Metered billing and the credit summary screen
@@ -1443,7 +1755,17 @@ features on and off.
 ├── dist/views/            # GENERATED by `npm run build:views`: src/core/views
 │                          #   plus the enabled features'. This is the directory
 │                          #   wrangler uploads — never edit it.
-├── dictionary/            # Generated OpenCC tables for Chinese search
+├── dictionary/            # OpenCC tables for Chinese search (copied into dist/views)
+├── server.mjs             # Serve the bundle under Miniflare (self-hosting)
+├── server-workerd.mjs     # Generate a standalone workerd config.capnp
+├── Dockerfile             # Self-hosting image: dist/ + Wrangler, no source
+├── compose.yaml           # Runs ghcr.io/lionrockjs/0xcms behind a local proxy
+├── cms.env.example        # Container secrets template -> cms.env (gitignored)
+├── docker/
+│   ├── entrypoint.sh      # BASE_URL -> origin settings, migrations, then serve
+│   ├── runtime-lock.mjs   # Wrangler's slice of package-lock.json for the image
+│   └── nginx/cms.conf     # TLS reverse proxy example for the container
+├── .github/workflows/docker.yml  # Publishes the multi-arch image to GHCR
 ├── package.json
 ├── tsconfig.json
 ├── wrangler.example.toml  # config template; tests run against it

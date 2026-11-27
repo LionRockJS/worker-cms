@@ -1,0 +1,152 @@
+(() => {
+  const bulkForm = document.querySelector('[data-dashboard-bulk-form]');
+  if (!bulkForm) return;
+  const checkboxes = Array.from(document.querySelectorAll('[data-dashboard-bulk-checkbox]'));
+  const selectAll = document.querySelector('[data-dashboard-bulk-select-all]');
+  const selectedCount = document.querySelector('[data-dashboard-selected-count]');
+  const action = document.querySelector('[data-dashboard-bulk-action]');
+  const scope = document.querySelector('[data-dashboard-bulk-scope]');
+  const tagsPanel = document.querySelector('[data-dashboard-bulk-tags]');
+  const tagSearch = document.querySelector('[data-dashboard-bulk-tag-search]');
+  const tagOptions = Array.from(document.querySelectorAll('[data-dashboard-bulk-tag-option]'));
+  const tagGroups = Array.from(document.querySelectorAll('[data-dashboard-bulk-tag-group]'));
+  const tagChips = document.querySelector('[data-dashboard-bulk-tag-chips]');
+  const tagEmpty = document.querySelector('[data-dashboard-bulk-tag-empty]');
+  const tagLabelAdd = document.querySelector('[data-dashboard-bulk-tag-label-add]');
+  const tagLabelRemove = document.querySelector('[data-dashboard-bulk-tag-label-remove]');
+  const tagHelpAdd = document.querySelector('[data-dashboard-bulk-tag-help-add]');
+  const tagHelpRemove = document.querySelector('[data-dashboard-bulk-tag-help-remove]');
+  const replacementPanel = document.querySelector('[data-dashboard-bulk-replacement]');
+  const searchText = document.querySelector('[data-dashboard-bulk-search-text]');
+  const replacementText = document.querySelector('[data-dashboard-bulk-replacement-text]');
+  const selectedTagIds = new Set();
+
+  const renderTagPicker = () => {
+    const query = (tagSearch?.value || '').trim().toLocaleLowerCase();
+    let matches = 0;
+    tagOptions.forEach((option) => {
+      const id = option.dataset.tagId || '';
+      const name = option.dataset.tagName || option.textContent || '';
+      const visible = !selectedTagIds.has(id) && (!query || name.toLocaleLowerCase().includes(query));
+      option.classList.toggle('hidden', !visible);
+      if (visible) matches += 1;
+    });
+    tagGroups.forEach((group) => {
+      let sibling = group.nextElementSibling;
+      let hasVisibleOption = false;
+      while (sibling && !sibling.matches('[data-dashboard-bulk-tag-group]') && !sibling.matches('[data-dashboard-bulk-tag-empty]')) {
+        if (!sibling.classList.contains('hidden')) hasVisibleOption = true;
+        sibling = sibling.nextElementSibling;
+      }
+      group.classList.toggle('hidden', !hasVisibleOption);
+    });
+    tagEmpty?.classList.toggle('hidden', matches > 0);
+  };
+
+  const addTagChip = (option) => {
+    const id = option.dataset.tagId || '';
+    const name = option.dataset.tagName || option.textContent?.trim() || '';
+    if (!id || selectedTagIds.has(id)) return;
+    selectedTagIds.add(id);
+
+    const chip = document.createElement('span');
+    chip.className = 'inline-flex max-w-full items-center gap-1 rounded bg-indigo-100 py-0.5 pl-2 pr-1 text-xs font-medium text-indigo-700';
+    chip.dataset.dashboardBulkTagChip = id;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'tag_ids';
+    input.value = id;
+    const label = document.createElement('span');
+    label.className = 'truncate';
+    label.textContent = name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'shrink-0 rounded p-0.5 text-indigo-400 hover:bg-indigo-200 hover:text-indigo-700';
+    remove.setAttribute('aria-label', '{{ "view_strings.sections_editor.remove_tag" | t }}');
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      selectedTagIds.delete(id);
+      chip.remove();
+      renderTagPicker();
+    });
+    chip.append(input, label, remove);
+    tagChips?.appendChild(chip);
+    renderTagPicker();
+  };
+
+  tagOptions.forEach((option) => option.addEventListener('click', () => addTagChip(option)));
+  tagSearch?.addEventListener('input', renderTagPicker);
+  const syncAction = () => {
+    const addingTags = action?.value === 'add_tag';
+    const removingTags = action?.value === 'remove_tag';
+    const changingTags = addingTags || removingTags;
+    const replacingText = action?.value === 'replace_text';
+    tagsPanel?.classList.toggle('hidden', !changingTags);
+    tagsPanel?.setAttribute('aria-hidden', changingTags ? 'false' : 'true');
+    replacementPanel?.classList.toggle('hidden', !replacingText);
+    replacementPanel?.setAttribute('aria-hidden', replacingText ? 'false' : 'true');
+    if (searchText) {
+      searchText.required = replacingText;
+      searchText.disabled = !replacingText;
+    }
+    if (replacementText) replacementText.disabled = !replacingText;
+    tagLabelAdd?.classList.toggle('hidden', !addingTags);
+    tagLabelRemove?.classList.toggle('hidden', !removingTags);
+    tagHelpAdd?.classList.toggle('hidden', !addingTags);
+    tagHelpRemove?.classList.toggle('hidden', !removingTags);
+    if (changingTags) renderTagPicker();
+  };
+  action?.addEventListener('change', syncAction);
+
+  const countSelected = () => checkboxes.filter((checkbox) => checkbox.checked).length;
+  const syncSelection = () => {
+    const selected = countSelected();
+    if (selectedCount) selectedCount.textContent = String(selected);
+    bulkForm.classList.toggle('hidden', selected === 0);
+    bulkForm.setAttribute('aria-hidden', selected === 0 ? 'true' : 'false');
+    if (selectAll) {
+      selectAll.checked = selected > 0 && selected === checkboxes.length;
+      selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
+    }
+  };
+
+  selectAll?.addEventListener('change', () => {
+    checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+    syncSelection();
+  });
+  checkboxes.forEach((checkbox) => checkbox.addEventListener('change', syncSelection));
+  bulkForm.addEventListener('submit', (event) => {
+    const selected = countSelected();
+    if (selected === 0) {
+      event.preventDefault();
+      return;
+    }
+    const changingTags = action?.value === 'add_tag' || action?.value === 'remove_tag';
+    if (changingTags && selectedTagIds.size === 0) {
+      event.preventDefault();
+      alert(bulkForm.dataset.dashboardBulkChooseTag || 'Choose at least one tag');
+      return;
+    }
+    if (action?.value === 'replace_text' && !searchText?.value) {
+      event.preventDefault();
+      alert(bulkForm.dataset.dashboardBulkEnterSearch || 'Enter text to find');
+      searchText?.focus();
+      return;
+    }
+    if (action?.value === 'replace_text') return;
+    const actionLabel = action?.selectedOptions?.[0]?.textContent?.trim() || action?.value || '';
+    const subject = scope?.value === 'all'
+      ? bulkForm.dataset.dashboardBulkAllSubject
+      : selected + ' ' + (selected === 1
+        ? bulkForm.dataset.dashboardBulkPageSingular
+        : bulkForm.dataset.dashboardBulkPagePlural);
+    const message = (bulkForm.dataset.dashboardBulkConfirmTemplate || 'Confirm {action} for {subject}?')
+      .replace('{action}', actionLabel)
+      .replace('{subject}', subject || '');
+    if (!confirm(message)) {
+      event.preventDefault();
+    }
+  });
+  syncAction();
+  syncSelection();
+})();

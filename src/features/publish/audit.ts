@@ -1,7 +1,7 @@
 import type { Env, Page } from '../../types';
 import { writeBackgroundAuditRows, type AuditActor } from '../../core/db/audit';
 import { prepareReadAudits, type PendingRead } from '../../core/http/access-log';
-import type { PublishAdapter, PublishedTag } from '../../core/publish/adapter';
+import type { PublishAdapter, PublishedTag } from '../../contracts/publish';
 import { auditOutboundIntent } from '../../core/http/outbound-audit';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 

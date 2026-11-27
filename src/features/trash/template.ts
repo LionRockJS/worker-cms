@@ -103,6 +103,10 @@ export interface HoldRow {
   placed_at: string;
   released_by: number | null;
   released_at: string | null;
+  placed_by_plugin?: string | null;
+  keep_until?: string | null;
+  /** Unreleased and not past keep_until (computed by the query). */
+  active?: number;
 }
 
 export async function holdsPage(views: Fetcher, opts: BaseTemplateProps & { holds: HoldRow[]; flash?: string }): Promise<string> {
@@ -116,7 +120,11 @@ export async function holdsPage(views: Fetcher, opts: BaseTemplateProps & { hold
       reason: hold.reason,
       placedBy: hold.placed_by,
       placedAt: hold.placed_at,
-      active: hold.released_at === null,
+      active: hold.active === undefined ? hold.released_at === null : Boolean(hold.active),
+      expired: hold.released_at === null && hold.active !== undefined && !hold.active,
+      plugin: hold.placed_by_plugin ?? '',
+      keepUntil: hold.keep_until ?? '',
+      keepUntilAction: `/admin/holds/${hold.id}/keep-until`,
       releasedBy: hold.released_by,
       releasedAt: hold.released_at,
       releaseAction: `/admin/holds/${hold.id}/release`,

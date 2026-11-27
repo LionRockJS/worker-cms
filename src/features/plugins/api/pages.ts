@@ -1,3 +1,4 @@
+import { legacyPageFilter } from '../../../core/auth/page-access';
 // Page read/write for /__cms: list, search, get, create, update, duplicate,
 // publish and delete.
 //
@@ -18,7 +19,7 @@ import type {
   PageListBatchInput,
   PluginAuth,
 } from './types';
-import type { LivePageSnapshot } from '../../../core/publish/adapter';
+import type { LivePageSnapshot } from '../../../contracts/publish';
 import type { AppContext } from '../../../core/http/context';
 import { authenticatePlugin, forbiddenPageType, forbiddenPageTypeBody } from './auth';
 import { recordPageReads, recordRead, recordTagReads } from '../../../core/http/access-log';
@@ -39,7 +40,7 @@ import {
 } from './serialize';
 import { createPages } from './create';
 import { emitPluginHooks } from './hooks';
-import { chineseSearchVariants } from '../../../core/db/chinese';
+import { chineseSearchPattern } from '../../../core/db/chinese';
 import { advancedSearchOperator, advancedSearchOrder, advancedSearchSort, performAdvancedSearch } from '../../../core/db/search';
 import { blueprintToLect, mergeLects, safeParseLect, stringifyLect } from '../../../core/db/lect';
 import { resolveCmsConfig } from '../../../core/db/content-config';
@@ -234,7 +235,7 @@ pagesApiRoutes.get('/pages', async (c) => {
   const lookupIds = idsParam.map((value) => parseInt(value, 10));
 
   const params: unknown[] = [pageType];
-  let where = 'WHERE page_type = ?';
+  let where = `WHERE page_type = ? AND ${legacyPageFilter('p.uuid')}`;
   if (lookupIds.length || slugsParam.length) {
     // JSON-array binds (not one placeholder per value) keep a 500-entry lookup
     // within D1's 100-bound-parameters-per-query limit.
@@ -285,9 +286,9 @@ pagesApiRoutes.get('/pages', async (c) => {
     }
   }
   if (q) {
-    const terms = chineseSearchVariants(q).map((variant) => `%${variant.replaceAll(' ', '%')}%`);
-    where += ` AND (${terms.map(() => '(name LIKE ? OR slug LIKE ? OR lect LIKE ?)').join(' OR ')})`;
-    for (const term of terms) params.push(term, term, term);
+    const { operator, pattern } = await chineseSearchPattern(q);
+    where += ` AND (name ${operator} ? OR slug ${operator} ? OR lect ${operator} ?)`;
+    params.push(pattern, pattern, pattern);
   }
 
   // count=0 skips the COUNT(*) (a scan of the whole filtered set) — callers
@@ -296,7 +297,7 @@ pagesApiRoutes.get('/pages', async (c) => {
 
   const select = fields ? [...new Set(['id', 'uuid', ...fields])].join(', ') : '*';
   const [rows, totalRow] = await Promise.all([
-    c.env.DB.prepare(`SELECT ${select} FROM pages ${where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`)
+    c.env.DB.prepare(`SELECT ${select} FROM pages p ${where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`)
       .bind(...params, limit, offset)
       .all<Page>(),
     skipCount
@@ -427,7 +428,7 @@ pagesApiRoutes.post('/pages/list-batch', async (c) => {
     const sort = LIST_BATCH_SORTS[query.sort];
     // Field and range paths are inlined (keys validated by LECT_FIELD_KEY) so
     // an expression index on them can be used, as in GET /pages.
-    let where = 'page_type = ?';
+    let where = `page_type = ? AND ${legacyPageFilter('pages.uuid')}`;
     const whereParams: unknown[] = [query.pageType];
     if (query.ids) {
       where += ' AND id IN (SELECT value FROM json_each(?))';
@@ -582,6 +583,7 @@ pagesApiRoutes.post('/pages/search', async (c) => {
   const operator = advancedSearchOperator(typeof body.operator === 'string' ? body.operator : undefined);
 
   const result = await performAdvancedSearch(c.env.DB, pageTypes, criteria, operator, {
+    access: { sql: legacyPageFilter('p.uuid'), args: [] },
     limit,
     page,
     sort,
@@ -616,7 +618,7 @@ pagesApiRoutes.get('/pages/:id', async (c) => {
   const id = asFiniteNumber(c.req.param('id'));
   if (id === null) return c.json({ error: 'invalid_id' }, 400);
 
-  const page = await c.env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(id).first<Page>();
+  const page = await c.env.DB.prepare(`SELECT * FROM pages WHERE id = ? AND ${legacyPageFilter('pages.uuid')}`).bind(id).first<Page>();
   if (!page) return c.json({ error: 'not_found' }, 404);
   if (!pageTypeScopeAllows(auth.readableTypes, page.page_type ?? '')) return forbiddenPageType(c, auth, page.page_type ?? '');
   recordPageReads('page.read', [page], { actor: apiActor(c, auth.pluginId) });

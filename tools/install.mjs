@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
+import { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import {
   DEFAULT_EXPIRES_IN_DAYS,
   MAX_EXPIRES_IN_DAYS,
@@ -16,12 +21,14 @@ import {
 } from './apple-client-secret.mjs';
 
 const CONFIG_PATH = new URL('../wrangler.toml', import.meta.url);
+const UPGRADE_CONFIG_PATH = new URL('../.wrangler-upgrade.toml', import.meta.url);
 const EXAMPLE_CONFIG_PATH = new URL('../wrangler.example.toml', import.meta.url);
-const MANUAL_MIGRATIONS = new URL('../migrations/manual/', import.meta.url);
 const FEATURES_PATH = new URL('../cms.features.json', import.meta.url);
 const DEV_VARS_PATH = new URL('../.dev.vars', import.meta.url);
+const WRANGLER_STATE_PATH = new URL('../.wrangler/', import.meta.url);
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const LOCAL_ORIGIN = 'http://localhost:8787';
 const PROVIDERS = {
   github: {
     clientId: 'GITHUB_CLIENT_ID',
@@ -50,19 +57,38 @@ const PROVIDERS = {
   },
 };
 
+const upgradeMode = process.argv.includes('--upgrade');
+const operation = upgradeMode ? 'Upgrade' : 'Setup';
+
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
-  console.log(`0xCMS interactive Cloudflare setup
+  console.log(upgradeMode ? `0xCMS OAuth upgrade
 
 Usage:
-  npm run setup             ask where the CMS runs
-  npm run setup -- --local  run it on this machine (Wrangler, server.mjs, or workerd)
+  npm run upgrade
+
+Add one OAuth provider to the Worker configured in this clone's wrangler.toml.
+The wizard uses the deployed callback URL and updates the Worker's settings.
+` : `0xCMS interactive setup
+
+Usage:
+  npm run setup             choose Wrangler development or full hosting setup
+  npm run setup -- --local  full hosting setup on this machine, including OAuth
+
+For Wrangler development, setup creates wrangler.toml if needed, configures
+.dev.vars for localhost:8787, and applies the local D1 migrations. When no
+OAuth provider is configured, it offers to add providers, client IDs, and
+secrets to .dev.vars.
+
+With an existing wrangler.toml, continue to configure .dev.vars or start over
+with a fresh setup. Starting over saves the old config files under .wrangler/.
 
 The wizard asks for one namespace and derives every resource name from it
 (<ns>, <ns>-published, <ns>-media, <ns>-admin-jobs, <ns>-audit,
 <ns>-plugin-views); each can still be overridden. It creates or reuses D1, R2, and Queue resources, updates
 wrangler.toml and the feature switches in cms.features.json, applies migrations,
 optionally provisions the plugin view cache, and configures OAuth secrets and
-the first admin. The first bootstrap deploy bypasses the release gate. Later
+the first admin. It also sets the default timezone for new page schedules.
+The first bootstrap deploy bypasses the release gate. Later
 releases go through "npm run deploy".
 
 A local setup runs the CMS on this machine instead of Cloudflare Workers:
@@ -74,12 +100,29 @@ tunnel or reverse proxy that forwards that domain to this machine.`);
   process.exit(0);
 }
 
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  console.error('Setup is interactive and must be run in a terminal.');
+if (upgradeMode && process.argv.length !== 3) {
+  console.error('Usage: npm run upgrade');
   process.exit(1);
 }
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+if (!process.stdin.isTTY || !process.stdout.isTTY) {
+  console.error(`${operation} is interactive and must be run in a terminal.`);
+  process.exit(1);
+}
+
+let hiddenInput = false;
+const promptOutput = new Writable({
+  write(chunk, encoding, done) {
+    if (hiddenInput) done();
+    else process.stdout.write(chunk, encoding, done);
+  },
+});
+const rl = createInterface({
+  input: process.stdin,
+  output: promptOutput,
+  terminal: true,
+  historySize: 0,
+});
 
 function command(args, { capture = false, input } = {}) {
   const interactive = !capture && input === undefined;
@@ -107,11 +150,11 @@ function run(args, options) {
   return result;
 }
 
-function runNpm(args) {
+function runNpm(args, { stdin = 'inherit' } = {}) {
   rl.pause();
   const result = spawnSync(NPM, args, {
     cwd: new URL('..', import.meta.url),
-    stdio: 'inherit',
+    stdio: [stdin, 'inherit', 'inherit'],
   });
   rl.resume();
   if (result.error) throw result.error;
@@ -132,6 +175,27 @@ async function confirm(label, defaultValue = true) {
   const answer = (await rl.question(`${label} [${hint}]: `)).trim().toLowerCase();
   if (!answer) return defaultValue;
   return answer === 'y' || answer === 'yes';
+}
+
+async function ensureDependencies() {
+  if (existsSync(new URL('../node_modules/wrangler/package.json', import.meta.url))) return;
+  console.log('Dependencies are not installed.');
+  if (!await confirm('Run npm install now?')) throw new Error('Run "npm install" first.');
+  runNpm(['install']);
+}
+
+async function askSecret(label, optional = false) {
+  while (true) {
+    process.stdout.write(`${label}: `);
+    hiddenInput = true;
+    try {
+      const value = await rl.question('');
+      if (optional || value.trim()) return value;
+    } finally {
+      hiddenInput = false;
+      process.stdout.write('\n');
+    }
+  }
 }
 
 function resourceName(value) {
@@ -308,17 +372,44 @@ function setFirstSectionValue(lines, section, key, value) {
   lines[range.start + index] = `${key} = ${JSON.stringify(value)}`;
 }
 
-function setVar(lines, key, value) {
+function varsRange(lines) {
   const start = lines.findIndex((line) => line.trim() === '[vars]');
   if (start === -1) throw new Error('Could not find [vars] in wrangler.toml.');
   let end = start + 1;
   while (end < lines.length && !lines[end].trim().startsWith('[')) end += 1;
+  return { start, end };
+}
 
+function setVar(lines, key, value) {
+  const { start, end } = varsRange(lines);
   const matcher = new RegExp(`^\\s*#?\\s*${key}\\s*=`);
-  const index = lines.slice(start + 1, end).findIndex((line) => matcher.test(line));
+  const entries = lines.slice(start + 1, end);
+  const active = entries.findIndex((line) => matcher.test(line) && !line.trimStart().startsWith('#'));
+  const index = active === -1 ? entries.findIndex((line) => matcher.test(line)) : active;
   const replacement = `${key} = ${JSON.stringify(value)}`;
   if (index === -1) lines.splice(end, 0, replacement);
   else lines[start + 1 + index] = replacement;
+}
+
+function isDefaultTimezone(value) {
+  if (/^[+-]/.test(value)) return /^[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?$/.test(value);
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function configuredDefaultTimezone(config) {
+  const lines = config.split('\n');
+  const { start, end } = varsRange(lines);
+  for (const line of lines.slice(start + 1, end)) {
+    const match = /^\s*DEFAULT_TIMEZONE\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/.exec(line);
+    const value = (match?.[1] ?? match?.[2])?.trim();
+    if (value && isDefaultTimezone(value)) return value;
+  }
+  return '+0800';
 }
 
 async function updateConfig(settings) {
@@ -374,6 +465,7 @@ async function updateConfig(settings) {
   setVar(lines, 'ENABLED_PROVIDERS', settings.providers.join(','));
   setVar(lines, 'OAUTH_REDIRECT_URI', `${settings.canonicalOrigin}/auth/callback`);
   setVar(lines, 'CANONICAL_ORIGIN', settings.canonicalOrigin);
+  if (settings.defaultTimezone) setVar(lines, 'DEFAULT_TIMEZONE', settings.defaultTimezone);
 
   for (const provider of settings.providers) {
     setVar(lines, PROVIDERS[provider].clientId, settings.clientIds[provider]);
@@ -386,14 +478,9 @@ async function updateConfig(settings) {
   console.log(existing === null ? 'Created wrangler.toml from wrangler.example.toml.' : 'Updated wrangler.toml.');
 }
 
-function devVar(lines, key) {
-  const line = lines.find((item) => item.startsWith(`${key}=`));
-  return line?.slice(key.length + 1) || undefined;
-}
-
-/** Replaces KEY= (or a commented-out "# KEY=") in place, else appends it. */
 function setDevVar(lines, key, value) {
-  let index = lines.findIndex((line) => line.startsWith(`${key}=`));
+  const assignment = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*(?:=|:\\s)`);
+  let index = lines.findLastIndex((line) => assignment.test(line));
   if (index === -1) index = lines.findIndex((line) => new RegExp(`^#\\s*${key}=`).test(line));
   const replacement = `${key}=${value}`;
   if (index !== -1) lines[index] = replacement;
@@ -409,10 +496,25 @@ async function firstAdminGrant(providers, prompt) {
     providers[0],
     (value) => providers.includes(value.toLowerCase()),
   )).toLowerCase();
-  const providerUserId = provider === 'github'
-    ? await ask('First admin\'s GitHub numeric user ID', undefined, (value) => /^[1-9]\d*$/.test(value))
-    : await ask(`First admin's ${provider} account subject (sub)`);
-
+  if (provider === 'github') {
+    const providerUserId = await ask('First admin\'s GitHub numeric user ID', undefined, (value) => /^[1-9]\d*$/.test(value));
+    return JSON.stringify([{ provider, providerUserId, roles: ['admin'] }]);
+  }
+  // Only Google and Apple send the email_verified claim an email grant needs;
+  // the CMS treats every other provider's email as unverified.
+  if (provider === 'google' || provider === 'apple') {
+    // Same pattern as initialUserRoles(): one bad entry rejects the whole config.
+    const value = await ask(`First admin's ${provider} email or account subject (sub)`, undefined,
+      (answer) => Boolean(answer) && (!answer.includes('@') || /^[^\s@*]+@[^\s@*]+$/.test(answer)));
+    return JSON.stringify([value.includes('@')
+      ? { provider, email: value, roles: ['admin'] }
+      : { provider, providerUserId: value, roles: ['admin'] }]);
+  }
+  const providerUserId = await ask(
+    `First admin's ${provider} account subject (sub, not an email)`,
+    undefined,
+    (value) => Boolean(value) && !value.includes('@'),
+  );
   return JSON.stringify([{ provider, providerUserId, roles: ['admin'] }]);
 }
 
@@ -422,16 +524,18 @@ async function firstAdminGrant(providers, prompt) {
  * .dev.vars overrides [vars] and a stale value there would win over the
  * origin just entered. Existing secrets are kept unless replaced.
  */
-async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
+async function writeLocalSecrets({ canonicalOrigin, providers = [], clientIds = {}, vars: oauthVars = {} }) {
   const existing = await readFile(DEV_VARS_PATH, 'utf8').catch((error) => {
     if (error.code === 'ENOENT') return null;
     throw error;
   });
+  const vars = parseEnv(existing ?? '');
   const lines = (existing ?? '# Local development only. Gitignored; never reuse these values in a deployed Worker.\n').split('\n');
 
   setDevVar(lines, 'CANONICAL_ORIGIN', canonicalOrigin);
   setDevVar(lines, 'OAUTH_REDIRECT_URI', `${canonicalOrigin}/auth/callback`);
-  if (devVar(lines, 'JWT_SECRET')) {
+  for (const [key, value] of Object.entries(oauthVars)) setDevVar(lines, key, value);
+  if (vars.JWT_SECRET?.length >= 32 && vars.JWT_SECRET !== 'replace-with-a-random-32-byte-hex-string') {
     console.log('Keeping the existing JWT_SECRET in .dev.vars.');
   } else {
     setDevVar(lines, 'JWT_SECRET', randomBytes(32).toString('hex'));
@@ -440,17 +544,17 @@ async function writeLocalSecrets({ canonicalOrigin, providers, clientIds }) {
 
   for (const provider of providers) {
     const key = PROVIDERS[provider].secret;
-    if (devVar(lines, key) && !await confirm(`Replace the existing ${key} in .dev.vars?`, false)) continue;
+    if (vars[key] && !await confirm(`Replace the existing ${key} in .dev.vars?`, false)) continue;
     const secret = provider === 'apple'
       ? await appleClientSecret(clientIds.apple)
-      : await ask(`${provider} client secret (blank to add later)`, undefined, () => true);
+      : (await askSecret(`${provider} client secret (input hidden, blank to add later)`, true)).trim();
     if (secret) setDevVar(lines, key, secret);
     else console.log(`Add ${key} to .dev.vars before signing in with ${provider}.`);
   }
 
   if (lines.some((line) => /^\s*(?:export\s+)?INITIAL_USER_ROLES\s*(?:=|:\s)/.test(line))) {
     console.log('Keeping the existing INITIAL_USER_ROLES in .dev.vars.');
-  } else {
+  } else if (providers.length) {
     const grant = await firstAdminGrant(providers, 'Configure a first admin in .dev.vars?');
     if (grant) {
       // Keep the dotenv quoting and any variable expansion out of the JSON value.
@@ -526,12 +630,290 @@ the .p8 key you download once from
   return token;
 }
 
+function oauthUpgradeConfig(original, vars) {
+  const newline = original.includes('\r\n') ? '\r\n' : '\n';
+  const lines = original.split(newline);
+  for (const [name, value] of Object.entries(vars)) setVar(lines, name, value);
+  return lines.join(newline);
+}
+
+function oauthProviders(value) {
+  return typeof value === 'string' ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function workerVariable(bindings, name) {
+  return bindings.find((binding) => binding.name === name && binding.type === 'plain_text')?.text;
+}
+
+function oauthUpgradeVars(bindings, provider, clientId, microsoftTenant) {
+  const enabledBinding = bindings.find(({ name }) => name === 'ENABLED_PROVIDERS');
+  if (enabledBinding && enabledBinding.type !== 'plain_text') {
+    throw new Error('The deployed ENABLED_PROVIDERS binding must be a text variable.');
+  }
+  const providers = oauthProviders(workerVariable(bindings, 'ENABLED_PROVIDERS'));
+  if (!providers.some((name) => name.toLowerCase() === provider)) providers.push(provider);
+  return {
+    ENABLED_PROVIDERS: providers.join(','),
+    [PROVIDERS[provider].clientId]: clientId,
+    ...(provider === 'microsoft' ? { MICROSOFT_TENANT: microsoftTenant } : {}),
+  };
+}
+
+function oauthSettingsForm(bindings, vars, secretName, secret) {
+  const changes = [
+    ...Object.entries(vars).map(([name, text]) => ({ name, type: 'plain_text', text })),
+    { name: secretName, type: 'secret_text', text: secret },
+  ];
+  const changedNames = new Set(changes.map(({ name }) => name));
+  // The settings API replaces the binding list. Name and type alone inherit an
+  // existing binding, including secrets whose values are omitted on reads.
+  const retained = bindings.filter(({ name }) => !changedNames.has(name))
+    .map(({ name, type }) => ({ name, type }));
+  const form = new FormData();
+  form.set('settings', JSON.stringify({ bindings: [...retained, ...changes] }));
+  return form;
+}
+
+async function workerSettings(accountId, workerName, headers, body) {
+  const method = body ? 'PATCH' : 'GET';
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}/settings`;
+  const response = await fetch(url, { method, headers, body, redirect: 'error', signal: AbortSignal.timeout(30_000) });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.success !== true) {
+    // The API can report fields from the submitted bindings. Log only codes.
+    const codes = payload?.errors?.map(({ code }) => code).filter(Number.isInteger).join(', ');
+    throw new Error(`Cloudflare could not ${body ? 'update' : 'read'} the settings for ${workerName} (HTTP ${response.status}${codes ? `, codes ${codes}` : ''}).`);
+  }
+  if (!body && !Array.isArray(payload.result?.bindings)) throw new Error('Cloudflare did not return the Worker bindings.');
+  return payload.result;
+}
+
+function cloudflareCredentials(config) {
+  const authResult = command(['auth', 'token', '--json', '--config', 'wrangler.toml'], { capture: true });
+  if (authResult.status !== 0) throw new Error('Run npx wrangler login or set CLOUDFLARE_API_TOKEN.');
+  let auth;
+  try {
+    auth = JSON.parse(authResult.stdout);
+  } catch {
+    throw new Error('Could not read credentials from Wrangler.');
+  }
+  const headers = auth.type === 'api_key'
+    ? { 'X-Auth-Key': auth.key, 'X-Auth-Email': auth.email }
+    : { Authorization: `Bearer ${auth.token}` };
+  let accountId = config.account_id || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+  if (!accountId) {
+    const { accounts } = JSON.parse(run(['whoami', '--json', '--config', 'wrangler.toml'], { capture: true }).stdout);
+    if (accounts?.length === 1) accountId = accounts[0].id;
+  }
+  if (!/^[a-f0-9]{32}$/i.test(accountId ?? '')) {
+    throw new Error('Set account_id in wrangler.toml or set CLOUDFLARE_ACCOUNT_ID to select the Worker account.');
+  }
+  return { accountId, headers };
+}
+
+async function upgrade() {
+  const original = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') throw new Error('Expected an existing deployment config at wrangler.toml.');
+    throw error;
+  });
+  const { unstable_readConfig } = await import('wrangler');
+  const config = unstable_readConfig({ config: fileURLToPath(CONFIG_PATH) });
+  const { name, vars } = config;
+  if (!name) throw new Error('Set the deployed Worker name in wrangler.toml.');
+  const { accountId, headers } = cloudflareCredentials(config);
+  const { bindings } = await workerSettings(accountId, name, headers);
+  const callback = workerVariable(bindings, 'OAUTH_REDIRECT_URI');
+  if (!callback || URL.parse(callback)?.protocol !== 'https:') {
+    throw new Error('Set an HTTPS OAUTH_REDIRECT_URI on the deployed Worker.');
+  }
+  const enabled = workerVariable(bindings, 'ENABLED_PROVIDERS');
+  const providers = oauthProviders(enabled);
+  const localProviders = oauthProviders(vars.ENABLED_PROVIDERS);
+  const available = Object.keys(PROVIDERS).filter((provider) => [providers, localProviders]
+    .some((list) => !list.some((entry) => entry.toLowerCase() === provider)));
+  if (!available.length) {
+    console.log('All supported OAuth providers are already enabled.');
+    return;
+  }
+
+  console.log(`\nWorker: ${name} (account ${accountId})\nCurrent OAuth providers: ${providers.join(', ') || '(none)'}\nCallback: ${callback}\n`);
+  const provider = await ask(
+    `OAuth provider to add (${available.join(', ')})`, undefined,
+    (value) => available.includes(value.toLowerCase()),
+  ).then((value) => value.toLowerCase());
+  console.log(`Register ${callback} with ${provider}.\n${PROVIDERS[provider].instructions}`);
+  const clientIdName = PROVIDERS[provider].clientId;
+  const clientId = await ask(`${provider} client ID`, workerVariable(bindings, clientIdName) || vars[clientIdName] || undefined);
+  const microsoftTenant = provider === 'microsoft'
+    ? await ask('Microsoft tenant', workerVariable(bindings, 'MICROSOFT_TENANT') || vars.MICROSOFT_TENANT || 'common')
+    : undefined;
+  const secret = provider === 'apple'
+    ? await appleClientSecret(clientId)
+    : await askSecret(`${provider} client secret (input hidden)`);
+  if (!await confirm(`Apply ${provider} settings to ${name}?`, false)) return;
+  const changes = oauthUpgradeVars(bindings, provider, clientId, microsoftTenant);
+  await writeFile(UPGRADE_CONFIG_PATH, oauthUpgradeConfig(original, changes), { flag: 'wx', mode: 0o600 });
+  try {
+    if (await readFile(CONFIG_PATH, 'utf8') !== original) {
+      throw new Error('wrangler.toml changed during the upgrade. Rerun npm run upgrade.');
+    }
+    const latest = (await workerSettings(accountId, name, headers)).bindings;
+    if (workerVariable(latest, 'OAUTH_REDIRECT_URI') !== callback || workerVariable(latest, 'ENABLED_PROVIDERS') !== enabled) {
+      throw new Error('The deployed OAuth settings changed during the upgrade. Rerun npm run upgrade.');
+    }
+    const body = oauthSettingsForm(latest, changes, PROVIDERS[provider].secret, secret);
+    await workerSettings(accountId, name, headers, body);
+    if (await readFile(CONFIG_PATH, 'utf8') !== original) {
+      throw new Error(`Cloudflare enabled ${provider}, but wrangler.toml changed during the update. Rerun npm run upgrade to sync it.`);
+    }
+    await rename(UPGRADE_CONFIG_PATH, CONFIG_PATH);
+  } finally {
+    await rm(UPGRADE_CONFIG_PATH, { force: true });
+  }
+  console.log(`\nEnabled ${provider} on ${name} and updated wrangler.toml.`);
+}
+
+async function askOAuthClients(callback, defaults = {}) {
+  let providers;
+  while (!providers) {
+    const answer = await ask('OAuth providers (comma-separated)', defaults.providers?.join(',') || 'github');
+    const selected = [...new Set(answer.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
+    const invalid = selected.filter((provider) => !Object.hasOwn(PROVIDERS, provider));
+    if (selected.length && !invalid.length) providers = selected;
+    else console.log(`Choose from: ${Object.keys(PROVIDERS).join(', ')}.`);
+  }
+
+  console.log(`\nRegister this callback URL with every OAuth provider:\n  ${callback}\n`);
+  const clientIds = {};
+  let microsoftTenant;
+  for (const provider of providers) {
+    console.log(`${provider}: ${PROVIDERS[provider].instructions}`);
+    clientIds[provider] = await ask(`${provider} client ID`, defaults.clientIds?.[provider]);
+    if (provider === 'microsoft') {
+      microsoftTenant = await ask('Microsoft tenant', defaults.microsoftTenant || 'common');
+    }
+  }
+  return { providers, clientIds, microsoftTenant };
+}
+
+/**
+ * Local counterpart of the provider prompts: the choices go to .dev.vars,
+ * which overrides wrangler.toml's [vars] under wrangler dev. Providers found
+ * in the existing config are only defaults, so they can be dropped or changed.
+ */
+async function askLocalOAuthClients(canonicalOrigin, defaults = {}) {
+  const question = defaults.providers?.length
+    ? 'Set up local OAuth sign-in (providers, client IDs, secrets)?'
+    : 'No OAuth provider is configured for local sign-in. Set one up now?';
+  if (!await confirm(question, !defaults.providers?.length)) return {};
+  const { providers, clientIds, microsoftTenant } = await askOAuthClients(`${canonicalOrigin}/auth/callback`, defaults);
+  const vars = { ENABLED_PROVIDERS: providers.join(',') };
+  for (const provider of providers) vars[PROVIDERS[provider].clientId] = clientIds[provider];
+  if (microsoftTenant) vars.MICROSOFT_TENANT = microsoftTenant;
+  return { providers, clientIds, vars };
+}
+
+async function setupLocalDevelopment() {
+  const template = await readFile(EXAMPLE_CONFIG_PATH, 'utf8');
+  try {
+    await writeFile(CONFIG_PATH, template, { flag: 'wx' });
+    console.log('Created wrangler.toml from wrangler.example.toml.');
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    console.log('Keeping the existing wrangler.toml.');
+  }
+
+  const oauth = await askLocalOAuthClients(LOCAL_ORIGIN);
+  await writeLocalSecrets({ canonicalOrigin: LOCAL_ORIGIN, ...oauth });
+  runNpm(['run', 'db:migrate'], { stdin: 'ignore' });
+  console.log(`\nLocal setup complete. Start with npm run dev and open ${LOCAL_ORIGIN}.`);
+  if (!oauth.providers) {
+    console.log(`For sign-in, configure an OAuth client with callback ${LOCAL_ORIGIN}/auth/callback.`);
+  }
+}
+
+async function continueLocalSetup(localHosting) {
+  const { unstable_readConfig } = await import('wrangler');
+  const { vars } = unstable_readConfig({ config: fileURLToPath(CONFIG_PATH) });
+  const localVars = parseEnv(await readFile(DEV_VARS_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  }));
+  const canonicalOrigin = origin(localVars.CANONICAL_ORIGIN)
+    ? new URL(localVars.CANONICAL_ORIGIN).origin
+    : origin(vars.CANONICAL_ORIGIN) && (localHosting || isLocalOrigin(vars.CANONICAL_ORIGIN))
+      ? new URL(vars.CANONICAL_ORIGIN).origin
+      : LOCAL_ORIGIN;
+
+  console.log(`Keeping wrangler.toml. Local OAuth callback is ${canonicalOrigin}/auth/callback.`);
+  const clientIds = {};
+  const sources = new Set();
+  for (const name of oauthProviders(localVars.ENABLED_PROVIDERS ?? vars.ENABLED_PROVIDERS)) {
+    const provider = name.toLowerCase();
+    if (!Object.hasOwn(PROVIDERS, provider)) continue;
+    const { clientId } = PROVIDERS[provider];
+    const value = localVars[clientId] ?? vars[clientId];
+    // wrangler.example.toml ships GITHUB_CLIENT_ID = "your-github-oauth-client-id".
+    if (typeof value !== 'string' || !value.trim() || /^your-.*-client-id$/.test(value)) continue;
+    clientIds[provider] = value;
+    sources.add(Object.hasOwn(localVars, clientId) ? '.dev.vars' : 'wrangler.toml');
+  }
+  const configured = Object.keys(clientIds);
+  if (configured.length) {
+    console.log(`Found OAuth client IDs for ${configured.join(', ')} in ${[...sources].join(' and ')}.`);
+  }
+  const oauth = await askLocalOAuthClients(canonicalOrigin, {
+    providers: configured,
+    clientIds,
+    microsoftTenant: localVars.MICROSOFT_TENANT ?? vars.MICROSOFT_TENANT,
+  });
+  await writeLocalSecrets({ canonicalOrigin, ...oauth });
+  const port = new URL(canonicalOrigin).port;
+  const portOption = isLocalOrigin(canonicalOrigin) && port && port !== '8787' ? ` -- --port ${port}` : '';
+  console.log(`\nLocal settings are ready. Start with npm run dev${portOption}.`);
+}
+
+async function backUpSetup() {
+  await mkdir(WRANGLER_STATE_PATH, { recursive: true });
+  const directory = await mkdtemp(fileURLToPath(new URL('setup-backup-', WRANGLER_STATE_PATH)));
+  console.log(`Saving previous setup files in ${directory}.`);
+  await rename(CONFIG_PATH, join(directory, 'wrangler.toml'));
+  try {
+    await rename(DEV_VARS_PATH, join(directory, '.dev.vars'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      await rename(join(directory, 'wrangler.toml'), CONFIG_PATH);
+      throw error;
+    }
+  }
+}
+
 async function main() {
-  console.log('\n0xCMS Cloudflare setup\n');
+  console.log('\n0xCMS setup\n');
+
+  const localHosting = process.argv.includes('--local');
+  const existingConfig = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (existingConfig !== null) {
+    console.log('Found wrangler.toml. Continue to configure .dev.vars, or start over with a backup.');
+    const mode = await ask('Setup mode (continue/start over)', 'continue', (value) =>
+      ['continue', 'start over'].includes(value.toLowerCase()));
+    if (mode.toLowerCase() === 'continue') {
+      await continueLocalSetup(localHosting);
+      return;
+    }
+    await backUpSetup();
+  }
+  if (!localHosting && await confirm('Set up this clone for local development with Wrangler?')) {
+    await setupLocalDevelopment();
+    return;
+  }
 
   const canonicalOrigin = (await ask(
     'Public HTTPS origin (custom domain or workers.dev URL; http://localhost:port for local dev)',
-    undefined,
+    localHosting ? LOCAL_ORIGIN : undefined,
     origin,
   )).replace(/\/$/, '');
   const callback = `${canonicalOrigin}/auth/callback`;
@@ -539,7 +921,7 @@ async function main() {
   // local: server.mjs serves it behind a tunnel or reverse proxy.
   const loopback = isLocalOrigin(canonicalOrigin);
   const local = loopback
-    || process.argv.includes('--local')
+    || localHosting
     || await confirm('Run it on this machine behind a tunnel or proxy?', false);
 
   if (local) {
@@ -555,6 +937,16 @@ async function main() {
       console.log('Cloudflare authentication confirmed.');
     }
   }
+
+  const config = await readFile(CONFIG_PATH, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return readFile(EXAMPLE_CONFIG_PATH, 'utf8');
+    throw error;
+  });
+  const defaultTimezone = await ask(
+    'Default timezone for new page schedules (for example +0800 or Asia/Hong_Kong)',
+    configuredDefaultTimezone(config),
+    isDefaultTimezone,
+  );
 
   // Every resource name derives from one namespace. The longest suffix is
   // "-plugin-views" (13 chars), and R2/Queue names stop at 63.
@@ -620,25 +1012,7 @@ async function main() {
     ? await name('Audit archive R2 bucket name', derived.auditBucketName)
     : null;
 
-  let providers;
-  while (!providers) {
-    const answer = await ask('OAuth providers (comma-separated)', 'github');
-    const selected = [...new Set(answer.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
-    const invalid = selected.filter((provider) => !Object.hasOwn(PROVIDERS, provider));
-    if (selected.length && !invalid.length) providers = selected;
-    else console.log(`Choose from: ${Object.keys(PROVIDERS).join(', ')}.`);
-  }
-
-  console.log(`\nRegister this callback URL with every OAuth provider:\n  ${callback}\n`);
-  const clientIds = {};
-  let microsoftTenant;
-  for (const provider of providers) {
-    console.log(`${provider}: ${PROVIDERS[provider].instructions}`);
-    clientIds[provider] = await ask(`${provider} client ID`);
-    if (provider === 'microsoft') {
-      microsoftTenant = await ask('Microsoft tenant', 'common');
-    }
-  }
+  const { providers, clientIds, microsoftTenant } = await askOAuthClients(callback);
 
   let databaseId;
   let publishedDatabaseId;
@@ -666,6 +1040,7 @@ async function main() {
     auditBucketName,
     queueName,
     canonicalOrigin,
+    defaultTimezone,
     providers,
     clientIds,
     microsoftTenant,
@@ -680,24 +1055,18 @@ async function main() {
     if (publishedDatabaseName) run(['d1', 'migrations', 'apply', publishedDatabaseName, target]);
   }
 
-  // A fresh database gets the audit/classification tables from the baseline.
-  // An existing one already applied the baseline, so it needs the hand-applied
-  // upgrades that wrangler's migrations_dir does not descend into.
+  // Schema changes go into the baseline only (see README "Schema changes"), so
+  // a database created by an older revision may be missing tables or columns.
   if (databaseReused) {
-    const manual = (await readdir(MANUAL_MIGRATIONS)).filter((file) => file.endsWith('.sql')).sort();
     console.log(`
-${databaseName} already existed. Apply any of these upgrades it does not have yet,
-in this order (read each file's header first; *_sensitivity_trash.sql needs the
-trash tables), before using the deployed code:
-${manual.map((file) => `  npx wrangler d1 execute ${databaseName} --remote --file migrations/manual/${file}`).join('\n')}
-
-A "duplicate column" error means that upgrade is already applied. The deployed
-code fails closed without them (sign-in included), so apply them before deploying.
+${databaseName} already existed. Numbered migrations cannot add what changed in the
+baseline since it was created. If it predates the current schema, recreate it or
+patch it by hand before deploying: the code fails closed (sign-in included).
 `);
   }
 
-  // Default off for a reused database: deploying before its upgrades locks
-  // everyone out, and they are applied by hand outside this wizard.
+  // Default off for a reused database: deploying onto an out-of-date schema
+  // locks everyone out.
   const deployed = !local && await confirm('Deploy 0xCMS now?', !databaseReused);
   if (deployed) {
     const grant = await firstAdminGrant(
@@ -771,9 +1140,10 @@ anywhere but the proxy.`);
 }
 
 try {
-  await main();
+  await ensureDependencies();
+  await (upgradeMode ? upgrade() : main());
 } catch (error) {
-  console.error(`\nSetup stopped: ${error.message}`);
+  console.error(`\n${operation} stopped: ${error.message}`);
   process.exitCode = 1;
 } finally {
   rl.close();

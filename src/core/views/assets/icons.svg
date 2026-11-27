@@ -22,6 +22,12 @@
   <symbol id="chevron-down" viewBox="0 0 24 24">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
   </symbol>
+  <symbol id="chevron-double-left" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 5-7 7 7 7m7-14-7 7 7 7"/>
+  </symbol>
+  <symbol id="chevron-double-right" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m5 5 7 7-7 7m7-14 7 7-7 7"/>
+  </symbol>
   <symbol id="chevron-right" viewBox="0 0 24 24">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
   </symbol>

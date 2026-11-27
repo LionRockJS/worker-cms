@@ -6,7 +6,7 @@
 // screens needs them.
 
 import type { BlueprintEntry } from '../../cms-config';
-import type { PublishLectRule } from '../../core/publish/adapter';
+import type { PublishLectRule } from '../../contracts/publish';
 export type { PublishLectRule };
 
 export type PluginTrustLevel = 'server-only' | 'sandboxed-ui' | 'trusted-ui';
@@ -100,6 +100,10 @@ export interface PluginContentTypes {
 export type PluginHookEvent = 'create' | 'submission' | 'update' | 'publish' | 'unpublish' | 'delete';
 
 export interface PluginManifest {
+  /** Host operations requested by this plugin. Each needs its own local grant. */
+  capabilities?: string[];
+  /** Top-level registration config keys which may travel between CMS installations. */
+  portableConfigFields?: string[];
   id: string;
   name: string;
   version: string;
@@ -287,6 +291,9 @@ export interface PluginCreditDef {
   per?: number;
   period?: 'month';
   billing?: PluginCreditBilling;
+  /** Pay only from this plugin's wallet (credits its creator supplied) —
+   *  never from the member's balance or the shared pool. */
+  plugin_only?: boolean;
 }
 
 /** An admin-approved plugin asset (see PluginManifest.assets), stored in the

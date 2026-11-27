@@ -1,3 +1,4 @@
+import { requestPageFilter } from '../../core/auth/page-access';
 import { recordTagReads, recordTaxonomyReads } from '../../core/http/access-log';
 // The advanced-search page controller.
 //
@@ -10,24 +11,25 @@ import { advancedSearchPage, bulkReplacePreviewPage } from './template';
 import { num } from '../../core/http/forms';
 import { queryFingerprint, recordRead } from '../../core/http/access-log';
 import {
-  advancedSearchFormCriteria,
   advancedSearchOperator,
   advancedSearchOrder,
-  advancedSearchPageSize,
   advancedSearchPageTypes,
   advancedSearchPathOptionsByPageType,
-  advancedSearchQueryString,
   advancedSearchSelectedPageType,
   advancedSearchSort,
-  advancedSearchTagGroups,
   advancedSearchTargetPageTypes,
-  parseAdvancedSearchCriteria,
   performAdvancedSearch,
 } from '../../core/db/search';
+import {
+  advancedSearchFormCriteria,
+  advancedSearchPageSize,
+  advancedSearchQueryString,
+  advancedSearchTagGroups,
+  parseAdvancedSearchCriteria,
+} from './query';
 import { resolveCmsConfig } from '../../core/db/content-config';
 import { editorTaxonomy } from '../../core/db/admin-queries';
 import { publication } from '../services';
-import { withLiveStatus } from '../../core/db/page-logic';
 import { renderPage } from '../../core/render/chrome';
 import { coreExtensions } from '../../core/extensions';
 import {
@@ -61,6 +63,7 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
 
   const result = hasSearch
     ? await performAdvancedSearch(c.env.DB, pageTypes, criteria, operator, {
+        access: await requestPageFilter(c, 'read', 'p.uuid'),
         limit: pageSize,
         page: requestedPage,
         sort,
@@ -106,10 +109,8 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
 
   // Only the rows on this results page need a live status, so look those up
   // by uuid rather than reading every live page of the searched types.
-  const [liveMap, projectDraft] = await Promise.all([
-    publication()?.liveMapForDraftPages(c.env, result.results),
-    publication()?.draftLectProjector(c.env),
-  ]);
+  const pages = await publication()?.annotateDraftPages(c.env, result.results)
+    ?? result.results.map(page => ({ ...page, isPublished: false }));
   const routeBase = selectedPageType === 'all'
     ? '/admin/advanced-search'
     : `/admin/advanced-search/${encodeURIComponent(selectedPageType)}`;
@@ -157,7 +158,7 @@ export async function renderAdvancedSearch(c: AppContext, defaultPageType = 'all
       bulkAction: `${routeBase}/bulk?${queryWithoutPage}`,
       currentHref: `${routeBase}?${pageQuery(result.pagination.currentPage)}`,
       queryWithoutPage,
-      pages: withLiveStatus(result.results, liveMap ?? new Map(), projectDraft),
+      pages,
   });
 }
 
@@ -172,15 +173,16 @@ export async function renderBulkReplacePreview(c: AppContext, input: {
   replacementText: string;
   returnTo: string;
 }): Promise<Response> {
+  const access = await requestPageFilter(c, 'write', 'p.uuid');
   const targetIds = input.scope === 'all'
     ? await resolveBulkTargetIds(c.env, {
         pageTypes: input.pageTypes,
         criteria: input.criteria,
         operator: input.operator,
         status: input.status,
-      })
+      }, undefined, access)
     : input.ids;
-  const previewPages = await draftPagesByIds(c.env.DB, targetIds.slice(0, BULK_REPLACE_PREVIEW_PAGE_LIMIT));
+  const previewPages = await draftPagesByIds(c.env.DB, targetIds.slice(0, BULK_REPLACE_PREVIEW_PAGE_LIMIT), access);
   const changes: Array<{
     pageName: string;
     pageEditHref: string;

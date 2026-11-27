@@ -4,7 +4,7 @@
       "type": "page-header",
       "settings": {
         "title": "{{ 'view_strings.sections_taxonomies.taxonomies' | t }}",
-        "description": "{{ 'view_strings.sections_taxonomies.database_taxonomies_are_editable_here_config_file_and_plugin_taxonomies_' | t }}"
+        "explanation": "{{ 'view_strings.sections_taxonomies.database_taxonomies_are_editable_here_config_file_and_plugin_taxonomies_' | t }}"
       },
       "blocks": {
         "new": {

@@ -31,7 +31,7 @@ import { recordAuditOutage } from '../core/db/audit-outages';
 import { loadAppBrandingSettings } from '../core/db/settings';
 import { viewRevision } from '../core/http/view-revision';
 import { buildTranslationCatalog, resolveUiLocale } from '../core/i18n';
-import { loginPage } from '../core/templates/login';
+import { LOGIN_ERRORS, loginPage } from '../core/templates/login';
 import type { Env, Variables, JWTPayload } from '../types';
 import type { AppContext } from '../core/http/context';
 import {
@@ -380,7 +380,8 @@ authRoutes.get('/i18n/catalog/:locale', async (c) => {
 // GET /auth/login – show the login page (HTML)
 authRoutes.get('/login', async (c) => {
   const providers = getEnabledProviders(c.env);
-  const error = c.req.query('error');
+  const requestedError = c.req.query('error') ?? '';
+  const error = LOGIN_ERRORS.has(requestedError) ? requestedError : undefined;
   const [branding, uiLocale] = await Promise.all([
     loadAppBrandingSettings(c.env, c.env.SITE_TITLE ?? '0xCMS'),
     resolveUiLocale(c),

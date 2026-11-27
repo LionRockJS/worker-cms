@@ -1,15 +1,17 @@
 import type { AppContext } from '../../core/http/context';
-import { captureAccessAuthorization } from '../../core/auth/access-authorization';
+import { captureMutationAuthority } from '../../core/evidence/mutation-authority';
 import { recordPolicyDenial } from '../../core/auth/denials';
 import type { PermissionDenialReason } from '../../core/auth/denial-contract';
-import { classFor,resolveDataClasses,classificationPolicyGuard } from '../../core/db/data-classes';
+import { classFor,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
 import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
 import { abortIf } from '../../core/db/transaction-guard';
+import { fingerprint, guard, json, snapshot } from '../../core/db/bounded-mutation';
 import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { clearConfigCache } from '../../core/db/content-config';
-import { CONTENT_DEFAULT_LANGUAGE_SETTING_KEY,DEFAULT_CONTENT_LANGUAGE,LocaleInputValidationError,defaultContentLanguageFromRows,normalizeLocaleCode,normalizeLocaleInput,normalizeLocaleMessageInput,type LocaleRecord } from '../../core/i18n';
+import { CONTENT_DEFAULT_LANGUAGE_SETTING_KEY,DEFAULT_CONTENT_LANGUAGE,LocaleInputValidationError,defaultContentLanguageFromRows,normalizeLocaleCode,type LocaleRecord } from '../../core/i18n';
+import { normalizeLocaleInput, normalizeLocaleMessageInput } from './validation';
 
 type Change={action:'create';input:Record<string,unknown>}|{action:'update';input:Record<string,unknown>;code:string}|{action:'delete';code:unknown}|{action:'default';code:unknown}|{action:'message-save';code:unknown;key:unknown;value:unknown}|{action:'message-delete';code:unknown;key:unknown};
 interface MessageRow {locale_code:string;message_key:string;value:string;updated_by:string|null;created_at:string;updated_at:string}
@@ -20,21 +22,7 @@ const MESSAGE=['locale_code','message_key','value','updated_by','created_at','up
 const SETTING=['key','value','created_at','updated_at'];
 export class LocaleMutationUnavailableError extends Error {constructor(){super('Locale change unavailable');}}
 class LocalePolicyError extends LocaleInputValidationError {constructor(message:string,readonly reason:PermissionDenialReason){super(message);}}
-function json(value:unknown):string {const text=JSON.stringify(value);if(new TextEncoder().encode(text).length>1_000_000)throw new Error('Locale manifest requires review');return text;}
-async function fingerprint(key:string):Promise<string> {return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
-async function snapshot<T>(c:AppContext,table:string,fields:string[],where:string,args:Array<string|number|null>,order:string):Promise<T[]> {
-  const object=`json_object(${fields.map(f=>`'${f}',r.${f}`).join(',')})`;
-  const result=await c.env.DB.prepare(`WITH scoped AS (SELECT * FROM ${table} WHERE ${where} ORDER BY ${order} LIMIT 5001),
-    budget AS (SELECT COUNT(*) n,COALESCE(SUM(length(CAST(${object} AS BLOB))),0)+COUNT(*)+2 bytes FROM scoped r)
-    SELECT CASE WHEN n>5000 OR bytes>1000000 THEN json('{') ELSE (SELECT json_group_array(${object}) FROM scoped r) END snapshot FROM budget`).bind(...args).first<{snapshot:string}>();
-  if(!result)throw new Error('Locale snapshot unavailable');return JSON.parse(result.snapshot) as T[];
-}
-function guard(c:AppContext,table:string,fields:string[],rows:object[],where='1',args:Array<string|number|null>=[]) {
-  return abortIf(c.env,`(SELECT COUNT(*) FROM ${table} WHERE ${where})<>? OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS
-    (SELECT 1 FROM ${table} r WHERE ${fields.map(f=>`r.${f} IS json_extract(e.value,'$.${f}')`).join(' AND ')}))`,[...args,rows.length,json(rows)]);
-}
-/** Host locale/message administration only; DB-only core helpers keep their
- * own caller/evidence boundary. Payloads and message keys stay out of detail. */
+/** Audited locale and message edits. Payloads and message keys stay out of detail. */
 export async function mutateLocaleAdmin(c:AppContext,change:Change):Promise<string> {
   assertRegulatedWritesAllowed(c.env);
   try {return await mutate(c,change);}catch(error){
@@ -44,14 +32,13 @@ export async function mutateLocaleAdmin(c:AppContext,change:Change):Promise<stri
 }
 async function mutate(c:AppContext,change:Change):Promise<string> {
   const code=normalizeLocaleCode(change.action==='create'?change.input.code:change.code);
-  const authority=await captureAccessAuthorization(c.env,c.get('user'),'menu:manage');if(!authority.allowed)throw new Error('Locale authority unavailable');
-  const policy=await resolveDataClasses(c.env,true);if(!policy.ok)throw new Error('Locale classification unavailable');
+  const {authority,policy}=await captureMutationAuthority(c,'menu:manage');
   const [locales,messages,settings]=await Promise.all([
     snapshot<LocaleRecord>(c,'locales',LOCALE,'1',[],'weight,label COLLATE NOCASE,code'),
     snapshot<MessageRow>(c,'locale_messages',MESSAGE,'locale_code=?',[code],'message_key'),
     snapshot<SettingRow>(c,'settings',SETTING,'key=?',[CONTENT_DEFAULT_LANGUAGE_SETTING_KEY],'key'),
   ]);
-  const classes=['locales','locale_messages','settings'].map(t=>classFor(policy,'table',t));const dataClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  const classes=['locales','locale_messages','settings'].map(t=>classFor(policy,'table',t));const dataClass=strongestClass(classes);
   const messageIds=await Promise.all(messages.map(async row=>`${code}:message:${await fingerprint(row.message_key)}`));
   await auditBackgroundReads(c.env,[{action:'locale.mutation-read',kind:'table' as const,key:'locales',targetType:'locale',ids:locales.map(l=>l.code),count:locales.length},
     {action:'locale.messages-mutation-read',kind:'table' as const,key:'locale_messages',targetType:'locale_message',ids:messageIds,count:messages.length},

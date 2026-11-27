@@ -1,4 +1,5 @@
-import { mutateHostPageTag } from '../../core/pages/tag-association-evidence';
+import { requestPageFilter } from '../../core/auth/page-access';
+import { mutateHostPageTag } from '../../core/evidence/tag-association-evidence';
 import { rejectCrossSiteRequest } from '../../core/http/headers';
 // Admin JSON API endpoints.
 
@@ -8,17 +9,18 @@ import { regulatedPages } from '../../core/db/regulated-pages';
 import { getLectLocalizedValue, safeParseLect } from '../../core/db/lect';
 import type { Env, Variables, Tag, Taxonomy, Page } from '../../types';
 import { num } from '../../core/http/forms';
-import { requirePageSync, requirePermission } from '../../core/auth/guards';
+import { requirePageListing, requirePageSync, requirePermission } from '../../core/auth/guards';
 import type { AppContext } from '../../core/http/context';
 import { resolveCmsConfig } from '../../core/db/content-config';
 
 export const apiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-apiRoutes.get('/api/parent-pages', requirePermission('content:read'), async (c) => {
+apiRoutes.get('/api/parent-pages', requirePageListing, async (c) => {
   const query = c.req.query('q')?.trim() ?? '';
   const excludeId = num(c.req.query('exclude'), 0);
-  const params: unknown[] = [];
-  const conditions: string[] = [];
+  const access = await requestPageFilter(c, 'read', 'pages.uuid');
+  const params: unknown[] = [...access.args];
+  const conditions = [access.sql];
 
   if (query) {
     const term = `%${query.replaceAll(' ', '%')}%`;
@@ -92,18 +94,18 @@ apiRoutes.get('/api/parent-tags', requirePermission('content:read'), async (c) =
   })));
 });
 
-// Users for the editors combobox on the page editor. `q` filters by name or
-// email; without it, returns the most recently active users. Requires
+// Users for the user pickers (page editors, page access). Active accounts only.
+// `q` filters by name or email; without it, returns the most recently active users. Requires
 // content:write (not just read) since it enumerates user names/emails and only
 // users who can save the form need it.
 apiRoutes.get('/api/users', requirePermission('content:write'), async (c) => {
   const query = c.req.query('q')?.trim() ?? '';
   const params: unknown[] = [];
-  let whereSql = '';
+  let whereSql = 'WHERE disabled_at IS NULL';
 
   if (query) {
     const term = `%${query.replaceAll(' ', '%')}%`;
-    whereSql = 'WHERE (name LIKE ? OR email LIKE ?)';
+    whereSql += ' AND (name LIKE ? OR email LIKE ?)';
     params.push(term, term);
   }
 
@@ -129,13 +131,14 @@ apiRoutes.get('/api/users', requirePermission('content:write'), async (c) => {
 // (src/core/views/snippets/pagefield/page/basic.liquid). `q` filters by name/slug; `id`
 // resolves a single page (used to label the current selection). With neither,
 // returns the most-recently-updated pages of the type.
-apiRoutes.get('/api/pages/:type', requirePermission('content:read'), async (c) => {
+apiRoutes.get('/api/pages/:type', requirePageListing, async (c) => {
   const pageType = c.req.param('type');
   const query = c.req.query('q')?.trim() ?? '';
   const id = num(c.req.query('id'), 0);
 
-  const conditions = ['page_type = ?'];
-  const params: unknown[] = [pageType];
+  const access = await requestPageFilter(c, 'read', 'pages.uuid');
+  const conditions = ['page_type = ?', access.sql];
+  const params: unknown[] = [pageType, ...access.args];
   if (id) {
     conditions.push('id = ?');
     params.push(id);
@@ -192,7 +195,7 @@ function associationId(value:string|undefined):number|null {
   return Number.isSafeInteger(id)&&id>0?id:null;
 }
 
-apiRoutes.post('/api/page/:pageId/tag/:tagId', requirePermission('content:write'), async (c) => {
+apiRoutes.post('/api/page/:pageId/tag/:tagId', async (c) => {
   const pageId=associationId(c.req.param('pageId')),tagId=associationId(c.req.param('tagId'));
   if(pageId===null||tagId===null)return c.json({error:'invalid_association_id'},400);
   const result=await mutateHostPageTag(c,{action:'add',pageId,tagId});
@@ -200,13 +203,13 @@ apiRoutes.post('/api/page/:pageId/tag/:tagId', requirePermission('content:write'
   return c.json({type:'ADD_PAGE_TAG',payload:result.created?{success:true,id:result.id}:{success:false,message:'tag exist',id:result.id}});
 });
 
-apiRoutes.delete('/api/page/remove/page_tag/:id', requirePermission('content:write'), async (c) => deletePageTagApi(c));
-apiRoutes.delete('/api/page_tag/:id', requirePermission('content:write'), async (c) => deletePageTagApi(c));
+apiRoutes.delete('/api/page/remove/page_tag/:id', async (c) => deletePageTagApi(c));
+apiRoutes.delete('/api/page_tag/:id', async (c) => deletePageTagApi(c));
 
 async function deletePageTagApi(c: AppContext) {
   const id=associationId(c.req.param('id'));
   if(id===null)return c.json({error:'invalid_association_id'},400);
-  await mutateHostPageTag(c,{action:'remove',id});
+  if (!await mutateHostPageTag(c,{action:'remove',id})) return c.notFound();
   return c.json({type:'DELETE_PAGE_TAG',payload:{success:true,id}});
 }
 

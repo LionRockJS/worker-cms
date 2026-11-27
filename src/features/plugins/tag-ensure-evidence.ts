@@ -1,10 +1,12 @@
 import type { AppContext } from '../../core/http/context';
 import type { PluginPageMutationAuthority } from './page-update-evidence';
 import { assertPluginPageAuthority } from './page-update-evidence';
+import { noteActingUser } from './evidence-common';
 import { serviceMutationAuditEvidence, ServiceMutationUnavailableError } from '../../core/db/audit';
 import { snapshot, guard, resultGuard, json, fingerprint, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
-import { classFor } from '../../core/db/data-classes';
+import { nextIdSql } from '../../core/pages/snapshot-id';
+import { classFor,strongestClass } from '../../core/db/data-classes';
 import { auditBackgroundReads, flushReadAudit, recordTagReads } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
@@ -14,14 +16,14 @@ import { publication } from '../services';
 const TAX=['id','uuid','created_at','updated_at','name','slug'];
 const TAG=['id','uuid','created_at','updated_at','name','slug','weight','taxonomy_slug','parent_tag','lect'];
 const OWNER=['id','uuid','slug','taxonomy_slug'];
-const NEXT_TAG_ID=`(SELECT MAX(COALESCE(MAX(id),0),(CAST(strftime('%s','now') AS INTEGER)-1563741060)*100000+(RANDOM() & 65535))+1 FROM tags)`;
+const NEXT_TAG_ID=nextIdSql('tags');
 /** Find/create is one local transaction, including reused identities and item
  * decisions. Catalogue publication has its own external outcome. */
 export async function ensurePluginTags(c:AppContext,authority:PluginPageMutationAuthority,input:unknown):Promise<Response> {
  assertRegulatedWritesAllowed(c.env);
  const operationId=crypto.randomUUID();let attempted=false,committed=false,dataClass=authority.dataClass;
  const detail:Record<string,unknown>={operation_id:operationId,registry_id:authority.registryId,identity_fingerprint:authority.identityFingerprint,principal:'credential_authenticated_plugin'};
- const asserted=c.req.header('x-acting-user-id');if(asserted!==undefined){detail.acting_user_verified=false;const id=Number(asserted);if(/^\d+$/.test(asserted)&&Number.isSafeInteger(id)&&id>0)detail.asserted_user_id=id;else detail.acting_user_unrecordable=true;}
+ noteActingUser(c,detail);
  try {
   assertPluginPageAuthority(authority,'tag-ensure');
   if(!authority.allowed.size){const receipt=serviceMutationAuditEvidence(c.env,{action:'tag.ensure',entityType:'tag_ensure_operation',entityId:operationId,outcome:'denied',detail:{...detail,reason:'write_scope_required'}},authority.actor,dataClass,authority.policy,c);await c.env.DB.batch([...authority.check(),receipt.write,receipt.guard,...authority.check(),receipt.guard]);return c.json({error:'forbidden'},403);}
@@ -48,7 +50,7 @@ export async function ensurePluginTags(c:AppContext,authority:PluginPageMutation
   const slugWhere="EXISTS(SELECT 1 FROM json_each(?) e WHERE tags.slug=e.value OR substr(tags.slug,1,length(e.value)+1)=e.value||'-')",slugArgs=[json(bases)];
   const owners=await snapshot<Row>(c,'tags',OWNER,slugWhere,slugArgs);
   const classes=[...owners.map(t=>classFor(authority.policy,'taxonomy',String(t.taxonomy_slug??'default'))),authority.dataClass,...keys.map(key=>classFor(authority.policy,'taxonomy',key))];
-  dataClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  dataClass=strongestClass(classes);
   const requestFingerprint=await fingerprint(json(pairs));detail.request_fingerprint=requestFingerprint;
   await auditBackgroundReads(c.env,[['taxonomies',taxonomies],['tags',existing],['tags',owners]].map(([table,rows])=>({action:'plugin.tag-ensure-source-read',kind:'table' as const,key:table as string,targetType:table as string,ids:(rows as Row[]).map(row=>String(row.id)),count:(rows as Row[]).length,minimumClass:dataClass==='none'?undefined:dataClass})),authority.actor);
   if(await flushReadAudit(c))throw new Error('Tag source evidence unavailable');

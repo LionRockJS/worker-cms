@@ -65,7 +65,7 @@ Each needs an owner's decision. None is fixed here.
 
 | # | Finding | Controls | Belongs to |
 |---|---|---|---|
-| 1 | **Submissions stay in the published database indefinitely.** Public Workers (forms, RSVP) insert submissions into `PUBLISHED_DB.pages`. The cron ingest copies them into drafts but never mutates or deletes the published row ([submission-ingest.ts](../../src/core/db/submission-ingest.ts)). Personal data therefore persists in the database public sites read, with no retention rule | A.8.10, A.5.34, A.8.12 | W12 |
+| 1 | **Submissions stay in the published database indefinitely.** Public Workers (forms, RSVP) insert submissions into `PUBLISHED_DB.pages`. The cron ingest copies them into drafts but never mutates or deletes the published row ([submission-ingest.ts](../../src/features/publish/submission-ingest.ts)). Personal data therefore persists in the database public sites read, with no retention rule | A.8.10, A.5.34, A.8.12 | W12 |
 | 2 | **Legacy `audit_log` table.** Nothing in source reads, writes or prunes it, but it can still hold old admin records with actor details | A.5.33, A.8.10 | W12 |
 | 3 | **`admin_jobs` grows without bound.** Nothing deletes finished jobs | A.8.6, A.8.10 | W11/W12 |
 | 4 | **Trash never expires, and credit ledgers have no retention rule.** Trash empties only when an editor restores or purges. The ledgers are append-only | A.8.10 | W12 |

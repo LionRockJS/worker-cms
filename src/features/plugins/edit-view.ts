@@ -168,6 +168,7 @@ async function dispatchPluginView(
         `/admin/plugins/${plugin.manifest.id}/views`,
         pluginViewRevision(plugin.manifest),
         plugin.manifest.i18n === true,
+        plugin.manifest.assets,
       )
     : withPluginEditPresenceBar(await sanitizePluginHtmlFragment(await upstream.text()), editPresence);
   const declaredAssetPaths = new Set((plugin.manifest.assets ?? []).map((asset) => asset.path));

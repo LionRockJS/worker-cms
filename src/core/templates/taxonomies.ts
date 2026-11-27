@@ -57,12 +57,14 @@ export async function taxonomiesPage(views: Fetcher, opts: BaseTemplateProps & {
 export async function taxonomyFormPage(views: Fetcher, opts: BaseTemplateProps & {
   taxonomy?: TaxonomyFormData;
   readOnly?: boolean;
+  fromConfig?: boolean;
 }): Promise<string> {
-  const { taxonomy, readOnly = false } = opts;
+  const { taxonomy, readOnly = false, fromConfig = false } = opts;
   const heading = readOnly ? 'View Taxonomy' : taxonomy ? 'Edit Taxonomy' : 'New Taxonomy';
   const body = await renderView(views, '/templates/taxonomy-form.json', {
     isEdit: !!taxonomy,
     readOnly,
+    fromConfig,
     heading,
     action: taxonomy ? `/admin/taxonomies/${taxonomy.id}` : '/admin/taxonomies',
     name: taxonomy?.name ?? '',

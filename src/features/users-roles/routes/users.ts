@@ -1,3 +1,4 @@
+import { notice, readNotice } from '../../../core/http/notice';
 import { auditUnavailable, flushReadAudit, recordTableReads } from '../../../core/http/access-log';
 // User administration — list users and assign their roles. Admin-gated
 // (users:manage). Users are created by OAuth login, not here.
@@ -15,7 +16,7 @@ import type { AccessAuthorization } from '../../../core/auth/access-authorizatio
 import { userCan } from '../../../core/auth/permissions';
 import { renderPage } from '../../../core/render/chrome';
 import { maskPrivateValue } from '../../../core/render/privacy';
-import { allRoleOptions } from '../../../core/auth/role-store';
+import { allRoleOptions } from '../../../core/auth/role-options';
 import { ROLE_LABELS, builtinRoleTranslationKey, effectivePermissions, splitRoles } from '../../../core/auth/roles';
 import { featureAdminScreenProps } from '../../services';
 import type { AppContext } from '../../../core/http/context';
@@ -119,8 +120,8 @@ usersRoutes.get('/users', async (c) => {
         canDelete: user.id !== currentUserId && (!hasAdminRole(user.role) || (adminCount?.n ?? 0) > 1),
       };
     }),
-    flash: c.req.query('flash') ?? '',
-    error: c.req.query('error') ?? '',
+    flash: await readNotice(c),
+    error: await readNotice(c, 'error'),
     panels: creditPanel,
   });
 });
@@ -131,7 +132,7 @@ usersRoutes.get('/users/:id/edit', async (c) => {
     .bind(id)
     .first<User>();
   if (!user) return c.notFound();
-  return userForm(c, user, c.req.query('error') || undefined, c.req.query('flash') || undefined);
+  return userForm(c, user, await readNotice(c, 'error') || undefined, await readNotice(c) || undefined);
 });
 
 usersRoutes.post('/users/:id', requirePermission('users:manage'), async (c) => {
@@ -198,7 +199,7 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
   if (!Number.isInteger(id) || id <= 0) return c.notFound();
   if (id === currentUserId) {
     await recordPolicyDenial(c, 'self_deletion');
-    return c.redirect('/admin/users?error=You+cannot+remove+your+own+user');
+    return c.redirect(`/admin/users?${await notice(c, 'You cannot remove your own user', 'error')}`);
   }
 
   const user = await c.env.DB.prepare('SELECT id, role FROM users WHERE id = ?')
@@ -217,7 +218,7 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
       .first<{ n: number }>();
     if ((otherAdmins?.n ?? 0) === 0) {
       await recordPolicyDenial(c, 'last_administrator');
-      return c.redirect('/admin/users?error=Cannot+remove+the+last+administrator');
+      return c.redirect(`/admin/users?${await notice(c, 'Cannot remove the last administrator', 'error')}`);
     }
   }
 
@@ -251,7 +252,7 @@ usersRoutes.post('/users/:id/delete', requirePermission('users:manage'), async (
   } catch {
     return accessMutationUnavailable(c);
   }
-  return c.redirect('/admin/users?flash=User+removed');
+  return c.redirect(`/admin/users?${await notice(c, 'User removed')}`);
 });
 
 async function userForm(c: AppContext, user: User, error?: string, flash?: string): Promise<Response> {

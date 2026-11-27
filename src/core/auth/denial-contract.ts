@@ -7,7 +7,7 @@ export const AUTH_DENIAL_REASONS = {
     'no_access_token', 'userinfo_not_configured', 'userinfo_failed', 'invalid_userinfo', 'link_session_mismatch',
     'identity_already_linked', 'email_not_allowed', 'identity_not_linked', 'db_error', 'rate_limited', 'unknown'],
   'auth.refresh': ['ip_not_allowed', 'no_refresh_token', 'invalid_refresh_token', 'session_revoked', 'user_not_found', 'rate_limited', 'unknown'],
-  'auth.access': ['missing_credentials', 'invalid_credentials', 'unknown'],
+  'auth.access': ['missing_credentials', 'invalid_credentials', 'canary_credential', 'bait_path', 'unknown'],
 } as const;
 export type AuthDenialAction = keyof typeof AUTH_DENIAL_REASONS | 'permission.denied';
 export const PERMISSION_DENIAL_REASONS = [

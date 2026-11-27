@@ -4,20 +4,26 @@
 // A row in `page_types` is the runtime-editable equivalent of a
 // plugin content-type fragment: it is converted into the same
 // ContributedContentTypes shape and merged into the effective CmsConfig
-// by resolveCmsConfig() (src/plugins/config.ts).
+// by resolveCmsConfig() (src/core/db/content-config.ts).
 // ============================================================
 
 import type { BlueprintEntry, CmsConfig } from '../../cms-config';
 import type { Env, PageType } from '../../types';
 import type { ContributedContentTypes } from '../extensions';
-import { getSetting, saveSetting } from './settings';
+import { getSetting } from './settings';
 
-/** Loads all database-defined page types, ordered for display. */
+/** Loads database-defined page types, including retained rows in disabled profiles. */
 export async function listDbPageTypes(db: D1DatabaseClient): Promise<PageType[]> {
-  const { results } = await db
-    .prepare('SELECT * FROM page_types ORDER BY weight ASC, name ASC')
-    .all<PageType>();
-  return results;
+  try {
+    const { results } = await db
+      .prepare('SELECT * FROM page_types ORDER BY weight ASC, name ASC')
+      .all<PageType>();
+    return results;
+  } catch (error) {
+    // Fresh profiles without runtime content types omit this table.
+    if (error instanceof Error && /no such table: page_types(?:[:\s]|$)/i.test(error.message)) return [];
+    throw error;
+  }
 }
 
 /** Parses a JSON column into the expected shape, or returns the fallback. */
@@ -71,26 +77,22 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+export function normalizedPageTypeExtension(slug: string, value: unknown): PageTypeExtension | null {
+  if (UNSAFE_KEYS.has(slug) || !value || typeof value !== 'object') return null;
+  const blocks = stringArray((value as PageTypeExtension).blocks);
+  const taxonomies = stringArray((value as PageTypeExtension).taxonomies);
+  return blocks.length || taxonomies.length ? { blocks, taxonomies } : null;
+}
+
 /** Loads the extensions map, dropping malformed or empty entries. */
 export async function loadPageTypeExtensions(env: Env): Promise<PageTypeExtensions> {
   const parsed = parseJson<Record<string, unknown>>(await getSetting(env, PAGE_TYPE_EXTENSIONS_SETTING_KEY), {});
   const extensions: PageTypeExtensions = {};
   for (const [slug, value] of Object.entries(parsed)) {
-    if (UNSAFE_KEYS.has(slug) || !value || typeof value !== 'object') continue;
-    const blocks = stringArray((value as PageTypeExtension).blocks);
-    const taxonomies = stringArray((value as PageTypeExtension).taxonomies);
-    if (blocks.length || taxonomies.length) extensions[slug] = { blocks, taxonomies };
+    const extension = normalizedPageTypeExtension(slug, value);
+    if (extension) extensions[slug] = extension;
   }
   return extensions;
-}
-
-/** Replaces one type's extension; an empty extension deletes the entry. */
-export async function savePageTypeExtension(env: Env, slug: string, extension: PageTypeExtension): Promise<void> {
-  if (UNSAFE_KEYS.has(slug)) return;
-  const extensions = await loadPageTypeExtensions(env);
-  if (extension.blocks.length || extension.taxonomies.length) extensions[slug] = extension;
-  else delete extensions[slug];
-  await saveSetting(env, PAGE_TYPE_EXTENSIONS_SETTING_KEY, JSON.stringify(extensions));
 }
 
 /** Unions extension entries into the lists of types that exist in the config. */

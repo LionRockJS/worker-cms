@@ -3,17 +3,13 @@
 //
 // A database deployed at an earlier revision is not upgraded by the regenerated
 // baseline: D1 tracks migrations by name, so it only receives numbered files it
-// has not applied, plus whichever one-off files under migrations/manual/ an
-// operator runs by hand. Nothing checked that this path ends where a fresh
-// install does, or told the operator which manual files a given revision needs.
+// has not applied. Nothing else checked that this path ends where a fresh
+// install does.
 //
 // This rebuilds the schema as it stood at --from (every numbered migration at
-// that revision, applied to an empty database), then applies the upgrade path
-// to it, and compares the result with a fresh install of the current tree:
-//
-//   1. manual files added after --from, in filename (date) order — they are
-//      core upgrades that feature enable migrations may build on;
-//   2. numbered files that did not exist at --from, in number order.
+// that revision, applied to an empty database), then applies the numbered files
+// that did not exist at --from, in number order, and compares the result with a
+// fresh install of the current tree.
 //
 // It also reports rollback hazards: what the --from code would meet if the
 // Worker were rolled back after the upgrade (dropped tables or columns, new
@@ -21,7 +17,7 @@
 //
 // Local SQLite (node:sqlite), not D1: it proves the SQL path, not a deployed
 // database's actual state. The --from database is assumed to be a fresh install
-// of that revision; one that skipped earlier manual files will differ.
+// of that revision.
 //
 // Usage:
 //   node tools/check-upgrade-path.mjs --from <revision> [--db private|published|both]
@@ -37,8 +33,8 @@ import { DatabaseSync } from 'node:sqlite';
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
 
 const DATABASES = {
-  private: { dir: 'migrations', manual: 'migrations/manual' },
-  published: { dir: 'migrations/published', manual: null },
+  private: { dir: 'migrations' },
+  published: { dir: 'migrations/published' },
 };
 
 function parseArgs(argv) {
@@ -191,20 +187,15 @@ function rollbackFindings(before, after) {
 }
 
 function drill(kind, from) {
-  const { dir, manual } = DATABASES[kind];
+  const { dir } = DATABASES[kind];
   const numberedAt = filesAt(from, dir).filter(isNumbered);
   const numberedNow = filesNow(dir).filter(isNumbered);
-  const manualAt = manual ? new Set(filesAt(from, manual)) : new Set();
-  const manualNow = manual ? filesNow(manual) : [];
 
   const before = freshDatabase();
   for (const name of numberedAt) applyFile(before, `${from}:${dir}/${name}`, git('show', `${from}:${dir}/${name}`));
   const beforeSchema = snapshot(before);
 
-  const plan = [
-    ...manualNow.filter((name) => !manualAt.has(name)).map((name) => `${manual}/${name}`),
-    ...numberedNow.filter((name) => !numberedAt.includes(name)).map((name) => `${dir}/${name}`),
-  ];
+  const plan = numberedNow.filter((name) => !numberedAt.includes(name)).map((name) => `${dir}/${name}`);
   for (const file of plan) applyFile(before, file, readFileSync(path.join(rootDir, file), 'utf8'));
   const upgraded = snapshot(before);
 

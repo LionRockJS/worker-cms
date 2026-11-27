@@ -27,7 +27,7 @@ The source reconciliation covered the mounted host draft-editor, tag/taxonomy an
 | `POST /pages` and `/pages/new_post/:pageType` | `saveDraftContent`; page, initial history, tags and exact create receipt. |
 | `POST /pages/:id`, including structured edits and history restore | `saveDraftContent`; complete local edit/history/tag receipt. |
 | History removal actions on `POST /pages/:id` | `removeDraftHistory`; exact selected history removal. |
-| Single/batch page weights and reorder | `updateDraftWeights` from `src/core/pages/batch-mutation-evidence.ts`. |
+| Single/batch page weights and reorder | `updateDraftWeights` from `src/core/evidence/batch-mutation-evidence.ts`. |
 | Host page-tag POST and both DELETE aliases | `mutateHostPageTag`. |
 | Tag/taxonomy create/edit/delete and tag weights | `saveTag`, `deleteTag`, `saveTaxonomy`, `deleteTaxonomy`, `updateTagWeights`. |
 | Single draft deletion and trash restore/purge | `mutatePageLifecycle`. |

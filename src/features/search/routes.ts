@@ -1,4 +1,7 @@
+import { notice } from '../../core/http/notice';
+import { pageAccessFilter } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
+import { requireTrashLifecycle } from '../services';
 // Advanced search pages and bulk actions. (CSV export moved to the
 // import-export plugin; renderAdvancedSearch links there when it's installed.)
 
@@ -22,10 +25,16 @@ import {
   advancedSearchOperator,
   advancedSearchSelectedPageType,
   advancedSearchTargetPageTypes,
-  parseAdvancedSearchCriteria,
 } from '../../core/db/search';
+import { parseAdvancedSearchCriteria } from './query';
 
 export const searchRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+searchRoutes.get('/pages/search/:pageType', requirePermission('content:read'), async (c) => {
+  const pageType = c.req.param('pageType');
+  const search = c.req.query('search') ?? '';
+  return c.redirect(`/admin/advanced-search/${encodeURIComponent(pageType)}?operator=AND&pagesize=20&sort=updated_at&order=DESC&search1=${encodeURIComponent(search)}&path1=`);
+});
 
 searchRoutes.get('/advanced-search', requirePermission('content:read'), (c) => renderAdvancedSearch(c));
 
@@ -84,26 +93,28 @@ async function bulkAdvancedSearch(
   const action = bulkAction(form.get('bulk_action'));
   const returnTo = safeAdminReturnPath(form.get('return_to'), '/admin/advanced-search');
   if ((action === 'publish' || action === 'unpublish') && !featureInstalled('publish')) return c.notFound();
-  if (!action) return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Choose a bulk action')}`));
+  if (!action) return c.redirect(appendQuery(returnTo, await notice(c, 'Choose a bulk action')));
 
   if (!(await userCan(c, BULK_ACTIONS[action].permission))) {
     return c.text(`Forbidden: Insufficient permissions. Required permission: ${BULK_ACTIONS[action].permission}`, 403);
   }
+
+  if (action === 'delete') requireTrashLifecycle();
 
   const scope = str(form.get('scope')) === 'all' ? 'all' : 'selected';
   const ids = uniquePageIds(form.getAll('page_ids'));
   const isTagAction = action === 'add_tag' || action === 'remove_tag';
   const targetTagIds = isTagAction ? uniqueNumericIds(form.getAll('tag_ids')) : [];
   if (isTagAction && !targetTagIds.length) {
-    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Choose at least one tag')}`));
+    return c.redirect(appendQuery(returnTo, await notice(c, 'Choose at least one tag')));
   }
   const searchText = action === 'replace_text' ? rawText(form.get('search_text')) : '';
   const replacementText = action === 'replace_text' ? rawText(form.get('replacement_text')) : '';
   if (action === 'replace_text' && !searchText) {
-    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Enter text to find')}`));
+    return c.redirect(appendQuery(returnTo, await notice(c, 'Enter text to find')));
   }
   if (searchText.length > 5000 || replacementText.length > 5000) {
-    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('Search and replacement text must be 5000 characters or fewer')}`));
+    return c.redirect(appendQuery(returnTo, await notice(c, 'Search and replacement text must be 5000 characters or fewer')));
   }
   let pageTypes: string[] = [];
   const criteria = parseAdvancedSearchCriteria(c.req.url);
@@ -135,7 +146,7 @@ async function bulkAdvancedSearch(
   }
 
   if (scope === 'selected' && !ids.length) {
-    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent('No matching pages')}`));
+    return c.redirect(appendQuery(returnTo, await notice(c, 'No matching pages')));
   }
 
   if (action === 'replace_text' && str(form.get('confirmed')) !== '1') {
@@ -168,7 +179,7 @@ async function bulkAdvancedSearch(
     returnTo,
   }) ?? false;
   if (queued) {
-    return c.redirect(appendQuery(returnTo, `flash=${encodeURIComponent(BULK_ACTIONS[action].queued)}`));
+    return c.redirect(appendQuery(returnTo, await notice(c, BULK_ACTIONS[action].queued)));
   }
 
   return bulkAdvancedSearchInline(c, {
@@ -215,7 +226,7 @@ async function bulkAdvancedSearchInline(
       criteria: input.criteria,
       operator: input.operator,
       status: input.status,
-    })
+    }, undefined, pageAccessFilter(c.get('user'), 'write', 'p.uuid', true))
     : input.ids;
 
   const slice = targetIds.slice(0, BULK_ACTION_PAGE_LIMIT);
@@ -232,5 +243,5 @@ async function bulkAdvancedSearchInline(
     [...outcome.failedTargets],
   );
   const note = remaining > 0 ? `${flash}; ${remaining} left — run it again to continue` : flash;
-  return c.redirect(appendQuery(input.returnTo, `flash=${encodeURIComponent(note)}`));
+  return c.redirect(appendQuery(input.returnTo, await notice(c, note)));
 }

@@ -1,20 +1,22 @@
+import { legacyPageFilter } from '../../core/auth/page-access';
 import type { AppContext } from '../../core/http/context';
 import type { PluginAuth } from './api/types';
 import type { PluginPageMutationAuthority } from './page-update-evidence';
 import { assertPluginPageAuthority } from './page-update-evidence';
+import { noteActingUser } from './evidence-common';
 import { snapshot, guard, json, fingerprint, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
 import { serviceMutationAuditEvidence, ServiceMutationUnavailableError } from '../../core/db/audit';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
-import { classFor } from '../../core/db/data-classes';
-import { trashPagesAsService, PageLifecycleUnavailableError } from '../../core/pages/lifecycle-mutation-evidence';
+import { classFor,strongestClass } from '../../core/db/data-classes';
+import { PageLifecycleUnavailableError } from '../../core/pages/trash-lifecycle';
 import { pageTypeScopeAllows } from './page-types';
 import { forbiddenPageTypeBody } from './api/auth';
 import { collectionWhere, asPositiveSafeInteger } from './api/serialize';
 import { emitPluginHooks } from './api/hooks';
-import { publication } from '../services';
+import { publication, trashLifecycle } from '../services';
 
 const FIELDS=['id','uuid','page_type'];
 type Mode='single'|'batch'|'children';
@@ -22,10 +24,11 @@ type Mode='single'|'batch'|'children';
  * a replay or an assertion that the unacknowledged chunk rolled back. */
 export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:PluginPageMutationAuthority,mode:Mode,input:unknown):Promise<Response> {
  assertRegulatedWritesAllowed(c.env);
+ const trash = trashLifecycle();
+ if (!trash) throw new ServiceMutationUnavailableError();
  const operationId=crypto.randomUUID();let acknowledged=0,chunkIndex=0,inFlight=false;let evidenceClass=authority.dataClass;
  const detail:Record<string,unknown>={operation_id:operationId,registry_id:authority.registryId,identity_fingerprint:authority.identityFingerprint,principal:'credential_authenticated_plugin',mode};
- const asserted=c.req.header('x-acting-user-id');
- if(asserted!==undefined){detail.acting_user_verified=false;const id=Number(asserted);if(/^\d+$/.test(asserted)&&Number.isSafeInteger(id)&&id>0)detail.asserted_user_id=id;else detail.acting_user_unrecordable=true;}
+ noteActingUser(c,detail);
  try {
   assertPluginPageAuthority(authority,'delete');
   let where:string,args:Array<string|number|null>,selected:Row[],total:number;
@@ -47,6 +50,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
    if(raw.some(id=>(mode==='batch'&&typeof id!=='number')||asPositiveSafeInteger(id)===null))return c.json({error:'invalid_id'},400);
    const ids=[...new Set(raw.map(id=>asPositiveSafeInteger(id)!))];where='id IN (SELECT value FROM json_each(?))';args=[json(ids)];
   }
+  where = `(${where}) AND ${legacyPageFilter('uuid')}`;
   const count=await c.env.DB.prepare(`SELECT COUNT(*) n FROM pages WHERE ${where}`).bind(...args).first<{n:number}>();
   if(!count||!Number.isSafeInteger(count.n)||count.n<0)throw new Error('Deletion count unavailable');total=count.n;
   // Fixed trusted projection: no bodies or free-text selectors enter evidence.
@@ -71,7 +75,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
   const tags=await snapshot<Row>(c,'tags',['id','uuid','taxonomy_slug'],'id IN (SELECT value FROM json_each(?))',[json(tagIds)]);
   if(tags.length!==tagIds.length)throw new Error('Deletion tag identity unavailable');
   const classes=[...tags.map(t=>classFor(authority.policy,'taxonomy',String(t.taxonomy_slug??'default'))),authority.dataClass,...selected.map(p=>classFor(authority.policy,'page_type',String(p.page_type??'default'))),...(declared?[classFor(authority.policy,'page_type',declared)]:[]),...floors.map(f=>f.level===2?'phi':'pii')];
-  evidenceClass=classes.includes('phi')?'phi':classes.includes('pii')?'pii':'none';
+  evidenceClass=strongestClass(classes);
   await auditBackgroundReads(c.env,[{action:'plugin.page-delete-selection-read',kind:'table',key:'pages',targetType:'page',ids:selected.map(p=>String(p.id)),count:selected.length,minimumClass:evidenceClass==='none'?undefined:evidenceClass,detail:{operation_id:operationId,selector_fingerprint:selectionFingerprint}}],authority.actor);
   await auditBackgroundReads(c.env,['page_sensitivity_floors','page_tags','tags'].map(table=>({action:'plugin.page-delete-selection-metadata-read',kind:'table' as const,key:table,targetType:table,ids:selected.map(p=>String(p.uuid)),count:selected.length,minimumClass:evidenceClass==='none'?undefined:evidenceClass})),authority.actor);
   const forbiddenRow=selected.find(p=>!pageTypeScopeAllows(authority.allowed,String(p.page_type??'')));
@@ -89,7 +93,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
   while(acknowledged<targets.length){
    const chunk=targets.slice(acknowledged,acknowledged+100),before=acknowledged,after=acknowledged+chunk.length;
    inFlight=true;
-   const result=await trashPagesAsService(c.env,{actor:authority.actor,check:()=>[...authority.check(),intent.guard],allows:type=>pageTypeScopeAllows(authority.allowed,type),dataClass:evidenceClass,request:c,
+   const result=await trash.trashPagesAsService(c.env,{actor:authority.actor,check:()=>[...authority.check(),intent.guard],allows:type=>pageTypeScopeAllows(authority.allowed,type),dataClass:evidenceClass,request:c,
     detail:{...detail,chunk_index:chunkIndex,acknowledged_before:before,acknowledged_after:after,request_complete:after===targets.length,done:after===total,withdrawal:mode==='children'?'not_requested':'separate_effect'},before:()=>selectionCheck(before),after:()=>selectionCheck(after)},chunk.map(p=>Number(p.id)));
    if(result.count!==chunk.length)throw new Error('Deletion result unavailable');inFlight=false;
    acknowledged=after;chunkIndex++;

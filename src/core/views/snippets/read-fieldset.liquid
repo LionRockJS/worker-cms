@@ -1,0 +1,35 @@
+{%- comment -%}
+  Read-only fields plus item groups (sections/read.liquid). Item rows nest
+  their own field sets, so this snippet renders itself for each row.
+{%- endcomment -%}
+{%- if set.fields.size > 0 -%}
+  <div class="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+    {%- for field in set.fields -%}
+      <div class="min-w-0">
+        <p class="mb-1 text-sm font-medium text-gray-700">{{ field.label }}</p>
+        <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
+          {%- render "snippets/read-value.liquid", value: field.value -%}
+          {%- for extra in field.extras -%}
+            <div class="mt-1 text-xs text-gray-500"><span class="font-medium text-gray-400">{{ extra.key | t }}:</span> {{ extra.value }}</div>
+          {%- endfor -%}
+        </div>
+      </div>
+    {%- endfor -%}
+  </div>
+{%- endif -%}
+{%- for group in set.groups -%}
+  <div class="mt-4 min-w-0 space-y-4 rounded-lg border border-gray-100 bg-gray-50 p-4">
+    <p class="min-w-0 break-words text-sm font-semibold text-gray-700">{{ group.name }}</p>
+    {%- for row in group.rows -%}
+      <div class="min-w-0 space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+        <span class="min-w-0 text-xs text-gray-400">{{ row.label }}</span>
+        {%- if row.settings -%}
+          <div class="space-y-3"><p class="text-xs font-semibold uppercase tracking-wide text-gray-400">{{ "view_strings.snippets_structured_editor.settings" | t }}</p>{% render "snippets/read-fieldset.liquid", set: row.settings %}</div>
+        {%- endif -%}
+        {%- render "snippets/read-fieldset.liquid", set: row.content -%}
+      </div>
+    {%- else -%}
+      <p class="text-sm text-gray-400">{{ "read.no_items" | t }}</p>
+    {%- endfor -%}
+  </div>
+{%- endfor -%}

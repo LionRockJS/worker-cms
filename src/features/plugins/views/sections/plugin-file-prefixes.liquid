@@ -12,7 +12,7 @@
       <div class="flex items-center justify-between gap-4" style="padding:1rem 1rem 0;margin-bottom:.75rem">
         <div>
           <h3 class="text-lg font-bold text-gray-900">{{ "view_strings.sections_plugin_file_prefixes.file_prefixes" | t }}</h3>
-          <p class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_file_prefixes.approval_reserves_the_prefix_for_this_plugin_and_blocks_overlapping_prefixes" | t }}</p>
+          <p data-explanation class="mt-1 text-sm text-gray-500">{{ "view_strings.sections_plugin_file_prefixes.approval_reserves_the_prefix_for_this_plugin_and_blocks_overlapping_prefixes" | t }}</p>
         </div>
       </div>
       <div class="overflow-x-auto w-full">
@@ -43,14 +43,26 @@
                     {% if prefix.approved %}
                       <form method="post" action="{{ prefix.revokeAction }}" class="inline" data-confirm="{{ "view_strings.sections_plugin_file_prefixes.revoke_confirmation" | t }}">
                         <input type="hidden" name="prefix" value="{{ prefix.prefix }}">
-                        <button type="submit" class="rounded-lg border border-red-300 px-3 py-1 text-xs font-semibold text-red-700">{{ "view_strings.sections_plugin_file_prefixes.revoke" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_file_prefixes.revoke" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_file_prefixes.revoke" | t }}"
+                                class="inline-flex rounded-lg border border-red-300 px-3 text-xs font-semibold text-red-700 items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_file_prefixes.revoke" | t }}</span>
+                        </button>
                       </form>
                     {% elsif prefix.conflict %}
                       <span class="text-xs text-gray-400">{{ "view_strings.sections_plugin_file_prefixes.not_available" | t }}</span>
                     {% else %}
                       <form method="post" action="{{ prefix.approveAction }}" class="inline">
                         <input type="hidden" name="prefix" value="{{ prefix.prefix }}">
-                        <button type="submit" class="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">{{ "view_strings.sections_plugin_file_prefixes.approve" | t }}</button>
+                        <button type="submit"
+                                title="{{ "view_strings.sections_plugin_file_prefixes.approve" | t }}"
+                                aria-label="{{ "view_strings.sections_plugin_file_prefixes.approve" | t }}"
+                                class="inline-flex rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white items-center justify-center shrink-0 gap-2 h-8">
+                          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+                          <span class="hidden lg:inline">{{ "view_strings.sections_plugin_file_prefixes.approve" | t }}</span>
+                        </button>
                       </form>
                     {% endif %}
                   </td>

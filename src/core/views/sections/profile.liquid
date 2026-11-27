@@ -2,36 +2,44 @@
 
   <section class="mb-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <form method="post" action="{{ uiLocaleAction }}" class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-end">
+      <form method="post" action="{{ uiLocaleAction }}" class="flex min-w-0 flex-1 flex-row items-end gap-2">
         <label class="min-w-0 flex-1 text-sm font-medium text-gray-700">{{ "profile.interface_language" | t }}
           <select name="locale" class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2">
             {% for option in uiLocaleOptions %}<option value="{{ option.code }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <button type="submit" class="h-10 shrink-0 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white">{{ "profile.save_language" | t }}</button>
+        <button type="submit"
+                title="{{ "profile.save_language" | t }}"
+                aria-label="{{ "profile.save_language" | t }}"
+                class="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+          <span class="hidden lg:inline">{{ "profile.save_language" | t }}</span>
+        </button>
       </form>
 
       <div class="flex flex-wrap items-center gap-2">
         <button type="button"
-                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 data-theme-toggle
                 data-theme-light-label="{{ "shell.theme.light" | t }}"
                 data-theme-dark-label="{{ "shell.theme.dark" | t }}"
                 data-theme-switch-light="{{ "shell.theme.switch_to_light" | t }}"
                 data-theme-switch-dark="{{ "shell.theme.switch_to_dark" | t }}"
                 aria-pressed="false"
+                title="{{ "shell.theme.switch_to_light" | t }}"
                 aria-label="{{ "shell.theme.switch_to_light" | t }}">
-          <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="light"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-theme-icon="dark"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
-          <span data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
+          <svg class="h-4 w-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-theme-icon="light"><use href="{{ iconHrefPrefix }}#sun"></use></svg>
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-theme-icon="dark"><use href="{{ iconHrefPrefix }}#moon"></use></svg>
+          <span class="hidden lg:inline" data-theme-toggle-label>{{ "shell.theme.dark" | t }}</span>
         </button>
 
         <form method="post" action="/auth/logout" class="inline-flex">
           <button type="submit"
-                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 hover:bg-red-50"
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50"
+                  title="{{ "shell.sign_out" | t }}"
                   aria-label="{{ "shell.sign_out" | t }}">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#logout"></use></svg>
-            {{ "shell.sign_out" | t }}
+            <span class="hidden lg:inline">{{ "shell.sign_out" | t }}</span>
           </button>
         </form>
       </div>
@@ -66,12 +74,27 @@
         <input type="hidden" name="avatar" value="">
         <input type="file" accept="image/*" class="hidden" data-avatar-file>
         <button type="button" data-avatar-upload
-                class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">{{ "profile.avatar_upload" | t }}</button>
+                title="{{ "profile.avatar_upload" | t }}"
+                aria-label="{{ "profile.avatar_upload" | t }}"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+          <span class="hidden lg:inline">{{ "profile.avatar_upload" | t }}</span>
+        </button>
         <button type="button" data-avatar-initials
-                class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">{{ "profile.avatar_initials" | t }}</button>
+                title="{{ "profile.avatar_initials" | t }}"
+                aria-label="{{ "profile.avatar_initials" | t }}"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#user"></use></svg>
+          <span class="hidden lg:inline">{{ "profile.avatar_initials" | t }}</span>
+        </button>
         {% if hasOwnAvatar %}
           <button type="submit"
-                  class="inline-flex h-9 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50">{{ "profile.avatar_remove" | t }}</button>
+                  title="{{ "profile.avatar_remove" | t }}"
+                  aria-label="{{ "profile.avatar_remove" | t }}"
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50 shrink-0">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+            <span class="hidden lg:inline">{{ "profile.avatar_remove" | t }}</span>
+          </button>
         {% endif %}
         <p class="hidden w-full text-xs text-red-700" data-avatar-error>{{ "profile.invalid_avatar" | t }}</p>
       </form>
@@ -79,7 +102,10 @@
         <label for="profile-name" class="block text-sm font-medium text-gray-700">{{ "profile.display_name" | t }}</label>
         <input id="profile-name" name="name" type="text" required maxlength="100" autocomplete="name" value="{{ name }}"
                class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-        <button type="submit" class="h-10 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">{{ "common.save" | t }}</button>
+        <button type="submit" title="{{ "common.save" | t }}" aria-label="{{ "common.save" | t }}" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 shrink-0">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+          <span class="hidden lg:inline">{{ "common.save" | t }}</span>
+        </button>
       </form>
     </section>
 
@@ -119,7 +145,7 @@
   <section class="mt-4 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
     <div class="mb-4">
       <h3 class="text-lg font-semibold text-gray-900">{{ "profile.sign_in_methods" | t }}</h3>
-      <p class="mt-1 text-sm text-gray-500">{{ "profile.sign_in_description" | t }}</p>
+      <p data-explanation class="mt-1 text-sm text-gray-500">{{ "profile.sign_in_description" | t }}</p>
     </div>
     {% if hasProviders %}
       <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -131,9 +157,15 @@
             </div>
           {% else %}
             <a href="{{ provider.connectHref }}"
-               class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg>
-              {{ "profile.connect" | t }} {{ provider.label }}
+               title="{{ "profile.connect" | t }} {{ provider.label }}"
+               aria-label="{{ "profile.connect" | t }} {{ provider.label }}"
+               class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+              {% if provider.provider == 'eventuai' %}
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#key"></use></svg>
+              {% else %}
+                <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{{ provider.provider }}"></use></svg>
+              {% endif %}
+              <span class="hidden lg:inline">{{ "profile.connect" | t }} {{ provider.label }}</span>
             </a>
           {% endif %}
         {% endfor %}
@@ -143,135 +175,7 @@
     {% endif %}
   </section>
 
-  {% if showCreditsPanel %}
-  {% comment %}
-    One card per wallet (credits, diamonds, ...). Every string here is
-    currency-neutral except the wallet's own name and description, which the
-    server supplies as translation keys — so a new currency needs two strings,
-    not a second copy of this markup.
-  {% endcomment %}
-  {% for wallet in creditWallets %}
-  <section class="mt-4 bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6">
-    <div class="mb-4">
-      <h3 class="text-lg font-semibold text-gray-900">{{ wallet.nameKey | t }}</h3>
-      <p class="mt-1 text-sm text-gray-500">{{ wallet.descriptionKey | t }}</p>
-    </div>
-    <p class="text-2xl font-bold text-gray-900">{{ wallet.balance }}</p>
-
-    {% if wallet.balance > 0 %}
-    <form method="POST" action="{{ wallet.transferAction }}"
-          data-confirm="{{ "credits.wallet.send_confirm" | t }}"
-          class="mt-5 max-w-md space-y-3 border-t border-gray-100 pt-5">
-      <input type="hidden" name="currency" value="{{ wallet.currency }}">
-      <h4 class="text-sm font-semibold text-gray-900">{{ "credits.wallet.send_title" | t }}</h4>
-      <p class="text-xs text-gray-500">{{ "credits.wallet.send_description" | t }}</p>
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "profile.recipient_email" | t }}</span>
-        <input name="recipient" type="email" required autocomplete="off" placeholder="user@example.com"
-               class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-      </label>
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "common.amount" | t }}</span>
-        <input name="amount" type="number" step="1" min="1" required placeholder="e.g. 100"
-               class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-      </label>
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "common.note" | t }} <span class="text-gray-400">({{ "common.optional" | t }})</span></span>
-        <input name="note" type="text" maxlength="300" placeholder="{{ "profile.transfer_note_placeholder" | t }}"
-               class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-      </label>
-      <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700">{{ "credits.wallet.send_title" | t }}</button>
-    </form>
-
-    <form method="POST" action="{{ wallet.donateAction }}"
-          data-confirm="{{ "credits.wallet.donate_confirm" | t }}"
-          class="mt-5 max-w-md space-y-3 border-t border-gray-100 pt-5">
-      <input type="hidden" name="currency" value="{{ wallet.currency }}">
-      <h4 class="text-sm font-semibold text-gray-900">{{ "credits.wallet.donate_title" | t }}</h4>
-      <p class="text-xs text-gray-500">
-        {{ "profile.shared_pool_balance" | t }}: <span class="font-semibold text-gray-900">{{ wallet.sharedBalance }}</span>.
-        {{ "credits.wallet.shared_pool_description" | t }}
-      </p>
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "common.amount" | t }}</span>
-        <input name="amount" type="number" step="1" min="1" required placeholder="e.g. 100"
-               class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-      </label>
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1">{{ "common.note" | t }} <span class="text-gray-400">({{ "common.optional" | t }})</span></span>
-        <input name="note" type="text" maxlength="300" placeholder="{{ "profile.donation_note_placeholder" | t }}"
-               class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-      </label>
-      <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700">{{ "profile.donate_to_pool" | t }}</button>
-    </form>
-    {% endif %}
-
-    {% if wallet.hasLedger %}
-      <div class="mt-4 overflow-x-auto">
-        <table class="w-full min-w-[560px] text-left text-sm">
-          <thead class="bg-gray-50 text-left text-xs uppercase text-gray-500">
-            <tr>
-              <th class="px-4 py-2">{{ "common.when" | t }}</th>
-              <th class="px-4 py-2">{{ "common.action" | t }}</th>
-              <th class="px-4 py-2">{{ "common.change" | t }}</th>
-              <th class="px-4 py-2">{{ "common.balance" | t }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for entry in wallet.ledger %}
-              <tr class="border-t border-gray-100">
-                <td class="px-4 py-3 text-xs text-gray-500">{{ entry.createdAt | l10n_date }}</td>
-                <td class="px-4 py-3">
-                  <span class="font-mono text-xs">{{ entry.action }}</span>
-                  {% if entry.note != '' %}<div class="text-xs text-gray-500 mt-0.5">{{ entry.note }}</div>{% endif %}
-                </td>
-                <td class="px-4 py-3 text-sm {% if entry.isSpend %}text-red-700{% else %}text-green-700{% endif %}">{{ entry.delta }}</td>
-                <td class="px-4 py-3 text-sm text-gray-700">{{ entry.balanceAfter }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% if wallet.showPagination %}
-        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
-          <p class="text-sm text-gray-500">
-            {{ "profile.showing" | t }} {{ wallet.pagination.from }}-{{ wallet.pagination.to }} {{ "profile.showing_of" | t }} {{ wallet.pagination.total }}
-          </p>
-          <div class="flex items-center gap-2">
-            {% if wallet.pagination.hasPrevious %}
-              <a href="{{ wallet.pagination.previousHref }}"
-                 class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-                {{ "common.previous" | t }}
-              </a>
-            {% else %}
-              <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
-                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-                {{ "common.previous" | t }}
-              </span>
-            {% endif %}
-            <span class="text-xs font-medium text-gray-500">{{ "profile.pagination_page" | t }} {{ wallet.pagination.page }} {{ "profile.pagination_of" | t }} {{ wallet.pagination.pageCount }}</span>
-            {% if wallet.pagination.hasNext %}
-              <a href="{{ wallet.pagination.nextHref }}"
-                 class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-                {{ "common.next" | t }}
-                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
-              </a>
-            {% else %}
-              <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
-                {{ "common.next" | t }}
-                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
-              </span>
-            {% endif %}
-          </div>
-        </div>
-      {% endif %}
-    {% else %}
-      <p class="mt-3 text-sm text-gray-500">{{ "credits.wallet.no_activity" | t }}</p>
-    {% endif %}
-  </section>
-  {% endfor %}
-  {% endif %}
+  {% feature_fragment credits/profile-wallets %}
   <section class="mt-4 rounded-xl border border-red-200 bg-white p-5 shadow-sm sm:p-6">
     <h3 class="text-lg font-semibold text-gray-900">{{ "profile.disable_account" | t }}</h3>
     <p class="mt-2 text-sm text-gray-500">{{ "profile.disable_description" | t }}</p>
@@ -280,7 +184,10 @@
         <input type="checkbox" name="confirm" value="disable" required>
         {{ "profile.disable_acknowledge" | t }}
       </label>
-      <button type="submit" class="mt-3 h-10 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50">{{ "profile.disable_account" | t }}</button>
+      <button type="submit" title="{{ "profile.disable_account" | t }}" aria-label="{{ "profile.disable_account" | t }}" class="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50 shrink-0">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#lock-closed"></use></svg>
+        <span class="hidden lg:inline">{{ "profile.disable_account" | t }}</span>
+      </button>
     </form>
   </section>
 </div>

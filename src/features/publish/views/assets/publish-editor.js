@@ -30,7 +30,7 @@
 
     let publishScheduleCollapsed = true;
     try {
-      publishScheduleCollapsed = window.localStorage.getItem(publishScheduleStorageKey) === '1';
+      publishScheduleCollapsed = window.localStorage.getItem(publishScheduleStorageKey) !== '0';
     } catch (_error) {}
     setPublishScheduleCollapsed(publishScheduleCollapsed, false);
     publishScheduleToggle.addEventListener('click', () => {

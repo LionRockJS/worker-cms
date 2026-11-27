@@ -1,0 +1,24 @@
+# Run the published image (.github/workflows/docker.yml builds it):
+#   BASE_URL=https://cms.example.com docker compose pull && docker compose up -d
+# or build it from this checkout instead:
+#   BASE_URL=https://cms.example.com docker compose up -d --build
+# CMS_TAG picks the image tag: development (default) or a fixed sha-<commit>.
+# Secrets (JWT_SECRET, *_CLIENT_SECRET, ...) go in cms.env, which is gitignored:
+#   cp cms.env.example cms.env
+services:
+  cms:
+    build: .
+    image: ghcr.io/lionrockjs/0xcms:${CMS_TAG:-development}
+    restart: unless-stopped
+    # Loopback only: the reverse proxy on this host is the way in. Docker's
+    # published ports bypass the host firewall.
+    ports:
+      - "127.0.0.1:${CMS_PORT:-8787}:8787"
+    environment:
+      BASE_URL: ${BASE_URL:-http://localhost:8787}
+    env_file: cms.env
+    volumes:
+      - cms-state:/app/.wrangler/state
+
+volumes:
+  cms-state:

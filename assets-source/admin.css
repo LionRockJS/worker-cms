@@ -191,6 +191,22 @@ th,
   }
 }
 
+/* Inset the chevron on single-row selects and reserve space for the label. */
+@media (forced-colors: none) {
+  select:not([multiple], [size]:not([size="1"])) {
+    appearance: none;
+    padding-inline-end: 2.25rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 9l-7 7-7-7' fill='none' stroke='%23828d9f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-size: 1rem;
+    background-position: right 0.75rem center;
+
+    &:dir(rtl) {
+      background-position: left 0.75rem center;
+    }
+  }
+}
+
 /* Surfaces: "white" cards become raised dark panels. */
 .bg-white {
   background-color: #141a26;
@@ -529,7 +545,10 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
 }
 *::-webkit-scrollbar-thumb:hover { background: #38445a; background-clip: content-box; }
 
-/* Native explanation toggle shares the primary color in both themes. */
+/* Use the sidebar checkbox to control explanations throughout the admin shell. */
+body:has(> [data-admin-sidebar] [data-sidebar-help-toggle]:not(:checked)) [data-explanation] {
+  display: none;
+}
 html [data-admin-sidebar] [data-sidebar-help-control]:has([data-sidebar-help-toggle]:checked) {
   color: var(--color-indigo-600);
 }

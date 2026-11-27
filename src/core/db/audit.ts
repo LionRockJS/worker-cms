@@ -25,7 +25,6 @@ import { classificationPolicyFailureSql, type DataClassMap } from './data-classe
 import type { Env, JWTPayload } from '../../types';
 import type { AppContext } from '../http/context';
 import { recordAuditOutage } from './audit-outages';
-import { USER_HAS_ROLE_SQL, USER_WITHOUT_ROLE_SQL } from '../auth/role-mutation-sql';
 import { abortIf } from './transaction-guard';
 import { requestContext } from '../http/request-context';
 
@@ -372,50 +371,55 @@ export function auditDeliveryEvidence(env: Env, envelope: AuditEnvelope): Mutati
     guard: abortIf(env, `NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})`, auditValues(row, actor, request)) };
 }
 
-/**
- * Record each user losing a deleted role, from the same D1 transaction as the
- * later user updates. The role-store compares event count and final user roles
- * before committing, so a skipped audit or skipped update cannot look successful.
- */
-export interface RoleRemovalAuditEvidence {
-  write: D1PreparedStatement;
-  actor: AuditActor;
-  request: AuditRequest;
-  dataClass: AuditRow['dataClass'];
+/** Per-row SQL replacing envelope values in an INSERT ... SELECT. */
+export interface AuditRowExpressions {
+  targetId?: string;
+  targetCount?: string;
+  detail?: { sql: string; bindings: Array<string | number | null> };
 }
 
-export function roleRemovalAuditEvidence(c: AppContext, role: string, operationId: string, occurredAt: string,
-  dataClass: AuditRow['dataClass']): RoleRemovalAuditEvidence {
-  const row = mutationRow({ action: 'user.roles', entityType: 'user' });
-  row.occurredAt = occurredAt;
-  row.dataClass = dataClass;
+/** One mutation envelope per selected row; append the FROM/WHERE clause to `sql`. */
+export interface MutationAuditSelect {
+  sql: string;
+  bindings: Array<string | number | null>;
+  actor: AuditActor;
+  request: AuditRequest;
+}
+
+// UUIDv4 generated per selected row inside D1.
+const ROW_UUID_SQL = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', (abs(random()) % 4) + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))";
+
+/**
+ * Build the ordinary signed-in mutation envelope as an INSERT ... SELECT, so a
+ * feature can record one event per row it is about to change from the same
+ * D1 transaction. Actor, request, and retention match mutationAuditEvidence();
+ * only the event id and the `perRow` columns are evaluated per selected row.
+ */
+export function mutationAuditSelect(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
+  occurredAt: string, perRow: AuditRowExpressions): MutationAuditSelect {
+  const row = { ...mutationRow(entry), dataClass, occurredAt };
   const actor = actorFromUser(c.get('user'));
   const request = requestFrom(c);
   const values = auditValues(row, actor, request);
+  const overrides = new Map<number, string | undefined>([
+    [AUDIT_COLUMNS.indexOf('target_id'), perRow.targetId],
+    [AUDIT_COLUMNS.indexOf('target_count'), perRow.targetCount],
+  ]);
   const expressions: string[] = [];
   const bindings: Array<string | number | null> = [];
-  // UUIDv4 per affected user; identifiers and actor/request data use the same
-  // envelope as ordinary mutation events. No free-text name/email is copied.
-  const uuid = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', (abs(random()) % 4) + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))";
-  for (let index = 0; index < values.length; index++) {
-    if (index === 0) expressions.push(uuid);
-    else if (index === 15) expressions.push('CAST(u.id AS TEXT)');
-    else if (index === 17) expressions.push('1');
-    else if (index === 20) {
-      expressions.push(`json_object('operation_id', ?, 'role_before', u.role, 'role_after', ${USER_WITHOUT_ROLE_SQL}, 'removed_role', ?)`);
-      bindings.push(operationId, role, role);
+  values.forEach((value, index) => {
+    const override = overrides.get(index);
+    if (index === 0) expressions.push(ROW_UUID_SQL);
+    else if (override !== undefined) expressions.push(override);
+    else if (index === AUDIT_COLUMNS.indexOf('detail') && perRow.detail) {
+      expressions.push(perRow.detail.sql);
+      bindings.push(...perRow.detail.bindings);
     } else {
       expressions.push('?');
-      bindings.push(values[index]);
+      bindings.push(value);
     }
-  }
-  bindings.push(role, role);
-  return {
-    write: c.env.DB.prepare(`${INSERT_COLUMNS} SELECT ${expressions.join(', ')} FROM users AS u
-      WHERE ${USER_HAS_ROLE_SQL} AND EXISTS (SELECT 1 FROM roles WHERE name = ? AND builtin = 0)`)
-      .bind(...bindings),
-    actor, request, dataClass,
-  };
+  });
+  return { sql: `${INSERT_COLUMNS} SELECT ${expressions.join(', ')}`, bindings, actor, request };
 }
 
 /** Records one mutation by the signed-in user. */

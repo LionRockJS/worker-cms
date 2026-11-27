@@ -1,0 +1,102 @@
+{% if hasSelectablePages %}
+  <form id="dashboard-bulk-form" method="POST" action="{{ bulkAction }}"
+        class="mb-3 hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm"
+        data-dashboard-bulk-form
+        data-dashboard-bulk-confirm-template="{{ "view_strings.sections_dashboard.bulk_confirm_template" | t }}"
+        data-dashboard-bulk-all-subject="{{ "view_strings.sections_dashboard.bulk_all_matching_pages_subject" | t }}"
+        data-dashboard-bulk-page-singular="{{ "view_strings.sections_dashboard.bulk_selected_page" | t }}"
+        data-dashboard-bulk-page-plural="{{ "view_strings.sections_dashboard.bulk_selected_pages" | t }}"
+        data-dashboard-bulk-choose-tag="{{ "view_strings.shared_bulk_actions.choose_tags" | t }}"
+        data-dashboard-bulk-enter-search="{{ "view_strings.shared_bulk_actions.enter_text_to_find" | t }}"
+        aria-hidden="true">
+    <input type="hidden" name="return_to" value="{{ returnPath }}">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="block sm:w-56">
+          <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.bulk_action" | t }}</span>
+          <select name="bulk_action" data-dashboard-bulk-action
+                  class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            {% if publishEnabled %}
+            {% feature_fragment publish/dashboard-bulk-options %}
+            {% else %}
+              <option value="" selected disabled>—</option>
+            {% endif %}
+            {% feature_fragment trash/bulk-delete-option %}
+            <option value="replace_text">{{ "view_strings.shared_bulk_actions.replace_text" | t }}</option>
+            {% if hasBulkTagOptions %}
+              <option value="add_tag">{{ "view_strings.shared_bulk_actions.add_tags" | t }}</option>
+              <option value="remove_tag">{{ "view_strings.shared_bulk_actions.remove_tags" | t }}</option>
+            {% endif %}
+          </select>
+        </label>
+        <label class="block sm:w-56">
+          <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.apply_to" | t }}</span>
+          <select name="scope" data-dashboard-bulk-scope
+                  class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="selected">{{ "view_strings.shared_bulk_actions.selected_items" | t }}</option>
+            <option value="all">{{ "view_strings.sections_dashboard.all_matching_pages" | t }}</option>
+          </select>
+        </label>
+        {% if hasBulkTagOptions %}
+          <div class="hidden sm:col-span-2" data-dashboard-bulk-tags>
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500" data-dashboard-bulk-tag-label-add>{{ "view_strings.shared_bulk_actions.tags_to_add" | t }}</span>
+            <span class="mb-1 hidden text-xs font-semibold uppercase tracking-wider text-gray-500" data-dashboard-bulk-tag-label-remove>{{ "view_strings.shared_bulk_actions.tags_to_remove" | t }}</span>
+            <div class="relative rounded-lg border border-gray-300 bg-white p-2" data-dashboard-bulk-tag-picker>
+              <div class="flex flex-wrap gap-1.5" data-dashboard-bulk-tag-chips></div>
+              <input type="search"
+                     placeholder="{{ "view_strings.sections_editor.search_tags" | t }}"
+                     autocomplete="off"
+                     aria-label="{{ "view_strings.sections_editor.search_tags" | t }}"
+                     class="mt-1 h-8 w-full border-b border-transparent bg-transparent px-1 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none"
+                     data-dashboard-bulk-tag-search>
+              <div class="mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-100 bg-white py-1" data-dashboard-bulk-tag-options>
+                {% for group in bulkTagGroups %}
+                  <p class="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-gray-400" data-dashboard-bulk-tag-group>{% if group.isOther %}{{ "view_strings.shared_bulk_actions.untagged_tags" | t }}{% else %}{{ group.name }}{% endif %}</p>
+                  {% for tag in group.tags %}
+                    <button type="button"
+                            class="block w-full truncate px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                            data-dashboard-bulk-tag-option
+                            data-tag-id="{{ tag.id }}"
+                            data-tag-name="{{ tag.name }}">{{ tag.name }}</button>
+                  {% endfor %}
+                {% endfor %}
+                <p class="hidden px-3 py-2 text-sm text-gray-400" data-dashboard-bulk-tag-empty>{{ "view_strings.sections_editor.no_matching_tags" | t }}</p>
+              </div>
+            </div>
+            <p data-explanation class="mt-1 text-xs text-gray-500">
+              <span data-dashboard-bulk-tag-help-add>{{ "view_strings.shared_bulk_actions.add_tags_help" | t }}</span>
+              <span class="hidden" data-dashboard-bulk-tag-help-remove>{{ "view_strings.shared_bulk_actions.remove_tags_help" | t }}</span>
+            </p>
+          </div>
+        {% endif %}
+        <div class="hidden sm:col-span-2" data-dashboard-bulk-replacement>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.find_text" | t }}</span>
+              <input type="text" name="search_text" maxlength="5000" autocomplete="off"
+                     class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                     data-dashboard-bulk-search-text>
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.replacement_text" | t }}</span>
+              <input type="text" name="replacement_text" maxlength="5000" autocomplete="off"
+                     class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                     data-dashboard-bulk-replacement-text>
+            </label>
+          </div>
+          <p data-explanation class="mt-1 text-xs text-gray-500">{{ "view_strings.shared_bulk_actions.replace_text_help" | t }}</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="text-sm text-gray-500"><span data-dashboard-selected-count>0</span> {{ "view_strings.shared_bulk_actions.selected" | t }}</div>
+        <button type="submit"
+                title="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
+                aria-label="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
+                class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 shrink-0 gap-2">
+          <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+          <span class="hidden lg:inline">{{ "view_strings.shared_bulk_actions.apply" | t }}</span>
+        </button>
+      </div>
+    </div>
+  </form>
+{% endif %}

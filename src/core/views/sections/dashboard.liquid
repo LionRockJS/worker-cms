@@ -2,17 +2,7 @@
   <div class="flex flex-col gap-4 mb-6 xl:flex-row xl:items-center xl:justify-between">
     {% if hasStatusFilters or hasPageTypeChoices %}
       <div class="flex flex-wrap items-center gap-2">
-        {% if hasStatusFilters %}
-          <div class="inline-flex h-9 overflow-hidden rounded-lg border border-gray-300 bg-white text-sm font-semibold shadow-sm">
-            {% for filter in statusFilters %}
-              <a href="{{ filter.href }}"
-                 {% if filter.isActive %}aria-current="page"{% endif %}
-                 class="inline-flex items-center border-r border-gray-300 px-3 last:border-r-0 {% if filter.isActive %}bg-indigo-600 text-white{% else %}text-gray-700 hover:bg-gray-50{% endif %}">
-                {% if filter.translationKey %}{{ filter.translationKey | t }}{% else %}{{ filter.label }}{% endif %}
-              </a>
-            {% endfor %}
-          </div>
-        {% endif %}
+        {% feature_fragment publish/dashboard-status-filters %}
         {% if hasPageTypeChoices %}
           <label for="page_type_filter" class="sr-only">{{ "view_strings.sections_dashboard.filter_by_type" | t }}</label>
           <select id="page_type_filter"
@@ -26,22 +16,7 @@
       </div>
     {% endif %}
     <div class="flex w-full flex-row gap-2 xl:max-w-3xl xl:justify-end">
-      <form method="GET" action="{{ searchAction }}" class="flex min-w-0 flex-1 gap-2">
-        <input type="hidden" name="operator" value="AND">
-        <input type="hidden" name="pagesize" value="20">
-        <input type="hidden" name="sort" value="updated_at">
-        <input type="hidden" name="order" value="DESC">
-        <input type="hidden" name="path1" value="">
-        <label for="dashboard_search" class="sr-only">{{ "view_strings.sections_dashboard.search_pages" | t }}</label>
-        <input id="dashboard_search" type="search" name="search1" value="{{ searchValue }}" placeholder="{% if pageTypeFilter != '' %}{{ "view_strings.sections_dashboard.search" | t }} {{ pageTypeFilter }} {{ "nav.pages" | t }}{% else %}{{ "view_strings.sections_dashboard.search_pages" | t }}{% endif %}"
-               class="h-10 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <button type="submit"
-                title="{{ "view_strings.sections_dashboard.search" | t }}"
-                aria-label="{{ "view_strings.sections_dashboard.search_pages" | t }}"
-                class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#search"></use></svg>
-        </button>
-      </form>
+      {% feature_fragment search/dashboard-search %}
       {% if hasExportHref %}
         <a href="{{ exportHref }}"
            title="{{ "view_strings.sections_dashboard.export_csv" | t }}"
@@ -70,108 +45,7 @@
     </div>
   {% endif %}
 
-  {% if hasSelectablePages %}
-    <form id="dashboard-bulk-form" method="POST" action="{{ bulkAction }}"
-          class="mb-3 hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm"
-          data-dashboard-bulk-form
-          data-dashboard-bulk-confirm-template="{{ "view_strings.sections_dashboard.bulk_confirm_template" | t }}"
-          data-dashboard-bulk-all-subject="{{ "view_strings.sections_dashboard.bulk_all_matching_pages_subject" | t }}"
-          data-dashboard-bulk-page-singular="{{ "view_strings.sections_dashboard.bulk_selected_page" | t }}"
-          data-dashboard-bulk-page-plural="{{ "view_strings.sections_dashboard.bulk_selected_pages" | t }}"
-          data-dashboard-bulk-choose-tag="{{ "view_strings.shared_bulk_actions.choose_tags" | t }}"
-          data-dashboard-bulk-enter-search="{{ "view_strings.shared_bulk_actions.enter_text_to_find" | t }}"
-          aria-hidden="true">
-      <input type="hidden" name="return_to" value="{{ returnPath }}">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div class="grid gap-3 sm:grid-cols-2">
-          <label class="block sm:w-56">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.bulk_action" | t }}</span>
-            <select name="bulk_action" data-dashboard-bulk-action
-                    class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              {% if publishEnabled %}
-              <option value="publish">{{ "view_strings.shared_bulk_actions.publish" | t }}</option>
-              <option value="unpublish">{{ "view_strings.shared_bulk_actions.unpublish" | t }}</option>
-              {% else %}
-                <option value="" selected disabled>—</option>
-              {% endif %}
-              <option value="delete">{{ "view_strings.shared_bulk_actions.move_to_trash" | t }}</option>
-              <option value="replace_text">{{ "view_strings.shared_bulk_actions.replace_text" | t }}</option>
-              {% if hasBulkTagOptions %}
-                <option value="add_tag">{{ "view_strings.shared_bulk_actions.add_tags" | t }}</option>
-                <option value="remove_tag">{{ "view_strings.shared_bulk_actions.remove_tags" | t }}</option>
-              {% endif %}
-            </select>
-          </label>
-          <label class="block sm:w-56">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.apply_to" | t }}</span>
-            <select name="scope" data-dashboard-bulk-scope
-                    class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="selected">{{ "view_strings.shared_bulk_actions.selected_items" | t }}</option>
-              <option value="all">{{ "view_strings.sections_dashboard.all_matching_pages" | t }}</option>
-            </select>
-          </label>
-          {% if hasBulkTagOptions %}
-            <div class="hidden sm:col-span-2" data-dashboard-bulk-tags>
-              <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500" data-dashboard-bulk-tag-label-add>{{ "view_strings.shared_bulk_actions.tags_to_add" | t }}</span>
-              <span class="mb-1 hidden text-xs font-semibold uppercase tracking-wider text-gray-500" data-dashboard-bulk-tag-label-remove>{{ "view_strings.shared_bulk_actions.tags_to_remove" | t }}</span>
-              <div class="relative rounded-lg border border-gray-300 bg-white p-2" data-dashboard-bulk-tag-picker>
-                <div class="flex flex-wrap gap-1.5" data-dashboard-bulk-tag-chips></div>
-                <input type="search"
-                       placeholder="{{ "view_strings.sections_editor.search_tags" | t }}"
-                       autocomplete="off"
-                       aria-label="{{ "view_strings.sections_editor.search_tags" | t }}"
-                       class="mt-1 h-8 w-full border-b border-transparent bg-transparent px-1 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none"
-                       data-dashboard-bulk-tag-search>
-                <div class="mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-100 bg-white py-1" data-dashboard-bulk-tag-options>
-                  {% for group in bulkTagGroups %}
-                    <p class="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-gray-400" data-dashboard-bulk-tag-group>{% if group.isOther %}{{ "view_strings.shared_bulk_actions.untagged_tags" | t }}{% else %}{{ group.name }}{% endif %}</p>
-                    {% for tag in group.tags %}
-                      <button type="button"
-                              class="block w-full truncate px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                              data-dashboard-bulk-tag-option
-                              data-tag-id="{{ tag.id }}"
-                              data-tag-name="{{ tag.name }}">{{ tag.name }}</button>
-                    {% endfor %}
-                  {% endfor %}
-                  <p class="hidden px-3 py-2 text-sm text-gray-400" data-dashboard-bulk-tag-empty>{{ "view_strings.sections_editor.no_matching_tags" | t }}</p>
-                </div>
-              </div>
-              <p class="mt-1 text-xs text-gray-500">
-                <span data-dashboard-bulk-tag-help-add>{{ "view_strings.shared_bulk_actions.add_tags_help" | t }}</span>
-                <span class="hidden" data-dashboard-bulk-tag-help-remove>{{ "view_strings.shared_bulk_actions.remove_tags_help" | t }}</span>
-              </p>
-            </div>
-          {% endif %}
-          <div class="hidden sm:col-span-2" data-dashboard-bulk-replacement>
-            <div class="grid gap-3 sm:grid-cols-2">
-              <label class="block">
-                <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.find_text" | t }}</span>
-                <input type="text" name="search_text" maxlength="5000" autocomplete="off"
-                       class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                       data-dashboard-bulk-search-text>
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.shared_bulk_actions.replacement_text" | t }}</span>
-                <input type="text" name="replacement_text" maxlength="5000" autocomplete="off"
-                       class="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                       data-dashboard-bulk-replacement-text>
-              </label>
-            </div>
-            <p class="mt-1 text-xs text-gray-500">{{ "view_strings.shared_bulk_actions.replace_text_help" | t }}</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <div class="text-sm text-gray-500"><span data-dashboard-selected-count>0</span> {{ "view_strings.shared_bulk_actions.selected" | t }}</div>
-          <button type="submit"
-                  title="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
-                  aria-label="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
-                  class="inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700">
-            {{ "view_strings.shared_bulk_actions.apply" | t }}
-          </button>
-        </div>
-      </div>
-    </form>
-  {% endif %}
+  {% feature_fragment search/dashboard-bulk-form %}
 
   <div class="mb-8 bg-white rounded-xl shadow-sm border border-gray-200">
     <div class="overflow-x-auto">
@@ -179,14 +53,11 @@
       {% if hasPages %}
       <thead class="bg-gray-50 border-b border-gray-200">
         <tr>
+          {% if hasRowControls %}
           <th class="{% if canReorder %}w-20 px-4{% else %}w-12 px-6{% endif %} py-3">
-            {% if hasSelectablePages %}
-              <input type="checkbox" data-dashboard-bulk-select-all
-                     title="{{ "view_strings.shared_bulk_actions.select_all_visible_pages" | t }}"
-                     aria-label="{{ "view_strings.shared_bulk_actions.select_all_visible_pages" | t }}"
-                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-            {% endif %}
+            {% feature_fragment search/dashboard-select-all %}
           </th>
+          {% endif %}
           <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_dashboard.page" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_dashboard.weight" | t }}</th>
           <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{{ "view_strings.sections_dashboard.actions" | t }}</th>
@@ -196,14 +67,11 @@
       <tbody class="divide-y divide-gray-100">
         {% if hasPages %}
           {% for page in pages %}
-            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}{% if page.hasLiveWeight %} data-live-weight="{{ page.liveWeight }}"{% endif %}>
+            <tr class="hover:bg-gray-50 transition-colors"{% if canReorder %} data-id="{{ page.id }}"{% endif %}>
+              {% if hasRowControls %}
               <td class="{% if canReorder %}px-4{% else %}px-6{% endif %} py-4 align-top">
                 <div class="flex items-center gap-1">
-                  {% if page.isSelectable %}
-                    <input type="checkbox" name="page_ids" value="{{ page.id }}" form="dashboard-bulk-form"
-                           data-dashboard-bulk-checkbox title="Select {{ page.name }}" aria-label="Select {{ page.name }}"
-                           class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                  {% endif %}
+                  {% feature_fragment search/dashboard-select-page %}
                   {% if canReorder and page.isSelectable %}
                     <span data-reorder-handle
                           title="{{ "view_strings.sections_dashboard.drag_to_reorder" | t }}"
@@ -214,6 +82,7 @@
                   {% endif %}
                 </div>
               </td>
+              {% endif %}
               <td class="px-6 py-4">
                 {% if page.isDraftMissing %}
                   <div class="flex flex-col gap-1">
@@ -234,25 +103,7 @@
                       <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">{{ page.pageType }}</span>
                     {% endif %}
                   {% endif %}
-                  {% if publishEnabled %}
-                  {% if page.publicationStatus == 'scheduled' %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-600">
-                      <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>{{ "pages.status.scheduled" | t }}
-                    </span>
-                  {% elsif page.publicationStatus == 'ended' %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                      <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>{{ "pages.status.ended" | t }}
-                    </span>
-                  {% elsif page.publicationStatus == 'live' %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>{{ "pages.status.live" | t }}
-                    </span>
-                  {% else %}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                      <span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>{{ "view_strings.sections_dashboard.draft" | t }}
-                    </span>
-                  {% endif %}
-                  {% endif %}
+                  {% feature_fragment publish/dashboard-status %}
                   {% if page.hasTags %}
                     {% for tag in page.tags %}
                       <span class="inline-flex max-w-full items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
@@ -263,31 +114,7 @@
                       <span class="inline-flex items-center rounded-full bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-500">{{ "view_strings.sections_dashboard.more" | t }}</span>
                     {% endif %}
                   {% endif %}
-                  {% if page.isPublished %}
-                    {% if page.isDraftMissing %}
-                      <span title="{{ "view_strings.sections_dashboard.published_page_is_missing_from_drafts" | t }}"
-                            class="inline-flex items-center text-amber-600">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.published_page_is_missing_from_drafts" | t }}</span>
-                      </span>
-                    {% endif %}
-                    {% if page.hasLiveLectDrift %}
-                      <span title="{{ "view_strings.sections_dashboard.live_content_differs_from_draft" | t }}"
-                            class="inline-flex items-center text-amber-600">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.live_content_differs_from_draft" | t }}</span>
-                      </span>
-                      <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.live_content_differs_from_draft_publish_to_sync" | t }}"
-                                aria-label="{{ "view_strings.sections_dashboard.live_content_differs_from_draft_publish_to_sync" | t }}"
-                                class="inline-flex h-6 w-6 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.live_content_differs_from_draft_publish_to_sync" | t }}</span>
-                        </button>
-                      </form>
-                    {% endif %}
-                  {% endif %}
+                  {% feature_fragment publish/dashboard-content-drift %}
                 </div>
               </td>
               <td class="px-6 py-4">
@@ -300,46 +127,21 @@
                       <label for="weight_{{ page.id }}" class="sr-only">Weight for {{ page.name }}</label>
                       <input id="weight_{{ page.id }}" type="number" name="weight" value="{{ page.weight }}" min="0" max="1000"
                              class="w-20 shrink-0 px-2 py-1 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                      <button type="submit"
+                      <button type="submit" data-weight-save
                               title="{{ "view_strings.sections_dashboard.save" | t }}"
                               aria-label="{{ "view_strings.sections_dashboard.save" | t }}"
-                              class="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
+                              class="hidden h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
                       </button>
                     </form>
-                    {% if page.hasLiveWeight %}
-                      <span data-weight-drift class="{% if page.hasLiveWeightDrift %}inline-flex{% else %}hidden{% endif %} items-center gap-2">
-                        <span title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }} ({{ page.liveWeight }})"
-                              class="inline-flex items-center text-amber-600">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft" | t }}</span>
-                        </span>
-                        <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                          <button type="submit"
-                                  title="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
-                                  aria-label="{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}"
-                                  class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#sync"></use></svg>
-                            <span class="sr-only">{{ "view_strings.sections_dashboard.live_weight_differs_from_draft_publish_to_sync" | t }}</span>
-                          </button>
-                        </form>
-                      </span>
-                    {% endif %}
+                    {% feature_fragment publish/dashboard-weight-drift %}
                   </div>
                 {% endif %}
               </td>
               <td class="px-6 py-4 text-right">
                 <div class="flex flex-wrap items-center justify-end gap-2">
                   {% if page.isDraftMissing %}
-                    <form method="POST" action="{{ page.pullAction }}" class="inline shrink-0">
-                      <button type="submit"
-                              title="{{ "view_strings.sections_dashboard.ingest_submission" | t }}"
-                              aria-label="Ingest submission {{ page.name }}"
-                              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-indigo-600 hover:bg-indigo-50 hover:text-indigo-800 transition-colors">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#download"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.ingest_submission" | t }}</span>
-                      </button>
-                    </form>
+                    {% feature_fragment publish/dashboard-pull %}
                   {% else %}
                     <a href="{{ page.readHref }}"
                        title="{{ "view_strings.sections_dashboard.view" | t }}"
@@ -355,40 +157,8 @@
                       <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#pencil-square"></use></svg>
                       <span class="sr-only">{{ "view_strings.sections_dashboard.edit" | t }}</span>
                     </a>
-                    {% if publishEnabled %}
-                    {% if page.isPublished %}
-                      <form method="POST" action="{{ page.unpublishAction }}" class="inline shrink-0"
-                            data-confirm="{{ "view_strings.sections_dashboard.unpublish_this_page" | t }}">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.unpublish" | t }}"
-                                aria-label="Unpublish {{ page.name }}"
-                                class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-yellow-600 hover:bg-yellow-50 hover:text-yellow-800 transition-colors">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#eye-off"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.unpublish" | t }}</span>
-                        </button>
-                      </form>
-                    {% else %}
-                      <form method="POST" action="{{ page.publishAction }}" class="inline shrink-0">
-                        <button type="submit"
-                                title="{{ "view_strings.sections_dashboard.publish" | t }}"
-                                aria-label="Publish {{ page.name }}"
-                                class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-green-600 hover:bg-green-50 hover:text-green-800 transition-colors">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#cloud-upload"></use></svg>
-                          <span class="sr-only">{{ "view_strings.sections_dashboard.publish" | t }}</span>
-                        </button>
-                      </form>
-                    {% endif %}
-                    {% endif %}
-                    <form method="POST" action="{{ page.deleteAction }}" class="inline shrink-0"
-                          data-confirm="{{ "view_strings.sections_dashboard.move_this_page_to_trash" | t }}">
-                      <button type="submit"
-                              title="{{ "view_strings.sections_dashboard.trash" | t }}"
-                              aria-label="Move {{ page.name }} to trash"
-                              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash-can"></use></svg>
-                        <span class="sr-only">{{ "view_strings.sections_dashboard.trash" | t }}</span>
-                      </button>
-                    </form>
+                    {% feature_fragment publish/dashboard-actions %}
+                    {% feature_fragment trash/dashboard-delete %}
                   {% endif %}
                 </div>
               </td>
@@ -415,26 +185,30 @@
       <div class="flex items-center gap-2">
         {% if hasPreviousPage %}
           <a href="{{ previousHref }}"
-             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+             title="{{ "common.previous" | t }}"
+             aria-label="{{ "common.previous" | t }}"
+             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-            {{ "common.previous" | t }}
+            <span class="hidden lg:inline">{{ "common.previous" | t }}</span>
           </a>
         {% else %}
           <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
-            {{ "common.previous" | t }}
+            <span class="sr-only lg:not-sr-only">{{ "common.previous" | t }}</span>
           </span>
         {% endif %}
         <span class="text-xs font-medium text-gray-500">{{ "profile.pagination_page" | t }} {{ currentPage }} {{ "profile.pagination_of" | t }} {{ totalPages }}</span>
         {% if hasNextPage %}
           <a href="{{ nextHref }}"
-             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            {{ "common.next" | t }}
+             title="{{ "common.next" | t }}"
+             aria-label="{{ "common.next" | t }}"
+             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
+            <span class="hidden lg:inline">{{ "common.next" | t }}</span>
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
           </a>
         {% else %}
           <span class="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400">
-            {{ "common.next" | t }}
+            <span class="sr-only lg:not-sr-only">{{ "common.next" | t }}</span>
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
           </span>
         {% endif %}
@@ -452,156 +226,5 @@
     if (typeFilter.value) window.location.href = typeFilter.value;
   });
 
-  (() => {
-    const bulkForm = document.querySelector('[data-dashboard-bulk-form]');
-    if (!bulkForm) return;
-    const checkboxes = Array.from(document.querySelectorAll('[data-dashboard-bulk-checkbox]'));
-    const selectAll = document.querySelector('[data-dashboard-bulk-select-all]');
-    const selectedCount = document.querySelector('[data-dashboard-selected-count]');
-    const action = document.querySelector('[data-dashboard-bulk-action]');
-    const scope = document.querySelector('[data-dashboard-bulk-scope]');
-    const tagsPanel = document.querySelector('[data-dashboard-bulk-tags]');
-    const tagSearch = document.querySelector('[data-dashboard-bulk-tag-search]');
-    const tagOptions = Array.from(document.querySelectorAll('[data-dashboard-bulk-tag-option]'));
-    const tagGroups = Array.from(document.querySelectorAll('[data-dashboard-bulk-tag-group]'));
-    const tagChips = document.querySelector('[data-dashboard-bulk-tag-chips]');
-    const tagEmpty = document.querySelector('[data-dashboard-bulk-tag-empty]');
-    const tagLabelAdd = document.querySelector('[data-dashboard-bulk-tag-label-add]');
-    const tagLabelRemove = document.querySelector('[data-dashboard-bulk-tag-label-remove]');
-    const tagHelpAdd = document.querySelector('[data-dashboard-bulk-tag-help-add]');
-    const tagHelpRemove = document.querySelector('[data-dashboard-bulk-tag-help-remove]');
-    const replacementPanel = document.querySelector('[data-dashboard-bulk-replacement]');
-    const searchText = document.querySelector('[data-dashboard-bulk-search-text]');
-    const replacementText = document.querySelector('[data-dashboard-bulk-replacement-text]');
-    const selectedTagIds = new Set();
-
-    const renderTagPicker = () => {
-      const query = (tagSearch?.value || '').trim().toLocaleLowerCase();
-      let matches = 0;
-      tagOptions.forEach((option) => {
-        const id = option.dataset.tagId || '';
-        const name = option.dataset.tagName || option.textContent || '';
-        const visible = !selectedTagIds.has(id) && (!query || name.toLocaleLowerCase().includes(query));
-        option.classList.toggle('hidden', !visible);
-        if (visible) matches += 1;
-      });
-      tagGroups.forEach((group) => {
-        let sibling = group.nextElementSibling;
-        let hasVisibleOption = false;
-        while (sibling && !sibling.matches('[data-dashboard-bulk-tag-group]') && !sibling.matches('[data-dashboard-bulk-tag-empty]')) {
-          if (!sibling.classList.contains('hidden')) hasVisibleOption = true;
-          sibling = sibling.nextElementSibling;
-        }
-        group.classList.toggle('hidden', !hasVisibleOption);
-      });
-      tagEmpty?.classList.toggle('hidden', matches > 0);
-    };
-
-    const addTagChip = (option) => {
-      const id = option.dataset.tagId || '';
-      const name = option.dataset.tagName || option.textContent?.trim() || '';
-      if (!id || selectedTagIds.has(id)) return;
-      selectedTagIds.add(id);
-
-      const chip = document.createElement('span');
-      chip.className = 'inline-flex max-w-full items-center gap-1 rounded bg-indigo-100 py-0.5 pl-2 pr-1 text-xs font-medium text-indigo-700';
-      chip.dataset.dashboardBulkTagChip = id;
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'tag_ids';
-      input.value = id;
-      const label = document.createElement('span');
-      label.className = 'truncate';
-      label.textContent = name;
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'shrink-0 rounded p-0.5 text-indigo-400 hover:bg-indigo-200 hover:text-indigo-700';
-      remove.setAttribute('aria-label', '{{ "view_strings.sections_editor.remove_tag" | t }}');
-      remove.textContent = '×';
-      remove.addEventListener('click', () => {
-        selectedTagIds.delete(id);
-        chip.remove();
-        renderTagPicker();
-      });
-      chip.append(input, label, remove);
-      tagChips?.appendChild(chip);
-      renderTagPicker();
-    };
-
-    tagOptions.forEach((option) => option.addEventListener('click', () => addTagChip(option)));
-    tagSearch?.addEventListener('input', renderTagPicker);
-    const syncAction = () => {
-      const addingTags = action?.value === 'add_tag';
-      const removingTags = action?.value === 'remove_tag';
-      const changingTags = addingTags || removingTags;
-      const replacingText = action?.value === 'replace_text';
-      tagsPanel?.classList.toggle('hidden', !changingTags);
-      tagsPanel?.setAttribute('aria-hidden', changingTags ? 'false' : 'true');
-      replacementPanel?.classList.toggle('hidden', !replacingText);
-      replacementPanel?.setAttribute('aria-hidden', replacingText ? 'false' : 'true');
-      if (searchText) {
-        searchText.required = replacingText;
-        searchText.disabled = !replacingText;
-      }
-      if (replacementText) replacementText.disabled = !replacingText;
-      tagLabelAdd?.classList.toggle('hidden', !addingTags);
-      tagLabelRemove?.classList.toggle('hidden', !removingTags);
-      tagHelpAdd?.classList.toggle('hidden', !addingTags);
-      tagHelpRemove?.classList.toggle('hidden', !removingTags);
-      if (changingTags) renderTagPicker();
-    };
-    action?.addEventListener('change', syncAction);
-
-    const countSelected = () => checkboxes.filter((checkbox) => checkbox.checked).length;
-    const syncSelection = () => {
-      const selected = countSelected();
-      if (selectedCount) selectedCount.textContent = String(selected);
-      bulkForm.classList.toggle('hidden', selected === 0);
-      bulkForm.setAttribute('aria-hidden', selected === 0 ? 'true' : 'false');
-      if (selectAll) {
-        selectAll.checked = selected > 0 && selected === checkboxes.length;
-        selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
-      }
-    };
-
-    selectAll?.addEventListener('change', () => {
-      checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
-      syncSelection();
-    });
-    checkboxes.forEach((checkbox) => checkbox.addEventListener('change', syncSelection));
-    bulkForm.addEventListener('submit', (event) => {
-      const selected = countSelected();
-      if (selected === 0) {
-        event.preventDefault();
-        return;
-      }
-      const changingTags = action?.value === 'add_tag' || action?.value === 'remove_tag';
-      if (changingTags && selectedTagIds.size === 0) {
-        event.preventDefault();
-        alert(bulkForm.dataset.dashboardBulkChooseTag || 'Choose at least one tag');
-        return;
-      }
-      if (action?.value === 'replace_text' && !searchText?.value) {
-        event.preventDefault();
-        alert(bulkForm.dataset.dashboardBulkEnterSearch || 'Enter text to find');
-        searchText?.focus();
-        return;
-      }
-      if (action?.value === 'replace_text') return;
-      const actionLabel = action?.selectedOptions?.[0]?.textContent?.trim() || action?.value || '';
-      const subject = scope?.value === 'all'
-        ? bulkForm.dataset.dashboardBulkAllSubject
-        : selected + ' ' + (selected === 1
-          ? bulkForm.dataset.dashboardBulkPageSingular
-          : bulkForm.dataset.dashboardBulkPagePlural);
-      const message = (bulkForm.dataset.dashboardBulkConfirmTemplate || 'Confirm {action} for {subject}?')
-        .replace('{action}', actionLabel)
-        .replace('{subject}', subject || '');
-      if (!confirm(message)) {
-        event.preventDefault();
-      }
-    });
-    syncAction();
-    syncSelection();
-  })();
+  {% feature_fragment search/dashboard-selection-script %}
 </script>

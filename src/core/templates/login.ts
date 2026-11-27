@@ -3,6 +3,16 @@ import { assetRevisionQuery, layout } from '../render/layout';
 import { renderView } from '../render/liquid';
 import { BUILD_VERSION } from '../../generated/build-info';
 
+/** Every reason a redirect to /auth/login?error= may carry. The page shows the
+ *  code itself, so anything else in the query is dropped rather than shown. */
+export const LOGIN_ERRORS: ReadonlySet<string> = new Set([
+  'db_error', 'email_not_allowed', 'forbidden', 'identity_already_linked', 'identity_not_linked',
+  'invalid_id_token', 'invalid_state', 'invalid_userinfo', 'ip_not_allowed', 'link_session_expired',
+  'link_session_mismatch', 'missing_params', 'missing_state', 'no_access_token', 'no_id_token',
+  'provider_error', 'provider_not_configured', 'state_mismatch', 'token_exchange_failed',
+  'unsupported_provider', 'userinfo_failed', 'userinfo_not_configured',
+]);
+
 function providerLabel(provider: string): string {
   if (provider === 'google') return 'Google';
   if (provider === 'microsoft') return 'Microsoft';

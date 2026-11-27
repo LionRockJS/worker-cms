@@ -23,6 +23,7 @@ import { tagsRoutes } from './tags';
 import { profileRoutes } from './profile';
 import { apiRoutes } from './api';
 import { settingsRoutes } from './settings';
+import { configTransferRoutes } from './config-transfer';
 import { i18nCatalogRoutes } from './i18n-catalog';
 import { viewSourceFor } from '../../core/render/view-source';
 import { featureRouters } from '../../features/routers';
@@ -61,4 +62,5 @@ for (const { router } of featureRouters) {
 adminRoutes.route('/', tagsRoutes);
 adminRoutes.route('/', i18nCatalogRoutes);
 adminRoutes.route('/', settingsRoutes);
+adminRoutes.route('/', configTransferRoutes);
 adminRoutes.route('/', apiRoutes);

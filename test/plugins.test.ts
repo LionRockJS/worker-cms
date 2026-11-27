@@ -983,7 +983,10 @@ describe('plugin admin proxy', () => {
     __injectPluginFetcher(url, {
       fetch: async (input: RequestInfo | URL): Promise<Response> => {
         const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        if (new URL(u).pathname === '/__plugin/manifest') return Response.json(EVENTS_MANIFEST);
+        if (new URL(u).pathname === '/__plugin/manifest') return Response.json({
+          ...EVENTS_MANIFEST,
+          assets: [{ path: '/assets/sections/cards.hbs.js' }, { path: '/assets/actions.js' }],
+        });
         return Response.json(
           { marker: 'CLIENT_VIEW_MARKER' },
           {
@@ -1015,6 +1018,7 @@ describe('plugin admin proxy', () => {
       viewPath: '/templates/plugin-dashboard.json',
       viewBasePath: '/admin/plugins/events/views',
       plugin: true,
+      sectionAssets: ['/assets/sections/cards.hbs.js'],
       data: { marker: 'CLIENT_VIEW_MARKER' },
       // EVENTS_MANIFEST does not declare `i18n`, so the client must not probe
       // this plugin's locale catalogs (that request would 404 on every view).
@@ -1425,7 +1429,7 @@ describe('plugin admin proxy', () => {
     const manifest = {
       ...EVENTS_MANIFEST,
       editViews: ['event'],
-      assets: [{ path: '/assets/event-new.js', label: 'New event auto slug' }],
+      assets: [{ path: '/assets/event-new.js', label: 'New event auto slug' }, { path: '/assets/sections/details.ejs.js' }],
     };
     const integrity = await computeIntegrity(new TextEncoder().encode('console.log("event-new")').buffer);
     await approveAsset(env.DB, 'events', '/assets/event-new.js', integrity, 'admin@example.com');
@@ -1471,6 +1475,7 @@ describe('plugin admin proxy', () => {
       expect(response.status).toBe(200);
       const payload = renderPayload(await response.text());
       expect(payload.layoutData.editorSync).toBe(true);
+      expect(payload.bodyView).toMatchObject({ sectionAssets: ['/assets/sections/details.ejs.js'] });
       expect(payload.approvedPluginAssets?.events?.[0]).toMatchObject({
         path: '/assets/event-new.js',
         integrity,
@@ -1557,7 +1562,7 @@ describe('plugin admin proxy', () => {
       expect(native.status).toBe(200);
       const nativeBody = await native.text();
       expect(nativeBody).not.toContain('PLUGIN_READ_MARKER');
-      expect(nativeBody).toContain('Read-only'); // built-in read view badge
+      expect(renderPayload(nativeBody).bodyView?.viewPath).toBe('/templates/read.json'); // built-in read view
       expect(captured).toHaveLength(1); // plugin /__plugin/read was not called again
 
       // When the plugin declines (404), the CMS renders its built-in read view.
@@ -1567,7 +1572,7 @@ describe('plugin admin proxy', () => {
       expect(fallback.status).toBe(200);
       const fallbackBody = await fallback.text();
       expect(fallbackBody).not.toContain('PLUGIN_READ_MARKER');
-      expect(fallbackBody).toContain('Read-only');
+      expect(renderPayload(fallbackBody).bodyView?.viewPath).toBe('/templates/read.json');
     } finally {
       await env.DB.prepare('DELETE FROM pages WHERE id = ?').bind(pageId).run();
     }
@@ -1770,7 +1775,7 @@ describe('plugin admin proxy', () => {
     expect(listResponse.status).toBe(200);
     const listData = bodyData(await listResponse.text());
     expect(listData.plugins).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pageTypesHref: '/admin/plugins-manage/44/page-types' }),
+      expect.objectContaining({ pageTypesHref: '/admin/plugins-manage/44/page-types', pageTypeStatus: 'pending' }),
     ]));
 
     const pageResponse = await worker.fetch(new Request('http://localhost/admin/plugins-manage/44/page-types', {
@@ -1840,9 +1845,18 @@ describe('plugin admin proxy', () => {
     }, env.JWT_SECRET);
     const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
     const pageUrl = 'http://localhost/admin/plugins-manage/44/page-types';
+    const listUrl = 'http://localhost/admin/plugins-manage';
+    const expectListStatus = async (pageTypeStatus: 'pending' | 'approved') => {
+      const response = await worker.fetch(new Request(listUrl, { headers }));
+      expect(response.status).toBe(200);
+      expect(bodyData(await response.text()).plugins).toEqual(expect.arrayContaining([
+        expect.objectContaining({ pageTypesHref: '/admin/plugins-manage/44/page-types', pageTypeStatus }),
+      ]));
+    };
     const before = bodyData(await (await worker.fetch(new Request(pageUrl, { headers }))).text());
     expect(before.hasPendingApprovals).toBe(true);
     expect(before.approveAllAction).toBe('/admin/plugins-manage/44/page-types/approve-all');
+    await expectListStatus('pending');
 
     const moderatorToken = await signJWT({
       sub: '2', email: 'mod@example.com', name: 'Mod', role: 'moderator',
@@ -1877,6 +1891,7 @@ describe('plugin admin proxy', () => {
     const after = bodyData(await (await worker.fetch(new Request(`${pageUrl}?flash=approved-all`, { headers }))).text());
     expect(after.hasPendingApprovals).toBe(false);
     expect(after.flashMessageKey).toBe('view_strings.sections_plugin_page_types.flash_approved_all');
+    await expectListStatus('approved');
     const original = await env.DB.prepare(
       "SELECT updated_at FROM plugin_page_type_approvals WHERE plugin_id = 'checkin' AND page_type = 'guest' AND access = 'write'",
     ).first<{ updated_at: string }>();
@@ -2022,6 +2037,14 @@ describe('plugin admin proxy', () => {
 
     const mainPluginKey = 'plugin:events:main:/admin/plugins/events/dashboard';
     const settingsPluginKey = 'plugin:events:settings:/admin/plugins/events/mail-settings';
+    const iconFile = new FormData();
+    iconFile.set('icon_sprite', new File(['<svg><symbol id="ticket"><rect width="24" height="24"/></symbol></svg>'], 'icons.svg'));
+    const uploadResponse = await worker.fetch(new Request('http://localhost/admin/settings/system/icon-sprite', {
+      method: 'POST', redirect: 'manual', body: iconFile,
+      headers: { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' },
+    }));
+    expect(uploadResponse.status).toBe(303);
+    expect(uploadResponse.headers.get('Location')).toBe('/admin/settings/system?flash=icon-sprite-uploaded');
     const saveResponse = await worker.fetch(new Request('http://localhost/admin/settings/system', {
       method: 'POST',
       redirect: 'manual',
@@ -2038,7 +2061,7 @@ describe('plugin admin proxy', () => {
         ['settings_group_weight', '5'],
         [`plugin_weight_${encodeURIComponent(mainPluginKey)}`, '1'],
         [`plugin_weight_${encodeURIComponent(settingsPluginKey)}`, '1'],
-        [`plugin_icon_${encodeURIComponent(mainPluginKey)}`, 'document'],
+        [`plugin_icon_${encodeURIComponent(mainPluginKey)}`, 'custom-ticket'],
         [`sidebar_label_${encodeURIComponent(mainPluginKey)}_en`, 'Ticketing'],
         [`sidebar_label_${encodeURIComponent(mainPluginKey)}_zh-hant`, '票務'],
         ['plugin_visible_items', mainPluginKey],
@@ -2051,7 +2074,7 @@ describe('plugin admin proxy', () => {
     }));
     const afterPayload = renderPayload(await afterHide.text());
     expect(afterPayload.layoutData.sidebarNav).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: 'Ticketing', href: '/admin/plugins/events/dashboard', icon: 'document' }),
+      expect.objectContaining({ label: 'Ticketing', href: '/admin/plugins/events/dashboard', icon: 'custom-ticket', iconHref: '/assets/custom-icons.svg#custom-ticket' }),
     ]));
     const renamed = (afterPayload.layoutData.sidebarNav as Array<{ label: string; translationKey?: string }>).find((item) => item.label === 'Ticketing');
     expect(renamed?.translationKey).toBeUndefined();
@@ -2063,6 +2086,44 @@ describe('plugin admin proxy', () => {
     ]));
     expect(afterPayload.layoutData.sidebarSettingsNav).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Mail Settings' }),
+    ]));
+
+    const headers = { Cookie: `access_token=${token}`, 'Sec-Fetch-Site': 'same-origin' };
+    await env.DB.prepare('UPDATE plugins SET enabled = 0 WHERE url = ?').bind(url).run();
+    clearManifestCache();
+    const disabled = await worker.fetch(new Request('http://localhost/admin/settings/system', { headers }));
+    expect(bodyData(await disabled.text()).pluginOptions).toEqual([]);
+
+    const saveWhileDisabled = await worker.fetch(new Request('http://localhost/admin/settings/system', {
+      method: 'POST',
+      redirect: 'manual',
+      headers,
+      body: new URLSearchParams([
+        ['app_name', 'Renamed CMS'],
+        ['visible_items', 'pages'],
+        // An unavailable link cannot be changed by an old or forged form.
+        [`plugin_weight_${encodeURIComponent(mainPluginKey)}`, '99'],
+        ['plugin_visible_items', settingsPluginKey],
+      ]),
+    }));
+    expect(saveWhileDisabled.status).toBe(302);
+
+    await env.DB.prepare('UPDATE plugins SET enabled = 1 WHERE url = ?').bind(url).run();
+    clearManifestCache();
+    const restored = await worker.fetch(new Request('http://localhost/admin/settings/system', { headers }));
+    const restoredPayload = renderPayload(await restored.text());
+    expect(restoredPayload.bodyView?.data).toMatchObject({
+      appName: 'Renamed CMS',
+      pluginOptions: expect.arrayContaining([
+        expect.objectContaining({ checked: true, weight: 1, icon: 'custom-ticket', key: mainPluginKey }),
+        expect.objectContaining({ checked: false, weight: 1, key: settingsPluginKey }),
+      ]),
+    });
+    expect(restoredPayload.layoutData.sidebarNav).toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: '/admin/plugins/events/dashboard', icon: 'custom-ticket' }),
+    ]));
+    expect(restoredPayload.layoutData.sidebarSettingsNav).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: '/admin/plugins/events/mail-settings' }),
     ]));
   });
 });

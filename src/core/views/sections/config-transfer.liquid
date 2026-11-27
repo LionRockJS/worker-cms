@@ -1,0 +1,219 @@
+<div class="max-w-3xl px-4 sm:px-6 lg:px-8 mb-8 space-y-5">
+  {% if errorKey != '' %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ errorKey | t }}
+  </div>{% endif %}
+
+  {% if hasResult %}
+    <div class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{{ result.applied }} {{ "settings.transfer.result.applied" | t }}</div>
+    {% if result.remaining > 0 %}<div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">{{ result.remaining }} {{ "settings.transfer.result.remaining" | t }}</div>{% endif %}
+    {% if result.stopped != '' %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ "settings.transfer.result.stopped" | t }} {{ result.stopped }}</div>{% endif %}
+    {% if hasFailures %}
+      <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <p class="font-semibold">{{ "settings.transfer.result.failed" | t }}</p>
+        <ul class="mt-1 list-disc pl-5">{% for failure in result.failed %}<li>{{ failure.sectionLabelKey | t }} · {{ failure.label }}: {{ failure.message }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if hasPreview %}
+    <form action="/admin/settings/transfer/apply" method="post" enctype="multipart/form-data" class="space-y-4" {% if autoContinue %}data-transfer-auto{% endif %}>
+      <textarea name="bundle_json" hidden>{{ bundleJson }}</textarea>
+      {% if autoContinue %}
+        <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800" data-transfer-countdown hidden>
+          <span role="status" data-transfer-countdown-message="{{ 'settings.transfer.review.auto_countdown' | t }}"></span>
+          <button type="button" class="ml-2 font-semibold text-indigo-600 hover:underline" data-transfer-pause>{{ "settings.transfer.review.pause_auto" | t }}</button>
+        </div>
+      {% endif %}
+      <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900">{{ "settings.transfer.review.title" | t }}</h2>
+        <p class="mt-1 text-sm text-gray-500">{{ "settings.transfer.review.help" | t }}</p>
+        <dl class="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+          <div><dt class="text-gray-500">{{ "settings.transfer.review.source" | t }}</dt><dd class="font-medium text-gray-900 break-words">{{ source }}</dd></div>
+          {% if exportedAt != '' %}<div><dt class="text-gray-500">{{ "settings.transfer.review.exported_at" | t }}</dt><dd class="font-medium text-gray-900">{{ exportedAt | l10n_date }}</dd></div>{% endif %}
+        </dl>
+      </div>
+
+      {% for section in previewSections %}
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <label class="flex items-center gap-2 font-semibold text-gray-900">
+              {% if section.unavailableKey == '' and section.changes > 0 %}
+                <input type="checkbox" name="sections" value="{{ section.id }}" {% if section.checked %}checked{% endif %}>
+              {% else %}
+                <input type="checkbox" disabled>
+              {% endif %}
+              {% if section.labelKey != '' %}{{ section.labelKey | t }}{% else %}{{ section.id }}{% endif %}
+            </label>
+            {% if section.unavailableKey == '' %}
+              <div class="flex flex-wrap gap-2 text-xs font-semibold">
+                <span class="rounded-full bg-green-50 px-2 py-0.5 text-green-700">{{ section.counts.create }} {{ "settings.transfer.counts.create" | t }}</span>
+                <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-indigo-700">{{ section.counts.update }} {{ "settings.transfer.counts.update" | t }}</span>
+                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">{{ section.counts.unchanged }} {{ "settings.transfer.counts.unchanged" | t }}</span>
+                {% if section.counts.skip > 0 %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-red-700">{{ section.counts.skip }} {{ "settings.transfer.counts.skip" | t }}</span>{% endif %}
+              </div>
+            {% endif %}
+          </div>
+          {% if section.unavailableKey != '' %}<p class="mt-2 text-sm text-gray-500">{{ section.unavailableKey | t }}</p>{% endif %}
+          {% if section.noteKey != '' %}<p class="mt-2 text-sm text-gray-500" data-explanation>{{ section.noteKey | t }}</p>{% endif %}
+          {% if section.items.size > 0 %}
+            <details class="mt-3">
+              <summary class="cursor-pointer text-sm font-semibold text-indigo-600">{{ "settings.transfer.review.details" | t }}</summary>
+              <div class="mt-2 overflow-x-auto w-full">
+                <table class="w-full min-w-[560px] text-left">
+                  <tbody>
+                    {% for item in section.items %}
+                      <tr class="border-t border-gray-100">
+                        <td class="py-2 pr-3 text-sm font-mono text-gray-900 break-words">{{ item.label }}</td>
+                        <td class="py-2 pr-3 text-sm whitespace-nowrap {% if item.action == 'skip' %}text-red-700{% elsif item.action == 'unchanged' %}text-gray-500{% else %}text-gray-900{% endif %}">{{ item.actionKey | t }}</td>
+                        <td class="py-2 text-sm text-gray-500">{{ item.note }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      <div class="flex flex-wrap items-center gap-2">
+        {% if hasChanges %}
+          <button title="{{ "settings.transfer.review.apply" | t }}" aria-label="{{ "settings.transfer.review.apply" | t }}"
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+            <span>{{ "settings.transfer.review.apply" | t }}</span>
+          </button>
+        {% else %}
+          <p class="text-sm text-gray-500">{{ "settings.transfer.review.no_changes" | t }}</p>
+        {% endif %}
+        <a href="/admin/settings/transfer" data-stop-continue class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">{{ "settings.transfer.review.done" | t }}</a>
+      </div>
+    </form>
+    {% if autoContinue %}
+      <script nonce="{{ nonce }}">
+        (() => {
+          const form = document.querySelector('form[data-transfer-auto]');
+          const submit = form?.querySelector('button:not([type="button"])');
+          const countdown = form?.querySelector('[data-transfer-countdown]');
+          const message = countdown?.querySelector('[data-transfer-countdown-message]');
+          const pause = countdown?.querySelector('[data-transfer-pause]');
+          if (!submit || submit.disabled || !message || !pause) return;
+
+          let seconds = 3;
+          const update = () => { message.textContent = message.dataset.transferCountdownMessage.replace('{seconds}', String(seconds)); };
+          const stop = () => {
+            clearInterval(timer);
+            countdown.hidden = true;
+            window.removeEventListener('pagehide', stop);
+          };
+          const timer = setInterval(() => {
+            if (!form.isConnected) stop();
+            else if (--seconds === 0) { stop(); if (!submit.disabled) form.requestSubmit(submit); }
+            else update();
+          }, 1000);
+
+          pause.addEventListener('click', () => { stop(); submit.focus(); });
+          document.querySelectorAll('[data-stop-continue]').forEach((link) => link.addEventListener('click', stop));
+          form.addEventListener('submit', stop);
+          // Changing the selection means the user is taking over.
+          form.addEventListener('change', (event) => { if (event.target.matches('input[name="sections"]')) stop(); });
+          window.addEventListener('pagehide', stop);
+
+          countdown.hidden = false;
+          update();
+        })();
+      </script>
+    {% endif %}
+  {% else %}
+    <form action="/admin/settings/transfer/export" method="post" data-allow-resubmit data-transfer-export
+          data-next="{{ 'settings.transfer.export.next' | t }}" data-complete="{{ 'settings.transfer.export.complete' | t }}"
+          data-failed="{{ 'settings.transfer.export.failed' | t }}" class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <h2 class="text-lg font-bold text-gray-900">{{ "settings.transfer.export.title" | t }}</h2>
+      <p class="mt-1 text-sm text-gray-500" data-explanation>{{ "settings.transfer.export.help" | t }}</p>
+      {% if hasExportSections %}
+        <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {% for section in exportSections %}
+            <label class="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="sections" value="{{ section.id }}" {% if section.checked %}checked{% endif %}> {{ section.labelKey | t }}</label>
+          {% endfor %}
+        </div>
+        <button title="{{ "settings.transfer.export.download" | t }}" aria-label="{{ "settings.transfer.export.download" | t }}"
+                class="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#download"></use></svg>
+          <span data-export-label>{{ "settings.transfer.export.download" | t }}</span>
+        </button>
+        <p role="status" class="mt-2 text-sm" data-export-status></p>
+        <a hidden class="text-sm text-indigo-600 underline" data-export-file></a>
+      {% endif %}
+    </form>
+    <script nonce="{{ nonce }}">
+      (() => {
+        const form = document.querySelector('[data-transfer-export]');
+        const button = form?.querySelector('button');
+        if (!button) return;
+        const label = button.querySelector('[data-export-label]');
+        const status = form.querySelector('[data-export-status]');
+        const file = form.querySelector('[data-export-file]');
+        const boxes = [...form.querySelectorAll('input[name="sections"]')];
+        const firstLabel = label.textContent;
+        let cursor = '';
+        let busy = false;
+        function reset() {
+          cursor = '';
+          button.disabled = false;
+          button.title = label.textContent = firstLabel;
+          button.setAttribute('aria-label', firstLabel);
+          status.textContent = '';
+          if (!file.hidden) URL.revokeObjectURL(file.href);
+          file.hidden = true;
+        }
+        form.addEventListener('change', reset);
+        form.addEventListener('submit', async event => {
+          event.preventDefault();
+          if (busy) return;
+          busy = true;
+          const data = new FormData(form);
+          if (cursor) data.set('cursor', cursor);
+          button.disabled = true;
+          boxes.forEach(box => box.disabled = true);
+          try {
+            const response = await fetch(form.action, { method: 'POST', body: data });
+            if (!response.ok || !response.headers.get('Content-Disposition')) {
+              const plain = response.headers.get('Content-Type')?.startsWith('text/plain');
+              throw new Error(plain ? await response.text() : form.dataset.failed);
+            }
+            const blob = await response.blob();
+            if (!file.hidden) URL.revokeObjectURL(file.href);
+            file.href = URL.createObjectURL(blob);
+            file.download = response.headers.get('Content-Disposition').match(/filename="([^"]+)"/)[1];
+            file.textContent = file.download;
+            file.hidden = false;
+            file.click();
+            cursor = response.headers.get('X-Next-Cursor') || '';
+            const complete = !cursor;
+            status.textContent = complete ? form.dataset.complete : '';
+            button.title = label.textContent = complete ? firstLabel : form.dataset.next;
+            button.setAttribute('aria-label', label.textContent);
+          } catch (error) {
+            status.textContent = error.message || form.dataset.failed;
+          } finally {
+            busy = false;
+            boxes.forEach(box => box.disabled = false);
+            button.disabled = false;
+          }
+        });
+      })();
+    </script>
+
+    <form action="/admin/settings/transfer/preview" method="post" enctype="multipart/form-data" class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <h2 class="text-lg font-bold text-gray-900">{{ "settings.transfer.import.title" | t }}</h2>
+      <p class="mt-1 text-sm text-gray-500" data-explanation>{{ "settings.transfer.import.help" | t }}</p>
+      <label class="mt-4 block text-sm font-medium text-gray-700">{{ "settings.transfer.import.file" | t }}
+        <input type="file" name="bundle" accept="application/json,.json" required class="mt-1 block w-full text-sm text-gray-700">
+      </label>
+      <button title="{{ "settings.transfer.import.preview" | t }}" aria-label="{{ "settings.transfer.import.preview" | t }}"
+              class="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#upload"></use></svg>
+        <span>{{ "settings.transfer.import.preview" | t }}</span>
+      </button>
+    </form>
+  {% endif %}
+</div>

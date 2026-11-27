@@ -5,13 +5,19 @@
 // interfaces and dispatch helpers in this file. Core therefore never imports
 // a feature implementation or a feature-owned contract directly.
 
+import { PageLifecycleUnavailableError, type TrashLifecycleService } from '../core/pages/trash-lifecycle';
+import type { HostSettingWrite } from '../core/evidence/settings-mutation-evidence';
+import type { ConfigTransferSection } from '../core/config-transfer';
 import type { AppContext } from '../core/http/context';
-import type { PublicationService } from '../core/publish/service';
+import type { PublicationService } from './publication';
 import type { Env } from '../types';
 import { featureServiceEntries } from '../generated/services';
 import { regulatedWritesBlocked } from '../core/http/regulated-writes';
 
+export type { DashboardPageRow, DashboardStatusFilterLink } from './publication';
+
 export type AdminScreenTarget =
+  | { screen: 'system-settings' }
   | { screen: 'profile' }
   | { screen: 'users' }
   | { screen: 'user'; userId: number };
@@ -41,9 +47,13 @@ export type FeatureReservation =
 export interface FeatureServiceEntry {
   readonly id: string;
   publication?: PublicationService;
+  trashLifecycle?: TrashLifecycleService;
   reservePageCreate?(c: AppContext, pageType: string): Promise<FeatureReservation>;
   reservePageCreates?(env: Env, input: PageCreateReservationInput): Promise<FeatureReservation>;
   adminScreenProps?(c: AppContext, target: AdminScreenTarget): Promise<Record<string, unknown>>;
+  systemSettingsWrites?(form: FormData): HostSettingWrite[];
+  /** Settings this feature owns, for export/import between CMS deployments. */
+  configTransferSections?: readonly ConfigTransferSection[];
   scheduled?(env: Env): Promise<string | null>;
   /** Audit retention/archival only; business work is denied by default. */
   scheduledDuringWriteContainment?: true;
@@ -56,6 +66,16 @@ const servicesById = new Map(featureServiceEntries.map((entry) => [entry.id, ent
 
 export function publication(): PublicationService | undefined {
   return servicesById.get('publish')?.publication;
+}
+
+export function trashLifecycle(): TrashLifecycleService | undefined {
+  return servicesById.get('trash')?.trashLifecycle;
+}
+
+export function requireTrashLifecycle(): TrashLifecycleService {
+  const lifecycle = trashLifecycle();
+  if (!lifecycle) throw new PageLifecycleUnavailableError(true);
+  return lifecycle;
 }
 
 export function freeReservation(): FeatureReservation {
@@ -112,6 +132,16 @@ export async function featureAdminScreenProps(
       .map((entry) => entry.adminScreenProps!(c, target)),
   );
   return Object.assign({}, ...props);
+}
+
+/** Collects preferences submitted through the shared system settings form. */
+export function featureSystemSettingsWrites(form: FormData): HostSettingWrite[] {
+  return featureServiceEntries.flatMap(entry => entry.systemSettingsWrites?.(form) ?? []);
+}
+
+/** Export/import sections contributed by installed features. */
+export function featureConfigTransferSections(): ConfigTransferSection[] {
+  return featureServiceEntries.flatMap(entry => entry.configTransferSections ?? []);
 }
 
 /** Runs bounded scheduled work contributed by installed features. */

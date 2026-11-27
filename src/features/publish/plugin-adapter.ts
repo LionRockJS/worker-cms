@@ -14,7 +14,7 @@
 // awaited and a non-2xx response counts as a target failure.
 // ============================================================
 
-import type { PublishAdapter, PublishPluginTarget, PublishSnapshot, PublishedTag } from '../../core/publish/adapter';
+import type { PublishAdapter, PublishPluginTarget, PublishSnapshot, PublishedTag } from '../../contracts/publish';
 
 async function post(plugin: PublishPluginTarget, path: string, body: unknown, optional = false): Promise<void> {
   const response = await plugin.send(`/publish/${path}`, body);

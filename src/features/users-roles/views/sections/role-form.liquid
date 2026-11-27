@@ -14,7 +14,7 @@
       <label for="role_name" class="block min-w-0">
         <span class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_role_form.slug" | t }}</span>
         <input id="role_name" name="name" value="{{ name }}" class="block min-w-0 w-full max-w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
-        <span class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_role_form.optional_derived_from_the_name_if_blank_used_internally_to_identify_the_" | t }}</span>
+        <span data-explanation class="block text-xs text-gray-500 mt-1">{{ "view_strings.sections_role_form.optional_derived_from_the_name_if_blank_used_internally_to_identify_the_" | t }}</span>
       </label>
     {% else %}
       <div class="block min-w-0">
@@ -26,12 +26,22 @@
     {% unless isNew %}
       <fieldset class="min-w-0">
         <legend class="block text-sm font-medium text-gray-700 mb-1">{{ "view_strings.sections_role_form.permissions" | t }}</legend>
-        <div class="grid grid-cols-1 gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2">
-          {% for option in permissionOptions %}
-            <label class="inline-flex items-center gap-2 rounded-md bg-white border border-gray-200 px-3 py-1.5 text-sm{% if locked %} text-gray-500{% endif %}">
-              <input type="checkbox" name="permissions" value="{{ option.value }}"{% if option.checked %} checked{% endif %}{% if locked %} disabled{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-              <span>{{ option.label }} <span class="block text-xs text-gray-400 font-mono">{{ option.value }}</span></span>
-            </label>
+        {% if hasPluginGroups %}
+          <p data-explanation class="text-xs text-gray-500 mb-2">{{ "view_strings.sections_role_form.plugin_access_needs_plugin_access_and_one_of_the_plugins_permissions" | t }}</p>
+        {% endif %}
+        <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          {% for group in permissionGroups %}
+            <fieldset class="min-w-0">
+              <legend class="block text-xs font-semibold text-gray-500 mb-2">{% if group.labelKey != blank %}{{ group.labelKey | t }}{% else %}{{ group.label }}{% endif %}</legend>
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {% for option in group.options %}
+                  <label class="inline-flex items-center gap-2 rounded-md bg-white border border-gray-200 px-3 py-1.5 text-sm{% if locked %} text-gray-500{% endif %}">
+                    <input type="checkbox" name="permissions" value="{{ option.value }}"{% if option.checked %} checked{% endif %}{% if locked %} disabled{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                    <span>{{ option.label }} <span class="block text-xs text-gray-400 font-mono">{{ option.value }}</span></span>
+                  </label>
+                {% endfor %}
+              </div>
+            </fieldset>
           {% endfor %}
         </div>
       </fieldset>
@@ -41,20 +51,64 @@
   {% if canDelete %}
     <form id="role-delete-form" method="POST" action="{{ deleteAction }}" data-confirm="{{ "view_strings.sections_role_form.delete_this_role_it_will_be_removed_from_any_users_that_have_it" | t }}"></form>
   {% endif %}
-  <div class="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-    {% unless locked %}<button form="role-form" type="submit" class="w-full px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm sm:w-auto">{% if isNew %}{{ "common.create" | t }}{% else %}{{ "common.save" | t }}{% endif %}</button>{% endunless %}
-    <a href="/admin/roles" class="w-full px-6 py-2 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors sm:w-auto">{% if locked %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}</a>
+  <div class="mt-4 flex min-w-0 flex-wrap items-center gap-3">
+    {% unless locked %}<button form="role-form" type="submit"
+            title="{% if isNew %}{{ "common.create" | t }}{% else %}{{ "common.save" | t }}{% endif %}"
+            aria-label="{% if isNew %}{{ "common.create" | t }}{% else %}{{ "common.save" | t }}{% endif %}"
+            class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if isNew %}plus{% else %}save{% endif %}"></use></svg>
+      <span class="hidden lg:inline">{% if isNew %}{{ "common.create" | t }}{% else %}{{ "common.save" | t }}{% endif %}</span>
+    </button>{% endunless %}
+    <a href="/admin/roles"
+       title="{% if locked %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}"
+       aria-label="{% if locked %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}"
+       class="inline-flex px-6 text-center bg-white text-gray-700 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors items-center justify-center shrink-0 gap-2 h-10">
+      <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#{% if locked %}arrow-left{% else %}x{% endif %}"></use></svg>
+      <span class="hidden lg:inline">{% if locked %}{{ "common.back" | t }}{% else %}{{ "common.cancel" | t }}{% endif %}</span>
+    </a>
     {% if canDelete %}
-      <button form="role-delete-form" type="submit" class="w-full px-6 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto sm:w-auto">{{ "view_strings.sections_role_form.delete" | t }}</button>
+      <button form="role-delete-form" type="submit"
+              title="{{ "view_strings.sections_role_form.delete" | t }}"
+              aria-label="{{ "view_strings.sections_role_form.delete" | t }}"
+              class="inline-flex px-6 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-sm sm:ml-auto items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#trash"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_role_form.delete" | t }}</span>
+      </button>
     {% endif %}
   </div>
 
   {% if canManageIp %}
     <form method="POST" action="{{ ipAction }}" class="mt-6 space-y-3 rounded-lg border border-gray-200 p-4">
       <label for="ip_allowlist" class="block text-sm font-medium text-gray-700">{{ "ip_access.allowlist" | t }}</label>
-      <p class="text-xs text-gray-500">{{ "ip_access.description" | t }}</p>
+      <p data-explanation class="text-xs text-gray-500">{{ "ip_access.description" | t }}</p>
       <textarea id="ip_allowlist" name="ip_allowlist" rows="5" maxlength="16384" class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">{{ ipAllowlist }}</textarea>
-      <button type="submit" class="px-6 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700">{{ "ip_access.save" | t }}</button>
+      <button type="submit"
+              title="{{ "ip_access.save" | t }}"
+              aria-label="{{ "ip_access.save" | t }}"
+              class="inline-flex px-6 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 items-center justify-center shrink-0 gap-2 h-10">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#save"></use></svg>
+        <span class="hidden lg:inline">{{ "ip_access.save" | t }}</span>
+      </button>
     </form>
   {% endif %}
 </div>
+
+{% if isNew %}
+<script nonce="{{ nonce }}">
+  // New role: the slug follows the name until the slug is typed in directly.
+  (() => {
+    const nameInput = document.getElementById('role_label');
+    const slugInput = document.getElementById('role_name');
+    if (!nameInput || !slugInput) return;
+    const slugForName = (name) => name.toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    let slugEdited = slugInput.value.trim() !== '' && slugInput.value.trim() !== slugForName(nameInput.value);
+    slugInput.addEventListener('input', () => { slugEdited = slugInput.value.trim() !== ''; });
+    nameInput.addEventListener('input', () => {
+      if (!slugEdited) slugInput.value = slugForName(nameInput.value);
+    });
+  })();
+</script>
+{% endif %}

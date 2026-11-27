@@ -29,8 +29,8 @@ const operations={
   weights:{path:'/admin/tags/batch-weight',body:{updates:[{id:10020,weight:10},{id:10021,weight:20}]},action:'tag.weights'},
 };
 type Operation=keyof typeof operations;
-async function call(operation:Operation,overrides:Partial<Env>={}){
-  counter++;const op=operations[operation];const ctx=createExecutionContext();const body=operation==='weights'?JSON.stringify(op.body):new URLSearchParams(op.body as Record<string,string>);
+async function call(operation:Operation,overrides:Partial<Env>={},fields:Record<string,string>={}){
+  counter++;const op=operations[operation];const ctx=createExecutionContext();const body=operation==='weights'?JSON.stringify(op.body):new URLSearchParams({...op.body as Record<string,string>,...fields});
   const response=await worker.fetch(new Request(`https://cms.example.com${op.path}`,{method:'POST',headers:{Cookie:cookie,'Sec-Fetch-Site':'same-origin','Content-Type':operation==='weights'?'application/json':'application/x-www-form-urlencoded','CF-Connecting-IP':`10.94.${Math.floor(counter/250)}.${counter%250+1}`},body}),{...env,REGULATED_MODE:undefined,REGULATED_INVENTORY:undefined,...overrides},ctx);
   await waitOnExecutionContext(ctx);return response;
 }
@@ -60,6 +60,24 @@ for(const operation of Object.keys(operations) as Operation[]){
   });
   it(`retains committed ${operation} state and evidence after a lost acknowledgment`,async()=>{expect((await call(operation,{DB:race(async()=>{},true)})).status).toBe(503);expect(await events()).toHaveLength(1);});
 }
+it.each(['10020', '10021'])('rejects a tag edit with cyclic parent %s', async parent => {
+  const before = await state();
+  const response = await call('tagUpdate', {}, { parent_tag: parent });
+  expect(response.status).toBe(400);
+  expect(await response.text()).toContain('parent tags form a loop');
+  expect(await state()).toEqual(before);
+  expect(await events()).toEqual([]);
+});
+
+it('rechecks a moved ancestor outside the tag mutation snapshot at commit', async () => {
+  await env.DB.prepare("INSERT INTO tags(id, name, slug, taxonomy_slug) VALUES (10023,'Ancestor','ancestor','external')").run();
+  await env.DB.prepare('UPDATE tags SET parent_tag=10023 WHERE id=10022').run();
+  const DB = race(() => env.DB.prepare('UPDATE tags SET parent_tag=10020 WHERE id=10023').run());
+  expect((await call('tagUpdate', { DB }, { parent_tag: '10022' })).status).toBe(503);
+  expect(await env.DB.prepare('SELECT parent_tag FROM tags WHERE id=10020').first()).toEqual({ parent_tag: null });
+  expect(await events()).toEqual([]);
+});
+
 it('advances the policy generation for an authorized classified taxonomy rename and retains PHI',async()=>{
   await classify('taxonomy','old');const before=(await env.DB.prepare('SELECT version FROM classification_policy_version').first<{version:number}>())!.version;
   expect((await call('taxUpdate')).status).toBe(302);const event=(await events())[0];expect(event.data_class).toBe('phi');expect(JSON.parse(String(event.detail))).toMatchObject({classification_policy_version_before:before,classification_policy_version:before+1,moved_tag_ids:[10020,10021]});

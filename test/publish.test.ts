@@ -13,7 +13,7 @@ import {
   unpublishPagesFromTargets,
 } from '../src/features/publish';
 import { clearManifestCache, __injectPluginFetcher, __clearInjectedFetchers } from './plugin-fixtures';
-import type { PublishSnapshot, PublishedTag } from '../src/core/publish/adapter';
+import type { PublishSnapshot, PublishedTag } from '../src/contracts/publish';
 import type { Env, Page } from '../src/types';
 import type { ResolvedPlugin } from '../src/features/plugins/types';
 
@@ -644,7 +644,7 @@ describe('publish registry', () => {
       await publishPageToTargets(testEnv, PAGE.id);
 
       const { draftLectProjector } = await import('../src/features/publish/projection');
-      const { withLiveStatus } = await import('../src/core/db/page-logic');
+      const { withLiveStatus } = await import('../src/features/publish/status');
       const draft = await env.DB.prepare('SELECT * FROM pages WHERE id = ?')
         .bind(PAGE.id)
         .first<Page>();

@@ -1,5 +1,5 @@
-import type { PluginViewSource } from '../local-views';
 import { pluginViewSource } from '../view-source';
+import { readForm } from '../registration-form';
 import { mutatePluginSettings,PluginSettingsUnavailableError } from '../settings-evidence';
 import { mutatePluginApproval,PluginApprovalUnavailableError } from '../approval-evidence';
 import { preparePluginRegistrationMutation,PluginRegistrationUnavailableError,PluginRegistrationConflictError } from '../registration-evidence';
@@ -21,20 +21,16 @@ import { auditUnavailable } from '../../../core/http/access-log';
 import type { AppContext } from '../../../core/http/context';
 import { auditPluginManagement } from '../disclosure-audit';
 import { recordContributorReads, recordMetadataReads, recordTableReads } from '../../../core/http/access-log';
-import { listIdentityApprovals } from '../identity';
-import { str, num } from '../../../core/http/forms';
+import { getIdentityForRow, listIdentityApprovals } from '../identity';
+import { str } from '../../../core/http/forms';
 import { getPlugins, clearManifestCache, pluginIdentityStates } from '../registry';
 import { clearConfigCache } from '../../../core/db/content-config';
 import {
   listPlugins,
   getPlugin,
-  type PluginInput,
 } from '../store';
 import { computeIntegrity, inspectAssetHealth, listApprovals } from '../assets';
-import {
-  isPageTypeWildcard,
-  listPageTypeApprovals,
-} from '../page-types';
+import { isPageTypeWildcard } from '../page-types';
 import {
   findFilePrefixConflict,
   listFilePrefixApprovals,
@@ -62,79 +58,13 @@ import {
   type PluginLimitRow,
   type PluginListItem,
 } from '../templates/manage';
-import { pluginTrustLevel, type PluginManifest, type ResolvedPlugin } from '../types';
+import { pluginTrustLevel, type PluginManifest, type PluginPageTypeApproval, type ResolvedPlugin } from '../types';
 
 export const pluginsManageRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 pluginsManageRoutes.onError((error,c)=>{if(error instanceof PluginSettingsUnavailableError)return c.json({error:'plugin_settings_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginApprovalUnavailableError)return c.json({error:'plugin_approval_change_unavailable'},503,{'Cache-Control':'no-store'});if(error instanceof PluginRegistrationUnavailableError)return c.json({error:'plugin_registration_change_unavailable'},503,{'Cache-Control':'no-store'});throw error;});
 
 pluginsManageRoutes.use('/plugins-manage', requirePermission('plugin:manage'));
 pluginsManageRoutes.use('/plugins-manage/*', requirePermission('plugin:manage'));
-
-/**
- * Best-effort SSRF guard: rejects hostnames that are literally a private,
- * loopback, link-local (incl. cloud metadata 169.254.169.254), CGNAT, or
- * .internal address. The CMS issues server-side requests to plugin URLs and
- * forwards the signed-in user summary + the plugin secret, so a registered URL
- * must not be able to point those at internal infrastructure. This does not
- * defend against DNS rebinding or a public hostname that resolves to a private
- * IP — it only blocks the obvious literals.
- */
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) return true;
-  if (host === '::1' || host === '0.0.0.0') return true;
-  // WHATWG URL canonicalizes IPv4-mapped IPv6 addresses to hexadecimal, e.g.
-  // [::ffff:127.0.0.1] becomes [::ffff:7f00:1]. Block the mapped loopback and
-  // private IPv4 ranges as well as their dotted spelling.
-  if (/^::ffff:(?:7f[0-9a-f]{2}|a[0-9a-f]{2}|a9fe|c0a8|ac1[0-9a-f]|64[4-7][0-9a-f]):[0-9a-f]{1,4}$/i.test(host)) return true;
-  if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe80:/.test(host)) return true; // IPv6 ULA / link-local
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (a === 0 || a === 10 || a === 127) return true;
-    if (a === 169 && b === 254) return true;        // link-local + cloud metadata
-    if (a === 192 && b === 168) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  }
-  return false;
-}
-
-/** Normalizes + validates a plugin base URL. Returns [normalized, error]. */
-function normalizeUrl(raw: string): [string, string | null] {
-  const trimmed = raw.trim().replace(/\/+$/, '');
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return [trimmed, 'Enter a valid URL.'];
-  }
-  // localhost over http stays allowed for local development against a plugin
-  // Worker on another port; every other host must be HTTPS and non-private.
-  if (parsed.protocol === 'http:' && parsed.hostname === 'localhost') {
-    return [trimmed, null];
-  }
-  if (parsed.protocol !== 'https:') {
-    return [trimmed, 'URL must be HTTPS (http is allowed only for localhost).'];
-  }
-  if (isPrivateHost(parsed.hostname)) {
-    return [trimmed, 'URL must not point to a private, loopback, or internal host.'];
-  }
-  return [trimmed, null];
-}
-
-/** Validates optional config JSON. Returns [stored, error]. */
-function normalizeConfig(raw: string): [string | null, string | null] {
-  const trimmed = raw.trim();
-  if (!trimmed) return [null, null];
-  try {
-    JSON.parse(trimmed);
-    return [trimmed, null];
-  } catch {
-    return [trimmed, 'Config must be valid JSON (or left blank).'];
-  }
-}
 
 const TENANT_CONFIG_PATH = `${PLUGIN_PREFIX}/tenants/config`;
 const TENANT_VAR_FORM_PREFIX = 'tenant_var_';
@@ -201,36 +131,37 @@ async function readPluginTenantConfig(
   }
 }
 
-function readForm(form: FormData, bucketAvailable: boolean, localAvailable: boolean): { input: PluginInput | null; error: string | null; raw: { label: string; url: string; enabled: boolean; sortOrder: number; config: string; trustedUi?: boolean; viewSource: PluginViewSource } } {
-  const label = str(form.get('label'));
-  const [url, urlError] = normalizeUrl(str(form.get('url')));
-  const enabled = form.get('enabled') != null;
-  const sortOrder = num(form.get('sort_order'), 0);
-  let [config, configError] = normalizeConfig(str(form.get('config')));
-  const viewSource: PluginViewSource = form.get('view_source') === 'local' ? 'local' : form.get('view_source') === 'bucket' ? 'bucket' : 'host';
-  if (viewSource === 'bucket' && !bucketAvailable) configError = 'Configure the PLUGIN_VIEWS_BUCKET binding before selecting Bucket.';
-  if (viewSource === 'local' && !localAvailable) configError = 'Set PLUGIN_VIEWS_DIR in the self-hosted server .env and restart before selecting Local files.';
-  if (form.has('view_source') && !['host', 'bucket', 'local'].includes(str(form.get('view_source')))) configError = 'Invalid view source.';
-  if (!configError) {
-    const settings = { ...JSON.parse(config || '{}'), cmsTrustedUi: form.get('trusted_ui') === '1' };
-    if (viewSource !== 'host') settings.cmsViewSource = viewSource;
-    else delete settings.cmsViewSource;
-    config = JSON.stringify(settings);
-  }
-  const raw = { label, url, enabled, sortOrder, viewSource, trustedUi: form.get('trusted_ui') === '1', config: str(form.get('config')) };
-
-  const error = urlError ?? configError;
-  if (error) return { input: null, error, raw };
-  return { input: { label, url, enabled, config, sort_order: sortOrder }, error: null, raw };
-}
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
+function requestedPageTypeScopes(contentTypes: PluginManifest['contentTypes']) {
+  return {
+    readTypes: new Set(contentTypes?.readTypes ?? []),
+    writeTypes: new Set([...(contentTypes?.writeTypes ?? []), ...Object.keys(contentTypes?.blueprint ?? {})]),
+  };
+}
+
+function pageTypeApprovalIndex(approvals: PluginPageTypeApproval[]) {
+  recordMetadataReads('plugin.type-approvals-read', 'plugin_page_type_approvals', approvals.map(approval => `${approval.plugin_id}:${approval.page_type}:${approval.access}`));
+  return new Map(approvals.map(approval => [`${approval.page_type}:${approval.access}`, approval]));
+}
+
+async function taxonomyGrants(c: AppContext, registrationId?: number) {
+  const query = `SELECT pin.plugin_row_id AS registrationId, grantRow.id FROM plugin_identity_approvals pin
+    JOIN plugin_capability_approvals grantRow ON grantRow.plugin_id=pin.manifest_id
+    WHERE grantRow.capability='taxonomy:create'`;
+  const rows = await c.env.DB.prepare(query + (registrationId === undefined ? '' : ' AND pin.plugin_row_id=?'))
+    .bind(...(registrationId === undefined ? [] : [registrationId])).all<{registrationId: number; id: number}>();
+  recordTableReads('plugin.capability-read', 'plugin_capability_approvals', rows.results.map(row => row.id));
+  return new Set(rows.results.map(row => row.registrationId));
+}
+
 pluginsManageRoutes.get('/plugins-manage', async (c) => {
-  const [rows, resolved, identities] = await Promise.all([
+  const [rows, resolved, identities, taxonomyApprovals] = await Promise.all([
     listPlugins(c.env.DB),
     getPlugins(c.env),
     pluginIdentityStates(c.env),
+    taxonomyGrants(c),
   ]);
   recordTableReads('plugin.registry-list', 'plugins', rows.map(row => row.id));
   recordMetadataReads('plugin.identity-read', 'plugin_identity_approvals', identities.filter(state => state.pinnedId).map(state => state.rowId));
@@ -255,6 +186,15 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
     const assetHealth = plugin && manifest?.assets?.length
       ? await inspectAssetHealth(c.env.DB, manifest.id, plugin.fetcher, manifest.assets)
       : undefined;
+    const { readTypes, writeTypes } = requestedPageTypeScopes(manifest?.contentTypes);
+    let pageTypeStatus: PluginListItem['pageTypeStatus'];
+    const requestsTaxonomies = manifest?.capabilities?.includes('taxonomy:create');
+    if (plugin && (readTypes.size || writeTypes.size || requestsTaxonomies)) {
+      const approvals = pageTypeApprovalIndex(plugin.pageTypeApprovals);
+      const pending = (requestsTaxonomies && !taxonomyApprovals.has(row.id)) || [...readTypes].some(type => !approvals.has(`${type}:read`))
+        || [...writeTypes].some(type => !approvals.has(`${type}:write`));
+      pageTypeStatus = pending ? 'pending' : 'approved';
+    }
     return {
       id: row.id,
       label: row.label,
@@ -267,12 +207,8 @@ pluginsManageRoutes.get('/plugins-manage', async (c) => {
       trustLevel: plugin ? pluginTrustLevel(plugin.manifest) : undefined,
       hasAssets: !!manifest?.assets?.length,
       hasFilePrefixes: !!manifest?.filePrefixes?.length,
-      hasPageTypes: !!(
-        Object.keys(manifest?.contentTypes?.blueprint ?? {}).length
-        + Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length
-        + (manifest?.contentTypes?.readTypes?.length ?? 0)
-        + (manifest?.contentTypes?.writeTypes?.length ?? 0)
-      ),
+      hasPageTypes: !!(pageTypeStatus || taxonomyApprovals.has(row.id) || Object.keys(manifest?.contentTypes?.taxonomies ?? {}).length),
+      pageTypeStatus,
       hasLimits: !!manifest?.limits?.length,
       hasCredits: !!manifest?.credits?.length,
       assetNeedsApproval: !!assetHealth?.needsApproval,
@@ -532,7 +468,17 @@ pluginsManageRoutes.post('/plugins-manage/:id/delete', async (c) => {
   if (!mutation.row(id)) return c.notFound();
   // Use the captured pin even when disabled/offline. Unpinned legacy rows
   // remove only their registry entry; do not infer ownership from a live URL.
+  const pin = await getIdentityForRow(c.env.DB, id);
   await mutation.remove(id);
+  // Unregistering releases the manifest id, so the credits its creator
+  // supplied are forfeited — a Worker that later claims the id inherits
+  // nothing. Inert when no credits feature is installed.
+  if (pin) {
+    await callFeatureService('credits', 'forfeit-plugin-wallet', c.env, {
+      contributorId: pin.manifest_id,
+      createdBy: String(c.get('user').sub),
+    });
+  }
   return c.redirect('/admin/plugins-manage');
 });
 
@@ -614,6 +560,13 @@ pluginsManageRoutes.get('/plugins-manage/:id/assets', async (c) => {
     assets,
     flash: c.req.query('flash') ?? undefined,
   });
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/assets/approve-all', async (c) => {
+  const id = Number(c.req.param('id'));
+  const result = await mutatePluginApproval(c, {id, action:'plugin.asset.approve_all'});
+  if (result === 'missing' || result === 'unreachable') return c.notFound();
+  return c.redirect(`/admin/plugins-manage/${id}/assets?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/assets/approve', async (c) => {
@@ -806,7 +759,12 @@ interface CreditPricingPayload {
   defaultValue: number;
   effectiveValue: number;
   configured: boolean;
+  pluginOnly?: boolean;
 }
+
+/** The plugin's own wallets — credits its creator supplied — as the credits
+ *  feature reports them. Absent when no credits feature is installed. */
+type PluginWalletPayload = NonNullable<Parameters<typeof pluginCreditsPage>[1]['wallet']>;
 
 pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
   const id = Number(c.req.param('id'));
@@ -819,6 +777,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
       pluginLabel: row.label || row.url,
       unreachable: true,
       credits: [],
+      wallet: null,
       saveAction: `/admin/plugins-manage/${id}/credits`,
       flash: c.req.query('flash') ?? undefined,
     });
@@ -847,13 +806,21 @@ pluginsManageRoutes.get('/plugins-manage/:id/credits', async (c) => {
     effectiveKey: row.effectiveValue === 0 ? 'view_strings.sections_plugin_credits.free' : '',
     usesDefault: !row.configured,
     value: row.configured ? String(row.effectiveValue) : '',
+    pluginOnly: row.pluginOnly === true,
   }));
+  const wallet = await callFeatureService<PluginWalletPayload>(
+    'credits',
+    'plugin-wallet',
+    c.env,
+    { contributorId: resolved.manifest.id },
+  ) ?? null;
 
   return renderPage(c, pluginCreditsPage, {
     pluginId: id,
     pluginLabel: resolved.manifest.name || row.label || row.url,
     unreachable: false,
     credits,
+    wallet,
     saveAction: `/admin/plugins-manage/${id}/credits`,
     flash: c.req.query('flash') ?? undefined,
   });
@@ -874,11 +841,12 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   const found = await resolvedPluginFor(c.env, id, true);
   if (!found) return c.notFound();
   const { row, resolved } = found;
+  const taxonomyApproved = (await taxonomyGrants(c, id)).has(id);
   if (!resolved) {
     return renderPage(c, pluginPageTypesPage, {
       pluginId: id,
       pluginLabel: row.label || row.url,
-      unreachable: true,
+      unreachable: true, taxonomyApproved,
       definedPageTypes: [],
       definedTaxonomies: [],
       pageTypes: [],
@@ -887,8 +855,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   }
 
   const declaredManifest = resolved.requestedManifest ?? resolved.manifest;
-  const readTypes = new Set(declaredManifest.contentTypes?.readTypes ?? []);
-  const writeTypes = new Set([...(declaredManifest.contentTypes?.writeTypes ?? []), ...Object.keys(declaredManifest.contentTypes?.blueprint ?? {})]);
+  const { readTypes, writeTypes } = requestedPageTypeScopes(declaredManifest.contentTypes);
   const definedPageTypes = Object.entries((resolved.requestedManifest ?? resolved.manifest).contentTypes?.blueprint ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([slug, blueprint]) => ({
@@ -904,9 +871,7 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
       viewHref: `/admin/taxonomies/view/${encodeURIComponent(slug)}`,
     }));
   const pageTypeNames = [...new Set([...readTypes, ...writeTypes])].sort();
-  const approvals = await listPageTypeApprovals(c.env.DB, (resolved.requestedManifest ?? resolved.manifest).id);
-  recordMetadataReads('plugin.type-approvals-read', 'plugin_page_type_approvals', approvals.map(approval => `${approval.plugin_id}:${approval.page_type}:${approval.access}`));
-  const approvalByKey = new Map(approvals.map((approval) => [`${approval.page_type}:${approval.access}`, approval]));
+  const approvalByKey = pageTypeApprovalIndex(resolved.pageTypeApprovals);
 
   const pageTypes = pageTypeNames.map((pageType) => {
     const readApproval = approvalByKey.get(`${pageType}:read`);
@@ -930,12 +895,22 @@ pluginsManageRoutes.get('/plugins-manage/:id/page-types', async (c) => {
   return renderPage(c, pluginPageTypesPage, {
     pluginId: id,
     pluginLabel: (resolved.requestedManifest ?? resolved.manifest).name || row.label || row.url,
-    unreachable: false,
+    unreachable: false, taxonomyApproved, taxonomyRequested: declaredManifest.capabilities?.includes('taxonomy:create'),
     definedPageTypes,
     definedTaxonomies,
     pageTypes,
     flash: c.req.query('flash') ?? undefined,
   });
+});
+
+pluginsManageRoutes.post('/plugins-manage/:id/capabilities/taxonomy-create/:decision', async c => {
+  const id = Number(c.req.param('id'));
+  const decision = c.req.param('decision');
+  if (decision !== 'approve' && decision !== 'revoke') return c.notFound();
+  const result = await mutatePluginApproval(c, { id, action: `plugin.capability.${decision}`, key: 'taxonomy:create' });
+  if (result === 'invalid') return c.text('The plugin must request taxonomy creation.', 400);
+  if (result !== 'approved' && result !== 'revoked') return c.notFound();
+  return c.redirect(`/admin/plugins-manage/${id}/page-types?flash=${result}`);
 });
 
 pluginsManageRoutes.post('/plugins-manage/:id/page-types/approve-all', async (c) => {

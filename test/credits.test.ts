@@ -18,7 +18,7 @@ import {
   transferSharedCredits,
 } from '../src/features/credits/service';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
-import { saveShowCredits, SHOW_CREDITS_SETTING_KEY } from '../src/core/db/settings';
+import { saveSetting, SHOW_CREDITS_SETTING_KEY } from '../src/core/db/settings';
 import type { JWTPayload } from '../src/types';
 import type { PluginManifest } from '../src/features/plugins/types';
 import type { CreditContributor } from '../src/features/credits/contracts';
@@ -401,7 +401,7 @@ describe('/__cms credits endpoints', () => {
     const res = await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', { key: 'send_edm', quantity: 10 });
     expect(res.status).toBe(402);
     expect((await res.json() as { credit: unknown }).credit)
-      .toEqual({ currency: 'credit', required: 20, balance: 5, shared_balance: 0 });
+      .toEqual({ currency: 'credit', required: 20, balance: 5, shared_balance: 0, plugin_balance: 0 });
   });
 });
 
@@ -660,13 +660,13 @@ describe('profile and plugins-manage pages', () => {
     await saveCreditValues(env, PLUGIN_ID, { create_event: 10 });
     expect(await (await adminFetch('/admin/plugins-manage')).text()).toContain('"hasCredits":true');
 
-    await saveShowCredits(env, false);
+    await saveSetting(env, SHOW_CREDITS_SETTING_KEY, 'false');
     const hidden = await adminFetch('/admin/plugins-manage');
     expect(hidden.status).toBe(200);
     expect(await hidden.text()).toContain('"hasCredits":false');
     expect(await loadCreditValues(env, PLUGIN_ID)).toEqual({ create_event: 10 });
 
-    await saveShowCredits(env, true);
+    await saveSetting(env, SHOW_CREDITS_SETTING_KEY, 'true');
     expect(await (await adminFetch('/admin/plugins-manage')).text()).toContain('"hasCredits":true');
   });
 

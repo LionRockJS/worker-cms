@@ -1,5 +1,7 @@
 <div class="min-w-0 max-w-xl px-4 pb-1 sm:px-6 lg:px-8">
-  {% if readOnly %}
+  {% if fromConfig %}
+    <div class="mb-4 px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600">{{ "view_strings.sections_taxonomy_form.config_taxonomy_read_only" | t }}</div>
+  {% elsif readOnly %}
     <div class="mb-4 px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600">{{ "view_strings.sections_taxonomy_form.you_don_t_have_permission_to_edit_taxonomies" | t }}</div>
   {% endif %}
   <form id="taxonomy-form" method="POST" action="{{ action }}" class="min-w-0 space-y-4">
@@ -13,3 +15,23 @@
     </label>
   </form>
 </div>
+
+{% unless isEdit or readOnly %}
+<script nonce="{{ nonce }}">
+  // New taxonomy: the slug follows the name until the slug is typed in directly.
+  (() => {
+    const nameInput = document.getElementById('taxonomy_name');
+    const slugInput = document.getElementById('taxonomy_slug');
+    if (!nameInput || !slugInput) return;
+    const slugForName = (name) => name.toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    let slugEdited = slugInput.value.trim() !== '' && slugInput.value.trim() !== slugForName(nameInput.value);
+    slugInput.addEventListener('input', () => { slugEdited = slugInput.value.trim() !== ''; });
+    nameInput.addEventListener('input', () => {
+      if (!slugEdited) slugInput.value = slugForName(nameInput.value);
+    });
+  })();
+</script>
+{% endunless %}

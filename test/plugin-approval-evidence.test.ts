@@ -16,7 +16,7 @@ let manifest:Record<string,unknown>;
 let fetch:ReturnType<typeof vi.fn>;
 const ops={
  identity:['identity','plugin.identity.approve'],
- assetApprove:['assets/approve','plugin.asset.approve'],assetRevoke:['assets/revoke','plugin.asset.revoke'],
+ assetApprove:['assets/approve','plugin.asset.approve'],assetAll:['assets/approve-all','plugin.asset.approve_all'],assetRevoke:['assets/revoke','plugin.asset.revoke'],
  fileApprove:['files/approve','plugin.file_prefix.approve'],fileRevoke:['files/revoke','plugin.file_prefix.revoke'],
  typeApprove:['page-types/approve','plugin.page_type.approve'],typeRevoke:['page-types/revoke','plugin.page_type.revoke'],
  typeAll:['page-types/approve-all','plugin.page_type.approve_all'],
@@ -56,7 +56,7 @@ async function regulatedEnv():Promise<Partial<Env>>{
  return {REGULATED_MODE:'true',REGULATED_INVENTORY:JSON.stringify(inventory),CANONICAL_ORIGIN:'https://cms.example.com',SESSION_IDLE_TTL:'1800'};
 }
 async function state(){return Promise.all(tables.map(async table=>(await env.DB.prepare(`SELECT * FROM ${table} ORDER BY ${table==='settings'?'key':table==='plugin_identity_approvals'?'plugin_row_id':table==='plugin_state'||table==='plugin_sequences'?'plugin_id,key':'id'}`).all()).results));}
-async function events(){return(await env.DB.prepare("SELECT * FROM audit_events WHERE action IN ('plugin.identity.approve','plugin.asset.approve','plugin.asset.revoke','plugin.file_prefix.approve','plugin.file_prefix.revoke','plugin.page_type.approve','plugin.page_type.revoke','plugin.page_type.approve_all') ORDER BY seq").all()).results;}
+async function events(){return(await env.DB.prepare("SELECT * FROM audit_events WHERE action IN ('plugin.identity.approve','plugin.asset.approve','plugin.asset.approve_all','plugin.asset.revoke','plugin.file_prefix.approve','plugin.file_prefix.revoke','plugin.page_type.approve','plugin.page_type.revoke','plugin.page_type.approve_all') ORDER BY seq").all()).results;}
 async function classify(kind='table',key='plugin_asset_approvals',value='phi'){await env.DB.prepare('INSERT INTO data_classes(container_kind,container_key,class) VALUES (?,?,?)').bind(kind,key,value).run();}
 function race(change:()=>Promise<unknown>,uncertain=false,includeNoop=false):Env['DB']{
  let changed=false;const tracked=new WeakMap<D1PreparedStatement,{actual:D1PreparedStatement;sql:string}>();
@@ -123,6 +123,17 @@ it('preserves existing attribution and timestamps on repeated approve-all',async
 it('treats repeated single approvals and missing revocations as validated no-ops',async()=>{expect((await call('fileApprove')).status).toBe(302);expect((await call('fileApprove')).status).toBe(302);expect(await events()).toHaveLength(1);expect((await call('assetRevoke',{}, {path:'/missing.js'})).status).toBe(302);expect(await events()).toHaveLength(1);});
 it('refuses stale no-op approval snapshots',async()=>{await env.DB.prepare('DELETE FROM plugin_asset_approvals').run();const DB=race(()=>env.DB.prepare("UPDATE plugins SET enabled=0").run(),false,true);expect((await call('assetRevoke',{DB})).status).toBe(503);expect(await events()).toEqual([]);});
 it('pins fetched bytes and refuses unavailable fetches before approval',async()=>{expect((await call('assetApprove')).status).toBe(302);expect(await env.DB.prepare('SELECT integrity FROM plugin_asset_approvals').first()).toEqual({integrity:await computeIntegrity(new TextEncoder().encode('private asset bytes').buffer)});await env.DB.prepare('DELETE FROM audit_events').run();fetch.mockImplementation(async(input:RequestInfo|URL)=>new URL(String(input)).pathname==='/__plugin/manifest'?Response.json(manifest):new Response('no',{status:503}));expect((await call('assetApprove')).headers.get('location')).toContain('fetch-failed');expect(await events()).toEqual([]);});
+it('approves every declared asset, re-pins drifted ones, and is a no-op when current',async()=>{
+ const integrity=await computeIntegrity(new TextEncoder().encode('private asset bytes').buffer);
+ const response=await call('assetAll');expect(response.headers.get('location')).toBe('/admin/plugins-manage/19010/assets?flash=approved-all');
+ expect((await env.DB.prepare('SELECT path,integrity,approved_by FROM plugin_asset_approvals ORDER BY path').all()).results).toEqual([
+  {path:'/new-asset.js',integrity,approved_by:'private-actor@example.invalid'},
+  {path:'/private-asset.js',integrity,approved_by:'private-actor@example.invalid'},
+ ]);
+ expect(await events()).toHaveLength(1);const before=await state();
+ expect((await call('assetAll')).status).toBe(302);expect(await state()).toEqual(before);expect(await events()).toHaveLength(1);
+});
+it('approves no assets when any declared asset cannot be fetched',async()=>{const before=await state();fetch.mockImplementation(async(input:RequestInfo|URL)=>{const path=new URL(String(input)).pathname;return path==='/__plugin/manifest'?Response.json(manifest):path==='/new-asset.js'?new Response('no',{status:503}):new Response('private asset bytes');});expect((await call('assetAll')).headers.get('location')).toContain('fetch-failed');expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 it('inspects a fresh declaration instead of granting from a stale cached manifest',async()=>{expect(await getPlugins(env)).toHaveLength(1);manifest.contentTypes={readTypes:[],writeTypes:[]};expect((await call('typeApprove')).status).toBe(400);expect(await events()).toEqual([]);});
 it('refuses registry changes made while fetching the manifest',async()=>{fetch.mockImplementation(async()=>{await env.DB.prepare("UPDATE plugins SET url='https://changed.invalid'").run();return Response.json(manifest);});expect((await call('typeApprove')).status).toBe(503);expect(await events()).toEqual([]);});
 it('inherits destination state and plugin sensitivity on identity moves',async()=>{await classify('plugin','renamed-plugin');expect((await call('identity')).status).toBe(302);expect((await events())[0].data_class).toBe('phi');});
@@ -134,7 +145,7 @@ it.each([
  ['assetApprove','plugin_asset_approvals','UPDATE'],['assetRevoke','plugin_asset_approvals','DELETE'],
  ['fileApprove','plugin_file_prefix_approvals','UPDATE'],['fileRevoke','plugin_file_prefix_approvals','DELETE'],
  ['typeApprove','plugin_page_type_approvals','UPDATE'],['typeRevoke','plugin_page_type_approvals','DELETE'],
- ['typeAll','plugin_page_type_approvals','INSERT'],
+ ['typeAll','plugin_page_type_approvals','INSERT'],['assetAll','plugin_asset_approvals','INSERT'],
 ] as const)('refuses ignored primary writes for %s',async(op,table,operation)=>{
  const before=await state();await env.DB.prepare(`CREATE TRIGGER ${fault} BEFORE ${operation} ON ${table} BEGIN SELECT RAISE(IGNORE); END`).run();
  expect((await call(op)).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);

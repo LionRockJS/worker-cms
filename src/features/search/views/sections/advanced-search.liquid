@@ -143,7 +143,7 @@
       </div>
     </template>
 
-    <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-between">
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
       <button type="button" id="advanced-search-add-criterion"
               title="{{ "view_strings.sections_advanced_search.add_criterion" | t }}"
               aria-label="{{ "view_strings.sections_advanced_search.add_criterion" | t }}"
@@ -151,10 +151,13 @@
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#plus"></use></svg>
         <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.add_criterion" | t }}</span>
       </button>
-      <div class="flex flex-col gap-2 sm:flex-row">
+      <div class="flex items-center gap-2">
       <a href="{{ resetHref }}"
-         class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-        {{ "view_strings.sections_advanced_search.reset" | t }}
+         title="{{ "view_strings.sections_advanced_search.reset" | t }}"
+         aria-label="{{ "view_strings.sections_advanced_search.reset" | t }}"
+         class="inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 shrink-0 gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#x"></use></svg>
+        <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.reset" | t }}</span>
       </a>
       <button type="submit"
               title="{{ "view_strings.sections_advanced_search.search" | t }}"
@@ -173,7 +176,7 @@
   </datalist>
   <script type="application/json" id="advanced-search-path-options-data">{{ pathOptionsByPageTypeJson | raw }}</script>
 
-  {% if hasResults %}
+  {% if hasResults and hasBulkActions %}
     <form id="advanced-search-bulk-form" method="POST" action="{{ bulkAction }}" class="mb-3 hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm" data-bulk-form aria-hidden="true">
       <input type="hidden" name="return_to" value="{{ currentHref }}">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -187,7 +190,7 @@
               {% else %}
                 <option value="" selected disabled>—</option>
               {% endif %}
-              <option value="delete">{{ "view_strings.shared_bulk_actions.move_to_trash" | t }}</option>
+              {% feature_fragment trash/bulk-delete-option %}
             </select>
           </label>
           <label class="block">
@@ -203,8 +206,9 @@
           <button type="submit"
                   title="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
                   aria-label="{{ "view_strings.shared_bulk_actions.apply_bulk_action" | t }}"
-                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700">
-            {{ "view_strings.shared_bulk_actions.apply" | t }}
+                  class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 shrink-0">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#check-circle"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.shared_bulk_actions.apply" | t }}</span>
           </button>
         </div>
       </div>
@@ -215,12 +219,14 @@
     <table class="relative w-full min-w-[840px] text-left">
       <thead class="border-b border-gray-200 bg-gray-50">
         <tr>
+          {% if hasBulkActions %}
           <th class="w-12 px-6 py-3">
             {% if hasResults %}
               <input type="checkbox" data-bulk-select-all title="{{ "view_strings.shared_bulk_actions.select_all_visible_pages" | t }}" aria-label="{{ "view_strings.shared_bulk_actions.select_all_visible_pages" | t }}"
                      class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
             {% endif %}
           </th>
+          {% endif %}
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.page" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.type" | t }}</th>
           <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{{ "view_strings.sections_advanced_search.weight" | t }}</th>
@@ -234,11 +240,13 @@
         {% if hasResults %}
           {% for page in pages %}
             <tr class="transition-colors hover:bg-gray-50">
+              {% if hasBulkActions %}
               <td class="px-6 py-4 align-top">
                 <input type="checkbox" name="page_ids" value="{{ page.id }}" form="advanced-search-bulk-form"
                        data-bulk-page-checkbox title="Select {{ page.name }}" aria-label="Select {{ page.name }}"
                        class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
               </td>
+              {% endif %}
               <td class="px-6 py-4">
                 <a href="{{ page.editHref }}" class="flex flex-col gap-1">
                   <div class="font-medium text-gray-900">{{ page.name }}</div>
@@ -257,11 +265,7 @@
               <td class="px-6 py-4">
                 <div class="flex min-w-0 items-center gap-2">
                   <span class="text-sm text-gray-700">{{ page.weight }}</span>
-                  {% if page.hasLiveWeightDrift %}
-                    <span title="Live weight is {{ page.liveWeight }}; publish to sync" class="inline-flex items-center text-amber-600">
-                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#warning"></use></svg>
-                    </span>
-                  {% endif %}
+                  {% feature_fragment publish/search-weight-drift %}
                 </div>
               </td>
               {% if publishEnabled %}
@@ -321,6 +325,7 @@
                     </form>
                   {% endif %}
                   {% endif %}
+                  {% if trashEnabled %}
                   <form method="POST" action="{{ page.deleteAction }}" class="inline shrink-0" data-confirm="{{ "view_strings.sections_advanced_search.move_this_page_to_trash" | t }}">
                     <button type="submit" title="{{ "view_strings.sections_advanced_search.trash" | t }}" aria-label="Move {{ page.name }} to trash"
                             class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-700">
@@ -328,13 +333,14 @@
                       <span class="sr-only">{{ "view_strings.sections_advanced_search.trash" | t }}</span>
                     </button>
                   </form>
+                  {% endif %}
                 </div>
               </td>
             </tr>
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="{% if publishEnabled %}6{% else %}5{% endif %}" class="px-6 py-12 text-center text-gray-400">
+            <td colspan="{{ emptyColspan }}" class="px-6 py-12 text-center text-gray-400">
               {% if hasSearch %}
                 No matching pages.
               {% else %}
@@ -352,10 +358,22 @@
       <div class="text-gray-500">Page {{ currentPage }} of {{ totalPages }}</div>
       <div class="flex gap-2">
         {% if hasPreviousPage %}
-          <a href="{{ previousHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_advanced_search.previous" | t }}</a>
+          <a href="{{ previousHref }}"
+             title="{{ "view_strings.sections_advanced_search.previous" | t }}"
+             aria-label="{{ "view_strings.sections_advanced_search.previous" | t }}"
+             class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#arrow-left"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.previous" | t }}</span>
+          </a>
         {% endif %}
         {% if hasNextPage %}
-          <a href="{{ nextHref }}" class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50">{{ "view_strings.sections_advanced_search.next" | t }}</a>
+          <a href="{{ nextHref }}"
+             title="{{ "view_strings.sections_advanced_search.next" | t }}"
+             aria-label="{{ "view_strings.sections_advanced_search.next" | t }}"
+             class="inline-flex h-9 items-center rounded-lg border border-gray-300 bg-white px-3 font-semibold text-gray-700 hover:bg-gray-50 justify-center shrink-0 gap-2">
+            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
+            <span class="hidden lg:inline">{{ "view_strings.sections_advanced_search.next" | t }}</span>
+          </a>
         {% endif %}
       </div>
     </div>

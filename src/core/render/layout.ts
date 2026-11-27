@@ -1,5 +1,6 @@
 import { currentCspNonce } from '../http/request-context';
 import { appearanceStyleSheet } from './theme';
+import { customIconHref } from './icon-sprite';
 import { builtinRoleTranslationKey } from '../auth/roles';
 import { isClientView, type RenderedView } from './liquid';
 
@@ -8,6 +9,7 @@ export interface SidebarNavItem {
   translationKey?: string;
   href: string;
   icon: string;
+  iconHref?: string;
   isSettingsGroup?: boolean;
   isActive?: boolean;
 }
@@ -33,14 +35,14 @@ const EDITOR_SYNC_CLIENT_ASSETS: readonly string[] = [
   '/assets/editor-sync.js',
 ];
 
+/** The bootstrap starts the renderer once. It loads engines on demand. */
 /**
- * The engine and the renderer, loaded before anything else and only in the
- * bootstrap: client-render.js replaces the whole document with the rendered
- * layout, so re-listing them in default.liquid would reload the renderer into
- * the page it just produced.
+ * Admin pages only. layout/default.liquid loads it too; the script binds once
+ * per page, so the bootstrap and the rendered layout cannot double its timer.
  */
+const ADMIN_KEEPALIVE_ASSET = '/assets/session-keepalive.js';
+
 const BOOTSTRAP_CLIENT_ASSETS: readonly string[] = [
-  '/assets/liquid.browser.min.js',
   '/assets/client-render.js',
 ];
 
@@ -256,6 +258,8 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   const nonce = currentCspNonce();
   const revision = opts.viewRevision || 'dev';
   const revisionQuery = assetRevisionQuery(revision);
+  const iconHrefPrefix = `/assets/icons.svg${revisionQuery}`;
+  const appIcon = opts.appIcon || 'document';
   // The bootstrap shell only needs general chrome assets. Collaboration assets
   // belong exclusively to the rendered editor document: loading Yjs in both
   // phases creates two module copies and breaks Yjs constructor identity.
@@ -275,7 +279,8 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
     userRoleItems,
     sidebarWallets: opts.sidebarWallets ?? [],
     userInitial: userName.trim().charAt(0).toUpperCase() || '?',
-    appIcon: opts.appIcon || 'document',
+    appIcon,
+    appIconHref: customIconHref(appIcon) || `${iconHrefPrefix}#${appIcon}`,
     contentClass: admin ? 'md:ml-64' : '',
     canManageUsers: opts.canManageUsers ?? false,
     canManageRoles: opts.canManageRoles ?? false,
@@ -297,7 +302,7 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
     pluginSettingsNav: opts.pluginSettingsNav ?? [],
     viewRevision: revision,
     assetRevisionQuery: revisionQuery,
-    iconHrefPrefix: `/assets/icons.svg${revisionQuery}`,
+    iconHrefPrefix,
     nonce,
     uiLocale: opts.uiLocale || 'en',
     uiDirection: opts.uiDirection || 'ltr',
@@ -325,14 +330,23 @@ export async function layout(views: Fetcher, opts: LayoutOptions): Promise<strin
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(opts.title)} - ${escHtml(opts.siteTitle)}</title>
+  <script nonce="${escHtml(nonce)}">
+    // Apply the saved theme before the loading screen is painted.
+    try {
+      if (window.localStorage.getItem('worker-cms-theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch (error) {
+      // The stylesheet defaults to dark when storage is unavailable.
+    }
+  </script>
   <link rel="stylesheet" href="/assets/admin.css${escHtml(revisionQuery)}">
   <style nonce="${escHtml(nonce)}">${appearanceStyleSheet(opts.appPrimaryColor, opts.appFont)}</style>
 </head>
 <body class="h-full overflow-x-hidden">
   <div id="cms-client-root" class="min-h-full">${loadingMarkup('100vh')}</div>
   <script id="cms-render-payload" type="application/json" nonce="${escHtml(nonce)}">${jsonScript(payload)}</script>
-  ${admin ? `<script nonce="${escHtml(nonce)}">${adminSessionKeepaliveScript()}</script>` : ''}
-  ${[...BOOTSTRAP_CLIENT_ASSETS, ...installedAssets]
+  ${[...BOOTSTRAP_CLIENT_ASSETS, ...(admin ? [ADMIN_KEEPALIVE_ASSET] : []), ...installedAssets]
     .map((src) => `<script src="${escHtml(src)}${escHtml(revisionQuery)}" nonce="${escHtml(nonce)}" defer></script>`)
     .join('\n  ')}
 </body>
@@ -372,65 +386,4 @@ function loadingMarkup(minHeight: string): string {
       </path>
     </svg>
   </div>`;
-}
-
-function adminSessionKeepaliveScript(): string {
-  return `(function() {
-      if (window.__cmsSessionKeepaliveBound) return;
-      window.__cmsSessionKeepaliveBound = true;
-      var INTERVAL = 5 * 60 * 1000;
-      // Interaction after this long without a report is sent at once, so the
-      // server's view of activity lags the person by at most this much.
-      var REPORT_AFTER = 5 * 60 * 1000;
-      var RETRY_AFTER = 30 * 1000;
-      var inFlight = false;
-      // Loading the page was itself a request the server counted.
-      var lastInteraction = Date.now();
-      var lastReported = lastInteraction;
-      var lastAttempt = 0;
-
-      // A visible page counts as reading, even when its window is inactive.
-      // Hidden tabs only report actual interaction, so they still go idle.
-      async function refresh() {
-        if (inFlight) return;
-        inFlight = true;
-        lastAttempt = Date.now();
-        if (document.visibilityState === 'visible') {
-          lastInteraction = Date.now();
-        }
-        var interaction = lastInteraction;
-        var headers = { Accept: 'application/json' };
-        if (interaction > lastReported) {
-          headers['X-CMS-Idle-For'] = String(Math.max(0, Math.floor((Date.now() - interaction) / 1000)));
-        } else {
-          headers['X-CMS-Background'] = '1';
-        }
-        try {
-          var res = await fetch('/auth/refresh', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: headers
-          });
-          if (res.status === 401) window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
-          else if (res.ok) lastReported = Math.max(lastReported, interaction);
-        } catch (error) {
-          /* retry on the next tick */
-        } finally {
-          inFlight = false;
-        }
-      }
-
-      function noteInteraction() {
-        lastInteraction = Date.now();
-        if (lastInteraction - lastReported > REPORT_AFTER && lastInteraction - lastAttempt > RETRY_AFTER) refresh();
-      }
-
-      ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function(type) {
-        window.addEventListener(type, noteInteraction, { capture: true, passive: true });
-      });
-      window.setInterval(refresh, INTERVAL);
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') refresh();
-      });
-    })();`;
 }
