@@ -4,6 +4,9 @@
 #   :development   the newest build; what compose.yaml pulls by default
 #   :sha-<commit>  that exact build, which never moves (pin or roll back to it)
 #
+# Nothing builds until the commit passes ci.yml (type-check, npm test, the
+# upgrade path and the production audit); a failure there publishes nothing.
+#
 # One image covers linux/amd64 and linux/arm64. Each architecture builds on a
 # native runner rather than under QEMU, because workerd's install script runs
 # the workerd binary, which aborts under emulation; the merge job then joins
@@ -29,7 +32,13 @@ env:
   IMAGE: ghcr.io/lionrockjs/0xcms
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
+    needs: ci
     strategy:
       matrix:
         include:

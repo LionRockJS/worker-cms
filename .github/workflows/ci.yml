@@ -2,7 +2,8 @@
 # surface: it builds (pretest), then runs the profile, boundary, generated,
 # inventory and security-requirements checks before vitest, so a stale
 # generated registry, a broken feature boundary or a deleted security test
-# fails here rather than at deploy.
+# fails here rather than at deploy. docker.yml calls this workflow too, so no
+# image is published from a commit that fails it.
 #
 # Actions are pinned to full commit SHAs (W14); Dependabot's github-actions
 # updates move the pin and its version comment together.
@@ -12,6 +13,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
