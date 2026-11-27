@@ -220,6 +220,23 @@ Copy them to another computer with
 in the copies. Never write to the live files from outside the CMS; make
 changes with the Wrangler command above.
 
+### Nightly snapshots
+
+`docker/d1-snapshot.sh` wraps the same snapshot for cron. Each run adds a
+folder `~/cms-snapshots/<YYYY-MM-DD_HHMM>/` and deletes snapshot folders older
+than 30 days. It uses the running CMS's own image and volume, so it needs no
+arguments. To run it every night at 03:00 (the Pi's local time):
+
+```bash
+(crontab -l 2>/dev/null | grep -v d1-snapshot.sh; echo '0 3 * * * sh "$HOME/worker-cms/docker/d1-snapshot.sh" >> "$HOME/cms-snapshots.log" 2>&1') | crontab -
+```
+
+This keeps any other cron jobs and can be run again safely. Each run appends
+one line to `~/cms-snapshots.log`. Pass a folder and a number of days to change
+the defaults, for example `d1-snapshot.sh /mnt/usb/cms 90`. These snapshots
+cover the databases only; uploaded media is in the volume too and needs the
+full backup above.
+
 ## Troubleshooting
 
 - **workerd aborts with "TCMalloc assumes a 48-bit virtual address space"**:
