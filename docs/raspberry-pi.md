@@ -79,7 +79,8 @@ CMS; both files are gitignored and neither is part of the image.
 
 In `cms.env`, uncomment `ENABLED_PROVIDERS` and the lines for your OAuth
 provider, and register `https://cms.local/auth/callback` with it. GitHub and
-Microsoft accept a `.local` callback; Google and Apple require a public domain.
+Microsoft accept a `.local` callback; Google and Apple require a public domain
+(see [Public address with a Cloudflare Tunnel](#public-address-with-a-cloudflare-tunnel)).
 The comments in `cms.env.example` link to each provider's registration page.
 
 ## 6. HTTPS and nginx
@@ -164,6 +165,80 @@ crontab -l
 This keeps any other cron jobs and can be run again safely. Don't run it under
 `set -e`: with an empty crontab, `grep` finds nothing and would stop the list
 before the two jobs are added.
+
+## Public address with a Cloudflare Tunnel
+
+`cms.local` exists only on your network. Anything outside it cannot reach the
+CMS, notably plugins deployed to Cloudflare: connecting one (Admin → Plugins →
+Connect) makes the plugin call back to the CMS to collect its secret, and it
+keeps calling the CMS afterwards. With a `.local` address that fails with "The
+plugin refused the enrollment". A Cloudflare Tunnel gives the Pi a public
+HTTPS address, for example `cms.example.com`, without opening a port on your
+router. You need a domain on Cloudflare.
+
+Install `cloudflared` on the Pi from Cloudflare's package repository, so
+`apt upgrade` keeps it current:
+
+```bash
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-public-v2.gpg | sudo tee /usr/share/keyrings/cloudflare-public-v2.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-public-v2.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install -y cloudflared
+```
+
+Create the tunnel on a computer with a browser and `cloudflared` installed
+(`brew install cloudflared` on a Mac). `login` opens Cloudflare; choose the
+domain the address belongs to:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create cms-pi
+cloudflared tunnel route dns cms-pi cms.example.com
+```
+
+`create` prints the tunnel ID and writes `~/.cloudflared/<tunnel-id>.json`.
+That file lets whoever holds it run the tunnel; keep it secret. Copy it to the
+Pi with `scp ~/.cloudflared/<tunnel-id>.json <user>@cms.local:`, then on the
+Pi:
+
+```bash
+sudo mkdir -p /etc/cloudflared
+sudo mv ~/<tunnel-id>.json /etc/cloudflared/ && sudo chmod 600 /etc/cloudflared/<tunnel-id>.json
+sudo tee /etc/cloudflared/config.yml >/dev/null <<'EOF'
+tunnel: <tunnel-id>
+credentials-file: /etc/cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: cms.example.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404
+EOF
+sudo cloudflared service install
+systemctl status cloudflared --no-pager
+```
+
+The service is enabled at boot and restarts itself if it stops. It forwards to
+the CMS directly rather than through nginx; Cloudflare's edge sets
+`CF-Connecting-IP` to the visitor's address. Use `127.0.0.1`, not `localhost`:
+`localhost` makes cloudflared try `::1` first, where nothing listens.
+
+Then make the public address the CMS's own:
+
+```bash
+cd ~/worker-cms
+sed -i 's|^BASE_URL=.*|BASE_URL=https://cms.example.com|' .env
+docker compose up -d
+```
+
+Register `https://cms.example.com/auth/callback` with your OAuth provider, and
+work at the new address from then on. `cms.local` still loads pages, because
+the server treats every request as one for `BASE_URL`, but signing in returns
+you to the new address, and forms submitted from a `cms.local` page are refused
+with 403 because their `Origin` no longer matches. To check from any computer:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://cms.example.com/auth/login
+```
 
 ## Updating
 
@@ -276,3 +351,9 @@ the memory use that caused it.
   `System clock synchronized: no` until it is.
 - **`cms.local` redirects to another address**: `BASE_URL` in `.env` does not
   match the address you opened. The CMS redirects every other host to it.
+- **502 Bad Gateway for about a minute and a half after boot**: Docker waits
+  for the clock, then the CMS takes a while to start. Until it listens, nginx
+  and the tunnel get their connections refused or reset. It clears by itself.
+- **Connecting a plugin says "The plugin refused the enrollment"**: the plugin
+  cannot reach `BASE_URL`. A Cloudflare-hosted plugin needs a public address;
+  see [Public address with a Cloudflare Tunnel](#public-address-with-a-cloudflare-tunnel).

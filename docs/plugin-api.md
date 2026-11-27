@@ -32,6 +32,15 @@ for five minutes. The host returns the tenant identity, CMS URL and pairwise
 secret. Optional `tenantVars` declares safe plugin environment variable names
 for the SDK's tenant setup; the host does not send their values.
 
+The plugin calls the claim endpoint itself, at the canonical origin the host
+names, so that origin must be reachable from wherever the plugin runs, over
+HTTPS with a publicly trusted certificate (plain `http` only for `localhost`).
+A plugin deployed to Cloudflare cannot reach a LAN-only address such as
+`https://cms.local`; the claim fails and the admin shows "The plugin refused
+the enrollment". Later plugin-to-CMS calls need the same reachability. Give
+such a host a public address, for example with a Cloudflare Tunnel
+([Raspberry Pi guide](raspberry-pi.md#public-address-with-a-cloudflare-tunnel)).
+
 ## Portable registration settings
 
 A plugin can declare top-level registration config fields in its public manifest, for example `"portableConfigFields": ["region", "displayLanguage"]`. The host transfers the complete JSON value of each named field, including any nested values. Choose fields whose contents are safe to copy to another CMS. An absent or malformed list, an unavailable manifest, or a conflicting pinned plugin identity yields an empty config export.
