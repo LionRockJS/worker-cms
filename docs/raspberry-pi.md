@@ -237,6 +237,27 @@ the defaults, for example `d1-snapshot.sh /mnt/usb/cms 90`. These snapshots
 cover the databases only; uploaded media is in the volume too and needs the
 full backup above.
 
+## Memory
+
+The CMS normally uses 300–350 MiB. Two limits guard against growth:
+
+- `docker/memory-check.sh` restarts the CMS cleanly (it shuts Miniflare down
+  first) once it uses 720 MiB, but not within 15 minutes of its last start.
+  It measures memory the way `docker stats` does and prints only when it acts.
+- `mem_limit` in `compose.yaml` is a hard cap, 1 GiB by default: past it the
+  kernel kills the CMS and Docker starts it again. It catches growth between
+  checks. Set `CMS_MEMORY_LIMIT` in `.env` to change it, for example `1500m`.
+
+To run the check every 5 minutes:
+
+```bash
+(crontab -l 2>/dev/null | grep -v memory-check.sh; echo '*/5 * * * * sh "$HOME/worker-cms/docker/memory-check.sh" >> "$HOME/cms-memory.log" 2>&1') | crontab -
+```
+
+Pass another threshold in MiB to change it, for example `memory-check.sh 900`.
+Keep it below `CMS_MEMORY_LIMIT`. `~/cms-memory.log` lists each restart with
+the memory use that caused it.
+
 ## Troubleshooting
 
 - **workerd aborts with "TCMalloc assumes a 48-bit virtual address space"**:
