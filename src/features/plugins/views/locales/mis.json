@@ -218,7 +218,6 @@
     "sections_plugin_page_types.write": "Write",
     "sections_plugins_manage.actions": "Actions",
     "sections_plugins_manage.asset_approved": "Approved",
-    "sections_plugins_manage.assets": "Assets",
     "sections_plugins_manage.asset_requires_approval": "Approval required",
     "sections_plugins_manage.asset_requires_update": "Update required",
     "sections_plugins_manage.asset_status": "Asset status",

@@ -30,10 +30,10 @@
               <td class="px-4 py-3">
                 {% if plugin.hasAssets %}
                   <div class="flex flex-wrap gap-1">
-                    {% if plugin.assetNeedsApproval %}<span class="inline-block rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800">{{ "view_strings.sections_plugins_manage.asset_requires_approval" | t }}</span>{% endif %}
-                    {% if plugin.assetNeedsUpdate %}<span class="inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">{{ "view_strings.sections_plugins_manage.asset_requires_update" | t }}</span>{% endif %}
-                    {% if plugin.assetStatusError %}<span class="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{{ "view_strings.sections_plugins_manage.asset_unable_to_verify" | t }}</span>{% endif %}
-                    {% unless plugin.assetNeedsApproval or plugin.assetNeedsUpdate or plugin.assetStatusError %}<span class="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">{{ "view_strings.sections_plugins_manage.asset_approved" | t }}</span>{% endunless %}
+                    {% if plugin.assetNeedsApproval %}<a href="{{ plugin.assetsHref }}" class="inline-block rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800 hover:underline">{{ "view_strings.sections_plugins_manage.asset_requires_approval" | t }}</a>{% endif %}
+                    {% if plugin.assetNeedsUpdate %}<a href="{{ plugin.assetsHref }}" class="inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800 hover:underline">{{ "view_strings.sections_plugins_manage.asset_requires_update" | t }}</a>{% endif %}
+                    {% if plugin.assetStatusError %}<a href="{{ plugin.assetsHref }}" class="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600 hover:underline">{{ "view_strings.sections_plugins_manage.asset_unable_to_verify" | t }}</a>{% endif %}
+                    {% unless plugin.assetNeedsApproval or plugin.assetNeedsUpdate or plugin.assetStatusError %}<a href="{{ plugin.assetsHref }}" class="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800 hover:underline">{{ "view_strings.sections_plugins_manage.asset_approved" | t }}</a>{% endunless %}
                   </div>
                 {% else %}
                   <span class="text-xs text-gray-400">—</span>
@@ -44,43 +44,29 @@
                   <a href="{{ plugin.pageTypesHref }}" class="inline-block rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800 hover:underline">{{ "view_strings.sections_plugin_page_types.status_not_approved" | t }}</a>
                 {% elsif plugin.pageTypeStatus == 'approved' %}
                   <a href="{{ plugin.pageTypesHref }}" class="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800 hover:underline">{{ "view_strings.sections_plugin_page_types.status_approved" | t }}</a>
+                {% elsif plugin.hasPageTypes %}
+                  <a href="{{ plugin.pageTypesHref }}" class="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600 hover:underline">{{ "view_strings.sections_plugins_manage.page_types" | t }}</a>
                 {% else %}
                   <span class="text-xs text-gray-400">—</span>
                 {% endif %}
               </td>
               <td class="px-4 py-3 text-right align-top">
                 <div class="flex flex-wrap justify-end gap-1.5">
-                  {% if plugin.hasAssets or plugin.hasFilePrefixes or plugin.hasPageTypes or plugin.hasLimits or plugin.hasCredits %}
+                  {% if plugin.hasFilePrefixes or plugin.hasLimits or plugin.hasCredits %}
                     <details class="group relative inline-block shrink-0 text-left">
                       <summary title="{{ "view_strings.sections_plugins_manage.configuration" | t }}"
                                aria-label="{{ "view_strings.sections_plugins_manage.configuration" | t }}"
-                               class="inline-flex h-8 shrink-0 cursor-pointer list-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+                               class="inline-flex h-8 w-8 shrink-0 cursor-pointer list-none items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 group-open:bg-gray-100 [&::-webkit-details-marker]:hidden">
                         <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#settings"></use></svg>
-                        <span class="hidden lg:inline">{{ "view_strings.sections_plugins_manage.configuration" | t }}</span>
-                        <svg class="h-3.5 w-3.5 hidden transition-transform lg:inline group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#chevron-right"></use></svg>
                       </summary>
                       <div class="mt-2 rounded-lg bg-white shadow-sm absolute z-10">
                         <div class="flex flex-nowrap gap-1.5 shadow-md pb-2 pe-2">
-                          {% if plugin.hasAssets %}<a href="{{ plugin.assetsHref }}"
-                             title="{{ "view_strings.sections_plugins_manage.assets" | t }}"
-                             aria-label="{{ "view_strings.sections_plugins_manage.assets" | t }}"
-                             class="inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-gray-300 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 gap-2">
-                            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#code"></use></svg>
-                            <span class="hidden lg:inline">{{ "view_strings.sections_plugins_manage.assets" | t }}</span>
-                          </a>{% endif %}
                           {% if plugin.hasFilePrefixes %}<a href="{{ plugin.filePrefixesHref }}"
                              title="{{ "view_strings.sections_plugins_manage.files" | t }}"
                              aria-label="{{ "view_strings.sections_plugins_manage.files" | t }}"
                              class="inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-gray-300 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 gap-2">
                             <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#folder"></use></svg>
                             <span class="hidden lg:inline">{{ "view_strings.sections_plugins_manage.files" | t }}</span>
-                          </a>{% endif %}
-                          {% if plugin.hasPageTypes %}<a href="{{ plugin.pageTypesHref }}"
-                             title="{{ "view_strings.sections_plugins_manage.page_types" | t }}"
-                             aria-label="{{ "view_strings.sections_plugins_manage.page_types" | t }}"
-                             class="inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-gray-300 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 gap-2">
-                            <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><use href="{{ iconHrefPrefix }}#blocks"></use></svg>
-                            <span class="hidden lg:inline">{{ "view_strings.sections_plugins_manage.page_types" | t }}</span>
                           </a>{% endif %}
                           {% if plugin.hasLimits %}<a href="{{ plugin.limitsHref }}"
                              title="{{ "view_strings.sections_plugins_manage.limits" | t }}"

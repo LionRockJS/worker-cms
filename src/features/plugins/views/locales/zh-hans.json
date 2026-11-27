@@ -218,7 +218,6 @@
     "sections_plugin_page_types.write": "写入",
     "sections_plugins_manage.actions": "操作",
     "sections_plugins_manage.asset_approved": "已批准",
-    "sections_plugins_manage.assets": "资源",
     "sections_plugins_manage.asset_requires_approval": "需要批准",
     "sections_plugins_manage.asset_requires_update": "需要更新",
     "sections_plugins_manage.asset_status": "资源状态",
