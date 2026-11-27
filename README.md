@@ -534,11 +534,13 @@ The [Dockerfile](Dockerfile) runs `server.mjs` on Node 26 in one container. The
 image holds only the built bundle (`dist/`), the migrations, `wrangler.toml`,
 `cms.features.json` and Wrangler (which brings Miniflare and workerd); no source
 code ships in it. A [workflow](.github/workflows/docker.yml) publishes it for
-`linux/amd64` and `linux/arm64` on every push to `development`:
+`linux/amd64` and `linux/arm64` on every push to `development` and `main`,
+once the commit passes CI:
 
 | Tag | Meaning |
 | --- | --- |
-| `ghcr.io/lionrockjs/0xcms:development` | The newest build; what `compose.yaml` pulls by default |
+| `ghcr.io/lionrockjs/0xcms:development` | The newest build of `development`; what `compose.yaml` pulls by default |
+| `ghcr.io/lionrockjs/0xcms:latest` | The newest build of `main`, so each merged pull request |
 | `ghcr.io/lionrockjs/0xcms:sha-<commit>` | That exact build. It never moves, so pin or roll back to it |
 
 The published image is built from `wrangler.example.toml` and the committed
@@ -556,7 +558,9 @@ cp cms.env.example cms.env && chmod 600 cms.env
 `BASE_URL` is the origin browsers use. At start the entrypoint derives
 `CANONICAL_ORIGIN` and `OAUTH_REDIRECT_URI` (`<BASE_URL>/auth/callback`) from it,
 so one image serves any host. Optional compose settings: `CMS_TAG` (image tag,
-default `development`) and `CMS_PORT` (host port, default `8787`).
+default `development`), `CMS_PORT` (host port, default `8787`) and
+`CMS_MEMORY_LIMIT` (hard memory cap, default `1g`; past it the CMS is killed
+and restarted).
 
 In `cms.env`, set `JWT_SECRET` (the container refuses to start without it), then
 uncomment `ENABLED_PROVIDERS` and the credentials for each provider. The file
@@ -589,6 +593,18 @@ On every start the entrypoint applies the D1 migrations to `DB` (and to
 Objects and queue state live in the `cms-state` volume (`/app/.wrangler/state`),
 so they survive updates and recreation; back up that volume. `server.mjs` fires
 the `*/N` cron triggers itself.
+
+**Operations.** Three scripts run on the host, from the checkout:
+
+| Script | Does |
+| --- | --- |
+| [docker/update.sh](docker/update.sh) | Pulls the checkout and the image, recreates the container only if the image changed, waits until the CMS answers, and prints the commits it moved between |
+| [docker/d1-snapshot.sh](docker/d1-snapshot.sh) | Copies the live D1 databases to standalone SQLite files in a dated folder (`VACUUM INTO`, CMS keeps running) and deletes snapshots older than 30 days; for a nightly cron job |
+| [docker/memory-check.sh](docker/memory-check.sh) | Restarts the CMS cleanly once it uses 720 MiB, at most once per 15 minutes; for a cron job every 5 minutes |
+
+[docs/raspberry-pi.md](docs/raspberry-pi.md) sets all of this up on a
+Raspberry Pi running Ubuntu, including the crontab, nginx and a self-signed
+certificate for `https://cms.local`.
 
 **Reverse proxy.** `compose.yaml` publishes the port on `127.0.0.1` only, because
 Docker's published ports bypass the host firewall. Put an HTTPS proxy on the
@@ -1764,6 +1780,10 @@ features on and off.
 ├── docker/
 │   ├── entrypoint.sh      # BASE_URL -> origin settings, migrations, then serve
 │   ├── runtime-lock.mjs   # Wrangler's slice of package-lock.json for the image
+│   ├── update.sh          # Host: pull the newest image and restart if it changed
+│   ├── d1-snapshot.sh     # Host (cron): dated D1 snapshots, 30-day retention
+│   ├── d1-snapshot.mjs    # Writes the snapshots; run inside a throwaway container
+│   ├── memory-check.sh    # Host (cron): clean restart past 720 MiB
 │   └── nginx/cms.conf     # TLS reverse proxy example for the container
 ├── .github/workflows/docker.yml  # Publishes the multi-arch image to GHCR
 ├── package.json

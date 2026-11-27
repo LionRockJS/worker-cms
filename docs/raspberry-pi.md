@@ -148,6 +148,23 @@ scp <user>@cms.local:/etc/ssl/certs/cms.local.crt ~/Downloads/
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/cms.local.crt
 ```
 
+## 10. Scheduled jobs
+
+Two cron jobs, both run as your user: a database snapshot every night at 03:00
+(the Pi's local time) and a memory check every 5 minutes. See
+[Nightly snapshots](#nightly-snapshots) and [Memory](#memory) for what they do.
+
+```bash
+(crontab -l 2>/dev/null | grep -v -e d1-snapshot.sh -e memory-check.sh
+ echo '0 3 * * * sh "$HOME/worker-cms/docker/d1-snapshot.sh" >> "$HOME/cms-snapshots.log" 2>&1'
+ echo '*/5 * * * * sh "$HOME/worker-cms/docker/memory-check.sh" >> "$HOME/cms-memory.log" 2>&1') | crontab -
+crontab -l
+```
+
+This keeps any other cron jobs and can be run again safely. Don't run it under
+`set -e`: with an empty crontab, `grep` finds nothing and would stop the list
+before the two jobs are added.
+
 ## Updating
 
 Each push to `development` that passes CI publishes a new `:development`
@@ -225,15 +242,11 @@ changes with the Wrangler command above.
 `docker/d1-snapshot.sh` wraps the same snapshot for cron. Each run adds a
 folder `~/cms-snapshots/<YYYY-MM-DD_HHMM>/` and deletes snapshot folders older
 than 30 days. It uses the running CMS's own image and volume, so it needs no
-arguments. To run it every night at 03:00 (the Pi's local time):
+arguments. [Step 10](#10-scheduled-jobs) runs it every night at 03:00.
 
-```bash
-(crontab -l 2>/dev/null | grep -v d1-snapshot.sh; echo '0 3 * * * sh "$HOME/worker-cms/docker/d1-snapshot.sh" >> "$HOME/cms-snapshots.log" 2>&1') | crontab -
-```
-
-This keeps any other cron jobs and can be run again safely. Each run appends
-one line to `~/cms-snapshots.log`. Pass a folder and a number of days to change
-the defaults, for example `d1-snapshot.sh /mnt/usb/cms 90`. These snapshots
+Each run appends one line to `~/cms-snapshots.log`. To change the defaults,
+pass a folder and a number of days in the crontab line (`crontab -e`), for
+example `d1-snapshot.sh /mnt/usb/cms 90`. These snapshots
 cover the databases only; uploaded media is in the volume too and needs the
 full backup above.
 
@@ -248,14 +261,9 @@ The CMS normally uses 300–350 MiB. Two limits guard against growth:
   kernel kills the CMS and Docker starts it again. It catches growth between
   checks. Set `CMS_MEMORY_LIMIT` in `.env` to change it, for example `1500m`.
 
-To run the check every 5 minutes:
-
-```bash
-(crontab -l 2>/dev/null | grep -v memory-check.sh; echo '*/5 * * * * sh "$HOME/worker-cms/docker/memory-check.sh" >> "$HOME/cms-memory.log" 2>&1') | crontab -
-```
-
-Pass another threshold in MiB to change it, for example `memory-check.sh 900`.
-Keep it below `CMS_MEMORY_LIMIT`. `~/cms-memory.log` lists each restart with
+[Step 10](#10-scheduled-jobs) runs the check every 5 minutes. To change the
+threshold, pass it in MiB in the crontab line (`crontab -e`), for example
+`memory-check.sh 900`, and keep it below `CMS_MEMORY_LIMIT`. `~/cms-memory.log` lists each restart with
 the memory use that caused it.
 
 ## Troubleshooting
