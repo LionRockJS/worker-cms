@@ -1,6 +1,6 @@
 # Audited mutation runner: porting plan
 
-**Status: planned. Wave 0 (host settings) is done in `e10487f` and `7b42787`.** This is an engineering refactor plan, not compliance evidence. It changes how writers are structured, not what they prove.
+**Status: stopped at its simple scope on 28 November 2026.** Host settings and Wave A1 are done (six writers); the rest stay as they are, as recorded under "Stopping point" below. This is an engineering refactor plan, not compliance evidence. It changes how writers are structured, not what they prove.
 
 ## Goal
 
@@ -83,6 +83,24 @@ The runner fits writers that snapshot whole tables and log every read. Page-cent
 | Waits for the page pattern | All of Wave A2 and Wave B; plugin page create, update and delete; plugin tag ensure (request-buffered reads) | Deferred |
 
 The page pattern would need, at least: per-snapshot read logging that can be off or custom (including request-buffered page reads), a page-access check in the actor step, writes that move the policy version, and 409 or denial answers next to the 503 path.
+
+## Stopping point: keep the runner simple (28 November 2026)
+
+**Decision: the runner stays at its current scope.** It serves signed-in admin changes that snapshot whole tables and log every read. Six writers use it: host settings, locales, runtime types, plugin registration, plugin limits and pricing, and credits administration. Every one of them dropped round trips (typically 7–9 down to 4–5). The code did not shrink: the runner is 234 lines, and the six writers together grew by 36 lines. What it bought is one fixed order of steps and fewer round trips.
+
+The remaining writers were checked against the code, not just their read patterns. None fits without generalizing the runner's request context, actor or sink, so they stay as they are:
+
+| Writer | Why it stays |
+|---|---|
+| Plugin state | Captures credential authority before the request body by design; its refusal writes a denied receipt with no business write |
+| Plugin automatic identity | Runs with the environment only (no request, user or read buffer); joins a winning concurrent claim |
+| Record holds | One receipt per hold, per-hold statuses, conditional updates instead of snapshot guards, one re-plan on a stale extension |
+| Plugin taxonomy ensure | Runs under the plugin page-mutation authority (page family) |
+| Display name and avatar | Guards only the session and account row; self-service authority would add the IP allowlist (a behavior change) and new read evidence |
+| Wave D (job queue, retention, recurring billing) and the rest of Wave E (sessions, denials, outbox, sequences) | Environment-only cron or outbox code, or the planned counter sink |
+| Wave F (sign-in flows) | Recommended to stay from the start |
+
+Revisit only together with the deferred page pattern, and only if that design also covers a non-request (environment) context.
 
 ### Wave A2: content writers — deferred (page pattern)
 
