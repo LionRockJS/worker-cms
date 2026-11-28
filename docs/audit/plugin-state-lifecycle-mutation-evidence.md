@@ -26,6 +26,8 @@ The authenticated principal is the credential-bearing plugin registration, recor
 
 ## Point-state transaction and private evidence
 
+The [state writer](../../src/features/plugins/state-evidence.ts) uses the [grouped audited mutation runner](../../src/core/evidence/audited-mutation.ts) with the already captured store authority. The runner reads the selected entry and namespace catalogue together under the captured classification policy and applies the checks for the write, denial or no-op.
+
 | Operation | Durable result |
 |---|---|
 | New key PUT | Entry creation and exact `plugin.state.put`. |

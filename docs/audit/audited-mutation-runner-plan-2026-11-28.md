@@ -1,6 +1,6 @@
 # Audited mutation runner: porting plan
 
-**Status (29 November 2026)** Host settings, Wave A1, the page–tag prototype and P1–P5 are implemented. Targeted Workers regressions passed. The standard full suite remains pending.
+**Status (29 November 2026)** Host settings, Wave A1, the page–tag prototype and P1–P6 are implemented. Targeted Workers regressions passed. The standard full suite remains pending.
 
 ## Goal
 
@@ -166,6 +166,7 @@ The same HTTP fixtures executed the following D1 calls before and after P1. Thes
 | P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P4 | Taxonomies and tags | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P5 | Plugin taxonomy and tag ensure | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
+| P6 | Plugin state PUT and DELETE | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 
 #### P2 fit check
 
@@ -267,6 +268,18 @@ Tag ensure records known rollback or uncertain submission before the outage inci
 
 All **69 focused plugin API and tag ensure tests** and **1,727 earlier regressions** passed in standalone workerd. Removing the final receipt verification caused both writers' regressions for a later receipt corrupting an earlier receipt to fail. The new taxonomy regression also passed on the original writer. Standard `npm test` remains blocked by the localhost listener restriction.
 
+#### P6 plugin state transactions
+
+The existing service adapter accepts the store authority captured before body parsing. The runner reads the exact selected entry and its metadata-only namespace catalogue together under the captured policy. Catalogue read evidence uses hashed keys and the captured policy. Success plans verify the entry and catalogue, and cap-denial plans verify the unchanged state and exact denial receipt before returning 409. Unchanged PUT and absent DELETE plans recheck the captured state and authority.
+
+| Request fixture | Unclassified D1 calls before → after | PHI D1 calls before → after |
+|---|---:|---:|
+| Create, update or delete | 14 → 12 | 16 → 14 |
+| Unchanged PUT or absent DELETE | 13 → 11 | — |
+| Denial at the namespace cap | 13 → 11 | 15 → 13 |
+
+Both plugin state suites passed all **120 existing tests**, and **1,796 earlier regressions** passed in standalone workerd. Disabling the final authority check caused the credential and identity pin rollback tests to fail. Standard `npm test` remains blocked by the localhost listener restriction.
+
 ### Wave A2: page and taxonomy writers
 
 | Writer | Lines | Tests | Needs | Notes |
@@ -296,7 +309,7 @@ All of these authenticate a plugin by its registry row, secret and identity pin 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
 | [Automatic plugin identity](../../src/features/plugins/automatic-identity-evidence.ts) | 52 | `plugin-registration-evidence` | E5 `plugin` | Smallest; introduces the adapter |
-| [Plugin state](../../src/features/plugins/state-evidence.ts) | 54 | `plugin-state-mutation-evidence`, `plugin-state` | store option | |
+| [Plugin state](../../src/features/plugins/state-evidence.ts) | 100 | `plugin-state-mutation-evidence`, `plugin-state` | E1, E5 | **Done** (P6). Reuses the captured store authority. |
 | [Record holds](../../src/features/plugins/hold-evidence.ts) | 119 | `plugin-holds` | store option, E1 | |
 | [Taxonomy ensure](../../src/features/plugins/taxonomy-ensure.ts) | 104 | `cms-api` | E1, E5 | **Done** (P5). Separate taxonomy approval and per-taxonomy receipts. |
 | [Tag ensure](../../src/features/plugins/tag-ensure-evidence.ts) | 172 | `plugin-tag-ensure-evidence`, `cms-api` | E1, E5, E9 | **Done** (P5). Per-tag and batch receipts, guarded return rows and outcome evidence. |
