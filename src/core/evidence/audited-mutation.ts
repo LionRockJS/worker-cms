@@ -2,7 +2,7 @@ import type { AppContext } from '../http/context';
 import type { AccessAuthorization } from '../auth/access-authorization';
 import { captureMutationAuthority } from './mutation-authority';
 import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind, type DataClass, type DataClassMap } from '../db/data-classes';
-import { attributedMutationAuditEvidence, contextActor, type AuditEntry } from '../db/audit';
+import { attributedMutationAuditEvidence, contextActor, serviceMutationAuditEvidence, type AuditActor, type AuditEntry } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { json, snapshotStatement, snapshotRows, guard } from '../db/bounded-mutation';
 import { auditBackgroundReads, flushReadAudit, recordRead, type PendingRead } from '../http/access-log';
@@ -10,10 +10,11 @@ import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
 /**
- * The standard recipe for one audited admin change. A writer declares:
+ * The standard recipe for one audited request mutation. A writer declares:
  *
  *   permission  who may make the change: a capability of the session user,
- *               or 'self' for the user acting on their own account
+ *               or 'self' for the user acting on their own account. A service
+ *               writer supplies its captured credential principal and checks.
  *   classify    which containers decide the evidence's data class (fixed,
  *               or from the snapshot rows; a plan may add more)
  *   snapshot    the rows the decision depends on, plus how their read is logged
@@ -44,12 +45,15 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                   re-admit   authority and policy again, so business
  *                              triggers inside the batch cannot slip past
  *                   returning  optional final SELECT, returned by commit
+ *   Service plans can group writes with individually classified receipts in
+ *   transaction order. A group can record a denial without a business write.
+ *   All receipts are verified again before returning the result rows.
  *   6. fail       any error: coarse outage incident, then the writer's error.
  *                 Errors the writer marks as its own (validation, policy
  *                 refusals) pass through unchanged, with no incident.
  *
- * A null plan, or one without writes, commits only the admission guards and
- * records no event.
+ * A null plan or a session plan without writes commits only the admission
+ * guards. A service plan can also verify an empty result.
  */
 
 type Binding = string | number | null;
@@ -99,25 +103,36 @@ export interface PlannedWrite {
  *  (for example every page type a wildcard grant covers). */
 type Containers = Array<[ContainerKind, string] | DataClass>;
 
-export interface MutationPlan {
-  writes: PlannedWrite[];
-  evidence: { entry: AuditEntry; targetIds?: string[] };
-  /** Containers the change itself touches, raising the evidence class. */
-  classify?: Containers;
+interface MutationChecks {
   /** Checks run after admission and before the writes, such as an ID
    *  allocator still matching what decide read. */
   admit?: D1PreparedStatement[];
   /** Postconditions after the writes. `since` is the database clock read just
    *  before the batch, for rows whose timestamps the transaction sets. */
   expect: (since: string) => D1PreparedStatement[];
-  /** Fixed trusted SQL run last in the batch; its first row is returned. */
+  /** Fixed trusted SQL run last in the batch. */
   returning?: { sql: string; args: Binding[] };
 }
 
-export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
-  permission: Exclude<AccessAuthorization['capability'], 'authenticated'> | 'self';
-  /** Record a writer's existing policy denial when fresh authority refuses it. */
-  onDenied?: () => Promise<void>;
+export interface MutationPlan extends MutationChecks {
+  writes: PlannedWrite[];
+  evidence: { entry: AuditEntry; targetIds?: string[] };
+  /** Containers the change itself touches, raising the evidence class. */
+  classify?: Containers;
+}
+
+export interface ServiceMutationGroup {
+  check?: D1PreparedStatement[];
+  writes?: PlannedWrite[];
+  evidence: { entry: AuditEntry; dataClass: DataClass | 'none' };
+}
+
+export interface ServiceMutationPlan extends MutationChecks {
+  /** The writer bounds its business manifests before submitting the groups. */
+  groups: ServiceMutationGroup[];
+}
+
+interface SnapshotMutationSpec<S extends Record<string, SnapshotSpec>> {
   classify: Containers | ((rows: Snapshots<S>) => Containers);
   snapshot: S;
   /** The writer's own refusal, so its route keeps its existing 503 body. */
@@ -126,7 +141,14 @@ export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
   passthrough?: (error: unknown) => boolean;
 }
 
-export type Snapshots<S> = { [K in keyof S]: Array<Record<string, Binding>> };
+export interface MutationSpec<S extends Record<string, SnapshotSpec>> extends SnapshotMutationSpec<S> {
+  permission: Exclude<AccessAuthorization['capability'], 'authenticated'> | 'self';
+  /** Record a writer's existing policy denial when fresh authority refuses it. */
+  onDenied?: () => Promise<void>;
+}
+
+type Row = Record<string, Binding>;
+export type Snapshots<S> = { [K in keyof S]: Row[] };
 
 export interface DecideTools {
   /** Transaction clock, read once; `columns` is fixed trusted SQL. */
@@ -145,13 +167,51 @@ export interface DecideTools {
 
 export interface AuditedMutation<S> {
   rows: Snapshots<S>;
-  commit(decide: (rows: Snapshots<S>, tools: DecideTools) => MutationPlan | null | Promise<MutationPlan | null>): Promise<Record<string, Binding> | undefined>;
+  commit(decide: Decide<S, MutationPlan>): Promise<Row | undefined>;
+}
+
+type Decide<S, P> = (rows: Snapshots<S>, tools: DecideTools) => P | null | Promise<P | null>;
+
+interface MutationAuthority {
+  policy: DataClassMap;
+  check(): D1PreparedStatement[];
+  session?: AccessAuthorization;
 }
 
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
+  const mutation = await prepareAuditedMutation(c, spec, async () => {
+    const { authority, policy } = await captureMutationAuthority(c, spec.permission, spec.onDenied);
+    return { policy, check: () => [authority.guard()], session: authority };
+  });
+  return {
+    rows: mutation.rows,
+    async commit(decide) {
+      const result = await mutation.commit(decide);
+      if (result && !result[0]) return mutation.fail(new Error('Mutation result unavailable'));
+      return result?.[0];
+    },
+  };
+}
+
+/** The service writer captures and validates its credential before reading
+ *  the request body. Use that same authority throughout the transaction. */
+export async function beginServiceAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: SnapshotMutationSpec<S>,
+  authority: MutationAuthority & { actor: AuditActor }) {
+  const mutation = await prepareAuditedMutation(c, spec, async () => authority, authority.actor);
+  return {
+    rows: mutation.rows,
+    async commit(decide: Decide<S, ServiceMutationPlan>): Promise<Row[]> {
+      return await mutation.commit(decide) ?? [];
+    },
+  };
+}
+
+async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: SnapshotMutationSpec<S>,
+  authorize: () => Promise<MutationAuthority>, serviceActor?: AuditActor) {
+  const actor = serviceActor ?? contextActor(c);
   const fail = async (error: unknown): Promise<never> => {
     if (spec.passthrough?.(error)) throw error;
-    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    await recordAuditOutage(c.env, 'health', [], actor, undefined, { captureIncomplete: true });
     throw spec.unavailable();
   };
 
@@ -161,7 +221,8 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
   let prepared;
   try {
     // 2. authorize
-    const { authority, policy } = await captureMutationAuthority(c, spec.permission, spec.onDenied);
+    const authority = await authorize();
+    const { policy, session } = authority;
 
     // 3. snapshot: one round trip for every snapshot, behind the policy guard
     let containers: Containers = [];
@@ -175,7 +236,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
       } else if (reads.length) {
         const dataClass = classOf();
         const raised = reads.map(read => ({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...read }));
-        await auditBackgroundReads(c.env, raised, contextActor(c), { policy });
+        await auditBackgroundReads(c.env, raised, actor, { policy });
       }
       if ((reads.length || mode === 'request') && await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
       guards.push(admit);
@@ -196,7 +257,8 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
       return captured;
     };
     const load = async <T>(source: SnapshotSource<T>) => {
-      const loaded = await source.load({ c, authority, policy, policyGuard: () => classificationPolicyGuard(c.env, policy) });
+      if (!session) throw new Error('Snapshot source requires session authority');
+      const loaded = await source.load({ c, authority: session, policy, policyGuard: () => classificationPolicyGuard(c.env, policy) });
       await settle(loaded.classify, loaded.reads, loaded.guards, loaded.readMode);
       return loaded.value;
     };
@@ -207,16 +269,18 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
       return typeof spec.classify === 'function' ? spec.classify(rows) : spec.classify;
     });
 
-    const admission = () => [authority.guard(), classificationPolicyGuard(c.env, policy), ...guards.flatMap(g => g())];
-    prepared = { authority, policy, classOf, rows, admission, read, load };
+    const recheck = () => [...authority.check(), classificationPolicyGuard(c.env, policy)];
+    const admission = () => [...recheck(), ...guards.flatMap(g => g())];
+    prepared = { policy, classOf, rows, admission, read, load, recheck };
   } catch (error) {
     return fail(error);
   }
-  const { authority, policy, classOf, rows, admission, read, load } = prepared;
+  const { policy, classOf, rows, admission, read, load, recheck } = prepared;
 
   return {
     rows,
-    async commit(decide) {
+    fail,
+    async commit(decide: Decide<S, MutationPlan | ServiceMutationPlan>): Promise<Row[] | undefined> {
       try {
         assertRegulatedWritesAllowed(c.env);
 
@@ -235,40 +299,50 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
           policy,
         };
         const plan = await decide(rows, tools);
-        json(plan?.writes.map(write => ({
-          ...write,
-          args: write.args.map(value => value === null || typeof value !== 'object' ? value : null),
-        })) ?? []);
+        if (plan && 'writes' in plan) {
+          json(plan.writes.map(write => ({
+            ...write,
+            args: write.args.map(value => value === null || typeof value !== 'object' ? value : null),
+          })));
+        }
         if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
-        if (!plan?.writes.length) {
+        if (!plan || (!('groups' in plan) && !plan.writes.length)) {
           await c.env.DB.batch(admission());
           return undefined;
         }
 
         // 5. commit
         const since = clock ?? await tools.clock();
-        const { entry, targetIds } = plan.evidence;
-        const receipt = attributedMutationAuditEvidence(c.env, c.get('user'),
-          { ...entry, detail: { operation_id: crypto.randomUUID(), ...entry.detail } },
-          classOf(plan.classify), policy, { context: c, targetIds });
+        const operationId = crypto.randomUUID();
+        const withOperation = (entry: AuditEntry) => ({ ...entry, detail: { operation_id: operationId, ...entry.detail } });
+        const prepareWrites = (writes: PlannedWrite[]) => writes.flatMap(({ sql, args, changes = 1 }) => [
+          c.env.DB.prepare(sql).bind(...args.map(value => value !== null && typeof value === 'object' ? value.document : value)),
+          abortIf(c.env, 'changes() <> ?', [changes]),
+        ]);
+        const statements = [...admission(), ...plan.admit ?? []];
+        const receiptChecks: D1PreparedStatement[] = [];
+        if ('groups' in plan) {
+          if (!serviceActor) throw new Error('Mutation groups require service authority');
+          for (const { check, writes, evidence } of plan.groups) {
+            const receipt = serviceMutationAuditEvidence(c.env, withOperation(evidence.entry), serviceActor, evidence.dataClass, policy, c);
+            statements.push(...check ?? [], ...prepareWrites(writes ?? []), receipt.write, receipt.guard);
+            receiptChecks.push(receipt.verify());
+          }
+        } else {
+          const { entry, targetIds } = plan.evidence;
+          const receipt = attributedMutationAuditEvidence(c.env, c.get('user'), withOperation(entry),
+            classOf(plan.classify), policy, { context: c, targetIds });
+          statements.push(...prepareWrites(plan.writes), receipt.write, receipt.guard);
+        }
         const results = await c.env.DB.batch([
-          ...admission(),
-          ...plan.admit ?? [],
-          ...plan.writes.flatMap(write => [
-            c.env.DB.prepare(write.sql).bind(...write.args.map(value => value !== null && typeof value === 'object' ? value.document : value)),
-            abortIf(c.env, 'changes() <> ?', [write.changes ?? 1]),
-          ]),
-          receipt.write,
-          receipt.guard,
+          ...statements,
           ...plan.expect(since.now),
-          authority.guard(),
-          classificationPolicyGuard(c.env, policy),
+          ...receiptChecks,
+          ...recheck(),
           ...(plan.returning ? [c.env.DB.prepare(plan.returning.sql).bind(...plan.returning.args)] : []),
         ]);
         if (!plan.returning) return undefined;
-        const returned = results.at(-1)?.results[0] as Record<string, Binding> | undefined;
-        if (!returned) throw new Error('Mutation result unavailable');
-        return returned;
+        return results.at(-1)!.results as Row[];
       } catch (error) {
         return fail(error);
       }

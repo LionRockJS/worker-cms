@@ -3,13 +3,13 @@ import type { AppContext } from '../../core/http/context';
 import type { Page } from '../../types';
 import type { PluginAuth } from './api/types';
 import { cmsConfig } from '../../cms-config';
-import { serviceMutationAuditEvidence, type AuditActor } from '../../core/db/audit';
+import { ServiceMutationUnavailableError, type AuditActor } from '../../core/db/audit';
 import { resolveDataClasses, classFor, classificationPolicyGuard, strongestClass } from '../../core/db/data-classes';
 import { snapshot, guard, resultGuard, fingerprint, json, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
 import { timingSafeEqualStr } from '../../core/http/crypto';
-import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
-import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
+import { auditBackgroundReads } from '../../core/http/access-log';
+import { beginServiceAuditedMutation, type PlannedWrite, type ServiceMutationGroup } from '../../core/evidence/audited-mutation';
 import { requestContext } from '../../core/http/request-context';
 import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../../core/pages/snapshot-id';
 import { pageTypeScopeAllows } from './page-types';
@@ -73,113 +73,202 @@ export function assertPluginPageAuthority(authority: Authority, purpose: 'create
 /** Bounded selected rows; all result decisions, including mixed-batch denials,
  * are tied to this exact source through the final transaction. */
 export async function readPluginPageUpdateSources(c: AppContext, authority: Authority, ids: number[]) {
+  if (!authority?.[brand] || authority.purpose !== 'update' || ids.length > 100 ||
+      ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) {
+    return unavailable(c, authority?.actor);
+  }
+  const args = [json(ids)];
+  const where = `id IN (SELECT value FROM json_each(?)) AND ${legacyPageFilter('uuid')}`;
+  const selected = `page_id IN (SELECT id FROM pages WHERE ${where})`;
+  const mutation = await beginServiceAuditedMutation(c, {
+    classify: [],
+    snapshot: {
+      pages: { table: 'pages', fields: PAGE, where, args, read: null },
+      links: { table: 'page_tags', fields: LINK, where: selected, args, read: null },
+      versions: { table: 'page_versions', fields: HISTORY, where: selected, args, read: null },
+      tags: { table: 'tags', fields: TAG, where: `id IN (SELECT tag_id FROM page_tags WHERE ${selected})`, args, read: null },
+      floors: { table: 'page_sensitivity_floors', fields: FLOOR, where: `uuid IN (SELECT uuid FROM pages WHERE ${where})`, args, read: null },
+    },
+    unavailable: () => new ServiceMutationUnavailableError(),
+  }, authority);
   try {
-    if (!authority?.[brand] || authority.purpose !== 'update' || ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) throw new Error('Invalid page source manifest');
-    const args = [json(ids)], where = `id IN (SELECT value FROM json_each(?)) AND ${legacyPageFilter('uuid')}`;
-    const pages = await snapshot<Page>(c, 'pages', PAGE, where, args);
-    const selected = `page_id IN (SELECT id FROM pages WHERE ${where})`;
-    const links = await snapshot<Row>(c, 'page_tags', LINK, selected, args);
-    const versions = await snapshot<Row>(c, 'page_versions', HISTORY, selected, args);
-    const tags = await snapshot<Row>(c, 'tags', TAG, 'id IN (SELECT value FROM json_each(?))', [json([...new Set(links.map(link => link.tag_id))])]);
-    const floorArgs = [json(pages.map(page => page.uuid))];
-    const floors = await snapshot<Row>(c, 'page_sensitivity_floors', FLOOR, 'uuid IN (SELECT value FROM json_each(?))', floorArgs);
+    const { links, versions, tags, floors } = mutation.rows;
+    const pages = mutation.rows.pages as unknown as Page[];
     if (floors.some(row => row.level !== 1 && row.level !== 2)) throw new Error('Invalid page floor');
     const classification = (page: Page, extraTags: Row[] = []) => strongestClass([authority.dataClass, classFor(authority.policy, 'page_type', page.page_type ?? 'default'),
       floors.find(row => row.uuid === page.uuid)?.level === 2 ? 'phi' : floors.find(row => row.uuid === page.uuid)?.level === 1 ? 'pii' : undefined,
       ...[...tags.filter(tag => links.some(link => link.page_id === page.id && link.tag_id === tag.id)), ...extraTags].map(tag => classFor(authority.policy, 'taxonomy', String(tag.taxonomy_slug ?? 'default')))]);
-    await auditBackgroundReads(c.env, pages.map(page => ({ action: 'plugin.page-update-source-read', kind: 'page_type' as const, key: page.page_type ?? 'default', targetType: 'page', ids: [String(page.id)], count: 1, uuidById: { [String(page.id)]: page.uuid }, minimumClass: classification(page) === 'none' ? undefined : classification(page) as 'pii'|'phi' })), authority.actor);
-    const check = () => [...authority.check(), guard(c, 'pages', PAGE, pages, where, args), guard(c, 'page_tags', LINK, links, selected, args), guard(c, 'page_versions', HISTORY, versions, selected, args), guard(c, 'tags', TAG, tags, 'id IN (SELECT value FROM json_each(?))', [json([...new Set(links.map(link => link.tag_id))])]), guard(c, 'page_sensitivity_floors', FLOOR, floors, 'uuid IN (SELECT value FROM json_each(?))', floorArgs)];
-    return { pages, links, versions, tags, floors, ids, args, selected, classification, check };
+    await auditBackgroundReads(c.env, pages.map(page => {
+      const dataClass = classification(page);
+      const id = String(page.id);
+      return {
+        action: 'plugin.page-update-source-read', kind: 'page_type', key: page.page_type ?? 'default',
+        targetType: 'page', ids: [id], count: 1, uuidById: { [id]: page.uuid },
+        minimumClass: dataClass === 'none' ? undefined : dataClass,
+      };
+    }), authority.actor, { policy: authority.policy });
+    return { authority, mutation, pages, links, versions, tags, floors, args, selected, classification };
   } catch { return unavailable(c, authority?.actor); }
 }
 type Sources = Awaited<ReturnType<typeof readPluginPageUpdateSources>>;
 export interface PluginPageUpdate { before: Page; next: Page; action: string; tags?: number[] }
 export interface PluginPageUpdateDenial { page: Page; reason: 'forbidden_page_type'|'version_precondition' }
 
-/** All accepted page/history/tag changes and per-page success/denial receipts
- * share one transaction. No HTTP user or CMS session is manufactured. */
-export async function commitPluginPageUpdates(c: AppContext, authority: Authority, source: Sources, changes: PluginPageUpdate[], denied: PluginPageUpdateDenial[] = []): Promise<Page[]> {
-  assertRegulatedWritesAllowed(c.env);
-  try {
-    if (!authority?.[brand] || authority.purpose !== 'update' || changes.length > 100 || new Set([...changes.map(change => change.before.id), ...denied.map(row => row.page.id)]).size !== changes.length + denied.length) throw new Error('Invalid page update manifest');
+/** Commit each accepted page change or denial in the same audited batch. */
+export async function commitPluginPageUpdates(c: AppContext, source: Sources, changes: PluginPageUpdate[], denied: PluginPageUpdateDenial[] = []): Promise<Page[]> {
+  const { authority, mutation } = source;
+  const saved = await mutation.commit(async (_rows, tools) => {
+    const changeIds = changes.map(change => change.before.id);
+    const resultIds = [...changeIds, ...denied.map(row => row.page.id)];
+    if (changes.length > 100 || new Set(resultIds).size !== resultIds.length) throw new Error('Invalid page update manifest');
     const extraIds = [...new Set(changes.flatMap(change => change.tags ?? []))];
     if (extraIds.length > 5000 || extraIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid association manifest');
-    const extraArgs = [json(extraIds)], extraWhere = 'id IN (SELECT value FROM json_each(?))';
-    const extraTags = await snapshot<Row>(c, 'tags', TAG, extraWhere, extraArgs);
+    const extraArgs = [json(extraIds)];
+    const extraWhere = 'id IN (SELECT value FROM json_each(?))';
+    const [extraTags] = await tools.snapshot([{ table: 'tags', fields: TAG, where: extraWhere, args: extraArgs, read: null }]);
     if (extraTags.length !== extraIds.length) throw new Error('Tag target unavailable');
     for (const change of changes) {
-      if (!source.pages.some(page => json(page) === json(change.before)) || !pageTypeScopeAllows(authority.allowed, change.before.page_type ?? '') || change.next.id !== change.before.id || change.next.uuid !== change.before.uuid || change.next.page_type !== change.before.page_type) throw new Error('Page source or authority changed');
+      if (!source.pages.some(page => json(page) === json(change.before)) ||
+          !pageTypeScopeAllows(authority.allowed, change.before.page_type ?? '') ||
+          change.next.id !== change.before.id || change.next.uuid !== change.before.uuid ||
+          change.next.page_type !== change.before.page_type) throw new Error('Page source or authority changed');
     }
     for (const denial of denied) {
-      if (!source.pages.some(page => json(page) === json(denial.page)) || (denial.reason === 'forbidden_page_type' && pageTypeScopeAllows(authority.allowed, denial.page.page_type ?? ''))) throw new Error('Invalid page refusal');
+      if (!source.pages.some(page => json(page) === json(denial.page)) ||
+          (denial.reason === 'forbidden_page_type' && pageTypeScopeAllows(authority.allowed, denial.page.page_type ?? ''))) {
+        throw new Error('Invalid page refusal');
+      }
     }
-    const minimum = strongestClass([...changes.map(change => source.classification(change.before, extraTags)), ...denied.map(row => source.classification(row.page))]);
-    await auditBackgroundReads(c.env, ['page_versions','page_tags','tags','page_sensitivity_floors','audit_events'].map(table => ({ action: 'plugin.page-update-metadata-read', kind: 'table' as const, key: table, targetType: table, ids: table === 'page_versions' ? source.versions.map(row => String(row.id)) : table === 'page_tags' ? source.links.map(row => String(row.id)) : table === 'tags' ? [...new Set([...source.tags, ...extraTags].map(row => String(row.id)))] : source.floors.map(row => String(row.uuid)), count: table === 'page_versions' ? source.versions.length : table === 'page_tags' ? source.links.length : table === 'tags' ? source.tags.length + extraTags.length : source.floors.length, minimumClass: minimum === 'none' ? undefined : minimum })), authority.actor);
-    if (await flushReadAudit(c)) throw new Error('Page source evidence unavailable');
-    const clock = await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP now').first<{ now: string }>();
-    if (!clock) throw new Error('Clock unavailable');
-    const operationId = crypto.randomUUID();
-    const detail: Record<string,unknown> = { operation_id: operationId, registry_id: authority.registryId, identity_fingerprint: authority.identityFingerprint, principal: 'credential_authenticated_plugin' };
+
+    const minimum = strongestClass([
+      ...changes.map(change => source.classification(change.before, extraTags)),
+      ...denied.map(row => source.classification(row.page)),
+    ]);
+    const metadata = [
+      { table: 'page_versions', ids: source.versions.map(row => String(row.id)), count: source.versions.length },
+      { table: 'page_tags', ids: source.links.map(row => String(row.id)), count: source.links.length },
+      { table: 'tags', ids: [...new Set([...source.tags, ...extraTags].map(row => String(row.id)))], count: source.tags.length + extraTags.length },
+      ...['page_sensitivity_floors', 'audit_events'].map(table => ({
+        table, ids: source.floors.map(row => String(row.uuid)), count: source.floors.length,
+      })),
+    ];
+    await auditBackgroundReads(c.env, metadata.map(({ table, ids, count }) => ({
+      action: 'plugin.page-update-metadata-read', kind: 'table', key: table, targetType: table, ids, count,
+      minimumClass: minimum === 'none' ? undefined : minimum,
+    })), authority.actor, { policy: tools.policy });
+
+    const detail: Record<string, unknown> = {
+      registry_id: authority.registryId,
+      identity_fingerprint: authority.identityFingerprint,
+      principal: 'credential_authenticated_plugin',
+    };
     noteActingUser(c, detail);
-    const statements = [...source.check(), guard(c, 'tags', TAG, extraTags, extraWhere, extraArgs)];
-    const expectedLinks = source.links.filter(link => !changes.some(change => change.before.id === link.page_id && change.tags !== undefined));
-    const newVersions: Array<{uuid:string;page_id:number;lect:string|null;action:string}> = [];
-    const receiptGuards: D1PreparedStatement[] = [];
+    const retainedLinks = source.links.filter(link => !changes.some(change => change.before.id === link.page_id && change.tags !== undefined));
+    const expectedLinks = [...retainedLinks];
+    const newVersions: Array<{ uuid: string; page_id: number; lect: string | null; action: string }> = [];
     const relationshipGuards: D1PreparedStatement[] = [];
-    for (const refusal of denied) {
-      const receipt = serviceMutationAuditEvidence(c.env, { action: 'page.update', entityType: 'page', entityId: refusal.page.uuid, outcome: 'denied', detail: { ...detail, reason: refusal.reason } }, authority.actor, source.classification(refusal.page), authority.policy, c);
-      statements.push(receipt.write, receipt.guard); receiptGuards.push(receipt.guard);
-    }
+
+    const groups: ServiceMutationGroup[] = denied.map(refusal => ({
+      evidence: {
+        entry: { action: 'page.update', entityType: 'page', entityId: refusal.page.uuid,
+          outcome: 'denied', detail: { ...detail, reason: refusal.reason } },
+        dataClass: source.classification(refusal.page),
+      },
+    }));
     for (const change of changes) {
       const { before, next } = change;
+      const check: D1PreparedStatement[] = [];
       if (next.page_id !== before.page_id && next.page_id !== null) {
         if (!Number.isSafeInteger(next.page_id) || next.page_id <= 0) throw new Error('Invalid parent');
-        // Existence, not an implicit grant to edit or read the parent's body.
-        const parentGuard = abortIf(c.env, `NOT EXISTS(SELECT 1 FROM pages WHERE id=? AND ${legacyPageFilter('pages.uuid')})`, [next.page_id]);
-        statements.push(parentGuard); relationshipGuards.push(parentGuard);
+        check.push(abortIf(c.env, `NOT EXISTS(SELECT 1 FROM pages WHERE id=? AND ${legacyPageFilter('pages.uuid')})`, [next.page_id]));
       }
-      if (next.slug !== before.slug) { const slugGuard = abortIf(c.env, 'EXISTS(SELECT 1 FROM pages WHERE slug=? AND id<>?)', [next.slug, before.id]); statements.push(slugGuard); relationshipGuards.push(slugGuard); }
-      statements.push(c.env.DB.prepare(`UPDATE pages SET ${CONTENT.map(field => `${field}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(...CONTENT.map(field => next[field]), before.id), abortIf(c.env, 'changes()<>1'));
-      if (change.tags !== undefined) {
-        statements.push(c.env.DB.prepare('DELETE FROM page_tags WHERE page_id=?').bind(before.id));
-        for (const tagId of [...new Set(change.tags)]) {
-          const uuid = crypto.randomUUID();
-          expectedLinks.push({ uuid, page_id: before.id, tag_id: tagId, weight: 5, created_at: null, updated_at: null });
-          statements.push(c.env.DB.prepare(`INSERT INTO page_tags(id,uuid,page_id,tag_id) SELECT ${nextIdSql('page_tags')},?,?,?`).bind(uuid, before.id, tagId), abortIf(c.env, 'changes()<>1'));
-        }
+      if (next.slug !== before.slug) {
+        check.push(abortIf(c.env, 'EXISTS(SELECT 1 FROM pages WHERE slug=? AND id<>?)', [next.slug, before.id]));
       }
-      const version = { uuid: crypto.randomUUID(), page_id: before.id, lect: next.lect, action: change.action }; newVersions.push(version);
-      statements.push(c.env.DB.prepare(`INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,?)`).bind(version.uuid, version.page_id, version.lect, version.action), abortIf(c.env, 'changes()<>1'));
+      relationshipGuards.push(...check);
+
+      const writes: PlannedWrite[] = [{
+        sql: `UPDATE pages SET ${CONTENT.map(field => `${field}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        args: [...CONTENT.map(field => next[field]), before.id],
+      }];
       const oldLinks = source.links.filter(link => link.page_id === before.id);
-      const receipt = serviceMutationAuditEvidence(c.env, { action: 'page.update', entityType: 'page', entityId: before.uuid, detail: { ...detail,
-        fields: [...CONTENT.filter(field => before[field] !== next[field]), 'history', ...(change.tags === undefined ? [] : ['tags'])], version_uuid: version.uuid,
-        ...(change.tags === undefined ? {} : { tags_before: oldLinks.map(link => ({ uuid: link.uuid, tag_id: link.tag_id, weight: link.weight })), tags_after: expectedLinks.filter(link => link.page_id === before.id).map(link => ({ uuid: link.uuid, tag_id: link.tag_id, weight: link.weight })) }) } }, authority.actor, source.classification(before, extraTags), authority.policy, c);
-      statements.push(receipt.write, receipt.guard); receiptGuards.push(receipt.guard);
+      const newLinks: Row[] = [];
+      if (change.tags !== undefined) {
+        writes.push({ sql: 'DELETE FROM page_tags WHERE page_id=?', args: [before.id], changes: oldLinks.length });
+        for (const tagId of new Set(change.tags)) {
+          const uuid = crypto.randomUUID();
+          newLinks.push({ uuid, page_id: before.id, tag_id: tagId, weight: 5, created_at: null, updated_at: null });
+          writes.push({
+            sql: `INSERT INTO page_tags(id,uuid,page_id,tag_id) SELECT ${nextIdSql('page_tags')},?,?,?`,
+            args: [uuid, before.id, tagId],
+          });
+        }
+        expectedLinks.push(...newLinks);
+      }
+
+      const version = { uuid: crypto.randomUUID(), page_id: before.id, lect: next.lect, action: change.action };
+      newVersions.push(version);
+      writes.push({
+        sql: `INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,?)`,
+        args: [version.uuid, version.page_id, version.lect, version.action],
+      });
+      const linksEvidence = (links: Row[]) => links.map(({ uuid, tag_id, weight }) => ({ uuid, tag_id, weight }));
+      groups.push({
+        check, writes,
+        evidence: {
+          entry: {
+            action: 'page.update', entityType: 'page', entityId: before.uuid,
+            detail: {
+              ...detail,
+              fields: [...CONTENT.filter(field => before[field] !== next[field]), 'history', ...(change.tags === undefined ? [] : ['tags'])],
+              version_uuid: version.uuid,
+              ...(change.tags === undefined ? {} : { tags_before: linksEvidence(oldLinks), tags_after: linksEvidence(newLinks) }),
+            },
+          },
+          dataClass: source.classification(before, extraTags),
+        },
+      });
     }
-    json(expectedLinks); json(newVersions);
-    const finals = source.pages.map(page => { const change = changes.find(change => change.before.id === page.id); return change ? { ...change.next, updated_at: null } : page; });
-    statements.push(resultGuard(c, 'pages', PAGE, finals, clock.now, 'id IN (SELECT value FROM json_each(?))', source.args),
-      resultGuard(c, 'page_tags', LINK.filter(field => field !== 'id'), expectedLinks, clock.now, source.selected, source.args),
-      abortIf(c.env, "EXISTS(SELECT 1 FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?)) AND (typeof(id)<>'integer' OR id<1 OR id>9007199254740991))", source.args),
-      abortIf(c.env, `(SELECT COUNT(*) FROM page_versions WHERE ${source.selected})<>? OR EXISTS(SELECT 1 FROM json_each(?) e WHERE NOT EXISTS(SELECT 1 FROM page_versions r WHERE ${HISTORY.map(field => `r.${field} IS json_extract(e.value,'$.${field}')`).join(' AND ')}))`, [...source.args, source.versions.length + newVersions.length, json(source.versions)]),
-      guard(c, 'tags', TAG, source.tags, 'id IN (SELECT value FROM json_each(?))', [json([...new Set(source.links.map(link => link.tag_id))])]), guard(c, 'tags', TAG, extraTags, extraWhere, extraArgs));
-    for (const version of newVersions) statements.push(abortIf(c.env, "NOT EXISTS(SELECT 1 FROM page_versions WHERE uuid=? AND page_id=? AND lect IS ? AND action=? AND typeof(id)='integer' AND id BETWEEN 1 AND 9007199254740991 AND created_at>=? AND created_at<=CURRENT_TIMESTAMP AND updated_at>=? AND updated_at<=CURRENT_TIMESTAMP)", [version.uuid, version.page_id, version.lect, version.action, clock.now, clock.now]));
-    for (const page of source.pages) {
-      const retained = source.floors.find(row => row.uuid === page.uuid)?.level ?? 0;
-      const affected = changes.find(change => change.before.id === page.id);
-      const targetIds = affected?.tags ?? source.links.filter(link => link.page_id === page.id).map(link => Number(link.tag_id));
-      const classes = [classFor(authority.policy, 'page_type', page.page_type ?? 'default'), ...[...source.tags, ...extraTags].filter(tag => targetIds.includes(Number(tag.id))).map(tag => classFor(authority.policy, 'taxonomy', String(tag.taxonomy_slug ?? 'default')))];
-      const expectedFloor = affected ? Math.max(Number(retained), classes.includes('phi') ? 2 : classes.includes('pii') ? 1 : 0) : retained;
-      statements.push(abortIf(c.env, 'COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)<>?', [page.uuid, expectedFloor]));
-    }
-    // A later page/version trigger must not corrupt an earlier page's receipt.
-    // SELECT-only checks preserve SQLite changes() from the last receipt insert.
-    const retainedLinks = source.links.filter(link => !changes.some(change => change.before.id === link.page_id && change.tags !== undefined));
-    statements.push(abortIf(c.env, `EXISTS(SELECT 1 FROM json_each(?) e WHERE NOT EXISTS(SELECT 1 FROM page_tags r WHERE ${LINK.map(field => `r.${field} IS json_extract(e.value,'$.${field}')`).join(' AND ')}))`, [json(retainedLinks)]));
-    statements.push(...receiptGuards, ...relationshipGuards, ...authority.check(), c.env.DB.prepare('SELECT * FROM pages WHERE id IN (SELECT value FROM json_each(?))').bind(json(changes.map(change => change.before.id))));
-    const results = await c.env.DB.batch(statements);
-    const saved = results.at(-1)!.results as Page[];
-    if (saved.length !== changes.length) throw new Error('Page result unavailable');
-    return changes.map(change => saved.find(page => page.id === change.before.id)!);
-  } catch { return unavailable(c, authority?.actor); }
+    json(expectedLinks);
+    json(newVersions);
+
+    const finalPages = source.pages.map(page => {
+      const change = changes.find(change => change.before.id === page.id);
+      return change ? { ...change.next, updated_at: null } : page;
+    });
+    return {
+      groups,
+      expect: since => [
+        resultGuard(c, 'pages', PAGE, finalPages, since, 'id IN (SELECT value FROM json_each(?))', source.args),
+        resultGuard(c, 'page_tags', LINK.filter(field => field !== 'id'), expectedLinks, since, source.selected, source.args),
+        abortIf(c.env, "EXISTS(SELECT 1 FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?)) AND (typeof(id)<>'integer' OR id<1 OR id>9007199254740991))", source.args),
+        abortIf(c.env, `(SELECT COUNT(*) FROM page_versions WHERE ${source.selected})<>?
+          OR EXISTS(SELECT 1 FROM json_each(?) e WHERE NOT EXISTS(SELECT 1 FROM page_versions r WHERE ${HISTORY.map(field => `r.${field} IS json_extract(e.value,'$.${field}')`).join(' AND ')}))`,
+        [...source.args, source.versions.length + newVersions.length, json(source.versions)]),
+        guard(c, 'tags', TAG, source.tags, extraWhere, [json([...new Set(source.links.map(link => link.tag_id))])]),
+        guard(c, 'tags', TAG, extraTags, extraWhere, extraArgs),
+        ...newVersions.map(version => abortIf(c.env, `NOT EXISTS(SELECT 1 FROM page_versions WHERE
+          uuid=? AND page_id=? AND lect IS ? AND action=? AND typeof(id)='integer' AND id BETWEEN 1 AND 9007199254740991
+          AND created_at>=? AND created_at<=CURRENT_TIMESTAMP AND updated_at>=? AND updated_at<=CURRENT_TIMESTAMP)`,
+        [version.uuid, version.page_id, version.lect, version.action, since, since])),
+        ...source.pages.map(page => {
+          const retained = Number(source.floors.find(row => row.uuid === page.uuid)?.level ?? 0);
+          const change = changes.find(change => change.before.id === page.id);
+          const targets = change?.tags ?? source.links.filter(link => link.page_id === page.id).map(link => Number(link.tag_id));
+          const classes = [classFor(tools.policy, 'page_type', page.page_type ?? 'default'),
+            ...[...source.tags, ...extraTags].filter(tag => targets.includes(Number(tag.id)))
+              .map(tag => classFor(tools.policy, 'taxonomy', String(tag.taxonomy_slug ?? 'default')))];
+          const expected = change ? Math.max(retained, classes.includes('phi') ? 2 : classes.includes('pii') ? 1 : 0) : retained;
+          return abortIf(c.env, 'COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)<>?', [page.uuid, expected]);
+        }),
+        abortIf(c.env, `EXISTS(SELECT 1 FROM json_each(?) e WHERE NOT EXISTS(
+          SELECT 1 FROM page_tags r WHERE ${LINK.map(field => `r.${field} IS json_extract(e.value,'$.${field}')`).join(' AND ')}))`, [json(retainedLinks)]),
+        ...relationshipGuards,
+      ],
+      returning: { sql: 'SELECT * FROM pages WHERE id IN (SELECT value FROM json_each(?))', args: [json(changeIds)] },
+    };
+  }) as unknown as Page[];
+  const byId = new Map(saved.map(page => [page.id, page]));
+  if (saved.length !== changes.length || changes.some(change => !byId.has(change.before.id))) return unavailable(c, authority.actor);
+  return changes.map(change => byId.get(change.before.id)!);
 }

@@ -1,6 +1,6 @@
 # Audited mutation runner: porting plan
 
-**Status (28 November 2026):** Host settings, Wave A1 and the page–tag prototype are complete. P1 is implemented and awaiting the Workers suite. The earlier stopping point records why the other writers remain deferred. This is an engineering refactor plan, not compliance evidence.
+**Status (28 November 2026)** Host settings, Wave A1 and the page–tag prototype are complete. P1 landed in `00e875f` and passed its targeted Workers regressions. The standard full suite remains pending.
 
 ## Goal
 
@@ -32,12 +32,12 @@ Each extension is added by the first writer that needs it (named in the "First u
 
 | # | Extension | What it adds | First user |
 |---|---|---|---|
-| E1 | Several receipts per plan | `evidence` becomes a list. One operation ID is shared across the receipts, plus an optional per-receipt `targetIds` | Taxonomies (to confirm) |
+| E1 | Several receipts per plan | Service groups share an operation ID and each carry an exact, individually classified receipt. A group can record a denial without a business write. | Plugin page update (implemented) |
 | E2 | Classification from rows | `classify` may be a function of the snapshot rows, and a plan may add containers, for page types, taxonomies and tag sets known only after reading | Runtime types (done) |
 | E3 | Read logging options | `read` becomes optional per snapshot, and can carry `uuidById` and page-type kinds so floor-aware page reads keep their exact evidence | Draft content |
 | E4 | Pre-write checks | `plan.admit` statements run after admission and before the writes (for example an ID allocator still matching what `decide` read) | Credits administration (done) |
-| E5 | Actor adapters | A capability of the session user exists; `permission: 'self'` is done. Still to add: `job(lease, capability)`, `pluginCredential(auth, storeTable?)` and `system(via)`. Each returns the actor, its guards and how receipts are attributed (attributed vs service) | `self`: credits administration (done); `job`: batch; `plugin`: automatic identity; `system`: job retention |
-| E6 | Result rows | `returning` statement appended last; its first row comes back from `commit` | Plugin registration (done) |
+| E5 | Actor adapters | Signed-in writers use a capability or `self`. Request-based plugin page updates supply their captured credential principal, classification and guards. Store-table, job and system adapters remain separate. | `self`: credits administration. Plugin request authority: plugin page update. |
+| E6 | Result rows | `returning` runs last. A session plan returns the first row and a service plan returns all rows. | Plugin registration and plugin page update (implemented) |
 | E7 | Trailing statements | `tail(plan)` adds statements after the postconditions, such as job checkpoints and delegation guards | Batch edits |
 | E8 | Sinks | `primary` (default), `outbox` (containment operations that must succeed during a primary audit outage, with delivery after commit) and `planned` (counter projections with a final guard) | `outbox`: identity disconnect; `planned`: plugin sequences |
 | E9 | Error passthrough | `passthrough(error)` lets the writer's own errors escape unchanged, with no outage incident | Locales (done) |
@@ -143,15 +143,56 @@ Not changing: the denial path keeps its current behavior (record `management_per
 
 **Estimate:** 1–1.5 engineering days. **Done when** both functions use the runner and the aggregate, every listed test passes unchanged, each new guard is shown to be covered, and round trips did not rise.
 
-**Implementation status:** Both functions use the runner and the page aggregate. The runner also preserves the editor's policy-denial receipt and binds draft document bodies outside the manifest size calculation. A local SQLite harness with the repository migrations counted the same database calls before and after for both functions: create 5, update/restore/history deletion 7 for unclassified pages and 8 for PHI, and a missing version 6 on the unclassified path. Removing the version-set, full-content or new-owner-policy check caused its targeted check to fail. The Workers suite is pending because the sandbox denies localhost listeners.
+Both functions use the runner and the page aggregate. The runner preserves the editor's policy-denial receipt and binds draft document bodies outside the manifest size calculation.
+
+All **873 tests across the 12 P1 regression files** passed in standalone workerd using local D1 and R2 bindings and the repository migrations. Disabling the version-set, full-content or new-owner-policy guard caused the corresponding request-level regression to fail. Both added regressions also passed against the pre-P1 writer. The ordinary `npm test` command still stops at the self-hosted plugin directory test because the sandbox denies its localhost listener.
+
+The same HTTP fixtures executed the following D1 calls before and after P1. These counts include route and middleware work. For the writer alone, the SQLite harness measured 5 calls for create and 7–8 for update, restore and history deletion.
+
+| Route action | Unclassified before → after | PHI before → after |
+|---|---:|---:|
+| Create | 18 → 18 | 18 → 18 |
+| Update | 20 → 20 | 21 → 21 |
+| Restore | 16 → 16 | 17 → 17 |
+| Delete one history version | 15 → 15 | 16 → 16 |
+| Delete all history | 15 → 15 | 16 → 16 |
 
 ### After P1 (each a separate decision)
 
 | Phase | Writers | Blocked on |
 |---|---|---|
-| P2 | Plugin page update and create | A `pluginCredential` actor with service-attributed receipts (these run in a request, so no context change) |
+| P2 | Plugin page update, create and duplicate | Update implemented. Create and duplicate still need intent-to-reservation coordination and rollback certainty across content commits. |
 | P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Environment-only (job) context in the runner, plus snapshots of many pages at once |
 | P4 | Taxonomies and tags | Writes that move the classification policy version inside the batch |
+
+#### P2 fit check
+
+Plugin update and create both run inside requests. Their credential and registry audit-sequence checks are captured before the request body and must survive through the final batch. The request boundary alone leaves several additional contracts for the runner.
+
+| Writer | Transaction behavior to preserve |
+|---|---|
+| [Plugin page update](../../src/features/plugins/page-update-evidence.ts) | Guard up to 100 selected pages together. Write successful and denied receipts with each page's classification under a shared operation ID. Denial-only requests also write receipts. Return every saved page. |
+| [Plugin page create and duplicate](../../src/features/plugins/page-create-evidence.ts) | Keep guarded planning before credit reservation and distinguish known rollback from an uncertain commit for refunds. Preserve per-page receipts and duplicate chunk receipts, provenance and progress. |
+
+The update writer exercises the credential and receipt changes independently of create's reservation and duplicate's chunk processing.
+
+1. Reuse the branded plugin page authority captured before body parsing. Carry its plugin principal and policy into the runner, and keep its registry sequence, credential, pin and approval checks at admission and re-admission.
+2. Load the selected pages, links, version metadata, tags and UUID floors as a bounded snapshot with the existing legacy page filter. Preserve protected source and result read attribution to the plugin.
+3. Allow a single operation to commit exact, individually classified receipts for mixed or denial-only outcomes. Verify every receipt at the end of the same transaction. Preserve the existing 403, 409 and 503 responses and return successful rows in request order.
+4. Run the existing update tests unchanged and compare D1 calls for single, bulk and denial-only requests. Evaluate create and duplicate once the update migration meets those checks.
+
+Plugin PUT/PATCH and batch PATCH now use `beginServiceAuditedMutation`. The route still captures authority before parsing the body. The runner batches the selected snapshots under the captured policy, checks that authority at admission and completion, writes per-page receipts in transaction order, and verifies every receipt again before returning. The plugin writer retains source and result read attribution, per-page classifications, and response order.
+
+| Request fixture | Unclassified before → after | PHI before → after |
+|---|---:|---:|
+| Single update | 43 → 37 | 48 → 42 |
+| Bulk update | 43 → 37 | 48 → 42 |
+| Mixed update and denial | 43 → 37 | 48 → 42 |
+| Denial only | 22 → 16 | 24 → 18 |
+
+The HTTP fixtures count D1 calls through each request. All **127 existing update tests** passed in standalone workerd. Disabling final receipt verification caused the regression for a later write corrupting an earlier receipt to fail. The updated runner also passed the **873 P1 regression tests** and **209 create and duplicate tests**.
+
+Create and duplicate still need the runner to preserve their guarded intent before charging, distinguish a known rollback from an uncertain content commit, and retain duplicate progress across multiple acknowledged chunks. These are separate contracts from the grouped page writes and receipts implemented for update. Under rule 6, keep the existing create and duplicate transactions until those contracts are designed together.
 
 ### Wave A2: content writers — deferred (page pattern)
 

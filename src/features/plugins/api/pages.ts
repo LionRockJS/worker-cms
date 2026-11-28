@@ -748,7 +748,7 @@ pagesApiRoutes.patch('/pages/batch', async (c) => {
     const merged = mergeLects(mergeLects(blueprintToLect(page.page_type ?? 'default', config.blueprint, config.defaultLanguage), safeParseLect(page.lect)), coerceLect(candidate.input.lect));
     changes.push({ before: page, next: { ...page, lect: stringifyLect(withDraftMetadata(merged, 0)) }, action: versionAction(candidate.input.version_action, 'update') });
   }
-  const saved = await commitPluginPageUpdates(c, authority, source, changes, denied);
+  const saved = await commitPluginPageUpdates(c, source, changes, denied);
   emitPluginHooks(c, 'update', saved.map(page => ({ id: page.id, uuid: page.uuid, page_type: page.page_type, name: page.name, slug: page.slug })), auth.pluginId, { evidenceCommitted: true, actor: authority.actor });
   recordPageReads('page.update-result', saved, { actor: authority.actor });
   errors.sort((a,b) => a.index-b.index);
@@ -768,11 +768,11 @@ async function updatePage(c: AppContext): Promise<Response> {
   const source = await readPluginPageUpdateSources(c, authority, [id]);
   const page = source.pages[0];
   if (!page) {
-    await commitPluginPageUpdates(c, authority, source, []);
+    await commitPluginPageUpdates(c, source, []);
     return c.json({ error: 'not_found' }, 404);
   }
   if (!pageTypeScopeAllows(authority.allowed, page.page_type ?? '')) {
-    await commitPluginPageUpdates(c, authority, source, [], [{ page, reason: 'forbidden_page_type' }]);
+    await commitPluginPageUpdates(c, source, [], [{ page, reason: 'forbidden_page_type' }]);
     return c.json(forbiddenPageTypeBody(auth, page.page_type ?? ''), 403);
   }
   const body = await c.req.json().catch(() => null) as PageInput | null;
@@ -780,7 +780,7 @@ async function updatePage(c: AppContext): Promise<Response> {
   if (Object.hasOwn(body, 'if_lect')) {
     if (!body.if_lect || typeof body.if_lect !== 'object' || Array.isArray(body.if_lect)) return c.json({ error: 'invalid_if_lect' }, 400);
     if (page.lect !== stringifyLect(coerceLect(body.if_lect))) {
-      await commitPluginPageUpdates(c, authority, source, [], [{ page, reason: 'version_precondition' }]);
+      await commitPluginPageUpdates(c, source, [], [{ page, reason: 'version_precondition' }]);
       return c.json({ error: 'version_conflict' }, 409);
     }
   }
@@ -800,7 +800,7 @@ async function updatePage(c: AppContext): Promise<Response> {
     start: 'start' in body ? (typeof body.start === 'string' ? body.start : null) : page.start,
     end: 'end' in body ? (typeof body.end === 'string' ? body.end : null) : page.end,
     timezone: 'timezone' in body ? (typeof body.timezone === 'string' ? body.timezone : null) : page.timezone, page_id: parentId };
-  const [saved] = await commitPluginPageUpdates(c, authority, source, [{ before: page, next, tags, action: versionAction(body.version_action, 'update') }]);
+  const [saved] = await commitPluginPageUpdates(c, source, [{ before: page, next, tags, action: versionAction(body.version_action, 'update') }]);
   await notifyPageSaved(c.env, id);
   emitPluginHooks(c, 'update', [{ id, uuid: page.uuid, page_type: pageType, name, slug }], auth.pluginId, { evidenceCommitted: true, actor: authority.actor });
   recordPageReads('page.update-result', [saved], { actor: authority.actor });
