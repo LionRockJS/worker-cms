@@ -106,8 +106,10 @@ export default { fetch(request, env) {
   const origin = ${JSON.stringify(publicOrigin)};
   if (origin) {
     const url = new URL(request.url), target = new URL(origin);
-    url.protocol = target.protocol; url.host = target.host;
-    request = new Request(url, request);
+    // Replace the whole origin: assigning url.host keeps the request's own
+    // port, so a client that sent "Host: 127.0.0.1:8787" got a non-canonical
+    // origin and a 308 redirect.
+    request = new Request(new URL(url.pathname + url.search, target.origin), request);
     request.headers.set("Host", target.host);
   }
   return env.CMS.fetch(request);
