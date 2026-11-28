@@ -66,17 +66,27 @@ export async function assignableContributedPermissions(env: Env): Promise<Contri
 
 /** Creates a custom role. Resolves to a validation message, a refusal to send
  *  back as-is, or null once the role exists. */
-export async function createRole(c: AppContext, name: string, label: string): Promise<string | Response | null> {
+export async function createRole(c: AppContext, name: string, label: string, permissions: string[] = []): Promise<string | Response | null> {
   const { authorization, refused } = await authorizeAccessMutation(c, 'roles:manage');
   if (refused) return refused;
   if (!safeRoleAuditValue(name)) return unsafeAccessEvidence(c);
-  const classification = await accessMutationClass(c.env, ['roles', 'users']);
+  if (permissions.length) {
+    const assignable = new Set<string>([...PERMISSIONS, ...(await assignableContributedPermissions(c.env)).map(p => p.value)]);
+    if (permissions.some(permission => !assignable.has(permission))) return 'Invalid permission';
+    if (!canManagePermissions(authorization, permissions)) {
+      await recordPolicyDenial(c, 'grant_exceeds_authority');
+      return c.text('Forbidden: cannot grant permissions beyond your own', 403);
+    }
+  }
+  const grants = storedRolePermissions(permissions);
+  const classification = await accessMutationClass(c.env, ['roles', 'role_permissions', 'users']);
   if (classification === null) return auditUnavailable(c);
   const refusedRead = await flushReadAudit(c);
   if (refusedRead) return refusedRead;
   try {
     return await createCustomRole(c.env, name, label, mutationAuditEvidence(c,
-      { action: 'role.create', entityType: 'role', entityId: name }, classification.dataClass, { requirePreviousChange: true, policy: classification.policy }), authorization);
+      { action: 'role.create', entityType: 'role', entityId: name, detail: { grants } },
+      classification.dataClass, { policy: classification.policy }), authorization, grants);
   } catch {
     return accessMutationUnavailable(c);
   } finally {

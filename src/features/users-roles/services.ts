@@ -13,6 +13,9 @@ const ROLE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const BUILTIN = new Set<string>(USER_ROLES);
 
 async function refusal(response: Response): Promise<never> {
+  if (response.status >= 500 || response.headers.get('X-CMS-Error') === 'management-permission-changed') {
+    throw new Error(`Role import unavailable (${response.status})`);
+  }
   const text = (await response.text().catch(() => '')).slice(0, 200);
   throw new ConfigTransferItemError(`Refused (${response.status})${text ? `: ${text}` : ''}`);
 }
@@ -72,9 +75,10 @@ const rolesSection: ConfigTransferSection = {
       const before = await roleState(c, name);
       const plan = planChange(name, before ?? undefined, { label, permissions }, async () => {
         if (!before) {
-          const created = await createRole(c, name, label);
+          const created = await createRole(c, name, label, permissions);
           if (created instanceof Response) await refusal(created);
           if (typeof created === 'string') throw new ConfigTransferItemError(created);
+          return;
         }
         const refused = await updateRole(c, name, label, permissions);
         if (refused) await refusal(refused);

@@ -17,8 +17,9 @@ export interface AccessAuthorization {
   guard(): D1PreparedStatement;
 }
 
-export async function captureAccessAuthorization(env: Env, actor: JWTPayload, permission: Exclude<AccessAuthorization['capability'],'authenticated'>): Promise<AccessAuthorization> {
-  return captureAuthorization(env, actor, permission, true);
+export async function captureAccessAuthorization(env: Env, actor: JWTPayload,
+  permission: Exclude<AccessAuthorization['capability'], 'authenticated'>, additionalPermission?: Permission): Promise<AccessAuthorization> {
+  return captureAuthorization(env, actor, permission, true, additionalPermission);
 }
 
 /** Session-bound self-service authority; callers must restrict source ownership
@@ -33,7 +34,7 @@ export async function captureContentJobAuthorization(env: Env, actor: JWTPayload
   return { authorization: await captureAuthorization(env, actor, capability, false), delegationGuard };
 }
 
-async function captureAuthorization(env: Env, actor: JWTPayload, permission: AccessAuthorization['capability'], sessionRequired: boolean): Promise<AccessAuthorization> {
+async function captureAuthorization(env: Env, actor: JWTPayload, permission: AccessAuthorization['capability'], sessionRequired: boolean, additionalPermission?: Permission): Promise<AccessAuthorization> {
   actor = { ...actor };
   if (!/^\d+$/.test(actor.sub) || (sessionRequired && !/^\d+$/.test(actor.sid ?? '')) || !safeRoleAuditValue(actor.role)) throw new Error('Access authorization unavailable');
   const [users, roles, grants] = await env.DB.batch([
@@ -57,7 +58,10 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
     .filter(role => actorRoles.includes(role.name))
     .map(role => storedIpAllowlist(role.ip_allowlist)));
   return {
-    capability: permission, allowed: ipAllowed && (permission === 'authenticated' || admin || effective.has(permission)), admin, permissions: effective, roleMap,
+    capability: permission,
+    allowed: ipAllowed && (admin || ((permission === 'authenticated' || effective.has(permission)) &&
+      (!additionalPermission || effective.has(additionalPermission)))),
+    admin, permissions: effective, roleMap,
     guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
         WHERE u.disabled_at IS NULL AND u.id = ? AND u.role IS ? AND u.ip_unrestricted IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
           AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})

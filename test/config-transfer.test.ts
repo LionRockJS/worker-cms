@@ -303,7 +303,7 @@ it('recreates exported settings on an empty CMS through the audited save paths, 
   expect(plugin!.secret).not.toBe('source-secret');
   expect(JSON.parse(plugin!.config)).toEqual({ region: 'hk', cmsTrustedUi: false });
   const actions = (await env.DB.prepare("SELECT action FROM audit_events WHERE event_class = 'admin'").all<{ action: string }>()).results.map((row) => row.action);
-  expect(actions).toEqual(expect.arrayContaining(['plugin.create', 'page_type.create', 'block_type.create', 'role.create', 'role.update', 'settings.system.update']));
+  expect(actions).toEqual(expect.arrayContaining(['plugin.create', 'page_type.create', 'block_type.create', 'role.create', 'settings.system.update']));
   expect((await env.DB.prepare("SELECT COUNT(*) n FROM audit_events WHERE action = 'tag.create' AND outcome = 'success'").first<{ n: number }>())!.n).toBe(2);
 
   const before = (await env.DB.prepare('SELECT COUNT(*) n FROM audit_events WHERE event_class = \'admin\'').first<{ n: number }>())!.n;
@@ -323,6 +323,59 @@ it('applies at most one batch of changes per request and continues on the next',
   expect(second).toContain('"applied":3');
   expect(second).toContain('"autoContinue":false');
   expect((await env.DB.prepare('SELECT COUNT(*) n FROM taxonomies').first<{ n: number }>())!.n).toBe(taxonomies.length);
+});
+
+it('rolls back a role and its grants together, then resumes after the committed import prefix', async () => {
+  const bundle = { format: '0xcms-config', version: 1, source: 'source-label', sections: {
+    taxonomies: [{ slug: 'import-topic', name: 'Imported topic' }],
+    roles: [{ name: 'import-editor', label: 'Imported role', permissions: ['tag:write'] }],
+    system_settings: [{ key: SYSTEM_TIMEZONE_SETTING_KEY, value: '+0800' }],
+  } };
+  const apply = () => call('/admin/settings/transfer/apply', applyForm(bundle));
+  await env.DB.prepare(`CREATE TRIGGER import_grant_fault BEFORE INSERT ON role_permissions
+    WHEN NEW.role = 'import-editor' BEGIN SELECT RAISE(IGNORE); END`).run();
+  try {
+    const failed = await (await apply()).text();
+    expect(failed).toContain('"applied":1');
+    expect(failed).toContain('"autoContinue":false');
+    expect(await env.DB.prepare("SELECT name FROM roles WHERE name = 'import-editor'").first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM audit_events WHERE action = 'role.create' AND target_id = 'import-editor'").first()).toBeNull();
+    expect(await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(SYSTEM_TIMEZONE_SETTING_KEY).first()).toBeNull();
+  } finally {
+    await env.DB.prepare('DROP TRIGGER import_grant_fault').run();
+  }
+
+  expect(await (await apply()).text()).toContain('"applied":2');
+  expect(await (await apply()).text()).toContain('"applied":0');
+  expect(await env.DB.prepare("SELECT permission FROM role_permissions WHERE role = 'import-editor'").first()).toEqual({ permission: 'tag:write' });
+  const { results } = await env.DB.prepare(`SELECT action, actor_user_id, detail FROM audit_events
+    WHERE json_type(detail, '$.config_import') = 'object' ORDER BY seq`).all<{ action: string; actor_user_id: string; detail: string }>();
+  expect(results.map(row => [row.action, row.actor_user_id])).toEqual([
+    ['taxonomy.create', '18000'], ['role.create', '18000'], ['settings.system.update', '18000'],
+  ]);
+  const records = results.map(row => JSON.parse(row.detail));
+  expect(records[1].grants).toEqual(['tag:write']);
+  expect(records.map(record => [record.config_import.section, record.config_import.item])).toEqual([
+    ['taxonomies', 1], ['roles', 1], ['system_settings', 2],
+  ]);
+  expect(records[0].config_import.attempt_id).not.toBe(records[1].config_import.attempt_id);
+  expect(records[1].config_import.attempt_id).toBe(records[2].config_import.attempt_id);
+  expect(JSON.stringify(records)).not.toContain('source-label');
+});
+
+it('stops subsequent role items after the import actor loses menu management', async () => {
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO roles (name, label, builtin) VALUES ('import-operator', 'Import operator', 0)"),
+    env.DB.prepare("INSERT INTO role_permissions (role, permission) VALUES ('import-operator', 'menu:manage'), ('import-operator', 'roles:manage')"),
+  ]);
+  const bundle = { format: '0xcms-config', version: 1, sections: { roles: [
+    { name: 'import-operator', label: 'Import operator', permissions: ['roles:manage'] },
+    { name: 'new-import-role', label: 'New import role', permissions: [] },
+  ] } };
+  const response = await call('/admin/settings/transfer/apply', applyForm(bundle, ['roles']), 'import-operator');
+  expect(await response.text()).toContain('"applied":1');
+  expect(await env.DB.prepare("SELECT name FROM roles WHERE name = 'new-import-role'").first()).toBeNull();
+  expect(await env.DB.prepare("SELECT permission FROM role_permissions WHERE role = 'import-operator'").first()).toEqual({ permission: 'roles:manage' });
 });
 
 it('keeps the previous section selection and only auto-continues ticked sections that still have changes', async () => {

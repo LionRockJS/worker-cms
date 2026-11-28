@@ -271,10 +271,15 @@ export function auditEvidence(env: Env, row: AuditRow, actor: AuditActor): Mutat
   return preparedAuditEvidence(env, row, actor, NO_REQUEST);
 }
 
+function withConfigImport(row: AuditRow, context: AppContext | undefined): AuditRow {
+  const item = context?.get('configImport');
+  return item ? { ...row, detail: { ...row.detail, config_import: item } } : row;
+}
+
 /** Prepare request-attributed evidence and its guard for the same D1 batch. */
 export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
   options: { requirePreviousChange?: boolean; policy?: DataClassMap } = {}): MutationAuditEvidence {
-  const row = mutationRow(entry, dataClass);
+  const row = withConfigImport(mutationRow(entry, dataClass), c);
   return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange, undefined, options.policy);
 }
 
@@ -320,7 +325,7 @@ export function servicePlannedMutationAuditEvidence(env: Env, entry: AuditEntry,
  * Complete batch manifests belong in detail; the indexed target list is capped. */
 export function attributedMutationAuditEvidence(env: Env, user: JWTPayload, entry: AuditEntry, dataClass: AuditRow['dataClass'],
   policy: DataClassMap, options: { context?: AppContext; targetIds?: string[]; via?: string } = {}): MutationAuditEvidence {
-  const row = mutationRow(entry, dataClass);
+  const row = withConfigImport(mutationRow(entry, dataClass), options.context);
   if (options.targetIds) { row.targetIds = options.targetIds.slice(0, 200); row.targetCount = options.targetIds.length; }
   return preparedAuditEvidence(env, row, actorFromUser(user, options.via ?? null), options.context ? requestFrom(options.context) : NO_REQUEST,
     false, undefined, policy);

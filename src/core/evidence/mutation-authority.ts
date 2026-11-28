@@ -7,7 +7,7 @@ import { resolveDataClasses } from '../db/data-classes';
  *  regulated-writes check stays with the caller, because whether it runs
  *  inside or outside the caller's try decides how a refusal is reported. */
 export async function captureMutationAuthority(c: AppContext, permission: Exclude<AccessAuthorization['capability'], 'authenticated'>) {
-  const authority = await captureAccessAuthorization(c.env, c.get('user'), permission);
+  const authority = await captureAccessAuthorization(c.env, c.get('user'), permission, c.get('configImport') && 'menu:manage');
   if (!authority.allowed) throw new Error('Mutation authority unavailable');
   const policy = await resolveDataClasses(c.env, true);
   if (!policy.ok) throw new Error('Mutation classification unavailable');

@@ -148,7 +148,7 @@ export async function saveRolePermissions(env: Env, name: string, label: string,
 
 /** Creates a custom role and its audit together. Returns a validation error. */
 export async function createCustomRole(env: Env, name: string, label: string,
-  audit: MutationAuditEvidence, authorization: AccessAuthorization): Promise<string | null> {
+  audit: MutationAuditEvidence, authorization: AccessAuthorization, permissions: string[] = []): Promise<string | null> {
   assertRegulatedWritesAllowed(env);
   if (!audit?.write || !audit.guard) throw new Error('Role mutation evidence is required');
   assertAccessAuthorization(authorization);
@@ -156,6 +156,9 @@ export async function createCustomRole(env: Env, name: string, label: string,
   if (!name) return 'Slug is required.';
   if (!label) return 'Name is required.';
   if (BUILTIN.has(name.trim().toLowerCase())) return `"${name}" is a built-in role.`;
+  const grants = storedRolePermissions(permissions);
+  if (!rolePermissionsRecordable(grants)) throw new Error('Role evidence is unsafe');
+  assertDelegatedRolePermissions(authorization, name, grants);
   const existing = await env.DB.prepare('SELECT name FROM roles WHERE name = ?').bind(name).first();
   if (existing) return `Role "${name}" already exists.`;
   const orphan = await env.DB.prepare('SELECT 1 FROM role_permissions WHERE role = ? LIMIT 1').bind(name).first();
@@ -165,8 +168,12 @@ export async function createCustomRole(env: Env, name: string, label: string,
     // Creating a role must not silently activate pre-existing orphan grants.
     abortIf(env, 'EXISTS (SELECT 1 FROM role_permissions WHERE role = ?)', [name]),
     env.DB.prepare('INSERT INTO roles (name, label, builtin) VALUES (?, ?, 0)').bind(name, label),
+    abortIf(env, 'changes() <> 1'),
+    env.DB.prepare('INSERT INTO role_permissions (role, permission) SELECT ?, value FROM json_each(?)').bind(name, JSON.stringify(grants)),
+    abortIf(env, 'changes() <> ?', [grants.length]),
     audit.write,
     audit.guard,
+    roleSnapshotGuard(env, name, { managed: true, builtin: 0, grants }),
     abortIf(env, 'NOT EXISTS (SELECT 1 FROM roles WHERE name = ? AND label = ? AND builtin = 0)', [name, label]),
   ]);
   return null;

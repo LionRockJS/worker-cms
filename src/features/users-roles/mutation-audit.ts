@@ -11,11 +11,13 @@ import { recordPolicyDenial } from '../../core/auth/denials';
 export async function authorizeAccessMutation(c: AppContext, permission: 'users:manage' | 'roles:manage'):
 Promise<{ authorization: AccessAuthorization; refused?: undefined } | { authorization?: undefined; refused: Response }> {
   let authorization: AccessAuthorization;
-  try { authorization = await captureAccessAuthorization(c.env, c.get('user'), permission); }
+  try { authorization = await captureAccessAuthorization(c.env, c.get('user'), permission, c.get('configImport') && 'menu:manage'); }
   catch { return { refused: await accessMutationUnavailable(c) }; }
   if (!authorization.allowed) {
     await recordPolicyDenial(c, 'management_permission_changed');
-    return { refused: c.text('Forbidden: access management permission changed', 403) };
+    return { refused: c.text('Forbidden: access management permission changed', 403, {
+      'X-CMS-Error': 'management-permission-changed',
+    }) };
   }
   return { authorization };
 }

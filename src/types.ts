@@ -316,6 +316,8 @@ export interface RateLimiter {
 // Hono context variables set by the auth middleware
 export interface Variables {
   user: JWTPayload;
+  /** Server-assigned correlation for the settings import item currently being applied. */
+  configImport?: { attempt_id: string; section: string; item: number };
   /** Set by requirePageSync when access came from a plugin sync grant: its expiry in seconds. */
   syncGrantExp?: number;
 }

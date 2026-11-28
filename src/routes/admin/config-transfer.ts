@@ -12,6 +12,7 @@ import {
   type ConfigTransferBundle, type ConfigTransferPlanItem, type ConfigTransferSection,
 } from '../../core/config-transfer';
 import { TagParentCycleError } from '../../core/evidence/taxonomy-mutation-evidence';
+import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { flushReadAudit } from '../../core/http/access-log';
 import { renderPage } from '../../core/render/chrome';
 import {
@@ -79,12 +80,16 @@ async function previewSections(c: AppContext, bundle: ConfigTransferBundle): Pro
  *  the previous one so later sections see what earlier ones created. */
 export async function applyConfigBundle(c: AppContext, bundle: ConfigTransferBundle, selected: ReadonlySet<string>,
   budget = MAX_CHANGES_PER_REQUEST): Promise<ConfigTransferResult> {
+  assertRegulatedWritesAllowed(c.env);
   const result: ConfigTransferResult = { applied: 0, remaining: 0, failed: [], stopped: '' };
+  const attemptId = crypto.randomUUID();
+  let item = 0;
   for (const section of await permittedSections(c)) {
     if (!selected.has(section.id) || !Object.hasOwn(bundle.sections, section.id)) continue;
     const plans = (await section.plan(c, bundle.sections[section.id])).filter((plan) => plan.apply);
     for (const plan of plans) {
       if (result.stopped || result.applied >= budget) { result.remaining += 1; continue; }
+      c.set('configImport', { attempt_id: attemptId, section: section.id, item: ++item });
       try {
         await plan.apply!();
         result.applied += 1;
@@ -97,6 +102,8 @@ export async function applyConfigBundle(c: AppContext, bundle: ConfigTransferBun
           result.stopped = `${plan.label}: this change could not be saved.`;
           result.remaining += 1;
         }
+      } finally {
+        c.set('configImport', undefined);
       }
     }
   }
