@@ -57,7 +57,9 @@ Line counts are the current file sizes. Estimates are engineering days, rough, a
 |---|---|---|
 | [Host settings](../../src/core/evidence/settings-mutation-evidence.ts) | `settings-mutation-evidence` | 70 → 49 lines. Round trips 7 → 5 (no-op 6 → 4) after reading the policy once |
 
-### Wave A1: signed-in admin, simple shape (about 1–1.5 days)
+### Wave A1: signed-in admin, simple shape — done
+
+Five writers moved; plugin approval, the published-to-draft pull and page access stay as they are, with reasons below. Round trips dropped for every moved writer.
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
@@ -67,8 +69,8 @@ Line counts are the current file sizes. Estimates are engineering days, rough, a
 | [Plugin approval](../../src/features/plugins/approval-evidence.ts) | 212 | `plugin-approval-evidence` | — | **Stays as is (rule 6).** It would need four bespoke hooks: containment revokes that skip the regulated gate, a guard batch mid-plan before fetching asset bytes, next IDs from `sqlite_sequence` with their own guards, and policy scans for overlapping storage prefixes. It keeps `capturePluginMutationContext` |
 | [Plugin financial settings](../../src/features/plugins/settings-evidence.ts) | 68 | `plugin-financial-settings-evidence` | E13, E14 | **Done.** Shares `beginPluginRegistryMutation` with registration. Added a wildcard-grant classification test (passes before and after) |
 | [Credits administration](../../src/features/credits/admin-mutation.ts) | 118 | `financial-administration-evidence` | E4, E5 `self`, E12, E13 | **Done.** Wallets and ledgers are a follow-up snapshot; ledger IDs come from the clock read. Counted from code: about 9–12 → 6 round trips. The users lookup is now logged as a read even for an unknown recipient (more evidence, not less) |
-| [Published-to-draft pull](../../src/features/publish/pull.ts) | 131 | `sensitive-read-coverage` | E10 | Published database read is external input |
-| [Page access policy](../../src/routes/admin/pages/access.ts) | 151 | `page-access` | E4, E5 `self` | |
+| [Published-to-draft pull](../../src/features/publish/pull.ts) | 131 | `sensitive-read-coverage` | — | **Stays as is (rule 6).** Its classification comes from the published source's read-evidence rows; its local snapshots are deliberately not logged; the existing-draft path logs a strict read keyed by the row's page type; the sensitivity pin has no fixed change count |
+| [Page access policy](../../src/routes/admin/pages/access.ts) | 151 | `page-access` | — | **Stays as is (rules 1 and 6).** A guard failure answers 409 (reload and retry), not an outage 503; evidence is always class `none` with no policy guard; `INSERT OR IGNORE` grants have no fixed change count |
 
 ### Wave A2: content writers (about 2–3 days)
 
