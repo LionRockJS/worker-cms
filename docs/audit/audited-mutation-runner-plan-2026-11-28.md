@@ -161,7 +161,7 @@ The same HTTP fixtures executed the following D1 calls before and after P1. Thes
 
 | Phase | Writers | Blocked on |
 |---|---|---|
-| P2 | Plugin page update, create and duplicate | Update implemented. Create and duplicate still need intent-to-reservation coordination and rollback certainty across content commits. |
+| P2 | Plugin page update, create and duplicate | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Environment-only (job) context in the runner, plus snapshots of many pages at once |
 | P4 | Taxonomies and tags | Writes that move the classification policy version inside the batch |
 
@@ -192,7 +192,18 @@ Plugin PUT/PATCH and batch PATCH now use `beginServiceAuditedMutation`. The rout
 
 The HTTP fixtures count D1 calls through each request. All **127 existing update tests** passed in standalone workerd. Disabling final receipt verification caused the regression for a later write corrupting an earlier receipt to fail. The updated runner also passed the **873 P1 regression tests** and **209 create and duplicate tests**.
 
-Create and duplicate still need the runner to preserve their guarded intent before charging, distinguish a known rollback from an uncertain content commit, and retain duplicate progress across multiple acknowledged chunks. These are separate contracts from the grouped page writes and receipts implemented for update. Under rule 6, keep the existing create and duplicate transactions until those contracts are designed together.
+Create and duplicate now use the same service runner for guarded intent and denial receipts and for each content transaction. The creation writer batches its contributor, configuration, parent, tag and floor snapshots under the captured policy. Intent and denial plans use checks that require no clock read. Content plans insert all selected pages before dependent history, link and receipt groups so forward-referenced parents work.
+
+The runner reports whether it submitted the content batch. The plugin writer still determines whether a recorded failure supports a refund, and the existing duplicate workflow advances its cursor only after an acknowledged chunk. The credit reservation and refund orchestration and recovery-result evidence remain with the plugin writer.
+
+| Request fixture | Unclassified before → after | PHI before → after |
+|---|---:|---:|
+| Single or bulk create | 70 → 61 | 75 → 66 |
+| Quota denial | 47 → 38 | 49 → 40 |
+| Duplicate 3 pages | 78 → 69 | 85 → 76 |
+| Duplicate 101 pages | 97 → 88 | 107 → 98 |
+
+All **209 existing create and duplicate tests** and **1,000 update and P1 regression tests** passed in standalone workerd. Disabling final receipt verification caused four create and duplicate regressions to fail, including a rewrite of a scope denial during the intent transaction. Standard `npm test` remains blocked by the self-hosted plugin directory test's localhost listener.
 
 ### Wave A2: content writers — deferred (page pattern)
 

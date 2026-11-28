@@ -24,6 +24,8 @@ An observed quota refusal requires a guarded classified `page.create.denied` rec
 
 ## Intent, content receipts and separate financial effects
 
+The P2 refactor runs the intent, denial and content transactions through `src/core/evidence/audited-mutation.ts`. Catalogues and relationships load in one policy-guarded D1 batch. The runner reports whether it submitted the content batch so the existing caller can apply the refund decision.
+
 A successful preflight commits `page.create.intent`, targeted at an internal creation-operation UUID, with the accepted internal page-ID/UUID manifest and `phase:intent`. It is evidence of preparation, not proof of created content or delivered external effects. Exact receipt and source checks surround this phase. Its acknowledgment must succeed before the reservation service is called. A lost intent acknowledgment may leave that intent committed, but starts no charge or content batch and is never automatically replayed.
 
 The optional reservation still runs through the neutral feature-service dispatcher. Its input now carries the creation operation ID. The credits provider records that ID in tagged debit/caller-refund note envelopes, while preserving prices, currencies, shared-pool fallback, charging actions and free/no-payer behavior. The host ledger display preserves the former batch breakdown/empty-note presentation and keeps the correlation envelope in stored evidence; unrelated notes retain their existing display. Other providers and internal multi-currency compensation retain their existing contracts. A service-reported refusal requires `page.create.denied` with `reservation_refused` before the stable 400/402 response; it does not pretend to establish a new transaction-bound financial eligibility decision.

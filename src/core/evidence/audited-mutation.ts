@@ -127,16 +127,21 @@ export interface ServiceMutationGroup {
   evidence: { entry: AuditEntry; dataClass: DataClass | 'none' };
 }
 
-export interface ServiceMutationPlan extends MutationChecks {
+export interface ServiceMutationPlan extends Omit<MutationChecks, 'expect'> {
+  /** Writes shared by the groups, such as inserting all pages before history. */
+  leadingWrites?: PlannedWrite[];
   /** The writer bounds its business manifests before submitting the groups. */
   groups: ServiceMutationGroup[];
+  /** Provide statements directly when no transaction clock is needed. */
+  expect: MutationChecks['expect'] | D1PreparedStatement[];
 }
 
 interface SnapshotMutationSpec<S extends Record<string, SnapshotSpec>> {
   classify: Containers | ((rows: Snapshots<S>) => Containers);
   snapshot: S;
-  /** The writer's own refusal, so its route keeps its existing 503 body. */
-  unavailable: () => Error;
+  /** The writer's refusal. A failed submission can have an unknown outcome
+   *  when the writer needs to decide whether a reservation can be refunded. */
+  unavailable: (error: unknown, batchSubmitted: boolean) => Error;
   /** Errors that are the writer's own answer, such as invalid input. */
   passthrough?: (error: unknown) => boolean;
 }
@@ -209,10 +214,10 @@ export async function beginServiceAuditedMutation<S extends Record<string, Snaps
 async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: SnapshotMutationSpec<S>,
   authorize: () => Promise<MutationAuthority>, serviceActor?: AuditActor) {
   const actor = serviceActor ?? contextActor(c);
-  const fail = async (error: unknown): Promise<never> => {
+  const fail = async (error: unknown, batchSubmitted = false): Promise<never> => {
     if (spec.passthrough?.(error)) throw error;
     await recordAuditOutage(c.env, 'health', [], actor, undefined, { captureIncomplete: true });
-    throw spec.unavailable();
+    throw spec.unavailable(error, batchSubmitted);
   };
 
   // 1. gate (outside the try: a refusal here is reported by the caller's route)
@@ -281,6 +286,7 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
     rows,
     fail,
     async commit(decide: Decide<S, MutationPlan | ServiceMutationPlan>): Promise<Row[] | undefined> {
+      let batchSubmitted = false;
       try {
         assertRegulatedWritesAllowed(c.env);
 
@@ -307,12 +313,14 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
         }
         if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
         if (!plan || (!('groups' in plan) && !plan.writes.length)) {
-          await c.env.DB.batch(admission());
+          const statements = admission();
+          batchSubmitted = true;
+          await c.env.DB.batch(statements);
           return undefined;
         }
 
         // 5. commit
-        const since = clock ?? await tools.clock();
+        const expected = typeof plan.expect === 'function' ? plan.expect((clock ?? await tools.clock()).now) : plan.expect;
         const operationId = crypto.randomUUID();
         const withOperation = (entry: AuditEntry) => ({ ...entry, detail: { operation_id: operationId, ...entry.detail } });
         const prepareWrites = (writes: PlannedWrite[]) => writes.flatMap(({ sql, args, changes = 1 }) => [
@@ -323,6 +331,7 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
         const receiptChecks: D1PreparedStatement[] = [];
         if ('groups' in plan) {
           if (!serviceActor) throw new Error('Mutation groups require service authority');
+          statements.push(...prepareWrites(plan.leadingWrites ?? []));
           for (const { check, writes, evidence } of plan.groups) {
             const receipt = serviceMutationAuditEvidence(c.env, withOperation(evidence.entry), serviceActor, evidence.dataClass, policy, c);
             statements.push(...check ?? [], ...prepareWrites(writes ?? []), receipt.write, receipt.guard);
@@ -334,17 +343,19 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
             classOf(plan.classify), policy, { context: c, targetIds });
           statements.push(...prepareWrites(plan.writes), receipt.write, receipt.guard);
         }
-        const results = await c.env.DB.batch([
+        const batch = [
           ...statements,
-          ...plan.expect(since.now),
+          ...expected,
           ...receiptChecks,
           ...recheck(),
           ...(plan.returning ? [c.env.DB.prepare(plan.returning.sql).bind(...plan.returning.args)] : []),
-        ]);
+        ];
+        batchSubmitted = true;
+        const results = await c.env.DB.batch(batch);
         if (!plan.returning) return undefined;
         return results.at(-1)!.results as Row[];
       } catch (error) {
-        return fail(error);
+        return fail(error, batchSubmitted);
       }
     },
   };
