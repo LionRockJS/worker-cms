@@ -4,7 +4,7 @@ import { captureMutationAuthority } from './mutation-authority';
 import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind } from '../db/data-classes';
 import { attributedMutationAuditEvidence, contextActor, type AuditEntry } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
-import { json, snapshot, guard } from '../db/bounded-mutation';
+import { json, snapshotStatement, snapshotRows, guard } from '../db/bounded-mutation';
 import { auditBackgroundReads, flushReadAudit, type PendingRead } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
@@ -20,8 +20,10 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  * The runner owns everything else and always runs it in this order:
  *
  *   1. gate       regulated-writes check
- *   2. authorize  fresh authority and classification policy
- *   3. snapshot   bounded read, read evidence, flushed before any write
+ *   2. authorize  fresh authority; its classification policy is read once
+ *                 and reused for every later step
+ *   3. snapshot   bounded reads batched behind a policy guard, so the read
+ *                 evidence is classified by the policy in force at the read
  *   4. decide     writer's plan (no database access)
  *   5. commit     one D1 batch:
  *                   admission  authority, policy, every snapshot unchanged
@@ -93,17 +95,25 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
     const { authority, policy } = await captureMutationAuthority(c, spec.permission);
     const dataClass = strongestClass(spec.classify.map(([kind, key]) => classFor(policy, kind, key)));
 
-    // 3. snapshot
+    // 3. snapshot: one round trip for every snapshot, behind the policy guard
+    const names = Object.keys(spec.snapshot) as Array<keyof S>;
+    const results = await c.env.DB.batch<{ snapshot: string }>([
+      classificationPolicyGuard(c.env, policy),
+      ...names.map(name => {
+        const { table, fields, where, args } = spec.snapshot[name];
+        return snapshotStatement(c, table, fields, where, args);
+      }),
+    ]);
     const rows = {} as Snapshots<S>;
     const reads: PendingRead[] = [];
-    for (const name of Object.keys(spec.snapshot) as Array<keyof S>) {
-      const { table, fields, where, args, read } = spec.snapshot[name];
-      const captured = await snapshot<Record<string, Binding>>(c, table, fields, where, args);
+    names.forEach((name, index) => {
+      const { fields, read } = spec.snapshot[name];
+      const captured = snapshotRows<Record<string, Binding>>(fields, results[index + 1].results[0]);
       rows[name] = captured;
       const { id, ...pending } = read;
       reads.push({ ...pending, ids: captured.map(id), count: captured.length });
-    }
-    await auditBackgroundReads(c.env, reads, contextActor(c));
+    });
+    await auditBackgroundReads(c.env, reads, contextActor(c), { policy });
 
     const admission = () => [
       authority.guard(),

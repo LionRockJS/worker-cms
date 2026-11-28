@@ -2,7 +2,7 @@ import { ipMatchesRoleAllowlists, storedIpAllowlist } from './ip-access';
 import type { Env, JWTPayload, Permission } from '../../types';
 import { buildRolePermissions, effectivePermissions, splitRoles } from './roles';
 import { safeRoleAuditValue } from './role-mutation-sql';
-import { resolveDataClasses, classificationPolicyFailureSql } from '../db/data-classes';
+import { resolveDataClasses, classificationPolicyFailureSql, type DataClassMap } from '../db/data-classes';
 import { abortIf } from '../db/transaction-guard';
 import { requestContext } from '../http/request-context';
 
@@ -14,6 +14,8 @@ export interface AccessAuthorization {
   admin: boolean;
   permissions: Set<Permission>;
   roleMap: Map<string, Set<Permission>>;
+  /** The classification policy this authority's guard was built from. */
+  policy: DataClassMap;
   guard(): D1PreparedStatement;
 }
 
@@ -61,7 +63,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
     capability: permission,
     allowed: ipAllowed && (admin || ((permission === 'authenticated' || effective.has(permission)) &&
       (!additionalPermission || effective.has(additionalPermission)))),
-    admin, permissions: effective, roleMap,
+    admin, permissions: effective, roleMap, policy,
     guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
         WHERE u.disabled_at IS NULL AND u.id = ? AND u.role IS ? AND u.ip_unrestricted IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
           AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})

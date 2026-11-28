@@ -27,6 +27,7 @@ import {
   retentionClassFor,
   type ContainerKind,
   type DataClass,
+  type DataClassMap,
 } from '../db/data-classes';
 import { contextActor, writeAuditRows, writeBackgroundAuditRows, type AuditActor, type AuditRow } from '../db/audit';
 import { wantsJsonResponse } from '../auth/guards';
@@ -203,8 +204,8 @@ function rowFor(read: PendingRead, dataClass: 'pii' | 'phi'): AuditRow {
 }
 
 /** Build the same classified evidence for HTTP and background work. */
-export async function prepareReadAudits(env: Env, pending: PendingRead[], fallbackActor: AuditActor, fresh = false) {
-  const classes = await resolveDataClasses(env, fresh);
+export async function prepareReadAudits(env: Env, pending: PendingRead[], fallbackActor: AuditActor, fresh = false, policy?: DataClassMap) {
+  const classes = policy ?? await resolveDataClasses(env, fresh);
   if (!classes.ok) throw new Error('Classification unavailable');
   // A tag association can itself be PHI even when the page type is public.
   // Expand before the output ID cap so later results are not silently missed.
@@ -304,8 +305,9 @@ export async function prepareReadAudits(env: Env, pending: PendingRead[], fallba
   return [...groups.values()];
 }
 
-export async function auditBackgroundReads(env: Env, pending: PendingRead[], actor: AuditActor, options: { exact?: boolean } = {}): Promise<AuditRow[]> {
-  const groups = await prepareReadAudits(env, pending, actor, true);
+/** `policy`: one the caller has proven was current when it read the rows. */
+export async function auditBackgroundReads(env: Env, pending: PendingRead[], actor: AuditActor, options: { exact?: boolean; policy?: DataClassMap } = {}): Promise<AuditRow[]> {
+  const groups = await prepareReadAudits(env, pending, actor, true, options.policy);
   for (const group of groups) {
     const strict = options.exact || group.strict || group.rows.some(row => row.eventClass === 'export');
     await writeBackgroundAuditRows(env, group.rows, group.actor, strict);
