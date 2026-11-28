@@ -566,10 +566,13 @@ and restarted) and `CMS_RUNTIME` (below).
 `server.mjs`, which keeps Node and Miniflare resident beside workerd. With
 `CMS_RUNTIME=workerd`, Node only writes a standalone config with
 `server-workerd.mjs` and exits, and [docker/workerd.sh](docker/workerd.sh)
-keeps workerd alone running. It also runs the scheduled jobs and restarts
-workerd in place on `SIGUSR2`. On a Raspberry Pi 4 the container starts at
-about 65 MiB instead of 320 MiB. The trade-off: there are no Images transforms,
-so media thumbnails are served as the original images.
+keeps workerd running without Miniflare. It also runs the scheduled jobs and
+restarts workerd in place on `SIGUSR2`. Plain workerd has no Images binding, so
+[docker/resize.mjs](docker/resize.mjs), a small Node server that loads `sharp`
+on first use, resizes media previews behind the `IMAGE_RESIZER` binding;
+`RESIZE_PORT=0` turns it off, and previews then fall back to the originals, as
+they do whenever the resizer fails. On a Raspberry Pi 4 the container idles at
+about 80 MiB (about 110 MiB once previews have been resized) instead of 320 MiB.
 
 In `cms.env`, set `JWT_SECRET` (the container refuses to start without it), then
 uncomment `ENABLED_PROVIDERS` and the credentials for each provider. The file
@@ -1788,7 +1791,8 @@ features on and off.
 ├── cms.env.example        # Container secrets template -> cms.env (gitignored)
 ├── docker/
 │   ├── entrypoint.sh      # BASE_URL -> origin settings, migrations, then serve
-│   ├── workerd.sh         # CMS_RUNTIME=workerd: run workerd alone, plus cron and restarts
+│   ├── workerd.sh         # CMS_RUNTIME=workerd: run workerd, the resizer, cron and restarts
+│   ├── resize.mjs         # CMS_RUNTIME=workerd: thumbnail service behind IMAGE_RESIZER
 │   ├── runtime-lock.mjs   # Wrangler's slice of package-lock.json for the image
 │   ├── update.sh          # Host: pull the newest image and restart if it changed
 │   ├── d1-snapshot.sh     # Host (cron): dated D1 snapshots, 30-day retention

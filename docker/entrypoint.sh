@@ -19,9 +19,14 @@ if node -e "process.exit(JSON.parse(require('fs').readFileSync('cms.features.jso
 fi
 
 # CMS_RUNTIME=workerd: Node only writes config.capnp, then exits, and workerd
-# serves alone (about 220 MiB less memory). It has no Images transforms; see
-# docker/workerd.sh. The default runs everything under Miniflare (server.mjs).
+# serves without Miniflare (about 220 MiB less memory). Media previews are
+# resized by docker/resize.mjs on RESIZE_PORT (default 8789; 0 turns it off and
+# previews fall back to the originals); see docker/workerd.sh. The default runs
+# everything under Miniflare (server.mjs).
 if [ "${CMS_RUNTIME:-miniflare}" = workerd ]; then
+  RESIZE_PORT=${RESIZE_PORT:-8789}
+  [ "$RESIZE_PORT" = 0 ] && RESIZE_PORT=""
+  export RESIZE_PORT
   node server-workerd.mjs
   exec sh docker/workerd.sh
 fi

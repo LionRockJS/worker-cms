@@ -98,13 +98,14 @@ mediaPublicRoutes.get('/media/*', async (c) => {
 });
 
 /**
- * Resize an R2 object to a square thumbnail via the Images binding. Returns
- * null whenever the transform cannot or should not run - no binding, missing
- * object, non-image, oversized input, or a decode failure - leaving the caller
- * to serve the original object instead.
+ * Resize an R2 object to a square thumbnail via the Images binding, or via the
+ * IMAGE_RESIZER service where there is no Images binding (self-hosting on plain
+ * workerd). Returns null whenever the transform cannot or should not run - no
+ * binding, missing object, non-image, oversized input, or a decode failure -
+ * leaving the caller to serve the original object instead.
  */
 async function thumbnailResponse(env: Env, key: string): Promise<Response | null> {
-  if (!env.IMAGES || !env.MEDIA_BUCKET) return null;
+  if ((!env.IMAGES && !env.IMAGE_RESIZER) || !env.MEDIA_BUCKET) return null;
 
   const object = await env.MEDIA_BUCKET.get(key);
   if (!object) return null;
@@ -114,12 +115,19 @@ async function thumbnailResponse(env: Env, key: string): Promise<Response | null
   if (!contentType.startsWith('image/')) return null;
 
   try {
-    const result = await env.IMAGES
-      .input(object.body)
-      .transform({ width: PREVIEW_SIZE, height: PREVIEW_SIZE, fit: 'cover' })
-      .output({ format: 'image/webp' });
-
-    const transformed = result.response();
+    const transformed = env.IMAGES
+      ? (await env.IMAGES
+        .input(object.body)
+        .transform({ width: PREVIEW_SIZE, height: PREVIEW_SIZE, fit: 'cover' })
+        .output({ format: 'image/webp' })).response()
+      : await env.IMAGE_RESIZER!.fetch(
+        `http://resizer/thumbnail?width=${PREVIEW_SIZE}&height=${PREVIEW_SIZE}`,
+        { method: 'POST', body: object.body, headers: { 'Content-Type': contentType } },
+      );
+    if (transformed.headers.get('Content-Type') !== 'image/webp') {
+      await transformed.body?.cancel();
+      return null;
+    }
     const headers = new Headers(transformed.headers);
     headers.set('Cache-Control', 'public, max-age=31536000');
     // Weak validator: derived from the source object, scoped to these params.

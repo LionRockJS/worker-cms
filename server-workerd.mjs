@@ -90,6 +90,17 @@ export default { async fetch(request, env) {
   if (type) headers.set("Content-Type", type + "; charset=utf-8");
   return new Response(response.body, { status: response.status, headers });
 } };`, [{ name: "FILES", service: { name: diskName } }]) });
+// There is no Images binding here (Miniflare's runs on sharp in Node). With
+// RESIZE_PORT set, bind IMAGE_RESIZER to docker/resize.mjs on that port so
+// media previews are still resized; without it they fall back to originals.
+const resizePort = Number(process.env.RESIZE_PORT ?? 0);
+if (resizePort) {
+  if (!Number.isInteger(resizePort) || resizePort < 1 || resizePort > 65535 || [port, cronPort].includes(resizePort)) {
+    throw new Error("RESIZE_PORT must be a free port between 1 and 65535.");
+  }
+  services.set("cms:resizer", { name: "cms:resizer", external: { address: `127.0.0.1:${resizePort}`, http: {} } });
+  services.get(cms).worker.bindings.push({ name: "IMAGE_RESIZER", service: { name: "cms:resizer" } });
+}
 services.set("cms:http", { name: "cms:http", worker: worker(`
 export default { fetch(request, env) {
   const origin = ${JSON.stringify(publicOrigin)};
@@ -165,7 +176,9 @@ try {
   rmSync(configTemp, { recursive: true, force: true });
 }
 console.log(`Generated ${configPath}. Run: node_modules/.bin/workerd serve --experimental config.capnp`);
-console.log(`Cron socket: POST http://127.0.0.1:${cronPort}/ (external scheduler required). Images transforms are disabled.`);
+console.log(`Cron socket: POST http://127.0.0.1:${cronPort}/ (external scheduler required). ${resizePort
+  ? `Media previews are resized by the IMAGE_RESIZER service on 127.0.0.1:${resizePort}.`
+  : "Images transforms are disabled."}`);
 if (args.has("--serve")) {
   const require = createRequire(import.meta.url);
   const workerd = require("workerd");

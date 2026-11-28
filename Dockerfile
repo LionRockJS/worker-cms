@@ -52,7 +52,7 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/migrations ./migrations
 COPY --from=build --chown=node:node /app/wrangler.toml /app/cms.features.json /app/server.mjs /app/server-workerd.mjs ./
 COPY --from=build --chown=node:node /app/tools/local-plugin-views.mjs ./tools/
-COPY --chown=node:node docker/entrypoint.sh docker/workerd.sh docker/
+COPY --chown=node:node docker/entrypoint.sh docker/workerd.sh docker/resize.mjs docker/
 
 ENV WRANGLER_SEND_METRICS=false
 # Worker vars and secrets come from the container environment instead of .dev.vars.

@@ -330,9 +330,9 @@ full backup above.
 The CMS normally uses 300–350 MiB, about 220 MiB of it a Node process that
 runs Miniflare beside workerd. To drop that, set `CMS_RUNTIME=workerd` in
 `.env` and run `docker compose up -d`: Node then only writes a standalone
-workerd config and exits, and the container starts at about 65 MiB. Media
-thumbnails are then served as the original images, since plain workerd has no
-Images transforms. See README "Runtime".
+workerd config and exits, and the container idles at about 80 MiB. Media
+previews are resized by a small Node thumbnail service (`docker/resize.mjs`,
+15–25 MiB) in place of Miniflare's Images binding. See README "Runtime".
 
 Two limits guard against growth:
 

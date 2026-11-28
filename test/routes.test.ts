@@ -10,6 +10,7 @@ import { clearConfigCache } from '../src/core/db/content-config';
 import { __injectPluginFetcher, clearManifestCache } from './plugin-fixtures';
 import { clearRolePermissionsCache } from '../src/core/auth/roles';
 import { CMS_ADMIN_JOB_KIND } from '../src/features/jobs/queue';
+import { mediaPublicRoutes } from '../src/features/media/routes/public';
 import { coreExtensions, registerCoreExtensions, type CmsAdminJobMessage } from '../src/core/extensions';
 import type { Env as AppEnv, JWTPayload } from '../src/types';
 
@@ -2923,6 +2924,79 @@ describe('admin routes', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('text/csv');
     expect(await response.text()).toBe('id,name\n1,a\n');
+  });
+
+  // Self-hosting on plain workerd has no Images binding; IMAGE_RESIZER
+  // (docker/resize.mjs) resizes previews instead.
+  describe('without an Images binding', () => {
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4]);
+    const ctx = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
+
+    async function previewPath(file: File, dir = 'pictures'): Promise<string> {
+      const body = new FormData();
+      body.append('dir', dir);
+      body.append('file', file);
+      const upload = await fetchWorker('/admin/upload', { method: 'POST', body, headers: { Cookie: await authCookie() } });
+      const payload = await upload.json<{ files: string[] }>();
+      return payload.files[0].replace(/^\/media\//, '/media-preview/');
+    }
+
+    function preview(path: string, resizer?: (request: Request) => Promise<Response>): Promise<Response> {
+      const testEnv = {
+        ...(env as AppEnv),
+        IMAGES: undefined,
+        IMAGE_RESIZER: resizer ? { fetch: (input: RequestInfo, init?: RequestInit) => resizer(new Request(input, init)) } : undefined,
+      } as unknown as AppEnv;
+      return Promise.resolve(mediaPublicRoutes.request(path, {}, testEnv, ctx));
+    }
+
+    it('resizes previews through IMAGE_RESIZER', async () => {
+      let seen: { url: string; method: string; type: string | null; bytes: Uint8Array } | undefined;
+      const path = await previewPath(new File([decodablePngBytes()], 'avatar.png', { type: 'image/png' }));
+
+      const response = await preview(path, async (request) => {
+        seen = { url: request.url, method: request.method, type: request.headers.get('Content-Type'), bytes: new Uint8Array(await request.arrayBuffer()) };
+        return new Response(webp, { headers: { 'Content-Type': 'image/webp' } });
+      });
+
+      expect(seen).toMatchObject({ url: 'http://resizer/thumbnail?width=100&height=100', method: 'POST', type: 'image/png' });
+      expect(seen?.bytes).toEqual(decodablePngBytes());
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('image/webp');
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(webp);
+      expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000');
+      expect(response.headers.get('ETag')).toMatch(/^W\/".+-100"$/);
+      expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'none'; sandbox");
+    });
+
+    it('serves the original when IMAGE_RESIZER refuses the image', async () => {
+      const path = await previewPath(new File([decodablePngBytes()], 'avatar.png', { type: 'image/png' }));
+
+      const response = await preview(path, async () => new Response(null, { status: 415 }));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('image/png');
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(decodablePngBytes());
+    });
+
+    it('serves the original when IMAGE_RESIZER is unreachable', async () => {
+      const path = await previewPath(new File([decodablePngBytes()], 'avatar.png', { type: 'image/png' }));
+
+      const response = await preview(path, async () => { throw new Error('connection refused'); });
+
+      expect(response.status).toBe(200);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(decodablePngBytes());
+    });
+
+    it('never sends non-images to IMAGE_RESIZER', async () => {
+      const resizer = vi.fn(async () => new Response(webp, { headers: { 'Content-Type': 'image/webp' } }));
+      const path = await previewPath(new File(['id,name\n1,a\n'], 'guests.csv', { type: 'text/csv' }), 'docs');
+
+      const response = await preview(path, resizer);
+
+      expect(resizer).not.toHaveBeenCalled();
+      expect(response.headers.get('Content-Type')).toBe('text/csv');
+    });
   });
 });
 

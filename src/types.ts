@@ -231,6 +231,10 @@ export interface Env {
   AUDIT_REVIEW_INTERVAL_DAYS?: string;
   /** Cloudflare Images binding used for media thumbnails; falls back to the original when unbound. */
   IMAGES?: ImagesBinding;
+  /** Self-hosting thumbnail service used when IMAGES is unbound (docker/resize.mjs
+   *  under CMS_RUNTIME=workerd): POST /thumbnail?width=&height= with the image
+   *  body, answered with image/webp. */
+  IMAGE_RESIZER?: Fetcher;
   /** Comma-separated built-in publish targets ("d1", "r2"). Defaults to "d1".
    *  Plugin publish targets are discovered from manifests, not listed here. */
   PUBLISH_TARGETS?: string;
