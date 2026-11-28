@@ -1,11 +1,11 @@
 import type { AppContext } from '../http/context';
-import { captureSelfAuthorization, type AccessAuthorization } from '../auth/access-authorization';
+import type { AccessAuthorization } from '../auth/access-authorization';
 import { captureMutationAuthority } from './mutation-authority';
 import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind, type DataClass, type DataClassMap } from '../db/data-classes';
 import { attributedMutationAuditEvidence, contextActor, type AuditEntry } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { json, snapshotStatement, snapshotRows, guard } from '../db/bounded-mutation';
-import { auditBackgroundReads, flushReadAudit, type PendingRead } from '../http/access-log';
+import { auditBackgroundReads, flushReadAudit, recordRead, type PendingRead } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
@@ -25,8 +25,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *   2. authorize  fresh authority; its classification policy is read once
  *                 and reused for every later step
  *   3. snapshot   bounded reads batched behind a policy guard, so the read
- *                 evidence is classified by the policy in force at the read,
- *                 and never below the change's own class; flushed at once
+ *                 evidence uses the policy in force at the read. Background
+ *                 evidence is raised to the change's class. Request reads
+ *                 use the request audit buffer and keep their own class.
  *   4. decide     writer's plan; its only database access goes through the
  *                 runner: the transaction clock (with trusted extra columns,
  *                 such as a next ID, reused as the timestamp baseline) and
@@ -52,6 +53,7 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  */
 
 type Binding = string | number | null;
+type WriteBinding = Binding | { document: string };
 
 export interface SnapshotSpec {
   table: string;
@@ -67,11 +69,13 @@ export interface SnapshotSpec {
 }
 
 /** What a source hands back: its rows, the containers that classify them,
- *  the reads to log (raised to the change's class) and its admission guards. */
+ *  the reads to log and its admission guards. Request reads keep the usual
+ *  page-read classification and attribution from the request buffer. */
 export interface LoadedSource<T> {
   value: T;
   classify: Containers;
   reads: PendingRead[];
+  readMode?: 'request';
   guards: () => D1PreparedStatement[];
 }
 
@@ -84,7 +88,9 @@ export interface SnapshotSource<T> {
 export interface PlannedWrite {
   /** Fixed trusted SQL; values go in args. */
   sql: string;
-  args: Binding[];
+  /** A document payload is bound directly without counting its
+   *  contents against the row manifest budget. */
+  args: WriteBinding[];
   /** Rows this statement must change; defaults to 1. */
   changes?: number;
 }
@@ -110,6 +116,8 @@ export interface MutationPlan {
 
 export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
   permission: Exclude<AccessAuthorization['capability'], 'authenticated'> | 'self';
+  /** Record a writer's existing policy denial when fresh authority refuses it. */
+  onDenied?: () => Promise<void>;
   classify: Containers | ((rows: Snapshots<S>) => Containers);
   snapshot: S;
   /** The writer's own refusal, so its route keeps its existing 503 body. */
@@ -140,13 +148,6 @@ export interface AuditedMutation<S> {
   commit(decide: (rows: Snapshots<S>, tools: DecideTools) => MutationPlan | null | Promise<MutationPlan | null>): Promise<Record<string, Binding> | undefined>;
 }
 
-/** Session-bound self-service authority; the writer restricts ownership. */
-async function captureSelf(c: AppContext) {
-  const authority = await captureSelfAuthorization(c.env, c.get('user'));
-  if (!authority.allowed) throw new Error('Mutation authority unavailable');
-  return { authority, policy: authority.policy };
-}
-
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
   const fail = async (error: unknown): Promise<never> => {
     if (spec.passthrough?.(error)) throw error;
@@ -160,19 +161,23 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
   let prepared;
   try {
     // 2. authorize
-    const { authority, policy } = spec.permission === 'self' ? await captureSelf(c) : await captureMutationAuthority(c, spec.permission);
+    const { authority, policy } = await captureMutationAuthority(c, spec.permission, spec.onDenied);
 
     // 3. snapshot: one round trip for every snapshot, behind the policy guard
     let containers: Containers = [];
     const classOf = (more: Containers = []) => strongestClass([...containers, ...more].map(item => typeof item === 'string' ? item : classFor(policy, item[0], item[1])));
     const guards: Array<() => D1PreparedStatement[]> = [];
     /** Classify, log and guard what was read; shared by table snapshots and sources. */
-    const settle = async (classify: Containers, reads: PendingRead[], admit: () => D1PreparedStatement[]) => {
+    const settle = async (classify: Containers, reads: PendingRead[], admit: () => D1PreparedStatement[], mode?: 'request') => {
       containers = [...containers, ...classify];
-      const dataClass = classOf();
-      const raised = reads.map(read => ({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...read }));
-      if (raised.length) await auditBackgroundReads(c.env, raised, contextActor(c), { policy });
-      if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+      if (mode === 'request') {
+        reads.forEach(recordRead);
+      } else if (reads.length) {
+        const dataClass = classOf();
+        const raised = reads.map(read => ({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...read }));
+        await auditBackgroundReads(c.env, raised, contextActor(c), { policy });
+      }
+      if ((reads.length || mode === 'request') && await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
       guards.push(admit);
     };
     const read = async (specs: SnapshotSpec[], classify: (rows: Array<Array<Record<string, Binding>>>) => Containers) => {
@@ -192,7 +197,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
     };
     const load = async <T>(source: SnapshotSource<T>) => {
       const loaded = await source.load({ c, authority, policy, policyGuard: () => classificationPolicyGuard(c.env, policy) });
-      await settle(loaded.classify, loaded.reads, loaded.guards);
+      await settle(loaded.classify, loaded.reads, loaded.guards, loaded.readMode);
       return loaded.value;
     };
     const names = Object.keys(spec.snapshot) as Array<keyof S>;
@@ -230,7 +235,10 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
           policy,
         };
         const plan = await decide(rows, tools);
-        json(plan?.writes ?? []);
+        json(plan?.writes.map(write => ({
+          ...write,
+          args: write.args.map(value => value === null || typeof value !== 'object' ? value : null),
+        })) ?? []);
         if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
         if (!plan?.writes.length) {
           await c.env.DB.batch(admission());
@@ -246,9 +254,9 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
         const results = await c.env.DB.batch([
           ...admission(),
           ...plan.admit ?? [],
-          ...plan.writes.flatMap(w => [
-            c.env.DB.prepare(w.sql).bind(...w.args),
-            abortIf(c.env, 'changes() <> ?', [w.changes ?? 1]),
+          ...plan.writes.flatMap(write => [
+            c.env.DB.prepare(write.sql).bind(...write.args.map(value => value !== null && typeof value === 'object' ? value.document : value)),
+            abortIf(c.env, 'changes() <> ?', [write.changes ?? 1]),
           ]),
           receipt.write,
           receipt.guard,

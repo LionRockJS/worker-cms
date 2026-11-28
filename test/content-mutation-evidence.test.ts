@@ -76,6 +76,14 @@ it('retains the prior PHI floor when tags or page type are removed',async()=>{
 });
 it('rejects a taxonomy move between classification and the write',async()=>{const DB=race(()=>env.DB.prepare("UPDATE tags SET taxonomy_slug=NULL WHERE id=9983").run());expect((await call('update',{DB})).status).toBe(503);expect(await events()).toEqual([]);});
 it('refuses missing selected tags without partial page/history changes',async()=>{const before=await state();const DB=race(()=>env.DB.prepare('DELETE FROM tags WHERE id=9983').run());expect((await call('create',{DB})).status).toBe(503);expect(await state()).toEqual(before);});
+it('rolls back creation if its receipt trigger changes the owner access policy', async () => {
+  const before = await state();
+  await env.DB.prepare(`CREATE TRIGGER ${fault} AFTER INSERT ON audit_events WHEN NEW.action='page.create'
+    BEGIN UPDATE page_access_policies SET enabled=0 WHERE page_uuid=NEW.target_id; END`).run();
+  expect((await call('create')).status).toBe(503);
+  expect(await state()).toEqual(before);
+  expect(await events()).toEqual([]);
+});
 it('does not invent history-deletion events for an already empty history',async()=>{await env.DB.prepare('DELETE FROM page_versions').run();expect((await call('clear')).status).toBe(302);expect(await events()).toEqual([]);});
 it('keeps regulated content writes contained',async()=>{expect((await call('update',{REGULATED_MODE:'true'})).status).toBe(503);expect(await events()).toEqual([]);});
 
@@ -97,6 +105,15 @@ it.each(['create','update','clear'] as Operation[])('does not replay %s after a 
 });
 it('refuses a changed UUID sensitivity floor at batch admission',async()=>{const before=await state();expect((await call('update',{DB:race(()=>env.DB.prepare('INSERT INTO page_sensitivity_floors(uuid,level) VALUES (?,2)').bind(uuid).run())})).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 it('refuses stale history or tag memberships at batch admission',async()=>{expect((await call('clear',{DB:race(()=>env.DB.prepare("INSERT INTO page_versions(page_id,lect,action) VALUES (?,'concurrent','update')").bind(id).run())})).status).toBe(503);expect(await events()).toEqual([]);});
+it('rejects a stale version set even if a write trigger would remove the concurrent version', async () => {
+  await env.DB.prepare(`CREATE TRIGGER ${fault} AFTER DELETE ON page_versions WHEN OLD.id=99811
+    BEGIN DELETE FROM page_versions WHERE id=99813; END`).run();
+  const DB = race(() => env.DB.prepare("INSERT INTO page_versions(id,page_id,lect,action) VALUES (99813,?,'{}','update')").bind(id).run());
+  expect((await call('clear', { DB })).status).toBe(503);
+  const versions = await env.DB.prepare('SELECT id FROM page_versions WHERE page_id=? ORDER BY id').bind(id).all();
+  expect(versions.results).toEqual([{ id: 99811 }, { id: 99812 }, { id: 99813 }]);
+  expect(await events()).toEqual([]);
+});
 it('refuses malformed classification without changing content',async()=>{await classify('table','pages','invalid');const before=await state();expect((await call('update')).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 
 it('rolls back history removal if its receipt trigger changes UUID sensitivity',async()=>{

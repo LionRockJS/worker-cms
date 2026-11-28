@@ -1,6 +1,6 @@
 # Audited mutation runner: porting plan
 
-**Status: stopped at its simple scope on 28 November 2026.** Host settings and Wave A1 are done (six writers); the rest stay as they are, as recorded under "Stopping point" below. This is an engineering refactor plan, not compliance evidence. It changes how writers are structured, not what they prove.
+**Status (28 November 2026):** Host settings, Wave A1 and the page–tag prototype are complete. P1 is implemented and awaiting the Workers suite. The earlier stopping point records why the other writers remain deferred. This is an engineering refactor plan, not compliance evidence.
 
 ## Goal
 
@@ -109,6 +109,49 @@ Design: an **aggregate** for one draft page ([`page-snapshot.ts`](../../src/core
 First user: [page–tag association](../../src/core/evidence/tag-association-evidence.ts), 102 → 61 lines, with all 87 tests unchanged. Counted from code, an add drops from about 10 round trips to 7. Dropping the aggregate's floor check fails two tests. A new test revokes an editor's page ownership during the change and expects a 503 with no write and no event; it passes on the original writer and on the aggregate, and fails when the aggregate's page-access guard is dropped.
 
 Next candidates for the aggregate are the draft editor and the batch writer, which repeat the same guards. They also need request-buffered page reads, 409 and denial answers, and multi-page snapshots, so each is a separate decision.
+
+## Next implementation: draft editor on the page aggregate (P1)
+
+**Goal:** move [`saveDraftContent` and `removeDraftHistory`](../../src/core/evidence/mutation-evidence.ts) (147 lines; the page editor, quick create, restore and history deletion) onto `PageSnapshot`, so the second and largest page writer proves the aggregate generalizes. The runner stays as it is apart from one read mode.
+
+**Why this one next:** it runs inside a signed-in request, like tag association. The batch writer and the trash lifecycle also run from queued jobs with only `env` and a user. That is the environment-only context the runner deliberately excludes, so they wait for a separate decision (P3).
+
+### What changes
+
+| # | Change | Where | Why the draft editor needs it |
+|---|---|---|---|
+| 1 | **Request read mode.** A source's reads can be `request` (recorded in the request read buffer and flushed, with request attribution) as well as today's background reads | runner `settle()`, about 5 lines | The editor logs `page.mutation-read` through `recordPageReads`, not as a background read |
+| 2 | **Content fields.** The aggregate guards the full page row (every content field), not only `id, uuid, page_type, updated_at` | `PageSnapshot` option `fields: 'content'` | The editor's `pageGuard` checks every content field before writing |
+| 3 | **Version set.** Optional snapshot of the page's version IDs, with a guard that the set is unchanged and a final check that exactly one new version was added | `PageSnapshot` option `versions: true`, plus an `expect` helper | Each save adds one `page_versions` row; history deletion removes a known subset |
+| 4 | **Target tags.** The tags a save will link are passed in, classified, and checked to exist with the same taxonomy | `extraTagIds` exists; add a final "links equal the target set" helper | A save replaces the page's tag set |
+| 5 | **New page.** A source for a page that does not exist yet: no row, no access check, only the target tags. A create also inserts the owner's access policy and checks it at the end | `PageSnapshot` returns an empty aggregate for `pageId: null` | Quick create and new pages |
+| 6 | **Error mapping.** The writer's unavailable error is `ContentBatchEvidenceUnavailableError`, so routes calling `contentMutationUnavailable` do not record a second outage. `sensitivity_reduction_requires_review` passes through unchanged | writer spec only (`unavailable`, `passthrough`) | The page, dashboard, tag and publish routes already map errors this way |
+
+Not changing: the denial path keeps its current behavior (record `management_permission_changed`, then fail as unavailable), and the save still returns the saved row through `returning`.
+
+### Steps
+
+1. Add the request read mode to the runner. Run every ported writer's tests (nothing should change: they all use background reads).
+2. Extend `PageSnapshot` with options 2–5. Tag association keeps its current options and must pass unchanged.
+3. Move `removeDraftHistory` first (no new page, no tag replacement). Run `content-mutation-evidence` and the history tests.
+4. Move `saveDraftContent` (update, then create, then restore).
+5. Mutation sanity checks: dropping the version-set guard, the content-field guard and the new-page policy check must each fail a test. Add a test for any that fails nothing, and confirm it also passes on the original writer, as done for page access.
+6. Count round trips before and after for save and history deletion.
+7. Full suite, then one commit per step 2–4.
+
+**Tests that must pass unchanged:** `content-mutation-evidence`, `quick-create-mutation-evidence`, `sensitivity-floors`, `page-access`, `page-tag-association-evidence`, and every other ported writer's file.
+
+**Estimate:** 1–1.5 engineering days. **Done when** both functions use the runner and the aggregate, every listed test passes unchanged, each new guard is shown to be covered, and round trips did not rise.
+
+**Implementation status:** Both functions use the runner and the page aggregate. The runner also preserves the editor's policy-denial receipt and binds draft document bodies outside the manifest size calculation. A local SQLite harness with the repository migrations counted the same database calls before and after for both functions: create 5, update/restore/history deletion 7 for unclassified pages and 8 for PHI, and a missing version 6 on the unclassified path. Removing the version-set, full-content or new-owner-policy check caused its targeted check to fail. The Workers suite is pending because the sandbox denies localhost listeners.
+
+### After P1 (each a separate decision)
+
+| Phase | Writers | Blocked on |
+|---|---|---|
+| P2 | Plugin page update and create | A `pluginCredential` actor with service-attributed receipts (these run in a request, so no context change) |
+| P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Environment-only (job) context in the runner, plus snapshots of many pages at once |
+| P4 | Taxonomies and tags | Writes that move the classification policy version inside the batch |
 
 ### Wave A2: content writers — deferred (page pattern)
 
