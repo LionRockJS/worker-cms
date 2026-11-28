@@ -32,17 +32,18 @@ Each extension is added by the first writer that needs it (named in the "First u
 
 | # | Extension | What it adds | First user |
 |---|---|---|---|
-| E1 | Several receipts per plan | `evidence` becomes a list. One operation ID is shared across the receipts, plus an optional per-receipt `targetIds` | Runtime types |
-| E2 | Classification from rows | `classify` may be a function of the snapshot rows and the plan, for page types, taxonomies and tag sets known only after reading | Tag association |
+| E1 | Several receipts per plan | `evidence` becomes a list. One operation ID is shared across the receipts, plus an optional per-receipt `targetIds` | Taxonomies (to confirm) |
+| E2 | Classification from rows | `classify` may be a function of the snapshot rows, and a plan may add containers, for page types, taxonomies and tag sets known only after reading | Runtime types (done) |
 | E3 | Read logging options | `read` becomes optional per snapshot, and can carry `uuidById` and page-type kinds so floor-aware page reads keep their exact evidence | Draft content |
 | E4 | Extra admission guards | `admit(rows)` returns more statements emitted with the admission guards and again at re-admission (page access, floors, version sets) | Page access |
 | E5 | Actor adapters | `sessionUser(permission)` exists. Adds `self()`, `job(lease, capability)`, `pluginCredential(auth, storeTable?)` and `system(via)`. Each returns the actor, its guards and how receipts are attributed (attributed vs service) | `self`: tag association; `job`: batch; `plugin`: automatic identity; `system`: job retention |
 | E6 | Result rows | `returning` statement appended last; its rows come back from `commit` (for example saving a draft returns the page) | Draft content |
 | E7 | Trailing statements | `tail(plan)` adds statements after the postconditions, such as job checkpoints and delegation guards | Batch edits |
 | E8 | Sinks | `primary` (default), `outbox` (containment operations that must succeed during a primary audit outage, with delivery after commit) and `planned` (counter projections with a final guard) | `outbox`: identity disconnect; `planned`: plugin sequences |
-| E9 | Error passthrough | `rethrow(error)` lets named errors escape unchanged, for example the sensitivity-reduction review error | Draft content |
+| E9 | Error passthrough | `passthrough(error)` lets the writer's own errors escape unchanged, with no outage incident | Locales (done) |
 | E10 | External inputs | Reads from another database (`PUBLISHED_DB`, R2) are passed into `decide` as unguarded input, because they cannot share the private D1 batch | Published-to-draft pull |
 | E11 | Lost-acknowledgment reconcile | `reconcile(plan)` checks for the writer's own receipt after an uncertain commit, returning the result or rethrowing; it never replays the write | Trash lifecycle |
+| E12 | Decide clock | `decide` may read the transaction clock once, with trusted extra columns such as a next ID; the runner reuses it as the timestamp baseline. A `null` plan means no change | Runtime types (done) |
 
 ## Waves
 
@@ -58,8 +59,8 @@ Line counts are the current file sizes. Estimates are engineering days, rough, a
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
-| [Runtime types and blueprint extensions](../../src/features/runtime-content-types/mutation-evidence.ts) | 96 | `runtime-type-mutation-evidence` | E1 | Three receipts |
-| [Locales and messages](../../src/features/i18n/mutation-evidence.ts) | 106 | `locale-mutation-evidence`, `i18n` | — | Closest to settings |
+| [Runtime types and blueprint extensions](../../src/features/runtime-content-types/mutation-evidence.ts) | 96 | `runtime-type-mutation-evidence` | E2, E12 | **Done.** Three operations with one receipt each. Round trips: create 9 → 5, no-op 8 → 4, remove 8 → 5 |
+| [Locales and messages](../../src/features/i18n/mutation-evidence.ts) | 106 | `locale-mutation-evidence`, `i18n` | E9 | **Done** (`e642aab`). Message save 8 → 5, no-op 8 → 4 |
 | [Plugin registration](../../src/features/plugins/registration-evidence.ts) | 102 | `plugin-registration-evidence` | E1 | Port before approval and settings: its `capturePluginMutationContext` is their shared snapshot |
 | [Plugin approval](../../src/features/plugins/approval-evidence.ts) | 212 | `plugin-approval-evidence` | E1 | Builds on the registration snapshot. Also guards before disclosing to the plugin |
 | [Plugin financial settings](../../src/features/plugins/settings-evidence.ts) | 68 | `plugin-financial-settings-evidence` | — | Builds on the registration snapshot |

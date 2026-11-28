@@ -1,11 +1,9 @@
 import type { AppContext } from '../../core/http/context';
-import { captureMutationAuthority } from '../../core/evidence/mutation-authority';
-import { classFor,classificationPolicyGuard,strongestClass } from '../../core/db/data-classes';
-import { attributedMutationAuditEvidence,contextActor } from '../../core/db/audit';
-import { abortIf } from '../../core/db/transaction-guard';
-import { guard, json, snapshot, type Row } from '../../core/db/bounded-mutation';
+import { beginAuditedMutation, type MutationPlan } from '../../core/evidence/audited-mutation';
+import type { ContainerKind } from '../../core/db/data-classes';
+import { contextActor } from '../../core/db/audit';
+import { guard, json, resultGuard, type Row } from '../../core/db/bounded-mutation';
 import { nextIdSql } from '../../core/pages/snapshot-id';
-import { auditBackgroundReads,flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { clearConfigCache } from '../../core/db/content-config';
@@ -27,70 +25,85 @@ function extensionsFromRaw(raw:string|null):Record<string,PageTypeExtension> {
   }
   return map;
 }
-async function unavailable(c:AppContext):Promise<never> {clearConfigCache();await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});throw new RuntimeTypeMutationUnavailableError();}
+async function unavailable(c:AppContext):Promise<never> {await recordAuditOutage(c.env,'health',[],contextActor(c),undefined,{captureIncomplete:true});throw new RuntimeTypeMutationUnavailableError();}
+const KEY=PAGE_TYPE_EXTENSIONS_SETTING_KEY;
+/** NULL timestamps in an expected row: set by this transaction (see resultGuard). */
 export async function prepareRuntimeTypeMutation(c:AppContext,table:Table) {
   assertRegulatedWritesAllowed(c.env);
-  try{return await prepare(c,table);}catch{return unavailable(c);}
-}
-async function prepare(c:AppContext,table:Table) {
-  const {authority,policy}=await captureMutationAuthority(c,table==='page_types'?'pagetype:write':'blocktype:write');
-  const [pages,blocks,taxonomies,settings]=await Promise.all([snapshot<Row>(c,'page_types',fields('page_types')),snapshot<Row>(c,'block_types',BASE),snapshot<Row>(c,'taxonomies',TAXONOMY),snapshot<Row>(c,'settings',SETTING,'key=?',[PAGE_TYPE_EXTENSIONS_SETTING_KEY])]);
+  let mutation:Awaited<ReturnType<typeof begin>>;
+  try{mutation=await begin(c,table);}catch(error){clearConfigCache();throw error;}
+  const {pages,blocks,taxonomies,settings}=mutation.rows;
   const catalog={page_types:pages,block_types:blocks};const source=catalog[table];
-  const admission=()=>[authority.guard(),classificationPolicyGuard(c.env,policy),guard(c,'page_types',fields('page_types'),pages),guard(c,'block_types',BASE,blocks),guard(c,'taxonomies',TAXONOMY,taxonomies),guard(c,'settings',SETTING,settings,'key=?',[PAGE_TYPE_EXTENSIONS_SETTING_KEY])];
-  const protection=(slugs:string[],taxa:string[])=>{
-    const classes=['page_types','block_types','taxonomies','settings'].map(t=>classFor(policy,'table',t));
-    for(const slug of [...pages.map(r=>String(r.slug)),...slugs])classes.push(classFor(policy,'page_type',slug));
-    for(const tax of [...taxonomies.map(r=>String(r.slug)),...taxa])classes.push(classFor(policy,'taxonomy',tax));
-    return strongestClass(classes);
+  const other:Table=table==='page_types'?'block_types':'page_types';
+  const unchanged={
+    others:()=>[guard(c,other,fields(other),catalog[other]),guard(c,'taxonomies',TAXONOMY,taxonomies),guard(c,'settings',SETTING,settings,'key=?',[KEY])],
+    catalogues:()=>[guard(c,'page_types',fields('page_types'),pages),guard(c,'block_types',BASE,blocks),guard(c,'taxonomies',TAXONOMY,taxonomies)],
   };
-  const readClass=protection([],[]);
-  await auditBackgroundReads(c.env,[{action:'schema.mutation-read',kind:'table',key:'page_types',targetType:'page_type',ids:pages.map(r=>String(r.id)),count:pages.length},
-    {action:'schema.mutation-read',kind:'table',key:'block_types',targetType:'block_type',ids:blocks.map(r=>String(r.id)),count:blocks.length},
-    {action:'schema.mutation-read',kind:'table',key:'taxonomies',targetType:'taxonomy',ids:taxonomies.map(r=>String(r.id)),count:taxonomies.length},
-    {action:'schema.extension-read',kind:'table',key:'settings',targetType:'settings',ids:settings.map(r=>String(r.key)),count:settings.length}].map(read=>({...read,kind:'table' as const,minimumClass:readClass==='none'?undefined:readClass})),contextActor(c));
-  const finish=()=>[authority.guard(),classificationPolicyGuard(c.env,policy)];
-  const otherGuards=()=>[guard(c,table==='page_types'?'block_types':'page_types',fields(table==='page_types'?'block_types':'page_types'),catalog[table==='page_types'?'block_types':'page_types']),guard(c,'taxonomies',TAXONOMY,taxonomies),guard(c,'settings',SETTING,settings,'key=?',[PAGE_TYPE_EXTENSIONS_SETTING_KEY])];
-  async function run<T>(work:()=>Promise<T>):Promise<T> {try{assertRegulatedWritesAllowed(c.env);if(await flushReadAudit(c))throw new Error('Schema read evidence unavailable');const result=await work();clearConfigCache();return result;}catch{return unavailable(c);}}
+  const protection=(slugs:string[],taxa:string[]):Array<[ContainerKind,string]>=>[...slugs.map(slug=>['page_type',slug] as [ContainerKind,string]),...taxa.map(tax=>['taxonomy',tax] as [ContainerKind,string])];
+  async function run(decide:Parameters<typeof mutation.commit>[0]):Promise<void> {try{await mutation.commit(decide);}finally{clearConfigCache();}}
   return {
     row(id:number):Row|undefined {const row=source.find(r=>r.id===id);return row?{...row}:undefined;},
     taxonomies:taxonomies.map(r=>({slug:String(r.slug),name:String(r.name)})),
-    async extensions(){try{return Object.fromEntries(Object.entries(extensionsFromRaw(settings[0]?.value as string??null)).map(([slug,value])=>[slug,{blocks:value.blocks??[],taxonomies:value.taxonomies??[]}]));}catch{return unavailable(c);}},
-    save(values:Record<string,string|number|null>,id?:number):Promise<number> {return run(async()=>{
+    async extensions(){try{return Object.fromEntries(Object.entries(extensionsFromRaw(settings[0]?.value as string??null)).map(([slug,value])=>[slug,{blocks:value.blocks??[],taxonomies:value.taxonomies??[]}]));}catch{clearConfigCache();return unavailable(c);}},
+    async save(values:Record<string,string|number|null>,id?:number):Promise<number> {let result=0;await run(async(_rows,tools):Promise<MutationPlan|null>=>{
       if(id!==undefined&&(!Number.isSafeInteger(id)||id<=0))throw new Error('Invalid schema target');
       const before=id===undefined?undefined:source.find(r=>r.id===id);if(id!==undefined&&!before)throw new Error('Schema target disappeared');
       const columns=['slug','name','blueprint',...(table==='page_types'?['block_lists','taxonomy_lists']:[]),'weight'];
       if(columns.some(f=>values[f]===undefined)||!values.slug||!values.name||!Number.isFinite(values.weight)||!Array.isArray(JSON.parse(String(values.blueprint))))throw new Error('Invalid schema values');
       const taxa=table==='page_types'?[...array(before?.taxonomy_lists),...array(values.taxonomy_lists)]:[];if(table==='page_types'){array(values.block_lists);array(before?.block_lists);}json(values);
-      const changed=columns.filter(f=>!before||before[f]!==values[f]);if(!changed.length){await c.env.DB.batch(admission());return Number(before!.id);}
-      const clock=await c.env.DB.prepare(`SELECT CURRENT_TIMESTAMP now,${nextIdSql(table)} next_id`).first<{now:string;next_id:number}>();
-      if(!clock||(!before&&(!Number.isSafeInteger(clock.next_id)||clock.next_id<=0)))throw new Error('Unsafe schema identity');
-      const targetId=before?.id??clock.next_id,uuid=before?.uuid??crypto.randomUUID();const next:Row={...before,id:targetId,uuid,created_at:before?.created_at??clock.now,updated_at:clock.now};for(const f of columns)next[f]=values[f];
+      const changed=columns.filter(f=>!before||before[f]!==values[f]);if(!changed.length){result=Number(before!.id);return null;}
+      const clock=await tools.clock(`${nextIdSql(table)} AS next_id`);
+      if(!before&&(!Number.isSafeInteger(clock.next_id)||Number(clock.next_id)<=0))throw new Error('Unsafe schema identity');
+      const targetId=before?.id??Number(clock.next_id),uuid=before?.uuid??crypto.randomUUID();const next:Row={...before,id:targetId,uuid,created_at:before?.created_at??null,updated_at:null};for(const f of columns)next[f]=values[f];
       const expected=before?source.map(r=>r.id===id?next:r):[...source,next];if(expected.length>5000)throw new Error('Schema catalogue requires review');json(expected);
-      const audit=table==='page_types'?'page_type':'block_type';const receipt=attributedMutationAuditEvidence(c.env,c.get('user'),{action:`${audit}.${before?'update':'create'}`,entityType:audit,entityId:String(uuid),detail:{operation_id:crypto.randomUUID(),id:targetId,fields:changed}},protection([String(before?.slug??''),String(values.slug)],taxa),policy,{context:c});
-      const business=before?c.env.DB.prepare(`UPDATE ${table} SET ${columns.map(f=>`${f}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(...columns.map(f=>values[f]),id!):c.env.DB.prepare(`INSERT INTO ${table}(id,uuid,${columns.join(',')}) VALUES (?,?,${columns.map(()=>'?').join(',')})`).bind(targetId,uuid,...columns.map(f=>values[f]));
-      await c.env.DB.batch([...admission(),business,abortIf(c.env,'changes()<>1'),receipt.write,receipt.guard,
-        guard(c,table,fields(table).filter(f=>f!=='created_at'&&f!=='updated_at'),expected),
-        guard(c,table,fields(table),source.filter(r=>r.id!==id),'id<>?',[targetId]),
-        abortIf(c.env,`NOT EXISTS (SELECT 1 FROM ${table} WHERE id=? AND updated_at>=? AND updated_at<=CURRENT_TIMESTAMP AND ${before?'created_at IS ?':'created_at>=? AND created_at<=CURRENT_TIMESTAMP'})`,[targetId,clock.now,before?.created_at??clock.now]),...otherGuards(),...finish()]);
-      return Number(targetId);
-    });},
-    remove(id:number):Promise<boolean> {return run(async()=>{
+      const audit=table==='page_types'?'page_type':'block_type';result=Number(targetId);
+      return {
+        writes:[before?{sql:`UPDATE ${table} SET ${columns.map(f=>`${f}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=?`,args:[...columns.map(f=>values[f]),id!]}
+          :{sql:`INSERT INTO ${table}(id,uuid,${columns.join(',')}) VALUES (?,?,${columns.map(()=>'?').join(',')})`,args:[targetId,uuid,...columns.map(f=>values[f])]}],
+        evidence:{entry:{action:`${audit}.${before?'update':'create'}`,entityType:audit,entityId:String(uuid),detail:{id:targetId,fields:changed}}},
+        classify:protection([String(before?.slug??''),String(values.slug)],taxa),
+        expect:since=>[resultGuard(c,table,fields(table),expected,since),...unchanged.others()],
+      };
+    });return result;},
+    async remove(id:number):Promise<boolean> {let removed=false;await run(():MutationPlan|null=>{
       if(!Number.isSafeInteger(id)||id<=0)throw new Error('Invalid schema target');const before=source.find(r=>r.id===id);
-      if(!before){await c.env.DB.batch(admission());return false;}
-      const audit=table==='page_types'?'page_type':'block_type';const receipt=attributedMutationAuditEvidence(c.env,c.get('user'),{action:`${audit}.delete`,entityType:audit,entityId:String(before.uuid),detail:{operation_id:crypto.randomUUID(),id}},protection([String(before.slug)],table==='page_types'?array(before.taxonomy_lists):[]),policy,{context:c});
-      await c.env.DB.batch([...admission(),c.env.DB.prepare(`DELETE FROM ${table} WHERE id=?`).bind(id),abortIf(c.env,'changes()<>1'),receipt.write,receipt.guard,guard(c,table,fields(table),source.filter(r=>r.id!==id)),...otherGuards(),...finish()]);return true;
-    });},
-    extend(slug:string,extension:PageTypeExtension):Promise<void> {return run(async()=>{
+      if(!before)return null;
+      const audit=table==='page_types'?'page_type':'block_type';removed=true;
+      return {
+        writes:[{sql:`DELETE FROM ${table} WHERE id=?`,args:[id]}],
+        evidence:{entry:{action:`${audit}.delete`,entityType:audit,entityId:String(before.uuid),detail:{id}}},
+        classify:protection([String(before.slug)],table==='page_types'?array(before.taxonomy_lists):[]),
+        expect:()=>[guard(c,table,fields(table),source.filter(r=>r.id!==id)),...unchanged.others()],
+      };
+    });return removed;},
+    extend(slug:string,extension:PageTypeExtension):Promise<void> {return run(async():Promise<MutationPlan|null>=>{
       if(table!=='page_types'||!slug||['__proto__','prototype','constructor'].includes(slug))throw new Error('Invalid schema extension');
       const map=extensionsFromRaw(settings[0]?.value as string??null);const old=map[slug]??{blocks:[],taxonomies:[]};array(extension.blocks);array(extension.taxonomies);
-      if(json(old.blocks??[])===json(extension.blocks)&&json(old.taxonomies??[])===json(extension.taxonomies)){await c.env.DB.batch(admission());return;}
+      if(json(old.blocks??[])===json(extension.blocks)&&json(old.taxonomies??[])===json(extension.taxonomies))return null;
       if(extension.blocks.length||extension.taxonomies.length)map[slug]=extension;else delete map[slug];if(Object.keys(map).length>5000)throw new Error('Extension catalogue requires review');const value=json(map);
       const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(slug)))).map(b=>b.toString(16).padStart(2,'0')).join('');
-      const receipt=attributedMutationAuditEvidence(c.env,c.get('user'),{action:'page_type.extend',entityType:'page_type',entityId:`extension:${digest}`,detail:{operation_id:crypto.randomUUID(),fields:['blocks','taxonomies'],blocks_before:(old.blocks??[]).length,blocks_after:extension.blocks.length,taxonomies_before:(old.taxonomies??[]).length,taxonomies_after:extension.taxonomies.length}},protection([slug],[...(old.taxonomies??[]),...extension.taxonomies]),policy,{context:c});
-      const clock=await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP now').first<{now:string}>();if(!clock)throw new Error('Schema clock unavailable');
-      await c.env.DB.batch([...admission(),c.env.DB.prepare(`INSERT INTO settings(key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`).bind(PAGE_TYPE_EXTENSIONS_SETTING_KEY,value),abortIf(c.env,'changes()<>1'),receipt.write,receipt.guard,
-        guard(c,'page_types',fields('page_types'),pages),guard(c,'block_types',BASE,blocks),guard(c,'taxonomies',TAXONOMY,taxonomies),
-        abortIf(c.env,`NOT EXISTS (SELECT 1 FROM settings WHERE key=? AND value IS ? AND updated_at>=? AND updated_at<=CURRENT_TIMESTAMP AND ${settings[0]?'created_at IS ?':'created_at>=? AND created_at<=CURRENT_TIMESTAMP'})`,[PAGE_TYPE_EXTENSIONS_SETTING_KEY,value,clock.now,settings[0]?.created_at??clock.now]),...finish()]);
+      return {
+        writes:[{sql:'INSERT INTO settings(key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP',args:[KEY,value]}],
+        evidence:{entry:{action:'page_type.extend',entityType:'page_type',entityId:`extension:${digest}`,detail:{fields:['blocks','taxonomies'],blocks_before:(old.blocks??[]).length,blocks_after:extension.blocks.length,taxonomies_before:(old.taxonomies??[]).length,taxonomies_after:extension.taxonomies.length}}},
+        classify:protection([slug],[...(old.taxonomies??[]),...extension.taxonomies]),
+        expect:since=>[...unchanged.catalogues(),resultGuard(c,'settings',SETTING,[{key:KEY,value,created_at:settings[0]?.created_at??null,updated_at:null}],since,'key=?',[KEY])],
+      };
     });},
   };
+}
+function begin(c:AppContext,table:Table) {
+  const tableRead=(key:string,targetType:string)=>({action:'schema.mutation-read',kind:'table' as const,key,targetType,id:(r:Row)=>String(r.id)});
+  return beginAuditedMutation(c,{
+    permission:table==='page_types'?'pagetype:write':'blocktype:write',
+    // Every existing page type and taxonomy, so planning reads keep their class.
+    classify:rows=>[...(['page_types','block_types','taxonomies','settings'].map(t=>['table',t]) as Array<[ContainerKind,string]>),
+      ...rows.pages.map(r=>['page_type',String(r.slug)] as [ContainerKind,string]),...rows.taxonomies.map(r=>['taxonomy',String(r.slug)] as [ContainerKind,string])],
+    snapshot:{
+      pages:{table:'page_types',fields:fields('page_types'),where:'1',args:[],read:tableRead('page_types','page_type')},
+      blocks:{table:'block_types',fields:BASE,where:'1',args:[],read:tableRead('block_types','block_type')},
+      taxonomies:{table:'taxonomies',fields:TAXONOMY,where:'1',args:[],read:tableRead('taxonomies','taxonomy')},
+      settings:{table:'settings',fields:SETTING,where:'key=?',args:[KEY],read:{action:'schema.extension-read',kind:'table',key:'settings',targetType:'settings',id:r=>String(r.key)}},
+    },
+    unavailable:()=>new RuntimeTypeMutationUnavailableError(),
+  });
 }
