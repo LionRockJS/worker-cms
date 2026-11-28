@@ -36,13 +36,13 @@ Each extension is added by the first writer that needs it (named in the "First u
 | E2 | Classification from rows | `classify` may be a function of the snapshot rows, and a plan may add containers, for page types, taxonomies and tag sets known only after reading | Runtime types (done) |
 | E3 | Read logging options | `read` becomes optional per snapshot, and can carry `uuidById` and page-type kinds so floor-aware page reads keep their exact evidence | Draft content |
 | E4 | Pre-write checks | `plan.admit` statements run after admission and before the writes (for example an ID allocator still matching what `decide` read) | Credits administration (done) |
-| E5 | Actor adapters | Signed-in writers use a capability or `self`. Request-based plugin page updates supply their captured credential principal, classification and guards. Store-table, job and system adapters remain separate. | `self`: credits administration. Plugin request authority: plugin page update. |
+| E5 | Actor adapters | Signed-in writers use a capability or `self`. Request-based plugin writers supply their captured credential principal, classification and guards. Job writers use their captured subject and lease guards with optional request attribution. Store-table and system adapters remain separate. | Credits administration, plugin pages and claimed content jobs |
 | E6 | Result rows | `returning` runs last. A session plan returns the first row and a service plan returns all rows. | Plugin registration and plugin page update (implemented) |
-| E7 | Trailing statements | `tail(plan)` adds statements after the postconditions, such as job checkpoints and delegation guards | Batch edits |
+| E7 | Trailing statements | A grouped plan can run checkpoint statements after its page receipts and before final state and receipt verification. | Batch edits (implemented) |
 | E8 | Sinks | `primary` (default), `outbox` (containment operations that must succeed during a primary audit outage, with delivery after commit) and `planned` (counter projections with a final guard) | `outbox`: identity disconnect; `planned`: plugin sequences |
 | E9 | Error passthrough | `passthrough(error)` lets the writer's own errors escape unchanged, with no outage incident | Locales (done) |
 | E10 | External inputs | Reads from another database (`PUBLISHED_DB`, R2) are passed into `decide` as unguarded input, because they cannot share the private D1 batch | Published-to-draft pull |
-| E11 | Lost-acknowledgment reconcile | `reconcile(plan)` checks for the writer's own receipt after an uncertain commit, returning the result or rethrowing; it never replays the write | Trash lifecycle |
+| E11 | Lost-acknowledgment reconciliation | The runner can verify exact receipts, state and current authority in a read-only batch after a failed submission. The original write is submitted once. | Trash lifecycle (implemented) |
 | E13 | Follow-up snapshots | `decide` may snapshot rows that depend on the first ones (for example a plugin's owned approvals). They are read, logged and guarded at admission exactly like the first snapshot | Plugin registration (done) |
 | E14 | Policy-derived classes | `decide` can read `tools.policy` and add raw classes, for rules such as a wildcard page-type grant covering every classified page type. Follow-up snapshots may classify from the rows they read | Plugin financial settings (done) |
 | E12 | Decide clock | `decide` may read the transaction clock once, with trusted extra columns such as a next ID; the runner reuses it as the timestamp baseline. A `null` plan means no change | Runtime types (done) |
@@ -162,7 +162,7 @@ The same HTTP fixtures executed the following D1 calls before and after P1. Thes
 | Phase | Writers | Blocked on |
 |---|---|---|
 | P2 | Plugin page update, create and duplicate | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
-| P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Environment-only (job) context in the runner, plus snapshots of many pages at once |
+| P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P4 | Taxonomies and tags | Writes that move the classification policy version inside the batch |
 
 #### P2 fit check
@@ -205,6 +205,28 @@ The runner reports whether it submitted the content batch. The plugin writer sti
 
 All **209 existing create and duplicate tests** and **1,000 update and P1 regression tests** passed in standalone workerd. Disabling final receipt verification caused four create and duplicate regressions to fail, including a rewrite of a scope denial during the intent transaction. Standard `npm test` remains blocked by the self-hosted plugin directory test's localhost listener.
 
+#### P3 batch and lifecycle transactions
+
+- Batch weights, reorder and local bulk edits use the runner with signed-in user or claimed-job attribution. The worker supplies the current lease, and the runner commits the optional checkpoint with its page writes and receipts, including empty slices. Final guards check the checkpoint's effects on the page transaction.
+- Trash, restore and purge batch their dependent snapshots under the captured classification policy. Claimed trash jobs can prove a submitted move by checking the exact receipt, current lease and source and destination state before publication withdrawal.
+- Plugin delete passes its captured classification policy and credential guards into the shared lifecycle runner. The route owns selection and the intent receipt reused across chunks. It advances progress and starts external effects after acknowledging each chunk.
+
+| Request fixture | D1 calls before → after |
+|---|---:|
+| Batch weights | 13 → 11 |
+| Reorder | 14 → 12 |
+| Inline bulk text replacement | 11 → 9 |
+| Inline bulk tag addition | 12 → 10 |
+| Claimed bulk edit with checkpoint | 22 → 20 |
+| Host trash | 37 → 27 |
+| Inline bulk trash | 32 → 22 |
+| Restore | 26 → 15 |
+| Purge | 23 → 15 |
+| Plugin single or batch delete | 60 → 49 |
+| Plugin delete children | 49 → 38 |
+
+All **352 existing P3 tests** and **1,209 earlier regressions** passed in standalone workerd. The bulk publication round-trip budget stayed within its existing limits, and removing final receipt verification caused the checkpoint and plugin receipt corruption tests to fail. Standard `npm test` remains blocked by the localhost listener restriction.
+
 ### Wave A2: content writers — deferred (page pattern)
 
 | Writer | Lines | Tests | Needs | Notes |
@@ -219,13 +241,13 @@ All **209 existing create and duplicate tests** and **1,000 update and P1 regres
 
 [`role-writes.ts`](../../src/features/users-roles/role-writes.ts), [`roles.ts`](../../src/features/users-roles/routes/roles.ts), [`users.ts`](../../src/features/users-roles/routes/users.ts) and [`ip-access.ts`](../../src/features/users-roles/routes/ip-access.ts) (about 700 lines; tests `role-mutation-audit`, `role-store`, `ip-access`, `initial-user-roles`). These build receipts with `mutationAuditSelect`, which writes one receipt per affected row from SQL inside the batch (for example, every user losing a deleted role). **Decision gate:** add a receipt-from-SQL variant to the runner (E1b), or leave this family as is. Recommendation: leave it unless Wave A2 shows the declarations staying small, because its SQL-projected receipts are already a single coherent pattern.
 
-### Wave B: queued jobs — deferred (page pattern)
+### Wave B: queued jobs — P3 implementation
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
-| [Batch weights, reorder and bulk edits](../../src/core/evidence/batch-mutation-evidence.ts) | 204 | `page-batch-mutation-evidence`, `bulk-publish-round-trips` | E5 `job`, E1, E2, E7 | Per-page receipts. The round-trip budget test must not get worse |
-| [Job progress checkpoint](../../src/features/jobs/local-bulk-checkpoint.ts) | 47 | `page-batch-mutation-evidence` | E7 | Becomes the batch writer's `tail` |
-| [Trash, restore and purge lifecycle](../../src/features/trash/lifecycle-mutation-evidence.ts) | 236 | `page-lifecycle-mutation-evidence`, `record-lifecycle`, `plugin-page-delete-evidence` | E5 `job`, E1, E11 | Same-invocation reconcile before published withdrawal |
+| [Batch weights, reorder and bulk edits](../../src/core/evidence/batch-mutation-evidence.ts) | 204 | `page-batch-mutation-evidence`, `bulk-publish-round-trips` | E5 `job`, E1, E2, E7 | Runner handles attributed batch and per-page receipts. Existing round-trip budget passed. |
+| [Job progress checkpoint](../../src/features/jobs/local-bulk-checkpoint.ts) | 47 | `page-batch-mutation-evidence` | E7 | Runs in the plan's `tail` before final verification. |
+| [Trash, restore and purge lifecycle](../../src/features/trash/lifecycle-mutation-evidence.ts) | 236 | `page-lifecycle-mutation-evidence`, `record-lifecycle`, `plugin-page-delete-evidence` | E5 `job`, E1, E11 | Runner checks exact outcome before publication withdrawal after a lost acknowledgement. |
 
 ### Wave C: plugin credential (about 3–4 days)
 
@@ -240,7 +262,7 @@ All of these authenticate a plugin by its registry row, secret and identity pin 
 | [Tag ensure](../../src/features/plugins/tag-ensure-evidence.ts) | 88 | `plugin-tag-ensure-evidence` | E1 | Per-tag and batch receipts |
 | [Page update](../../src/features/plugins/page-update-evidence.ts) | 185 | `plugin-page-update-evidence` | E2, E4 | Uses the highest audit `seq` as a concurrency witness; keep it as an admission guard |
 | [Page create and duplicate](../../src/features/plugins/page-create-evidence.ts) | 199 | `plugin-page-create-evidence`, `plugin-page-duplicate-evidence` | E1, E2, E4 | Seven receipts and 21 guards: the hardest in this wave. Escape hatch candidate |
-| [Page delete](../../src/features/plugins/page-delete-evidence.ts) | 113 | `plugin-page-delete-evidence` | Wave B lifecycle | Delegates to the trash lifecycle, so it follows Wave B |
+| [Page delete](../../src/features/plugins/page-delete-evidence.ts) | 113 | `plugin-page-delete-evidence` | Wave B lifecycle | Each content chunk commits through the lifecycle runner. The route retains operation intent and progress. |
 | [Metered debits](../../src/features/credits/debit-evidence.ts) and [contributor credits API](../../src/features/credits/routes/contributor-api.ts) | 506 | `plugin-credits`, `credits`, `diamond-credits` | E1 | Keyed replay must still prove the stored response in the debit batch |
 | [Plugin publish API](../../src/features/plugins/routes/publish-api.ts) | 157 | `outbound-publication-audit` | — | |
 | [Submission ingestion](../../src/features/publish/submission-ingest.ts) | 276 | `submission-ingest` | E10, `system` or `plugin` | Two entry points: scheduled service and plugin |

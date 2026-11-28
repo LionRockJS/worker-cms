@@ -1,5 +1,6 @@
 import type { Env, JWTPayload } from '../../types';
 import type { AuditActor } from '../db/audit';
+import type { DataClassMap } from '../db/data-classes';
 import type { AppContext } from '../http/context';
 import type { ContentBatchContext } from '../evidence/batch-mutation-evidence';
 
@@ -7,6 +8,7 @@ import type { ContentBatchContext } from '../evidence/batch-mutation-evidence';
  * The trash service never resolves contributor credentials or manufactures a CMS user. */
 export interface ServiceTrashAuthority {
   actor: AuditActor;
+  policy: DataClassMap;
   check: () => D1PreparedStatement[];
   allows: (pageType: string) => boolean;
   dataClass: 'none'|'pii'|'phi';

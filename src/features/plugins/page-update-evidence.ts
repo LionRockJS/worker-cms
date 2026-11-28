@@ -9,7 +9,7 @@ import { snapshot, guard, resultGuard, fingerprint, json, type Row } from '../..
 import { abortIf } from '../../core/db/transaction-guard';
 import { timingSafeEqualStr } from '../../core/http/crypto';
 import { auditBackgroundReads } from '../../core/http/access-log';
-import { beginServiceAuditedMutation, type PlannedWrite, type ServiceMutationGroup } from '../../core/evidence/audited-mutation';
+import { beginServiceAuditedMutation, type PlannedWrite, type MutationGroup } from '../../core/evidence/audited-mutation';
 import { requestContext } from '../../core/http/request-context';
 import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../../core/pages/snapshot-id';
 import { pageTypeScopeAllows } from './page-types';
@@ -168,7 +168,7 @@ export async function commitPluginPageUpdates(c: AppContext, source: Sources, ch
     const newVersions: Array<{ uuid: string; page_id: number; lect: string | null; action: string }> = [];
     const relationshipGuards: D1PreparedStatement[] = [];
 
-    const groups: ServiceMutationGroup[] = denied.map(refusal => ({
+    const groups: MutationGroup[] = denied.map(refusal => ({
       evidence: {
         entry: { action: 'page.update', entityType: 'page', entityId: refusal.page.uuid,
           outcome: 'denied', detail: { ...detail, reason: refusal.reason } },

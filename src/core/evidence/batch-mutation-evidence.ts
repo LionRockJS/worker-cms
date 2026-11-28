@@ -3,12 +3,13 @@ import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../pages/snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization, captureContentJobAuthorization } from '../auth/access-authorization';
-import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass, type DataClass } from '../db/data-classes';
-import { attributedMutationAuditEvidence, type AuditActor } from '../db/audit';
+import { classFor, classificationPolicyGuard, strongestClass, type DataClass } from '../db/data-classes';
+import type { AuditActor } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { auditBackgroundReads } from '../http/access-log';
 import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+import { beginAttributedAuditedMutation, type MutationGroup, type PlannedWrite } from './audited-mutation';
 
 export interface ContentJobLease {
   id: string;
@@ -41,10 +42,11 @@ async function prepare(env: Env, user: JWTPayload, pages: Array<Pick<Page,'id'|'
   const job = context.job && await captureContentJobAuthorization(env,user,context.job.guard);
   const authority = job?.authorization ?? await captureAccessAuthorization(env,user,'content:write');
   if (!authority.allowed) throw new Error('Content authority unavailable');
-  const policy = await resolveDataClasses(env,true);
+  const policy = authority.policy;
   if (!policy.ok) throw new Error('Content classification unavailable');
   const ids = pages.map(p=>p.id);
-  const [links,tags,floors,versions] = await env.DB.batch([
+  const [,links,tags,floors,versions] = await env.DB.batch([
+    classificationPolicyGuard(env,policy),
     env.DB.prepare('SELECT id,page_id,tag_id FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT 5001').bind(bounded(ids)),
     env.DB.prepare(`SELECT id,taxonomy_slug FROM tags WHERE id IN (SELECT value FROM json_each(?))
       OR id IN (SELECT tag_id FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?))) ORDER BY id LIMIT 5001`).bind(bounded(extraTagIds),bounded(ids)),
@@ -57,7 +59,7 @@ async function prepare(env: Env, user: JWTPayload, pages: Array<Pick<Page,'id'|'
   const floorRows = floors.results as Array<{uuid:string;level:number}>;
   const versionRows = versions.results as Array<{id:number;page_id:number}>;
   if (floorRows.some(f=>f.level!==1&&f.level!==2)) throw new Error('Content floor invalid');
-  const guards = [authority.guard(),pageAccessGuard(env,user,pages.map(page => page.uuid),true),classificationPolicyGuard(env,policy)];
+  const guards = [pageAccessGuard(env,user,pages.map(page => page.uuid),true)];
   if (job) guards.push(job.delegationGuard);
   const membershipGuard = () => abortIf(env, `(SELECT COUNT(*) FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?))) <> ?
     OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_tags t WHERE t.id=json_extract(e.value,'$.id')
@@ -84,12 +86,11 @@ async function prepare(env: Env, user: JWTPayload, pages: Array<Pick<Page,'id'|'
   const grouped = new Map<string,typeof pages>();
   for (const page of pages) { const key=page.page_type??'default'; const group=grouped.get(key)??[];group.push(page);grouped.set(key,group); }
   await auditBackgroundReads(env,[...grouped].map(([key,group])=>({action:'page.batch-mutation-read',kind:'page_type' as const,key,targetType:'page',
-    ids:group.map(p=>String(p.id)),count:group.length,uuidById:Object.fromEntries(group.map(p=>[String(p.id),p.uuid]))})),actor);
-  const operationId = crypto.randomUUID();
-  const details = {operation_id:operationId,...(context.job ? {job_id:context.job.id,job_attempt:context.job.attempt}: {})};
-  const evidence = (entry: Parameters<typeof attributedMutationAuditEvidence>[2], classification: 'none'|'pii'|'phi', targets?: string[]) =>
-    attributedMutationAuditEvidence(env,user,{...entry,detail:{...entry.detail,...details}},classification,policy,{context:context.request,via:actor.via??undefined,targetIds:targets});
-  return {guards,policy,linkRows,tagRows,versionRows,floorRows,dataClass,evidence,membershipGuard,tagGuard,floorGuard,ids};
+    ids:group.map(p=>String(p.id)),count:group.length,uuidById:Object.fromEntries(group.map(p=>[String(p.id),p.uuid]))})),actor,{policy});
+  const mutation = await beginAttributedAuditedMutation(env, { classify: [], snapshot: {} },
+    { policy, check: () => [authority.guard()] }, { user, request: context.request, via: actor.via ?? undefined });
+  const jobDetail = context.job ? { job_id: context.job.id, job_attempt: context.job.attempt } : {};
+  return {guards,mutation,jobDetail,linkRows,tagRows,versionRows,floorRows,dataClass,membershipGuard,tagGuard,floorGuard,ids};
 }
 
 /** One transaction for all selected weights; a reorder also checks the entire
@@ -108,20 +109,34 @@ async function updateWeights(env: Env,user: JWTPayload, updates: PageWeight[], c
     if (sequence.rows.length>5000) throw new Error('Reorder manifest requires review');
     guards.push(abortIf(env,'(SELECT COUNT(*) FROM pages WHERE page_type = ?) <> ?',[sequence.pageType,sequence.rows.length]),rowGuard(env,sequence.rows,METADATA_FIELDS));
   }
-  if (!changed.length) { await env.DB.batch(guards); return; }
+  if (!changed.length) {
+    await prepared.mutation.commit(() => ({ admit: guards, groups: [], expect: [] }));
+    return;
+  }
   const manifest = changed.map(p=>({id:p.id,uuid:p.uuid,weight_before:p.weight,weight_after:byId.get(p.id)!}));
   const finalRows = rows.results.map(p=>({...p,weight:byId.get(p.id)!}));
-  const classes = changed.map(prepared.dataClass);
-  const dataClass = strongestClass(classes);
-  const receipt = prepared.evidence({action:sequence?'page.reorder':updates.length===1?'page.weight':'page.weights',entityType:'page',detail:{targets:manifest}},dataClass,changed.map(p=>p.uuid));
-  await env.DB.batch([...guards,
-    env.DB.prepare(`UPDATE pages SET weight=json_extract(e.value,'$.weight_after') FROM json_each(?) e
-      WHERE pages.id=json_extract(e.value,'$.id')`).bind(bounded(manifest)),
-    abortIf(env,'changes() <> ?',[changed.length]),receipt.write,receipt.guard,
-    rowGuard(env,finalRows,METADATA_FIELDS),prepared.membershipGuard(),prepared.tagGuard(),prepared.floorGuard(),classificationPolicyGuard(env,prepared.policy),prepared.guards[0],
-    ...(sequence ? [abortIf(env,'(SELECT COUNT(*) FROM pages WHERE page_type=?) <> ?',[sequence.pageType,sequence.rows.length]),
-      rowGuard(env,sequence.rows.map(p=>({...p,weight:byId.get(p.id)??p.weight})),METADATA_FIELDS)] : []),
-    ...(context.job ? [context.job.guard] : [])]);
+  await prepared.mutation.commit(() => ({
+    admit: guards,
+    groups: [{
+      writes: [{
+        sql: `UPDATE pages SET weight=json_extract(e.value,'$.weight_after') FROM json_each(?) e
+          WHERE pages.id=json_extract(e.value,'$.id')`,
+        args: [bounded(manifest)], changes: changed.length,
+      }],
+      evidence: {
+        entry: { action: sequence ? 'page.reorder' : updates.length === 1 ? 'page.weight' : 'page.weights',
+          entityType: 'page', detail: { targets: manifest, ...prepared.jobDetail } },
+        dataClass: strongestClass(changed.map(prepared.dataClass)),
+        targetIds: changed.map(page => page.uuid),
+      },
+    }],
+    expect: [
+      rowGuard(env,finalRows,METADATA_FIELDS),prepared.membershipGuard(),prepared.tagGuard(),prepared.floorGuard(),
+      ...(sequence ? [abortIf(env,'(SELECT COUNT(*) FROM pages WHERE page_type=?) <> ?',[sequence.pageType,sequence.rows.length]),
+        rowGuard(env,sequence.rows.map(p=>({...p,weight:byId.get(p.id)??p.weight})),METADATA_FIELDS)] : []),
+      ...(context.job ? [context.job.guard] : []),
+    ],
+  }));
 }
 
 /** A bounded local bulk slice. Its changed pages and all receipts commit together. */
@@ -133,7 +148,9 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
     if (context.job && checkpoint) {
       const { authorization, delegationGuard } = await captureContentJobAuthorization(env, user, context.job.guard);
       if (!authorization.allowed) throw new Error('Content authority unavailable');
-      await env.DB.batch([authorization.guard(), delegationGuard, ...await checkpoint(0, 'none'), authorization.guard()]);
+      const mutation = await beginAttributedAuditedMutation(env, { classify: [], snapshot: {} },
+        { policy: authorization.policy, check: () => [authorization.guard()] }, { user, via: `job:${context.job.id}`, request: context.request });
+      await mutation.commit(async () => ({ admit: [delegationGuard], groups: [], tail: await checkpoint(0, 'none'), expect: [] }));
     }
     return;
   }
@@ -144,45 +161,56 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
   if (extraTags.some(id=>!prepared.tagRows.some(t=>t.id===id))) throw new Error('Bulk tag unavailable');
   const finalTagCount=changes.reduce((n,c)=>n+(c.tags ? new Set(c.tags).size : prepared.linkRows.filter(l=>l.page_id===c.before.id).length),0);
   if (finalTagCount>MAX_MANIFEST_ROWS) throw new Error('Bulk tag manifest requires review');
-  const statements = [...prepared.guards,rowGuard(env,changes.map(c=>c.before),PAGE_FIELDS)];
-  const receiptGuards: D1PreparedStatement[] = [];
+  const groups: MutationGroup[] = [];
   const expectedVersions: Array<{uuid:string;page_id:number;lect:string|null}> = [];
   const finals = changes.map(change=>({...change.before,name:change.name??change.before.name,lect:change.lect===undefined?change.before.lect:change.lect}));
   for (const [index,change] of changes.entries()) {
     const page=finals[index];
-    statements.push(env.DB.prepare('UPDATE pages SET name=?,lect=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(page.name,page.lect,page.id),abortIf(env,'changes() <> 1'));
+    const writes: PlannedWrite[] = [{
+      sql: 'UPDATE pages SET name=?,lect=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      args: [page.name, page.lect, page.id],
+    }];
+    const before = prepared.linkRows.filter(link => link.page_id === page.id);
     if (change.tags) {
-      statements.push(env.DB.prepare('DELETE FROM page_tags WHERE page_id=?').bind(page.id));
-      statements.push(env.DB.prepare(`INSERT INTO page_tags(id,page_id,tag_id) SELECT ${nextIdSql('page_tags')} + j.key, ?, j.value FROM json_each(?) j`).bind(page.id,bounded([...new Set(change.tags)])));
+      const tagIds = [...new Set(change.tags)];
+      writes.push({ sql: 'DELETE FROM page_tags WHERE page_id=?', args: [page.id], changes: before.length },
+        { sql: `INSERT INTO page_tags(id,page_id,tag_id) SELECT ${nextIdSql('page_tags')} + j.key, ?, j.value FROM json_each(?) j`,
+          args: [page.id, bounded(tagIds)], changes: tagIds.length });
     } else {
       const uuid=crypto.randomUUID();expectedVersions.push({uuid,page_id:page.id,lect:page.lect});
-      statements.push(env.DB.prepare(`INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,'bulk-replace')`).bind(uuid,page.id,page.lect),
-        abortIf(env,'changes() <> 1 OR NOT EXISTS (SELECT 1 FROM page_versions WHERE uuid=? AND id BETWEEN 1 AND 9007199254740991)',[uuid]));
+      writes.push({ sql: `INSERT INTO page_versions(id,uuid,page_id,lect,action) VALUES (${NEXT_SNAPSHOT_ID_SQL},?,?,?,'bulk-replace')`,
+        args: [uuid, page.id, page.lect] });
     }
-    const detail = change.tags ? {fields:['tags'],tags_before:prepared.linkRows.filter(l=>l.page_id===page.id).map(l=>l.tag_id),tags_after:[...new Set(change.tags)],tag_count:new Set(change.tags).size} : {fields:['name','lect'],version_uuid:expectedVersions.at(-1)!.uuid};
-    const receipt=prepared.evidence({action:'page.update',entityType:'page',entityId:page.id,detail:{...detail,operation_target_count:changes.length,operation_index:index}},prepared.dataClass(page));
-    statements.push(receipt.write,receipt.guard);
-    if (checkpoint) receiptGuards.push(receipt.guard);
+    const detail = change.tags ? {fields:['tags'],tags_before:before.map(l=>l.tag_id),tags_after:[...new Set(change.tags)],tag_count:new Set(change.tags).size} : {fields:['name','lect'],version_uuid:expectedVersions.at(-1)!.uuid};
+    groups.push({ writes, evidence: {
+      entry: { action:'page.update',entityType:'page',entityId:page.id,
+        detail:{...detail,operation_target_count:changes.length,operation_index:index,...prepared.jobDetail} },
+      dataClass: prepared.dataClass(page),
+    } });
   }
-  if (checkpoint) statements.push(...await checkpoint(changes.length, strongestClass(changes.map(change => prepared.dataClass(change.before)))), ...receiptGuards);
   const expectedLinks = changes.flatMap(c=>(c.tags ? [...new Set(c.tags)] : prepared.linkRows.filter(l=>l.page_id===c.before.id).map(l=>l.tag_id)).map(tag_id=>({page_id:c.before.id,tag_id})));
-  statements.push(rowGuard(env,finals,PAGE_FIELDS.filter(f=>f!=='updated_at')),prepared.tagGuard(),
+  const expect = [rowGuard(env,finals,PAGE_FIELDS.filter(f=>f!=='updated_at')),prepared.tagGuard(),
     abortIf(env,`(SELECT COUNT(*) FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?))) <> ?
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_tags t WHERE t.page_id=json_extract(e.value,'$.page_id') AND t.tag_id=json_extract(e.value,'$.tag_id')))
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE (SELECT COUNT(*) FROM page_tags t WHERE t.page_id=json_extract(e.value,'$.page_id') AND t.tag_id=json_extract(e.value,'$.tag_id'))
         <> (SELECT COUNT(*) FROM json_each(?) x WHERE json_extract(x.value,'$.page_id')=json_extract(e.value,'$.page_id') AND json_extract(x.value,'$.tag_id')=json_extract(e.value,'$.tag_id')))`,[bounded(prepared.ids),expectedLinks.length,bounded(expectedLinks),bounded(expectedLinks),bounded(expectedLinks)]),
     abortIf(env,`(SELECT COUNT(*) FROM page_versions WHERE page_id IN (SELECT value FROM json_each(?))) <> ?
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_versions v WHERE v.id=json_extract(e.value,'$.id') AND v.page_id=json_extract(e.value,'$.page_id')))
-      OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_versions v WHERE v.uuid=json_extract(e.value,'$.uuid') AND v.page_id=json_extract(e.value,'$.page_id') AND v.lect IS json_extract(e.value,'$.lect') AND v.action='bulk-replace'))`,
-    [bounded(prepared.ids),prepared.versionRows.length+expectedVersions.length,bounded(prepared.versionRows),bounded(expectedVersions)]),classificationPolicyGuard(env,prepared.policy));
+      OR EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM page_versions v WHERE v.uuid=json_extract(e.value,'$.uuid') AND v.page_id=json_extract(e.value,'$.page_id') AND v.lect IS json_extract(e.value,'$.lect') AND v.action='bulk-replace'
+        AND v.id BETWEEN 1 AND 9007199254740991))`,
+    [bounded(prepared.ids),prepared.versionRows.length+expectedVersions.length,bounded(prepared.versionRows),bounded(expectedVersions)])];
   // Tag edits can legitimately raise retained UUID floors; they cannot lower
   // an old floor or leave evidence below the final protection level.
-  for (const change of changes) statements.push(abortIf(env,`COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0) > ?
+  for (const change of changes) expect.push(abortIf(env,`COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0) > ?
     OR COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0) < ?`,[change.before.uuid,prepared.dataClass(change.before)==='phi'?2:prepared.dataClass(change.before)==='pii'?1:0,
     change.before.uuid,prepared.floorRows.find(f=>f.uuid===change.before.uuid)?.level??0]));
-  statements.push(prepared.guards[0]);
-  if (context.job && !checkpoint) statements.push(context.job.guard);
-  await env.DB.batch(statements);
+  if (context.job && !checkpoint) expect.push(context.job.guard);
+  await prepared.mutation.commit(async () => ({
+    admit: [...prepared.guards,rowGuard(env,changes.map(c=>c.before),PAGE_FIELDS)],
+    groups,
+    tail: await checkpoint?.(changes.length, strongestClass(changes.map(change => prepared.dataClass(change.before)))),
+    expect,
+  }));
 }
 
 export class ContentBatchEvidenceUnavailableError extends Error {

@@ -14,6 +14,8 @@ Selection and source/metadata audit writes are awaited before mutation. Effectiv
 
 ## Atomic local outcome
 
+The P3 refactor runs each local trash chunk through `src/core/evidence/audited-mutation.ts` using the policy captured with the plugin credential. The route retains the exact intent receipt used to admit each chunk and advances progress from the acknowledged result.
+
 A guarded `page.delete.intent` records the operation ID, bounded target identities and selection fingerprint before any trash move. Each chunk rechecks that intent. The shared core lifecycle writer preserves its page, version, link, destination-collision, parent and sensitivity checks. It copies complete page/history/tag state, preserves original source-parent references, then removes draft rows. Deleting only a parent leaves unselected draft children in place. It does not purge held records or bypass W12 hold/erasure controls.
 
 Each local transaction includes one exact `page.delete` receipt per moved page and a `page.delete.chunk` manifest with the source/history/link identities, original parent references, chunk index, acknowledged boundaries and request-completion flag. Exact business postconditions and every receipt are checked after all writes, so ignored inserts, rewritten/deleted receipts and later receipt triggers cannot silently report a successful chunk. Existing host-user lifecycle attribution and job leases remain in the shared writer. The service path permits only bounded trash moves, never implicit restore/purge authority.

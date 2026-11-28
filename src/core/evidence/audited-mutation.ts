@@ -1,3 +1,4 @@
+import type { Env, JWTPayload } from '../../types';
 import type { AppContext } from '../http/context';
 import type { AccessAuthorization } from '../auth/access-authorization';
 import { captureMutationAuthority } from './mutation-authority';
@@ -10,7 +11,7 @@ import { recordAuditOutage } from '../db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 
 /**
- * The standard recipe for one audited request mutation. A writer declares:
+ * The standard recipe for one audited request or job mutation. A writer declares:
  *
  *   permission  who may make the change: a capability of the session user,
  *               or 'self' for the user acting on their own account. A service
@@ -45,9 +46,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                   re-admit   authority and policy again, so business
  *                              triggers inside the batch cannot slip past
  *                   returning  optional final SELECT, returned by commit
- *   Service plans can group writes with individually classified receipts in
- *   transaction order. A group can record a denial without a business write.
- *   All receipts are verified again before returning the result rows.
+ *   Grouped plans pair writes with individually classified receipts, run any
+ *   checkpoint, and verify final state and every receipt before returning.
+ *   A job may verify a lost acknowledgment without replaying the mutation.
  *   6. fail       any error: coarse outage incident, then the writer's error.
  *                 Errors the writer marks as its own (validation, policy
  *                 refusals) pass through unchanged, with no incident.
@@ -121,27 +122,31 @@ export interface MutationPlan extends MutationChecks {
   classify?: Containers;
 }
 
-export interface ServiceMutationGroup {
+export interface MutationGroup {
   check?: D1PreparedStatement[];
   writes?: PlannedWrite[];
-  evidence: { entry: AuditEntry; dataClass: DataClass | 'none' };
+  evidence: { entry: AuditEntry; dataClass: DataClass | 'none'; targetIds?: string[] };
 }
 
-export interface ServiceMutationPlan extends Omit<MutationChecks, 'expect'> {
+export interface GroupedMutationPlan extends Omit<MutationChecks, 'expect'> {
   /** Writes shared by the groups, such as inserting all pages before history. */
   leadingWrites?: PlannedWrite[];
   /** The writer bounds its business manifests before submitting the groups. */
-  groups: ServiceMutationGroup[];
+  groups: MutationGroup[];
+  /** Job checkpoint or other statements that precede the final guards. */
+  tail?: D1PreparedStatement[];
   /** Provide statements directly when no transaction clock is needed. */
   expect: MutationChecks['expect'] | D1PreparedStatement[];
+  /** Read-only guards proving the outcome of the submitted batch. */
+  reconcile?: (receipts: D1PreparedStatement[]) => D1PreparedStatement[];
 }
 
 interface SnapshotMutationSpec<S extends Record<string, SnapshotSpec>> {
   classify: Containers | ((rows: Snapshots<S>) => Containers);
   snapshot: S;
-  /** The writer's refusal. A failed submission can have an unknown outcome
-   *  when the writer needs to decide whether a reservation can be refunded. */
-  unavailable: (error: unknown, batchSubmitted: boolean) => Error;
+  /** Omit when the caller owns failure reporting. A failed submission can
+   *  have an unknown outcome when deciding whether a refund is due. */
+  unavailable?: (error: unknown, batchSubmitted: boolean) => Error;
   /** Errors that are the writer's own answer, such as invalid input. */
   passthrough?: (error: unknown) => boolean;
 }
@@ -183,11 +188,13 @@ interface MutationAuthority {
   session?: AccessAuthorization;
 }
 
+type ReceiptAttribution = { actor: AuditActor } | { user: JWTPayload; via?: string };
+
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
-  const mutation = await prepareAuditedMutation(c, spec, async () => {
+  const mutation = await prepareAuditedMutation(c.env, c, spec, async () => {
     const { authority, policy } = await captureMutationAuthority(c, spec.permission, spec.onDenied);
     return { policy, check: () => [authority.guard()], session: authority };
-  });
+  }, { user: c.get('user') });
   return {
     rows: mutation.rows,
     async commit(decide) {
@@ -202,26 +209,39 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
  *  the request body. Use that same authority throughout the transaction. */
 export async function beginServiceAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: SnapshotMutationSpec<S>,
   authority: MutationAuthority & { actor: AuditActor }) {
-  const mutation = await prepareAuditedMutation(c, spec, async () => authority, authority.actor);
+  return beginGroupedAuditedMutation(c.env, c, spec, authority, { actor: authority.actor });
+}
+
+/** Jobs supply existing subject and lease guards without constructing an HTTP request. */
+export async function beginAttributedAuditedMutation<S extends Record<string, SnapshotSpec>>(env: Env, spec: SnapshotMutationSpec<S>, authority: MutationAuthority,
+  attribution: { user: JWTPayload; via?: string; request?: AppContext }) {
+  return beginGroupedAuditedMutation(env, attribution.request, spec, authority, attribution);
+}
+
+async function beginGroupedAuditedMutation<S extends Record<string, SnapshotSpec>>(env: Env, request: AppContext | undefined,
+  spec: SnapshotMutationSpec<S>, authority: MutationAuthority, attribution: ReceiptAttribution) {
+  const mutation = await prepareAuditedMutation(env, request, spec, async () => authority, attribution);
   return {
     rows: mutation.rows,
-    async commit(decide: Decide<S, ServiceMutationPlan>): Promise<Row[]> {
+    async commit(decide: Decide<S, GroupedMutationPlan>): Promise<Row[]> {
       return await mutation.commit(decide) ?? [];
     },
   };
 }
 
-async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: SnapshotMutationSpec<S>,
-  authorize: () => Promise<MutationAuthority>, serviceActor?: AuditActor) {
-  const actor = serviceActor ?? contextActor(c);
+async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(env: Env, request: AppContext | undefined, spec: SnapshotMutationSpec<S>,
+  authorize: () => Promise<MutationAuthority>, attribution: ReceiptAttribution) {
+  const actor: AuditActor = 'actor' in attribution ? attribution.actor : request && !attribution.via ? contextActor(request) : {
+    userId: attribution.user.sub, roles: attribution.user.role, sessionSid: attribution.user.sid ?? null, via: attribution.via ?? null,
+  };
   const fail = async (error: unknown, batchSubmitted = false): Promise<never> => {
-    if (spec.passthrough?.(error)) throw error;
-    await recordAuditOutage(c.env, 'health', [], actor, undefined, { captureIncomplete: true });
+    if (!spec.unavailable || spec.passthrough?.(error)) throw error;
+    await recordAuditOutage(env, 'health', [], actor, undefined, { captureIncomplete: true });
     throw spec.unavailable(error, batchSubmitted);
   };
 
   // 1. gate (outside the try: a refusal here is reported by the caller's route)
-  assertRegulatedWritesAllowed(c.env);
+  assertRegulatedWritesAllowed(env);
 
   let prepared;
   try {
@@ -241,15 +261,15 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
       } else if (reads.length) {
         const dataClass = classOf();
         const raised = reads.map(read => ({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...read }));
-        await auditBackgroundReads(c.env, raised, actor, { policy });
+        await auditBackgroundReads(env, raised, actor, { policy });
       }
-      if ((reads.length || mode === 'request') && await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+      if (request && (reads.length || mode === 'request') && await flushReadAudit(request)) throw new Error('Mutation read evidence unavailable');
       guards.push(admit);
     };
     const read = async (specs: SnapshotSpec[], classify: (rows: Array<Array<Record<string, Binding>>>) => Containers) => {
-      const results = specs.length ? await c.env.DB.batch<{ snapshot: string }>([
-        classificationPolicyGuard(c.env, policy),
-        ...specs.map(({ table, fields, where, args, order }) => snapshotStatement(c, table, fields, where, args, order)),
+      const results = specs.length ? await env.DB.batch<{ snapshot: string }>([
+        classificationPolicyGuard(env, policy),
+        ...specs.map(({ table, fields, where, args, order }) => snapshotStatement({ env }, table, fields, where, args, order)),
       ]) : [];
       const captured = specs.map((s, index) => snapshotRows<Record<string, Binding>>(s.fields, results[index + 1].results[0]));
       const reads: PendingRead[] = [];
@@ -258,12 +278,12 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
         const { id, ...pending } = read;
         reads.push({ ...pending, ids: await Promise.all(captured[index].map(id)), count: captured[index].length });
       }
-      await settle(classify(captured), reads, () => specs.map(({ table, fields, where, args }, index) => guard(c, table, fields, captured[index], where, args)));
+      await settle(classify(captured), reads, () => specs.map(({ table, fields, where, args }, index) => guard({ env }, table, fields, captured[index], where, args)));
       return captured;
     };
     const load = async <T>(source: SnapshotSource<T>) => {
-      if (!session) throw new Error('Snapshot source requires session authority');
-      const loaded = await source.load({ c, authority: session, policy, policyGuard: () => classificationPolicyGuard(c.env, policy) });
+      if (!request || !session) throw new Error('Snapshot source requires session authority');
+      const loaded = await source.load({ c: request, authority: session, policy, policyGuard: () => classificationPolicyGuard(env, policy) });
       await settle(loaded.classify, loaded.reads, loaded.guards, loaded.readMode);
       return loaded.value;
     };
@@ -274,7 +294,7 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
       return typeof spec.classify === 'function' ? spec.classify(rows) : spec.classify;
     });
 
-    const recheck = () => [...authority.check(), classificationPolicyGuard(c.env, policy)];
+    const recheck = () => [...authority.check(), classificationPolicyGuard(env, policy)];
     const admission = () => [...recheck(), ...guards.flatMap(g => g())];
     prepared = { policy, classOf, rows, admission, read, load, recheck };
   } catch (error) {
@@ -285,17 +305,17 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
   return {
     rows,
     fail,
-    async commit(decide: Decide<S, MutationPlan | ServiceMutationPlan>): Promise<Row[] | undefined> {
+    async commit(decide: Decide<S, MutationPlan | GroupedMutationPlan>): Promise<Row[] | undefined> {
       let batchSubmitted = false;
       try {
-        assertRegulatedWritesAllowed(c.env);
+        assertRegulatedWritesAllowed(env);
 
         // 4. decide
         let clock: ({ now: string } & Record<string, Binding>) | undefined;
         const tools: DecideTools = {
           async clock(columns) {
             if (clock) throw new Error('Mutation clock already read');
-            clock = await c.env.DB.prepare(`SELECT CURRENT_TIMESTAMP AS now${columns ? `, ${columns}` : ''}`).first() ?? undefined;
+            clock = await env.DB.prepare(`SELECT CURRENT_TIMESTAMP AS now${columns ? `, ${columns}` : ''}`).first() ?? undefined;
             if (!clock) throw new Error('Mutation clock unavailable');
             return clock;
           },
@@ -311,11 +331,11 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
             args: write.args.map(value => value === null || typeof value !== 'object' ? value : null),
           })));
         }
-        if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+        if (request && await flushReadAudit(request)) throw new Error('Mutation read evidence unavailable');
         if (!plan || (!('groups' in plan) && !plan.writes.length)) {
           const statements = admission();
           batchSubmitted = true;
-          await c.env.DB.batch(statements);
+          await env.DB.batch(statements);
           return undefined;
         }
 
@@ -323,24 +343,28 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
         const expected = typeof plan.expect === 'function' ? plan.expect((clock ?? await tools.clock()).now) : plan.expect;
         const operationId = crypto.randomUUID();
         const withOperation = (entry: AuditEntry) => ({ ...entry, detail: { operation_id: operationId, ...entry.detail } });
+        const prepareReceipt = (entry: AuditEntry, dataClass: DataClass | 'none', targetIds?: string[]) => 'actor' in attribution
+          ? serviceMutationAuditEvidence(env, withOperation(entry), attribution.actor, dataClass, policy, request)
+          : attributedMutationAuditEvidence(env, attribution.user, withOperation(entry), dataClass, policy, {
+            context: request, via: attribution.via, targetIds,
+          });
         const prepareWrites = (writes: PlannedWrite[]) => writes.flatMap(({ sql, args, changes = 1 }) => [
-          c.env.DB.prepare(sql).bind(...args.map(value => value !== null && typeof value === 'object' ? value.document : value)),
-          abortIf(c.env, 'changes() <> ?', [changes]),
+          env.DB.prepare(sql).bind(...args.map(value => value !== null && typeof value === 'object' ? value.document : value)),
+          abortIf(env, 'changes() <> ?', [changes]),
         ]);
         const statements = [...admission(), ...plan.admit ?? []];
         const receiptChecks: D1PreparedStatement[] = [];
         if ('groups' in plan) {
-          if (!serviceActor) throw new Error('Mutation groups require service authority');
           statements.push(...prepareWrites(plan.leadingWrites ?? []));
           for (const { check, writes, evidence } of plan.groups) {
-            const receipt = serviceMutationAuditEvidence(c.env, withOperation(evidence.entry), serviceActor, evidence.dataClass, policy, c);
+            const receipt = prepareReceipt(evidence.entry, evidence.dataClass, evidence.targetIds);
             statements.push(...check ?? [], ...prepareWrites(writes ?? []), receipt.write, receipt.guard);
             receiptChecks.push(receipt.verify());
           }
+          statements.push(...plan.tail ?? []);
         } else {
           const { entry, targetIds } = plan.evidence;
-          const receipt = attributedMutationAuditEvidence(c.env, c.get('user'), withOperation(entry),
-            classOf(plan.classify), policy, { context: c, targetIds });
+          const receipt = prepareReceipt(entry, classOf(plan.classify), targetIds);
           statements.push(...prepareWrites(plan.writes), receipt.write, receipt.guard);
         }
         const batch = [
@@ -348,10 +372,17 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(c:
           ...expected,
           ...receiptChecks,
           ...recheck(),
-          ...(plan.returning ? [c.env.DB.prepare(plan.returning.sql).bind(...plan.returning.args)] : []),
+          ...(plan.returning ? [env.DB.prepare(plan.returning.sql).bind(...plan.returning.args)] : []),
         ];
         batchSubmitted = true;
-        const results = await c.env.DB.batch(batch);
+        let results;
+        try {
+          results = await env.DB.batch(batch);
+        } catch (error) {
+          if (!('groups' in plan) || !plan.reconcile) throw error;
+          await env.DB.batch(plan.reconcile(receiptChecks));
+          return undefined;
+        }
         if (!plan.returning) return undefined;
         return results.at(-1)!.results as Row[];
       } catch (error) {

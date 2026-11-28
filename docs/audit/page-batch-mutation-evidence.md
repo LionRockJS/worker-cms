@@ -18,6 +18,8 @@ Detail excludes names, slugs, body content, find/replacement strings, taxonomy l
 
 ## Guards and bounds
 
+The P3 refactor submits writes, per-page or aggregate receipts and final checks through `src/core/evidence/audited-mutation.ts`. Claimed jobs pass their subject and lease guards, and the existing checkpoint statements run before the runner verifies the final page state and receipts.
+
 Admission rechecks current actor roles/grants, classification generation and the supported authorization context. Snapshot checks cover affected page metadata (full page snapshots for local edits), existing tag memberships, tag taxonomy ownership, retained UUID floors and relevant history membership. Classification conservatively includes applicable content-table/page-type/tag-taxonomy/UUID-floor protection; a local slice can retain a higher common tag ceiling. Tag edits can raise a retained floor but cannot lower it or leave evidence below final sensitivity.
 
 Final guards check affected-row counts, expected page values, complete tag membership/multiplicity, old/new history membership and each inserted history body/action, exact receipts and policy generation. Ignored/rewritten state, a later page's failed receipt, or a stale sequence/association aborts the entire local slice. Text-only changes preserve legacy duplicate links; changed tag sets are normalized without creating duplicate new links.

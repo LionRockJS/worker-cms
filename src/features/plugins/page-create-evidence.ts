@@ -7,7 +7,7 @@ import { serviceMutationAuditEvidence, ServiceMutationUnavailableError } from '.
 import { classFor, classificationPolicyGuard, strongestClass } from '../../core/db/data-classes';
 import { snapshotRows, snapshotStatement, guard, resultGuard, fingerprint, json, type Row } from '../../core/db/bounded-mutation';
 import { abortIf } from '../../core/db/transaction-guard';
-import { beginServiceAuditedMutation, type PlannedWrite, type ServiceMutationGroup } from '../../core/evidence/audited-mutation';
+import { beginServiceAuditedMutation, type PlannedWrite, type MutationGroup } from '../../core/evidence/audited-mutation';
 import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
 import { recordAuditOutage } from '../../core/db/audit-outages';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
@@ -142,7 +142,7 @@ export async function preparePluginPageCreates(c:AppContext,authority:Authority,
     const detail:Record<string,unknown>={operation_id:operationId,registry_id:authority.registryId,identity_fingerprint:authority.identityFingerprint,principal:'credential_authenticated_plugin',targets:plans.map(p=>({id:p.id,uuid:p.uuid})),count:plans.length,...(copy?{operation:'duplicate',...copy.detail,sources:copy.sources}: {})};
     noteActingUser(c,detail);
     const entityType = copy ? 'page_duplicate_operation' : 'page_create_operation';
-    const groups: ServiceMutationGroup[] = await Promise.all(forbiddenTypes.map(async type => ({
+    const groups: MutationGroup[] = await Promise.all(forbiddenTypes.map(async type => ({
       evidence: {
         entry: { action: `page.${kind}.denied`, entityType, entityId: operationId, outcome: 'denied',
           detail: { ...detail, reason: 'forbidden_page_type', type_fingerprint: await fingerprint(type) } },
@@ -236,7 +236,7 @@ export async function commitPluginPageCreates(c: AppContext, source: PluginPageC
     const links: Row[] = [];
     const versions: Array<{ uuid: string; page_id: number; lect: string }> = [];
     const provenance = new Map(copy?.sources.map(pair => [pair.targetUuid, pair]));
-    const groups: ServiceMutationGroup[] = plans.map(plan => {
+    const groups: MutationGroup[] = plans.map(plan => {
       const original = provenance.get(plan.uuid);
       const writes: PlannedWrite[] = [];
       if (original?.floor) writes.push({

@@ -93,7 +93,7 @@ export async function deletePluginPages(c:AppContext,auth:PluginAuth,authority:P
   while(acknowledged<targets.length){
    const chunk=targets.slice(acknowledged,acknowledged+100),before=acknowledged,after=acknowledged+chunk.length;
    inFlight=true;
-   const result=await trash.trashPagesAsService(c.env,{actor:authority.actor,check:()=>[...authority.check(),intent.guard],allows:type=>pageTypeScopeAllows(authority.allowed,type),dataClass:evidenceClass,request:c,
+   const result=await trash.trashPagesAsService(c.env,{actor:authority.actor,policy:authority.policy,check:()=>[...authority.check(),intent.guard],allows:type=>pageTypeScopeAllows(authority.allowed,type),dataClass:evidenceClass,request:c,
     detail:{...detail,chunk_index:chunkIndex,acknowledged_before:before,acknowledged_after:after,request_complete:after===targets.length,done:after===total,withdrawal:mode==='children'?'not_requested':'separate_effect'},before:()=>selectionCheck(before),after:()=>selectionCheck(after)},chunk.map(p=>Number(p.id)));
    if(result.count!==chunk.length)throw new Error('Deletion result unavailable');inFlight=false;
    acknowledged=after;chunkIndex++;
