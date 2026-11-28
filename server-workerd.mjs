@@ -142,7 +142,10 @@ function capnp(value) {
   if (value === null) return "void";
   if (Array.isArray(value)) return `[${value.map(capnp).join(",\n")}]`;
   if (typeof value === "object") return `(${Object.entries(value).map(([key, item]) => `${key} = ${capnp(item)}`).join(",\n")})`;
-  return JSON.stringify(value);
+  // Cap'n Proto text strings take \xXX escapes but not \uXXXX, which
+  // JSON.stringify emits for control characters (the bundle has a few in
+  // regexes). Rewrite only escapes that are not themselves escaped backslashes.
+  return JSON.stringify(value).replace(/(?<!\\)((?:\\\\)*)\\u00([0-9a-fA-F]{2})/g, "$1\\x$2");
 }
 const output = {
   services: [...selected.values()], extensions: assembled.extensions,
