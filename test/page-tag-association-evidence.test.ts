@@ -101,3 +101,12 @@ it('refuses an orphan legacy link rather than inventing page attribution',async(
 it('requires content write permission',async()=>{cookie=`access_token=${await signJWT({sub:'12001',name:'Viewer',email:'viewer@example.invalid',role:'viewer',type:'access',exp:Math.floor(Date.now()/1000)+900},env.JWT_SECRET)}`;const before=await state();expect((await call('add')).status).toBe(403);expect((await call('removeAlias')).status).toBe(403);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 it('fails closed when protected metadata read evidence cannot be written',async()=>{await classify();const before=await state();await env.DB.prepare(`CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_events WHEN NEW.action='page.tag-association-read' BEGIN SELECT RAISE(ABORT,'synthetic'); END`).run();expect((await call('add')).status).toBe(503);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 it('uses transaction time when execution crosses a timestamp second',async()=>{const DB=race(async()=>{await new Promise(resolve=>setTimeout(resolve,1100));});expect((await call('add',{DB})).status).toBe(200);expect(await events()).toHaveLength(1);});
+it('refuses an association when page write access is revoked during the change',async()=>{
+  cookie=`access_token=${await signJWT({sub:'12001',name:'Private Editor',email:'editor@example.invalid',role:'editor',type:'access',exp:Math.floor(Date.now()/1000)+900},env.JWT_SECRET)}`;
+  await env.DB.prepare("INSERT INTO page_access_policies(page_uuid,owner_id,enabled,mode,revision) VALUES ('page-uuid',12001,1,600,1)").run();
+  try{
+    let concurrent:Awaited<ReturnType<typeof state>>;
+    const DB=race(async()=>{await env.DB.prepare("UPDATE page_access_policies SET owner_id=12002,revision=2 WHERE page_uuid='page-uuid'").run();concurrent=await state();});
+    expect((await call('add',{DB})).status).toBe(503);expect(await state()).toEqual(concurrent!);expect(await events()).toEqual([]);
+  }finally{await env.DB.prepare("DELETE FROM page_access_policies WHERE page_uuid='page-uuid'").run();}
+});
