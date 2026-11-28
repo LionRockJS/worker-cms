@@ -1,0 +1,161 @@
+import type { AppContext } from '../http/context';
+import type { AccessAuthorization } from '../auth/access-authorization';
+import { captureMutationAuthority } from './mutation-authority';
+import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind } from '../db/data-classes';
+import { attributedMutationAuditEvidence, contextActor, type AuditEntry } from '../db/audit';
+import { abortIf } from '../db/transaction-guard';
+import { json, snapshot, guard } from '../db/bounded-mutation';
+import { auditBackgroundReads, flushReadAudit, type PendingRead } from '../http/access-log';
+import { recordAuditOutage } from '../db/audit-outages';
+import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+
+/**
+ * The standard recipe for one audited admin change. A writer declares:
+ *
+ *   permission  who may make the change (session user + capability)
+ *   classify    which containers decide the evidence's data class
+ *   snapshot    the rows the decision depends on, plus how their read is logged
+ *   decide      a pure plan: writes, the evidence entry, the expected final state
+ *
+ * The runner owns everything else and always runs it in this order:
+ *
+ *   1. gate       regulated-writes check
+ *   2. authorize  fresh authority and classification policy
+ *   3. snapshot   bounded read, read evidence, flushed before any write
+ *   4. decide     writer's plan (no database access)
+ *   5. commit     one D1 batch:
+ *                   admission  authority, policy, every snapshot unchanged
+ *                   writes     each followed by its exact changes() check
+ *                   evidence   audit write + exact receipt guard
+ *                   expect     writer's postconditions
+ *                   re-admit   authority and policy again, so business
+ *                              triggers inside the batch cannot slip past
+ *   6. fail       any error: coarse outage incident, then the writer's error
+ *
+ * A plan without writes commits only the admission guards and records no event.
+ */
+
+type Binding = string | number | null;
+
+export interface SnapshotSpec {
+  table: string;
+  fields: string[];
+  /** Fixed trusted SQL; values go in args. */
+  where: string;
+  args: Binding[];
+  /** How reading these rows is logged before the change. */
+  read: Omit<PendingRead, 'ids' | 'count'> & { id: (row: Record<string, Binding>) => string };
+}
+
+export interface PlannedWrite {
+  /** Fixed trusted SQL; values go in args. */
+  sql: string;
+  args: Binding[];
+  /** Rows this statement must change; defaults to 1. */
+  changes?: number;
+}
+
+export interface MutationPlan {
+  writes: PlannedWrite[];
+  evidence: { entry: AuditEntry; targetIds?: string[] };
+  /** Postconditions after the writes. `since` is the database clock read just
+   *  before the batch, for rows whose timestamps the transaction sets. */
+  expect: (since: string) => D1PreparedStatement[];
+}
+
+export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
+  permission: Exclude<AccessAuthorization['capability'], 'authenticated'>;
+  classify: Array<[ContainerKind, string]>;
+  snapshot: S;
+  /** The writer's own refusal, so its route keeps its existing 503 body. */
+  unavailable: () => Error;
+}
+
+export type Snapshots<S> = { [K in keyof S]: Array<Record<string, Binding>> };
+
+export interface AuditedMutation<S> {
+  rows: Snapshots<S>;
+  commit(decide: (rows: Snapshots<S>) => MutationPlan): Promise<void>;
+}
+
+export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
+  const fail = async (): Promise<never> => {
+    await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
+    throw spec.unavailable();
+  };
+
+  // 1. gate (outside the try: a refusal here is reported by the caller's route)
+  assertRegulatedWritesAllowed(c.env);
+
+  let prepared;
+  try {
+    // 2. authorize
+    const { authority, policy } = await captureMutationAuthority(c, spec.permission);
+    const dataClass = strongestClass(spec.classify.map(([kind, key]) => classFor(policy, kind, key)));
+
+    // 3. snapshot
+    const rows = {} as Snapshots<S>;
+    const reads: PendingRead[] = [];
+    for (const name of Object.keys(spec.snapshot) as Array<keyof S>) {
+      const { table, fields, where, args, read } = spec.snapshot[name];
+      const captured = await snapshot<Record<string, Binding>>(c, table, fields, where, args);
+      rows[name] = captured;
+      const { id, ...pending } = read;
+      reads.push({ ...pending, ids: captured.map(id), count: captured.length });
+    }
+    await auditBackgroundReads(c.env, reads, contextActor(c));
+
+    const admission = () => [
+      authority.guard(),
+      classificationPolicyGuard(c.env, policy),
+      ...Object.keys(spec.snapshot).map(name => {
+        const { table, fields, where, args } = spec.snapshot[name];
+        return guard(c, table, fields, rows[name as keyof S], where, args);
+      }),
+    ];
+    prepared = { authority, policy, dataClass, rows, admission };
+  } catch {
+    return fail();
+  }
+  const { authority, policy, dataClass, rows, admission } = prepared;
+
+  return {
+    rows,
+    async commit(decide) {
+      try {
+        assertRegulatedWritesAllowed(c.env);
+
+        // 4. decide
+        const plan = decide(rows);
+        json(plan.writes);
+        if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+        if (!plan.writes.length) {
+          await c.env.DB.batch(admission());
+          return;
+        }
+
+        // 5. commit
+        const clock = await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP AS now').first<{ now: string }>();
+        if (!clock) throw new Error('Mutation clock unavailable');
+        const { entry, targetIds } = plan.evidence;
+        const receipt = attributedMutationAuditEvidence(c.env, c.get('user'),
+          { ...entry, detail: { operation_id: crypto.randomUUID(), ...entry.detail } },
+          dataClass, policy, { context: c, targetIds });
+        await c.env.DB.batch([
+          ...admission(),
+          ...plan.writes.flatMap(w => [
+            c.env.DB.prepare(w.sql).bind(...w.args),
+            abortIf(c.env, 'changes() <> ?', [w.changes ?? 1]),
+          ]),
+          receipt.write,
+          receipt.guard,
+          ...plan.expect(clock.now),
+          authority.guard(),
+          classificationPolicyGuard(c.env, policy),
+        ]);
+      } catch {
+        await fail();
+      }
+    },
+  };
+}
