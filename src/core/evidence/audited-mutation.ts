@@ -1,7 +1,7 @@
 import type { AppContext } from '../http/context';
 import type { AccessAuthorization } from '../auth/access-authorization';
 import { captureMutationAuthority } from './mutation-authority';
-import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind } from '../db/data-classes';
+import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind, type DataClass, type DataClassMap } from '../db/data-classes';
 import { attributedMutationAuditEvidence, contextActor, type AuditEntry } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { json, snapshotStatement, snapshotRows, guard } from '../db/bounded-mutation';
@@ -69,7 +69,9 @@ export interface PlannedWrite {
   changes?: number;
 }
 
-type Containers = Array<[ContainerKind, string]>;
+/** A container to classify, or a class the writer derived from `tools.policy`
+ *  (for example every page type a wildcard grant covers). */
+type Containers = Array<[ContainerKind, string] | DataClass>;
 
 export interface MutationPlan {
   writes: PlannedWrite[];
@@ -98,9 +100,12 @@ export type Snapshots<S> = { [K in keyof S]: Array<Record<string, Binding>> };
 export interface DecideTools {
   /** Transaction clock, read once; `columns` is fixed trusted SQL. */
   clock(columns?: string): Promise<{ now: string } & Record<string, Binding>>;
-  /** Snapshots that depend on the first rows. `classify` adds containers to
-   *  both these reads and the change's evidence. Guarded at admission. */
-  snapshot(specs: SnapshotSpec[], classify?: Containers): Promise<Array<Array<Record<string, Binding>>>>;
+  /** Snapshots that depend on the first rows. `classify` (fixed, or from the
+   *  rows just read) adds containers to both these reads and the change's
+   *  evidence. Guarded at admission. */
+  snapshot(specs: SnapshotSpec[], classify?: Containers | ((rows: Array<Array<Record<string, Binding>>>) => Containers)): Promise<Array<Array<Record<string, Binding>>>>;
+  /** The classification policy this change is guarded by. Read only. */
+  policy: DataClassMap;
 }
 
 export interface AuditedMutation<S> {
@@ -125,7 +130,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
 
     // 3. snapshot: one round trip for every snapshot, behind the policy guard
     let containers: Containers = [];
-    const classOf = (more: Containers = []) => strongestClass([...containers, ...more].map(([kind, key]) => classFor(policy, kind, key)));
+    const classOf = (more: Containers = []) => strongestClass([...containers, ...more].map(item => typeof item === 'string' ? item : classFor(policy, item[0], item[1])));
     const guards: Array<() => D1PreparedStatement> = [];
     const read = async (specs: SnapshotSpec[], classify: (rows: Array<Array<Record<string, Binding>>>) => Containers) => {
       const results = await c.env.DB.batch<{ snapshot: string }>([
@@ -174,7 +179,8 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
             if (!clock) throw new Error('Mutation clock unavailable');
             return clock;
           },
-          snapshot: (specs, classify = []) => read(specs, () => classify),
+          snapshot: (specs, classify = []) => read(specs, rows => typeof classify === 'function' ? classify(rows) : classify),
+          policy,
         };
         const plan = await decide(rows, tools);
         json(plan?.writes ?? []);

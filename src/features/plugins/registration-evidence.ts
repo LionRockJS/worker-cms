@@ -48,17 +48,21 @@ export async function capturePluginMutationContext(c:AppContext){
   return {plugins,identities,policy,dataClass,admission,finish,run};
 }
 /** NULL timestamps in an expected row: set by this transaction (see resultGuard). */
-async function prepare(c:AppContext){
-  const mutation=await beginAuditedMutation(c,{
+/** The local plugin registry and identity pins, as every host plugin-management
+ *  change on the runner starts: `plugin:manage`, classified by each pinned plugin. */
+export function beginPluginRegistryMutation(c:AppContext,unavailable:()=>Error,passthrough?:(error:unknown)=>boolean){
+  return beginAuditedMutation(c,{
     permission:'plugin:manage',
     classify:rows=>[['table','plugins'],['table','plugin_identity_approvals'],...rows.identities.map(pin=>['plugin',String(pin.manifest_id)] as [ContainerKind,string])],
     snapshot:{
       plugins:{table:'plugins',fields:REGISTRY,where:'1',args:[],read:{action:'plugin.registration-read',kind:'table',key:'plugins',targetType:'plugin',id:r=>String(r.id)}},
       identities:{table:'plugin_identity_approvals',fields:IDENTITY,where:'1',args:[],read:{action:'plugin.registration-identity-read',kind:'table',key:'plugin_identity_approvals',targetType:'plugin_identity',id:r=>String(r.plugin_row_id)}},
     },
-    unavailable:()=>new PluginRegistrationUnavailableError(),
-    passthrough:error=>error instanceof PluginRegistrationConflictError,
+    unavailable,passthrough,
   });
+}
+async function prepare(c:AppContext){
+  const mutation=await beginPluginRegistryMutation(c,()=>new PluginRegistrationUnavailableError(),error=>error instanceof PluginRegistrationConflictError);
   const plugins=mutation.rows.plugins as unknown as PluginRecord[],identities=mutation.rows.identities as unknown as PluginIdentityApproval[];
   const row=(id:number)=>{if(!Number.isSafeInteger(id)||id<=0)throw new Error('Invalid plugin identity');return plugins.find(p=>p.id===id);};
   async function run<T>(decide:Parameters<typeof mutation.commit>[0]):Promise<T|undefined>{try{return await mutation.commit(decide) as T|undefined;}finally{invalidate();}}

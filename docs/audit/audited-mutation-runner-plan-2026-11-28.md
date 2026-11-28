@@ -44,6 +44,7 @@ Each extension is added by the first writer that needs it (named in the "First u
 | E10 | External inputs | Reads from another database (`PUBLISHED_DB`, R2) are passed into `decide` as unguarded input, because they cannot share the private D1 batch | Published-to-draft pull |
 | E11 | Lost-acknowledgment reconcile | `reconcile(plan)` checks for the writer's own receipt after an uncertain commit, returning the result or rethrowing; it never replays the write | Trash lifecycle |
 | E13 | Follow-up snapshots | `decide` may snapshot rows that depend on the first ones (for example a plugin's owned approvals). They are read, logged and guarded at admission exactly like the first snapshot | Plugin registration (done) |
+| E14 | Policy-derived classes | `decide` can read `tools.policy` and add raw classes, for rules such as a wildcard page-type grant covering every classified page type. Follow-up snapshots may classify from the rows they read | Plugin financial settings (done) |
 | E12 | Decide clock | `decide` may read the transaction clock once, with trusted extra columns such as a next ID; the runner reuses it as the timestamp baseline. A `null` plan means no change | Runtime types (done) |
 
 ## Waves
@@ -63,8 +64,8 @@ Line counts are the current file sizes. Estimates are engineering days, rough, a
 | [Runtime types and blueprint extensions](../../src/features/runtime-content-types/mutation-evidence.ts) | 96 | `runtime-type-mutation-evidence` | E2, E12 | **Done.** Three operations with one receipt each. Round trips: create 9 → 5, no-op 8 → 4, remove 8 → 5 |
 | [Locales and messages](../../src/features/i18n/mutation-evidence.ts) | 106 | `locale-mutation-evidence`, `i18n` | E9 | **Done** (`e642aab`). Message save 8 → 5, no-op 8 → 4 |
 | [Plugin registration](../../src/features/plugins/registration-evidence.ts) | 102 | `plugin-registration-evidence` | E6, E9, E12, E13 | **Done.** Create, toggle and remove 7 → 5. `capturePluginMutationContext` stays until approval and settings move |
-| [Plugin approval](../../src/features/plugins/approval-evidence.ts) | 212 | `plugin-approval-evidence` | E1 | Builds on the registration snapshot. Also guards before disclosing to the plugin |
-| [Plugin financial settings](../../src/features/plugins/settings-evidence.ts) | 68 | `plugin-financial-settings-evidence` | — | Builds on the registration snapshot |
+| [Plugin approval](../../src/features/plugins/approval-evidence.ts) | 212 | `plugin-approval-evidence` | — | **Stays as is (rule 6).** It would need four bespoke hooks: containment revokes that skip the regulated gate, a guard batch mid-plan before fetching asset bytes, next IDs from `sqlite_sequence` with their own guards, and policy scans for overlapping storage prefixes. It keeps `capturePluginMutationContext` |
+| [Plugin financial settings](../../src/features/plugins/settings-evidence.ts) | 68 | `plugin-financial-settings-evidence` | E13, E14 | **Done.** Shares `beginPluginRegistryMutation` with registration. Added a wildcard-grant classification test (passes before and after) |
 | [Credits administration](../../src/features/credits/admin-mutation.ts) | 118 | `financial-administration-evidence` | E5 `self` | Uses both access and self authority |
 | [Published-to-draft pull](../../src/features/publish/pull.ts) | 131 | `sensitive-read-coverage` | E10 | Published database read is external input |
 | [Page access policy](../../src/routes/admin/pages/access.ts) | 151 | `page-access` | E4, E5 `self` | |
