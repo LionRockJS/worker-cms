@@ -233,16 +233,25 @@ export interface MutationAuditEvidence {
   guard: D1PreparedStatement;
 }
 
+type ExactMutationAuditEvidence = MutationAuditEvidence & {
+  /** Re-read the exact receipt after an uncertain acknowledgement. */
+  verify(): D1PreparedStatement;
+};
+
 function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, request: AuditRequest,
-  requirePreviousChange = false, lookup?: AuditLookup, policy?: DataClassMap): MutationAuditEvidence {
+  requirePreviousChange = false, lookup?: AuditLookup, policy?: DataClassMap): ExactMutationAuditEvidence {
   if (policy) row = { ...row, detail: { ...row.detail, classification_policy_version: policy.version } };
   const prepared = { ...row, eventId: row.eventId ?? crypto.randomUUID(), occurredAt: row.occurredAt ?? new Date().toISOString() };
   const { values: expected, expressions } = auditParameters(prepared, actor, request, lookup);
   const matches = AUDIT_COLUMNS.map((column, index) => `${column} IS ${expressions[index]}`).join(' AND ');
   // A zero-row insert, or a trigger that removes/rewrites the new row, must
   // roll back the business mutation without depending on a table constraint.
-  const guard = abortIf(env, `changes() <> 1 OR NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})${policy ? ` OR (${classificationPolicyFailureSql(policy)})` : ''}`, expected);
-  return { write: statement(env, prepared, actor, request, requirePreviousChange, lookup), guard };
+  const missing = `NOT EXISTS (SELECT 1 FROM audit_events WHERE ${matches})${policy ? ` OR (${classificationPolicyFailureSql(policy)})` : ''}`;
+  return {
+    write: statement(env, prepared, actor, request, requirePreviousChange, lookup),
+    guard: abortIf(env, `changes() <> 1 OR ${missing}`, expected),
+    verify: () => abortIf(env, missing, expected),
+  };
 }
 
 /** Batch with a newly created account and its provider identity, before issuing
@@ -286,7 +295,7 @@ export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClas
 /** A credential-authenticated service is its own actor. An asserted user is
  * detail, never a fabricated CMS session or authenticated user principal. */
 export function serviceMutationAuditEvidence(env: Env, entry: AuditEntry, actor: AuditActor,
-  dataClass: AuditRow['dataClass'], policy: DataClassMap, context?: AppContext): MutationAuditEvidence {
+  dataClass: AuditRow['dataClass'], policy: DataClassMap, context?: AppContext): ExactMutationAuditEvidence {
   return preparedAuditEvidence(env,mutationRow(entry, dataClass),actor,
     context?requestFrom(context):requestContext.getStore()?.auditRequest??NO_REQUEST,false,undefined,policy);
 }
@@ -324,7 +333,7 @@ export function servicePlannedMutationAuditEvidence(env: Env, entry: AuditEntry,
 /** Classified local mutations shared by HTTP and trusted job execution.
  * Complete batch manifests belong in detail; the indexed target list is capped. */
 export function attributedMutationAuditEvidence(env: Env, user: JWTPayload, entry: AuditEntry, dataClass: AuditRow['dataClass'],
-  policy: DataClassMap, options: { context?: AppContext; targetIds?: string[]; via?: string } = {}): MutationAuditEvidence {
+  policy: DataClassMap, options: { context?: AppContext; targetIds?: string[]; via?: string } = {}): ExactMutationAuditEvidence {
   const row = withConfigImport(mutationRow(entry, dataClass), options.context);
   if (options.targetIds) { row.targetIds = options.targetIds.slice(0, 200); row.targetCount = options.targetIds.length; }
   return preparedAuditEvidence(env, row, actorFromUser(user, options.via ?? null), options.context ? requestFrom(options.context) : NO_REQUEST,

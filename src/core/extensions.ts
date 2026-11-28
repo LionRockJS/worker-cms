@@ -197,6 +197,8 @@ export interface QueuedBulkAction {
 export interface ApiCallerIdentity {
   /** The contributor id this request is authenticated as. */
   callerId: string;
+  /** The credential owner can bind a writer to the current credential and registration. */
+  captureMutationAuthority?(): Promise<{ actor: AuditActor; check: () => D1PreparedStatement[] }>;
 }
 
 /** Page lifecycle events core announces to whoever is listening. */

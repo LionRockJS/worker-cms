@@ -200,12 +200,19 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
     env.DB.prepare(`DELETE FROM ${sl} WHERE ${subWhere}`).bind(idJson),abortIf(env,'changes()<>?',[links.length]),
     env.DB.prepare(`DELETE FROM ${src} WHERE id IN (SELECT value FROM json_each(?))`).bind(idJson),abortIf(env,'changes()<>?',[sources.length]),
     receipt.write,receipt.guard,...perPage.flatMap(r=>[r.write,r.guard]),
-    ...(erasures.length?[env.DB.prepare('INSERT INTO submission_erasures (uuid) SELECT value FROM json_each(?) WHERE true ON CONFLICT(uuid) DO NOTHING').bind(json(erasures))]:[]),
-    guard({env},src,sf,[],'id IN (SELECT value FROM json_each(?))',[idJson]),guard({env},sv,VERSION,[],subWhere,[idJson]),guard({env},sl,LINK,[],subWhere,[idJson]));
+    ...(erasures.length?[env.DB.prepare('INSERT INTO submission_erasures (uuid) SELECT value FROM json_each(?) WHERE true ON CONFLICT(uuid) DO NOTHING').bind(json(erasures))]:[]));
+  const sourceGone = [
+    guard({env},src,sf,[],'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
+    guard({env},sv,VERSION,[],subWhere,[idJson]),guard({env},sl,LINK,[],subWhere,[idJson]),
+  ];
+  statements.push(...sourceGone);
   if (action === 'purge') statements.push(env.DB.prepare(`DELETE FROM page_access_policies WHERE page_uuid IN (SELECT value FROM json_each(?))
     AND NOT EXISTS (SELECT 1 FROM pages WHERE uuid = page_uuid)`).bind(uuidJson));
-  if(action!=='purge')statements.push(guard({env},dst,df.filter(f=>f!=='updated_at'),expectedDest,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
-    guard({env},dv,VERSION,expectedVersions,destSubWhere,versionArgs),guard({env},dl,LINK,expectedLinks,destSubWhere,linkArgs),subset(env,dst,['id','uuid'],parentRefs));
+  const destinationChecks = action === 'purge' ? [] : [
+    guard({env},dst,df.filter(f=>f!=='updated_at'),expectedDest,'id IN (SELECT value FROM json_each(?)) OR uuid IN (SELECT value FROM json_each(?))',[idJson,uuidJson]),
+    guard({env},dv,VERSION,expectedVersions,destSubWhere,versionArgs),guard({env},dl,LINK,expectedLinks,destSubWhere,linkArgs),subset(env,dst,['id','uuid'],parentRefs),
+  ];
+  statements.push(...destinationChecks);
   if(children.length)statements.push(subset(env,src,childFields.filter(f=>f!=='updated_at'),detached));
   if(service)statements.push(abortIf(env,`EXISTS(SELECT 1 FROM trash_pages WHERE uuid IN (SELECT value FROM json_each(?)) AND (updated_at<? OR updated_at>CURRENT_TIMESTAMP))`,[uuidJson,clock.now]),guard({env},'tags',['id','uuid','taxonomy_slug'],tags,'id IN (SELECT value FROM json_each(?))',[json(tagIds)]));
   statements.push(...(service?[receipt.guard,...perPage.map(r=>r.guard)]:[]),classificationPolicyGuard(env,policy),...checks(),...(service?.after?.()??[]),
@@ -213,7 +220,15 @@ async function mutate(env:Env,user:JWTPayload|null,action:LifecycleAction,select
       OR EXISTS (SELECT 1 FROM json_each(?) e WHERE COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=json_extract(e.value,'$.uuid')),0)<json_extract(e.value,'$.level'))`,[json(floorUuids),dataClass==='phi'?2:dataClass==='pii'?1:0,json(floors)]));
   if(job)statements.push(job.delegationGuard);
   onAttempt?.();
-  await env.DB.batch(statements);
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (!job || !user) throw error;
+    // This claim may continue to withdrawal only if its exact receipt and
+    // local trash outcome are present. No retry of the local move is needed.
+    await env.DB.batch([job.delegationGuard, ...checks(), pageAccessGuard(env, user, uuids.map(String), true),
+      receipt.verify(), ...sourceGone, ...destinationChecks]);
+  }
   // The purge has committed with the erasure recorded; a failure here leaves it pending for cron.
   if(erasures.length)await publishing?.eraseSubmissionSources(env).catch(()=>console.error(JSON.stringify({event:'submission.erasure-pending',count:erasures.length})));
   return {count:sources.length,pages:sources.map(p=>({id:Number(p.id),uuid:String(p.uuid),name:String(p.name),slug:String(p.slug),page_type:p.page_type as string|null,

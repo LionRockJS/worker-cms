@@ -206,6 +206,28 @@ describe('POST /__cms/credits/usage', () => {
     expect(await subscriptionRow('record_storage')).toBeNull();
   });
 
+  it('rolls back usage if its receipt is ignored or the caller loses its credential', async () => {
+    expect((await reportUsage('record_storage', 7)).status).toBe(200);
+    const before = await subscriptionRow('record_storage');
+    for (const fault of [
+      "BEFORE INSERT ON audit_events WHEN NEW.action='credit.subscription-usage' BEGIN SELECT RAISE(IGNORE); END",
+      "AFTER INSERT ON audit_events WHEN NEW.action='credit.subscription-usage' BEGIN UPDATE plugins SET enabled=0; END",
+    ]) {
+      await env.DB.prepare(`CREATE TRIGGER subscription_usage_fault ${fault}`).run();
+      try {
+        expect((await reportUsage('record_storage', 10)).status).toBe(503);
+        expect(await subscriptionRow('record_storage')).toEqual(before);
+      } finally {
+        await env.DB.prepare('DROP TRIGGER subscription_usage_fault').run();
+      }
+    }
+    expect((await reportUsage('record_storage', 10)).status).toBe(200);
+    const row = await env.DB.prepare("SELECT actor_user_id, acting_via, detail FROM audit_events WHERE action='credit.subscription-usage' ORDER BY seq DESC LIMIT 1")
+      .first<{ actor_user_id: string | null; acting_via: string; detail: string }>();
+    expect(row).toMatchObject({ actor_user_id: null, acting_via: expect.stringMatching(/^plugin:/) });
+    expect(JSON.parse(row!.detail)).toMatchObject({ billed_user_id: PAYER_ID, quantity_before: 7, quantity_after: 10 });
+  });
+
   it('rejects unknown keys, non-recurring keys, and unknown users', async () => {
     expect((await reportUsage('nope', 10)).status).toBe(400);
     const metered = await reportUsage('send_edm', 10);

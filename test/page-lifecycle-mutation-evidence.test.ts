@@ -117,6 +117,23 @@ it('retains a complete lifecycle target manifest beyond the indexed cap',async()
 });
 async function job(){return createAdvancedSearchBulkActionJob(env,{action:'delete',scope:'selected',ids:[11010,11011],pageTypes:['article'],criteria:[],operator:'AND',targetTagIds:[],searchText:'',replacementText:'',returnTo:'/admin',user:{...user,exp:1}});}
 it('executes a queued deletion with current delete authority and its persisted claim',async()=>{const queued=await job();await runCmsAdminJob(env,queued.id);expect(await env.DB.prepare('SELECT status FROM admin_jobs WHERE id=?').bind(queued.id).first()).toEqual({status:'done'});const rows=await events();expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({acting_via:`job:${queued.id}`,request_id:null,target_count:2});expect(JSON.parse(String(rows[0].detail))).toMatchObject({job_id:queued.id,job_attempt:1});});
+it('reconciles a trash move after a lost acknowledgement before withdrawing the published page', async () => {
+  const queued = await job();
+  const liveUuid = 'draft-uuid-11010';
+  await env.PUBLISHED_DB.prepare("INSERT INTO pages (uuid, name, slug) VALUES (?, 'Live page', 'live-recovery')").bind(liveUuid).run();
+  try {
+    await runCmsAdminJob({ ...env, PUBLISH_TARGETS: 'd1', DB: race(async () => {}, true) }, queued.id);
+    await runCmsAdminJob(env, queued.id);
+    expect(await env.DB.prepare('SELECT status, attempts FROM admin_jobs WHERE id=?').bind(queued.id).first())
+      .toEqual({ status: 'done', attempts: 1 });
+    expect(await env.DB.prepare('SELECT id FROM trash_pages WHERE uuid=?').bind(liveUuid).first()).not.toBeNull();
+    expect(await env.PUBLISHED_DB.prepare('SELECT id FROM pages WHERE uuid=?').bind(liveUuid).first()).toBeNull();
+    expect(await events()).toHaveLength(1);
+  } finally {
+    await env.PUBLISHED_DB.prepare('DELETE FROM pages WHERE uuid=?').bind(liveUuid).run();
+  }
+});
+
 it.each(['lease','grant'])('refuses a queued deletion if its %s changes at admission',async change=>{const queued=await job();const before=await state();const DB=race(()=>change==='lease'?env.DB.prepare('UPDATE admin_jobs SET attempts=attempts+1 WHERE id=?').bind(queued.id).run():env.DB.prepare("UPDATE users SET role='viewer' WHERE id=11000").run());await runCmsAdminJob({...env,DB},queued.id);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 
 it('refuses unavailable optional trash storage without hard-deleting a draft',async()=>{

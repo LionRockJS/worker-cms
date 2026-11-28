@@ -205,53 +205,74 @@ export async function claimAdminJob(env: Env, id: string): Promise<AdminJobRecor
 export const claimedJobSql = " AND status='running' AND attempts=? AND body IS ? AND updated_at IS ? AND user_json IS ?";
 export const claimedJobBindings = (claim: AdminJobRecord) => [claim.attempts, claim.body, claim.updatedAt, claim.userJson];
 
-export async function completeAdminJob(
-  db: D1DatabaseClient,
-  id: string,
-  resultStatus: number,
-  resultLocation: string | null,
-  claim?: AdminJobRecord,
-): Promise<void> {
-  const now = jobTimestamp();
-  await db.prepare(
-    `UPDATE admin_jobs
-     SET status = 'done',
-         result_status = ?,
-         result_location = ?,
-         error = NULL,
-         completed_at = ?,
-         updated_at = ?
-     WHERE id = ?${claim ? claimedJobSql : ''}`,
-  ).bind(resultStatus, resultLocation, now, now, id,...(claim ? claimedJobBindings(claim):[])).run();
+export class AdminJobOutcomeUnavailableError extends Error {
+  constructor(cause: unknown) { super('Job outcome evidence unavailable', { cause }); }
 }
 
-export async function requeueAdminJob(
-  db: D1DatabaseClient,
-  id: string,
-  body: string,
-  claim?: AdminJobRecord,
-): Promise<boolean> {
-  const now = jobTimestamp();
-  const result = await db.prepare(
-    `UPDATE admin_jobs
-     SET status = 'queued',
-         body = ?,
-         error = NULL,
-         updated_at = ?
-     WHERE id = ?${claim ? claimedJobSql : ''}`,
-  ).bind(body, now, id,...(claim ? claimedJobBindings(claim):[])).run();
-  return changes(result)===1;
+type JobOutcome =
+  | { status: 'done'; resultStatus: number; location: string | null }
+  | { status: 'queued'; body: string }
+  | { status: 'failed'; error: string };
+
+export function completeAdminJob(env: Env, claim: AdminJobRecord, resultStatus: number, location: string | null): Promise<boolean> {
+  return recordJobOutcome(env, claim, { status: 'done', resultStatus, location });
 }
 
-export async function failAdminJob(db: D1DatabaseClient, id: string, error: unknown, claim?: AdminJobRecord): Promise<void> {
-  const now = jobTimestamp();
-  await db.prepare(
-    `UPDATE admin_jobs
-     SET status = 'failed',
-         error = ?,
-         updated_at = ?
-     WHERE id = ?${claim ? claimedJobSql : ''}`,
-  ).bind(errorText(error), now, id,...(claim ? claimedJobBindings(claim):[])).run();
+export function requeueAdminJob(env: Env, claim: AdminJobRecord, body: string): Promise<boolean> {
+  return recordJobOutcome(env, claim, { status: 'queued', body });
+}
+
+export function failAdminJob(env: Env, claim: AdminJobRecord, error: unknown): Promise<boolean> {
+  return recordJobOutcome(env, claim, { status: 'failed', error: error instanceof Error ? error.message : String(error) });
+}
+
+async function recordJobOutcome(env: Env, claim: AdminJobRecord, outcome: JobOutcome): Promise<boolean> {
+  assertRegulatedWritesAllowed(env);
+  try {
+    const { DB: db } = env;
+    const selectClaim = () => db.prepare(`SELECT * FROM admin_jobs WHERE id = ? AND type = ?${claimedJobSql}`)
+      .bind(claim.id, claim.type, ...claimedJobBindings(claim)).first<AdminJobRow>();
+    const before = await selectClaim();
+    if (!before || before.plugin_id !== claim.pluginId || before.method !== claim.method ||
+      before.path !== claim.path || before.content_type !== claim.contentType) return false;
+
+    const now = jobTimestamp();
+    const transitionId = crypto.randomUUID();
+    const row: AdminJobRow = {
+      ...before, status: outcome.status, updated_at: now,
+      ...(outcome.status === 'done' ? {
+        result_status: outcome.resultStatus, result_location: outcome.location, error: null, completed_at: now,
+      } : outcome.status === 'queued' ? { body: outcome.body, error: null } : { error: outcome.error }),
+    };
+    const policy = await resolveDataClasses(env, true);
+    const receipt = serviceMutationAuditEvidence(env, {
+      action: 'job.outcome', entityType: 'admin_job', entityId: claim.id,
+      detail: { transition_id: transitionId, job_type: claim.type, job_attempt: claim.attempts, status: row.status,
+        ...(outcome.status === 'done' ? { result_status: outcome.resultStatus } : {}) },
+    }, { userId: null, roles: null, sessionSid: null, via: 'system:admin-job-runner' },
+    classFor(policy, 'table', 'admin_jobs') ?? 'none', policy);
+    try {
+      await db.batch([
+        db.prepare(`UPDATE admin_jobs SET status = ?, updated_at = ?, body = ?, result_status = ?,
+          result_location = ?, error = ?, completed_at = ? WHERE ${exactJob}`)
+          .bind(row.status, row.updated_at, row.body, row.result_status, row.result_location, row.error, row.completed_at, ...jobValues(before)),
+        abortIf(env, 'changes() <> 1'), receipt.write, receipt.guard, jobStateGuard(env, row),
+      ]);
+      return true;
+    } catch (error) {
+      const current = await db.prepare('SELECT * FROM admin_jobs WHERE id = ?').bind(claim.id).first<AdminJobRow>();
+      if (current && jobFields.every(field => current[field] === row[field])) {
+        const written = await db.prepare(`SELECT 1 FROM audit_events WHERE action = 'job.outcome'
+          AND target_type = 'admin_job' AND target_id = ? AND json_extract(detail, '$.transition_id') = ?`)
+          .bind(claim.id, transitionId).first();
+        if (written) return true;
+      }
+      if (!current || jobFields.some(field => current[field] !== before[field])) return false;
+      throw error;
+    }
+  } catch (error) {
+    throw new AdminJobOutcomeUnavailableError(error);
+  }
 }
 
 export async function getAdminJob(db: D1DatabaseClient, id: string): Promise<AdminJobRecord | null> {
@@ -292,15 +313,6 @@ function parseUser(value: string | null): JWTPayload | null {
   }
 }
 
-function changes(result: D1Result<unknown>): number {
-  return Number((result.meta as { changes?: number } | undefined)?.changes ?? 0);
-}
-
 function jobTimestamp(): string {
   return new Date().toISOString();
-}
-
-function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

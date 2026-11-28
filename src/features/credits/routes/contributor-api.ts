@@ -358,7 +358,7 @@ creditApiRoutes.post('/credits/usage', async (c) => {
   const userId = bodyUserId > 0 ? bodyUserId : actingUserId(c);
   if (userId === null || userId <= 0) return c.json({ error: 'user_required' }, 400);
 
-  const report = await reportSubscriptionUsage(c.env, { userId, credit, quantity });
+  const report = await reportSubscriptionUsage(c, auth, { userId, credit, quantity });
   if (!report.ok) return c.json({ error: 'unknown_user' }, 400);
   if (report.subscription) recordTableReads('credit.subscription-read', 'credit_subscriptions', [report.subscription.id], readActor(c, auth.callerId));
   announceContributor(c, auth.callerId);

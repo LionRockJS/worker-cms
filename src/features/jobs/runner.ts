@@ -23,6 +23,7 @@ import {
   isLocalBulkEdit,
 } from '../../core/pages/bulk-action';
 import {
+  AdminJobOutcomeUnavailableError,
   claimAdminJob,
   claimedJobBindings,
   claimedJobSql,
@@ -58,7 +59,9 @@ export async function runCmsAdminJob(env: Env, jobId: string): Promise<void> {
       throw new Error(`Unsupported admin job type ${job.type}`);
     }
   } catch (error) {
-    await failAdminJob(env.DB, job.id, error, job);
+    // An outcome write can fail after the job has already affected a destination.
+    if (error instanceof AdminJobOutcomeUnavailableError) throw error;
+    await failAdminJob(env, job, error);
     console.error(`[cms] admin job ${job.id} failed`, error);
   }
   if (requeued) {
@@ -96,7 +99,7 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
     },
   });
 
-  await completeAdminJob(env.DB, job.id, result.status, result.location, job);
+  await completeAdminJob(env, job, result.status, result.location);
 }
 
 async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Promise<boolean> {
@@ -178,13 +181,13 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
       refused,
       failedTargets,
     };
-    return requeueAdminJob(env.DB, job.id, JSON.stringify(nextInput), job);
+    return requeueAdminJob(env, job, JSON.stringify(nextInput));
   }
 
-  await completeAdminJob(env.DB, job.id, 200, appendQuery(
+  await completeAdminJob(env, job, 200, appendQuery(
     input.returnTo,
     await signedNotice(env.JWT_SECRET, job.user.sub, bulkActionFlash(input.action, updated, refused, failedTargets)),
-  ), job);
+  ));
   return false;
 }
 

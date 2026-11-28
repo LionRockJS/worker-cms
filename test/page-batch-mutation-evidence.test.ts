@@ -7,7 +7,7 @@ import { verifyJWT } from '../src/core/auth/jwt';
 import { applyBulkPageAction } from '../src/core/pages/bulk-action';
 import { updateDraftWeights, ContentBatchEvidenceUnavailableError } from '../src/core/evidence/batch-mutation-evidence';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
-import { claimAdminJob, createAdvancedSearchBulkActionJob, getAdminJob } from '../src/features/jobs/queue';
+import { claimAdminJob, completeAdminJob, createAdvancedSearchBulkActionJob, failAdminJob, getAdminJob, requeueAdminJob } from '../src/features/jobs/queue';
 import type { Env,JWTPayload } from '../src/types';
 
 let cookie='';let user:JWTPayload;let count=0;
@@ -130,6 +130,36 @@ it('recovers a lost claim acknowledgement and only dispatches the winning claim'
   ]);
   expect(JSON.parse(results[1].detail)).toMatchObject({ job_attempt: 1, claim_id: expect.any(String) });
   expect(JSON.stringify(results)).not.toMatch(/searchText|replacementText|private-actor@example.invalid/);
+});
+
+it('commits requeue and recovery of a lost completion with exact job outcome receipts', async () => {
+  const queued = await job();
+  const claim = (await claimAdminJob(env, queued.id))!;
+  expect(await requeueAdminJob(env, claim, claim.body!)).toBe(true);
+  expect(await failAdminJob(env, claim, 'stale detail')).toBe(false);
+  const next = (await claimAdminJob(env, queued.id))!;
+  const DB = race(async () => {}, true, /^UPDATE admin_jobs SET status = \?/);
+  expect(await completeAdminJob({ ...env, DB }, next, 302, '/admin?private=private-result')).toBe(true);
+  const { results } = await env.DB.prepare("SELECT detail FROM audit_events WHERE action='job.outcome' AND target_id=? ORDER BY seq")
+    .bind(queued.id).all<{ detail: string }>();
+  expect(results.map(row => JSON.parse(row.detail))).toMatchObject([
+    { job_attempt: 1, status: 'queued' }, { job_attempt: 2, status: 'done', result_status: 302 },
+  ]);
+  expect(JSON.stringify(results)).not.toContain('private-result');
+});
+
+it('rolls back a job failure when its outcome receipt cannot be recorded', async () => {
+  const queued = await job();
+  const claim = (await claimAdminJob(env, queued.id))!;
+  await env.DB.prepare(`CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_events
+    WHEN NEW.action='job.outcome' BEGIN SELECT RAISE(IGNORE); END`).run();
+  await expect(failAdminJob(env, claim, 'private failure')).rejects.toThrow('Job outcome evidence unavailable');
+  expect(await getAdminJob(env.DB, queued.id)).toMatchObject({ status: 'running', error: null });
+  await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
+  expect(await failAdminJob(env, claim, 'private failure')).toBe(true);
+  const receipt = await env.DB.prepare("SELECT detail FROM audit_events WHERE action='job.outcome' AND target_id=?").bind(queued.id).first<{ detail: string }>();
+  expect(JSON.parse(receipt!.detail)).toMatchObject({ status: 'failed', job_attempt: 1 });
+  expect(receipt!.detail).not.toContain('private failure');
 });
 
 it('executes a claimed job using current grants and its durable lease rather than an expired initiating JWT',async()=>{

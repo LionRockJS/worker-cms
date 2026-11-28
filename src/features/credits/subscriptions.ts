@@ -37,6 +37,13 @@
 // ============================================================
 
 import type { Env } from '../../types';
+import { ServiceMutationUnavailableError, serviceMutationAuditEvidence } from '../../core/db/audit';
+import { recordAuditOutage } from '../../core/db/audit-outages';
+import { classFor, resolveDataClasses, strongestClass } from '../../core/db/data-classes';
+import { abortIf } from '../../core/db/transaction-guard';
+import type { ApiCallerIdentity } from '../../core/extensions';
+import { auditBackgroundReads } from '../../core/http/access-log';
+import type { AppContext } from '../../core/http/context';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import type { CreditBillingMode } from './contracts';
 import { type EffectiveCredit, creditContributors, currencyLabel, effectiveCreditsFor, spendCredits } from './service';
@@ -109,45 +116,96 @@ export type UsageReportResult =
  * cancel at the boundary.
  */
 export async function reportSubscriptionUsage(
-  env: Env,
+  c: AppContext, caller: ApiCallerIdentity,
   input: { userId: number; credit: EffectiveCredit; quantity: number; now?: Date },
 ): Promise<UsageReportResult> {
+  assertRegulatedWritesAllowed(c.env);
+  try {
+    return await writeSubscriptionUsage(c, caller, input);
+  } catch {
+    await recordAuditOutage(c.env, 'health', [], undefined, undefined, { captureIncomplete: true });
+    throw new ServiceMutationUnavailableError();
+  }
+}
+
+async function writeSubscriptionUsage(
+  c: AppContext, caller: ApiCallerIdentity,
+  input: { userId: number; credit: EffectiveCredit; quantity: number; now?: Date },
+): Promise<UsageReportResult> {
+  const { env } = c;
+  const db = env.DB;
   const now = input.now ?? new Date();
+  const updatedAt = sqliteDate(now);
   const quantity = Math.trunc(input.quantity);
   const { pluginId, def } = input.credit;
-
-  if (quantity <= 0) {
-    const row = await env.DB.prepare(
-      `UPDATE credit_subscriptions SET quantity = 0, updated_at = ?
-        WHERE user_id = ? AND plugin_id = ? AND credit_key = ? AND status != 'canceled'
-        RETURNING *`,
-    ).bind(sqliteDate(now), input.userId, pluginId, def.key).first<CreditSubscriptionRow>();
-    return { ok: true, subscription: row ?? null };
+  if (pluginId !== caller.callerId || def.charge !== 'recurring' || !caller.captureMutationAuthority ||
+    !Number.isSafeInteger(input.userId) || input.userId <= 0 || !Number.isSafeInteger(quantity) || quantity < 0 || quantity > 1_000_000_000) {
+    throw new Error('Subscription authority unavailable');
+  }
+  const authority = await caller.captureMutationAuthority();
+  const policy = await resolveDataClasses(env, true);
+  const dataClass = strongestClass([classFor(policy, 'plugin', pluginId),
+    ...['credit_subscriptions', 'users', 'plugins', 'plugin_identity_approvals'].map(table => classFor(policy, 'table', table))]);
+  const key = [input.userId, pluginId, def.key];
+  const lookup = 'user_id = ? AND plugin_id = ? AND credit_key = ?';
+  const select = () => db.prepare(`SELECT * FROM credit_subscriptions WHERE ${lookup}`).bind(...key);
+  const before = await select().first<CreditSubscriptionRow>();
+  if (quantity === 0 && (!before || before.status === 'canceled')) return { ok: true, subscription: null };
+  if (quantity > 0 && !await db.prepare('SELECT id FROM users WHERE id = ?').bind(input.userId).first()) {
+    return { ok: false, error: 'unknown_user' };
   }
 
-  // Advance bills the coming month immediately (the sweep picks the row up on
-  // its next tick); arrears bills once the first month has elapsed.
-  const firstChargeAt = def.billing === 'arrears' ? addMonthsUTC(now, 1) : now;
+  if (before) await auditBackgroundReads(env, [{
+    action: 'credit.subscription-usage-source', kind: 'table', key: 'credit_subscriptions', targetType: 'credit_subscription',
+    ids: [String(before.id)], count: 1, minimumClass: dataClass === 'none' ? undefined : dataClass,
+  }], authority.actor, { exact: true });
 
-  const user = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(input.userId).first<{ id: number }>();
-  if (!user) return { ok: false, error: 'unknown_user' };
-
-  const row = await env.DB.prepare(
-    `INSERT INTO credit_subscriptions (user_id, plugin_id, credit_key, quantity, peak_quantity, status, next_charge_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
-     ON CONFLICT(user_id, plugin_id, credit_key) DO UPDATE SET
-       quantity = excluded.quantity,
-       peak_quantity = CASE WHEN status = 'canceled' THEN excluded.quantity ELSE MAX(peak_quantity, excluded.quantity) END,
-       next_charge_at = CASE WHEN status = 'canceled' THEN excluded.next_charge_at ELSE next_charge_at END,
-       last_mode = CASE WHEN status = 'canceled' THEN NULL ELSE last_mode END,
-       status = CASE WHEN status = 'canceled' THEN 'active' ELSE status END,
-       updated_at = excluded.updated_at
-     RETURNING *`,
-  ).bind(
-    input.userId, pluginId, def.key, quantity, quantity,
-    sqliteDate(firstChargeAt), sqliteDate(now), sqliteDate(now),
-  ).first<CreditSubscriptionRow>();
-  return { ok: true, subscription: row ?? null };
+  const reset = !before || before.status === 'canceled';
+  const next = {
+    quantity,
+    peak_quantity: reset ? quantity : quantity === 0 ? before.peak_quantity : Math.max(before.peak_quantity, quantity),
+    status: reset ? 'active' : before.status,
+    next_charge_at: reset ? sqliteDate(def.billing === 'arrears' ? addMonthsUTC(now, 1) : now) : before.next_charge_at,
+    last_charged_at: before?.last_charged_at ?? null,
+    last_mode: reset ? null : before.last_mode,
+    created_at: before?.created_at ?? updatedAt,
+    updated_at: updatedAt,
+  };
+  // Use the entire observed billing state for the CAS. A concurrent settlement
+  // or report can change the peak or next charge while this item is being planned.
+  const fields = ['quantity', 'peak_quantity', 'status', 'next_charge_at', 'last_charged_at',
+    'last_mode', 'created_at', 'updated_at'] as const;
+  const matches = fields.map(field => `${field} IS ?`).join(' AND ');
+  const snapshotGuard = before
+    ? abortIf(env, `NOT EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${lookup} AND id = ? AND ${matches})`,
+      [...key, before.id, ...fields.map(field => before[field])])
+    : abortIf(env, `EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${lookup})`, key);
+  const write = before
+    ? db.prepare(`UPDATE credit_subscriptions SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE ${lookup}`)
+      .bind(...fields.map(field => next[field]), ...key)
+    : db.prepare(`INSERT INTO credit_subscriptions (user_id, plugin_id, credit_key, ${fields.join(', ')})
+        VALUES (?, ?, ?, ${fields.map(() => '?').join(', ')})`).bind(...key, ...fields.map(field => next[field]));
+  const receipt = serviceMutationAuditEvidence(env, {
+    action: 'credit.subscription-usage', entityType: 'credit_subscription', entityId: JSON.stringify(key),
+    detail: { plugin_id: pluginId, credit_key: def.key, billed_user_id: input.userId,
+      operation: !before ? 'create' : reset ? 'reactivate' : 'update',
+      quantity_before: before?.quantity ?? null, quantity_after: next.quantity,
+      peak_before: before?.peak_quantity ?? null, peak_after: next.peak_quantity,
+      status_before: before?.status ?? null, status_after: next.status,
+      due_before: before?.next_charge_at ?? null, due_after: next.next_charge_at,
+      last_mode_before: before?.last_mode ?? null, last_mode_after: next.last_mode },
+  }, authority.actor, dataClass, policy, c);
+  const result = await db.batch([
+    ...authority.check(),
+    snapshotGuard,
+    write, abortIf(env, 'changes() <> 1'), receipt.write, receipt.guard,
+    ...authority.check(),
+    abortIf(env, `NOT EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${lookup} AND ${matches}
+      AND id BETWEEN 1 AND 9007199254740991 AND (? IS NULL OR id = ?))`,
+    [...key, ...fields.map(field => next[field]), before?.id ?? null, before?.id ?? null]),
+    select(),
+  ]);
+  return { ok: true, subscription: result.at(-1)!.results[0] as CreditSubscriptionRow };
 }
 
 export async function listSubscriptionsForPlugin(

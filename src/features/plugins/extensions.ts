@@ -31,6 +31,7 @@ import { pluginEditView, pluginNewView, pluginReadView } from './edit-view';
 import { viewsFor } from './views';
 import { listPlugins } from './store';
 import { authenticatePlugin } from './api/auth';
+import { snapshotPluginCredential } from './evidence-common';
 import { actingUserId } from './api/create';
 import { recordContributorReads } from '../../core/http/access-log';
 
@@ -207,7 +208,10 @@ registerCoreExtensions({
 
   async authenticateApiCaller(c: AppContext): Promise<ApiCallerIdentity | Response> {
     const auth = await authenticatePlugin(c);
-    return auth instanceof Response ? auth : { callerId: auth.pluginId };
+    return auth instanceof Response ? auth : {
+      callerId: auth.pluginId,
+      captureMutationAuthority: () => snapshotPluginCredential(c, auth),
+    };
   },
 
   actingUserId(c: AppContext): number | null {
