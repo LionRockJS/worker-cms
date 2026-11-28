@@ -3,7 +3,7 @@ import { NEXT_SNAPSHOT_ID_SQL, nextIdSql } from '../pages/snapshot-id';
 import type { Env, JWTPayload, Page } from '../../types';
 import type { AppContext } from '../http/context';
 import { captureAccessAuthorization, captureContentJobAuthorization } from '../auth/access-authorization';
-import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass } from '../db/data-classes';
+import { classFor, resolveDataClasses, classificationPolicyGuard, strongestClass, type DataClass } from '../db/data-classes';
 import { attributedMutationAuditEvidence, type AuditActor } from '../db/audit';
 import { abortIf } from '../db/transaction-guard';
 import { auditBackgroundReads } from '../http/access-log';
@@ -15,6 +15,8 @@ export interface ContentJobLease {
   attempt: number;
   /** Prepared by the owning optional feature; core never imports its schema. */
   guard: D1PreparedStatement;
+  /** Local bulk slices commit their job progress with the page outcomes. */
+  checkpoint?: (updated: number, dataClass: DataClass | 'none') => Promise<D1PreparedStatement[]>;
 }
 export interface ContentBatchContext { request?: AppContext; job?: ContentJobLease }
 export interface PageWeight { id: number; weight: number }
@@ -125,7 +127,15 @@ async function updateWeights(env: Env,user: JWTPayload, updates: PageWeight[], c
 async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[], context: ContentBatchContext = {}): Promise<void> {
   assertRegulatedWritesAllowed(env);
   if (changes.length>100 || new Set(changes.map(c=>c.before.id)).size!==changes.length) throw new Error('Invalid bulk manifest');
-  if (!changes.length) return;
+  const checkpoint = context.job?.checkpoint;
+  if (!changes.length) {
+    if (context.job && checkpoint) {
+      const { authorization, delegationGuard } = await captureContentJobAuthorization(env, user, context.job.guard);
+      if (!authorization.allowed) throw new Error('Content authority unavailable');
+      await env.DB.batch([authorization.guard(), delegationGuard, ...await checkpoint(0, 'none'), authorization.guard()]);
+    }
+    return;
+  }
   const extraTags = [...new Set(changes.flatMap(c=>c.tags??[]))];
   if (extraTags.length>5000 || extraTags.some(id=>!Number.isSafeInteger(id)||id<=0)) throw new Error('Invalid bulk tags');
   const prepared = await prepare(env,user,changes.map(c=>c.before),extraTags,context,true);
@@ -134,6 +144,7 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
   const finalTagCount=changes.reduce((n,c)=>n+(c.tags ? new Set(c.tags).size : prepared.linkRows.filter(l=>l.page_id===c.before.id).length),0);
   if (finalTagCount>MAX_MANIFEST_ROWS) throw new Error('Bulk tag manifest requires review');
   const statements = [...prepared.guards,rowGuard(env,changes.map(c=>c.before),PAGE_FIELDS)];
+  const receiptGuards: D1PreparedStatement[] = [];
   const expectedVersions: Array<{uuid:string;page_id:number;lect:string|null}> = [];
   const finals = changes.map(change=>({...change.before,name:change.name??change.before.name,lect:change.lect===undefined?change.before.lect:change.lect}));
   for (const [index,change] of changes.entries()) {
@@ -150,7 +161,9 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
     const detail = change.tags ? {fields:['tags'],tags_before:prepared.linkRows.filter(l=>l.page_id===page.id).map(l=>l.tag_id),tags_after:[...new Set(change.tags)],tag_count:new Set(change.tags).size} : {fields:['name','lect'],version_uuid:expectedVersions.at(-1)!.uuid};
     const receipt=prepared.evidence({action:'page.update',entityType:'page',entityId:page.id,detail:{...detail,operation_target_count:changes.length,operation_index:index}},prepared.dataClass(page));
     statements.push(receipt.write,receipt.guard);
+    if (checkpoint) receiptGuards.push(receipt.guard);
   }
+  if (checkpoint) statements.push(...await checkpoint(changes.length, strongestClass(changes.map(change => prepared.dataClass(change.before)))), ...receiptGuards);
   const expectedLinks = changes.flatMap(c=>(c.tags ? [...new Set(c.tags)] : prepared.linkRows.filter(l=>l.page_id===c.before.id).map(l=>l.tag_id)).map(tag_id=>({page_id:c.before.id,tag_id})));
   statements.push(rowGuard(env,finals,PAGE_FIELDS.filter(f=>f!=='updated_at')),prepared.tagGuard(),
     abortIf(env,`(SELECT COUNT(*) FROM page_tags WHERE page_id IN (SELECT value FROM json_each(?))) <> ?
@@ -167,7 +180,7 @@ async function applyChanges(env: Env,user: JWTPayload, changes: LocalPageChange[
     OR COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0) < ?`,[change.before.uuid,prepared.dataClass(change.before)==='phi'?2:prepared.dataClass(change.before)==='pii'?1:0,
     change.before.uuid,prepared.floorRows.find(f=>f.uuid===change.before.uuid)?.level??0]));
   statements.push(prepared.guards[0]);
-  if (context.job) statements.push(context.job.guard);
+  if (context.job && !checkpoint) statements.push(context.job.guard);
   await env.DB.batch(statements);
 }
 

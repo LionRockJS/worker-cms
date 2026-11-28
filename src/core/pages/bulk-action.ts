@@ -23,6 +23,10 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 /** The bulk actions a page listing offers. */
 export type BulkPageAction = 'publish' | 'unpublish' | 'delete' | 'add_tag' | 'remove_tag' | 'replace_text';
 
+export function isLocalBulkEdit(action: BulkPageAction): action is 'add_tag' | 'remove_tag' | 'replace_text' {
+  return action === 'add_tag' || action === 'remove_tag' || action === 'replace_text';
+}
+
 /** Extra values used only by the bulk actions that need them. */
 export interface BulkPageActionOptions {
   targetTagIds?: number[];
@@ -94,9 +98,13 @@ export async function applyBulkPageAction(
   let updated = 0;
   let refused = 0;
 
-  if (!ids.length) return { updated, refused, failedTargets };
+  const localEdit = isLocalBulkEdit(action);
+  if (!ids.length) {
+    if (localEdit && context.job?.checkpoint) await applyLocalPageChanges(env, user, [], context);
+    return { updated, refused, failedTargets };
+  }
   const access = pageAccessFilter(user, 'write', 'p.uuid', true);
-  if ((action === 'add_tag' || action === 'remove_tag' || action === 'replace_text') &&
+  if (localEdit &&
       (ids.length > BULK_ACTION_PAGE_LIMIT || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length)) {
     throw new Error('Invalid bulk target manifest');
   }
@@ -107,9 +115,12 @@ export async function applyBulkPageAction(
     .bind(JSON.stringify(requested), ...access.args).all<{ id: number }>();
   const allowed = new Set(authorized.results.map(page => page.id));
   ids = requested.filter(id => allowed.has(id));
-  if (!ids.length) return { updated, refused, failedTargets };
+  if (!ids.length) {
+    if (localEdit && context.job?.checkpoint) await applyLocalPageChanges(env, user, [], context);
+    return { updated, refused, failedTargets };
+  }
 
-  if (action === 'add_tag' || action === 'remove_tag' || action === 'replace_text') {
+  if (localEdit) {
     const pages = await draftPagesByIds(env.DB,[...new Set(ids)]);
     const changes: LocalPageChange[] = [];
     if (action === 'replace_text') {

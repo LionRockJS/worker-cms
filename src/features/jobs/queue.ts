@@ -77,6 +77,7 @@ export interface AdminJobRecord {
   contentType: string | null;
   body: string | null;
   user: JWTPayload | null;
+  userJson: string | null;
   attempts: number;
   resultStatus: number | null;
   resultLocation: string | null;
@@ -160,9 +161,8 @@ export async function claimAdminJob(db: D1DatabaseClient, id: string): Promise<A
 }
 
 /** A stale worker must not overwrite a newer claim or changed payload. */
-const claimedJobSql = ` AND status='running' AND attempts=? AND body IS ? AND updated_at IS ?
-  AND (CASE WHEN json_valid(user_json) THEN CAST(json_extract(user_json,'$.sub') AS TEXT) ELSE NULL END) IS ?`;
-const claimedJobBindings = (claim: AdminJobRecord) => [claim.attempts,claim.body,claim.updatedAt,claim.user?.sub??null];
+export const claimedJobSql = " AND status='running' AND attempts=? AND body IS ? AND updated_at IS ? AND user_json IS ?";
+export const claimedJobBindings = (claim: AdminJobRecord) => [claim.attempts, claim.body, claim.updatedAt, claim.userJson];
 
 export async function completeAdminJob(
   db: D1DatabaseClient,
@@ -229,6 +229,7 @@ function rowToRecord(row: AdminJobRow): AdminJobRecord {
     contentType: row.content_type,
     body: row.body,
     user: parseUser(row.user_json),
+    userJson: row.user_json,
     attempts: row.attempts,
     resultStatus: row.result_status,
     resultLocation: row.result_location,

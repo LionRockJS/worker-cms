@@ -20,15 +20,19 @@ import {
   resolveBulkTargetIds,
   BULK_ACTION_PAGE_LIMIT,
   draftPagesByIds,
+  isLocalBulkEdit,
 } from '../../core/pages/bulk-action';
 import {
   claimAdminJob,
+  claimedJobBindings,
+  claimedJobSql,
   completeAdminJob,
   failAdminJob,
   requeueAdminJob,
   type AdminJobRecord,
   type AdvancedSearchBulkActionPayload,
 } from './queue';
+import { prepareLocalBulkCheckpoint } from './local-bulk-checkpoint';
 import { appendQuery } from '../../core/http/forms';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 
@@ -39,22 +43,27 @@ export async function runCmsAdminJob(env: Env, jobId: string): Promise<void> {
   const job = await claimAdminJob(env.DB, jobId);
   if (!job) return;
 
+  let requeued = false;
   try {
     if (!job.user) throw new Error('Job user missing');
-    const current = await env.DB.prepare('SELECT email, name, role FROM users WHERE id = ?')
+    const current = await env.DB.prepare('SELECT email, name, role FROM users WHERE id = ? AND disabled_at IS NULL')
       .bind(job.user.sub).first<{ email: string; name: string; role: string }>();
     if (!current) throw new Error('Job user no longer exists');
     job.user = { ...job.user, ...current };
     if (job.type === 'plugin_admin_action') {
       await runPluginAdminActionJob(env, job);
     } else if (job.type === 'advanced_search_bulk_action') {
-      await runAdvancedSearchBulkActionJob(env, job);
+      requeued = await runAdvancedSearchBulkActionJob(env, job);
     } else {
       throw new Error(`Unsupported admin job type ${job.type}`);
     }
   } catch (error) {
     await failAdminJob(env.DB, job.id, error, job);
     console.error(`[cms] admin job ${job.id} failed`, error);
+  }
+  if (requeued) {
+    if (env.ADMIN_JOBS_QUEUE) await env.ADMIN_JOBS_QUEUE.send({ kind: 'cms_admin_job', jobId: job.id });
+    else await runCmsAdminJob(env, job.id);
   }
 }
 
@@ -90,7 +99,7 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
   await completeAdminJob(env.DB, job.id, result.status, result.location, job);
 }
 
-async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Promise<void> {
+async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Promise<boolean> {
   if (!job.user) throw new Error('Admin job is missing user data');
   let input = parseAdvancedSearchBulkActionJob(job.body);
   if ((input.action === 'publish' || input.action === 'unpublish') && !featureInstalled('publish')) {
@@ -134,17 +143,32 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
     action: 'page.job-read', kind: 'page_type', key, targetType: 'page', ids, count: ids.length,
     detail: { job_id: job.id, operation: input.action },
   })), { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null });
-  const outcome = await applyBulkPageAction(env, job.user, input.action, pageIds, {
-    targetTagIds: input.targetTagIds,
-    searchText: input.searchText,
-    replacementText: input.replacementText,
-  }, {job:{id:job.id,attempt:job.attempts,guard:abortIf(env,`NOT EXISTS (SELECT 1 FROM admin_jobs WHERE id=? AND type='advanced_search_bulk_action'
-    AND status='running' AND attempts=? AND body IS ? AND updated_at IS ? AND json_valid(user_json)
-    AND CAST(json_extract(user_json,'$.sub') AS TEXT)=?)`,[job.id,job.attempts,job.body,job.updatedAt,job.user.sub])}});
+  const nextCursor = cursor + pageIds.length;
+  const user = job.user;
+  const lease = {
+    id: job.id, attempt: job.attempts,
+    guard: abortIf(env, `NOT EXISTS (SELECT 1 FROM admin_jobs WHERE id=? AND type='advanced_search_bulk_action'${claimedJobSql})`,
+      [job.id, ...claimedJobBindings(job)]),
+  };
+  const options = { targetTagIds: input.targetTagIds, searchText: input.searchText, replacementText: input.replacementText };
+  if (isLocalBulkEdit(input.action)) {
+    let checkpoint: Awaited<ReturnType<typeof prepareLocalBulkCheckpoint>> | undefined;
+    try {
+      await applyBulkPageAction(env, user, input.action, pageIds, options, { job: { ...lease, async checkpoint(changed, dataClass) {
+        checkpoint = await prepareLocalBulkCheckpoint(env, job, user, input, cursor, nextCursor, changed, dataClass);
+        return checkpoint.statements;
+      } } });
+    } catch (error) {
+      // An acknowledgement can be lost after the page edit and checkpoint commit.
+      if (!checkpoint || !await checkpoint.committed()) throw error;
+    }
+    if (!checkpoint) throw new Error('Local job checkpoint missing');
+    return checkpoint.queued;
+  }
+  const outcome = await applyBulkPageAction(env, user, input.action, pageIds, options, { job: lease });
   const updated = (input.updated ?? 0) + outcome.updated;
   const refused = (input.refused ?? 0) + outcome.refused;
   const failedTargets = Array.from(new Set([...(input.failedTargets ?? []), ...outcome.failedTargets]));
-  const nextCursor = cursor + pageIds.length;
 
   if (nextCursor < input.ids.length) {
     const nextInput: AdvancedSearchBulkActionPayload = {
@@ -154,19 +178,14 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
       refused,
       failedTargets,
     };
-    if (!await requeueAdminJob(env.DB, job.id, JSON.stringify(nextInput), job)) return;
-    if (env.ADMIN_JOBS_QUEUE) {
-      await env.ADMIN_JOBS_QUEUE.send({ kind: 'cms_admin_job', jobId: job.id });
-    } else {
-      await runCmsAdminJob(env, job.id);
-    }
-    return;
+    return requeueAdminJob(env.DB, job.id, JSON.stringify(nextInput), job);
   }
 
   await completeAdminJob(env.DB, job.id, 200, appendQuery(
     input.returnTo,
     await signedNotice(env.JWT_SECRET, job.user.sub, bulkActionFlash(input.action, updated, refused, failedTargets)),
   ), job);
+  return false;
 }
 
 function parseAdvancedSearchBulkActionJob(body: string | null): AdvancedSearchBulkActionPayload {

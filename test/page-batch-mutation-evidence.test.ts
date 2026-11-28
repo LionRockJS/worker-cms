@@ -7,7 +7,7 @@ import { verifyJWT } from '../src/core/auth/jwt';
 import { applyBulkPageAction } from '../src/core/pages/bulk-action';
 import { updateDraftWeights, ContentBatchEvidenceUnavailableError } from '../src/core/evidence/batch-mutation-evidence';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
-import { createAdvancedSearchBulkActionJob } from '../src/features/jobs/queue';
+import { createAdvancedSearchBulkActionJob, getAdminJob } from '../src/features/jobs/queue';
 import type { Env,JWTPayload } from '../src/types';
 
 let cookie='';let user:JWTPayload;let count=0;
@@ -92,7 +92,7 @@ it('uses a taxonomy floor for bulk addition and retains it after removal',async(
 it('refuses direct stale or sessionless bulk authority',async()=>{await expect(applyBulkPageAction(env,{...user,sid:undefined},'replace_text',[9991],bulkOptions)).rejects.toThrow();await expect(updateDraftWeights(env,{...user,exp:0},[{id:9991,weight:10}])).rejects.toThrow();expect(await events()).toEqual([]);});
 it('keeps all direct local mutations blocked in regulated mode',async()=>{for(const operation of ['add_tag','replace_text'] as const)await expect(applyBulkPageAction({...env,REGULATED_MODE:'true'},user,operation,[9991],bulkOptions)).rejects.toThrow();await expect(updateDraftWeights({...env,REGULATED_MODE:'true'},user,[{id:9991,weight:20}])).rejects.toThrow();expect(await events()).toEqual([]);});
 
-async function job(){return createAdvancedSearchBulkActionJob(env.DB,{action:'replace_text',scope:'selected',ids:[9991,9992],pageTypes:['article'],criteria:[],operator:'and',targetTagIds:[],searchText:'Old',replacementText:'New',returnTo:'/admin',user:{...user,exp:1}});}
+async function job(ids = [9991,9992]){return createAdvancedSearchBulkActionJob(env.DB,{action:'replace_text',scope:'selected',ids,pageTypes:['article'],criteria:[],operator:'and',targetTagIds:[],searchText:'Old',replacementText:'New',returnTo:'/admin',user:{...user,exp:1}});}
 it('executes a claimed job using current grants and its durable lease rather than an expired initiating JWT',async()=>{
   const queued=await job();await runCmsAdminJob(env,queued.id);expect(await env.DB.prepare('SELECT status FROM admin_jobs WHERE id=?').bind(queued.id).first()).toEqual({status:'done'});
   const rows=await events();expect(rows).toHaveLength(2);expect(rows.every(r=>r.acting_via===`job:${queued.id}`&&r.request_id===null)).toBe(true);expect(JSON.parse(String(rows[0].detail))).toMatchObject({job_id:queued.id,job_attempt:1});
@@ -113,10 +113,65 @@ it('commits a full hundred-page replacement slice with complete correlated recei
   expect(result.updated).toBe(100);
   const rows=await events();expect(rows).toHaveLength(100);rows.forEach((row,index)=>expect(JSON.parse(String(row.detail))).toMatchObject({operation_target_count:100,operation_index:index}));expect(new Set(rows.map(r=>JSON.parse(String(r.detail)).operation_id)).size).toBe(1);expect((await env.DB.prepare('SELECT * FROM page_versions').all()).results).toHaveLength(100);
 });
-it('retains a committed job slice receipt when the commit acknowledgment is lost',async()=>{
-  const queued=await job();await runCmsAdminJob({...env,DB:race(async()=>{},true)},queued.id);expect(await events()).toHaveLength(2);
-  expect(await env.DB.prepare('SELECT status FROM admin_jobs WHERE id=?').bind(queued.id).first()).toEqual({status:'failed'});
+async function checkpoints(jobId: string) {
+  return (await env.DB.prepare("SELECT acting_via, data_class, detail FROM audit_events WHERE action='job.bulk-slice' AND target_id=? ORDER BY seq")
+    .bind(jobId).all<{ acting_via: string; data_class: string; detail: string }>()).results;
+}
+
+it('recovers a committed final slice after a lost acknowledgement without replaying it', async () => {
+  await classify();
+  const queued = await job();
+  await runCmsAdminJob({ ...env, DB: race(async () => {}, true) }, queued.id);
+  await runCmsAdminJob(env, queued.id);
+  expect(await events()).toHaveLength(2);
+  const result = await getAdminJob(env.DB, queued.id);
+  expect(result).toMatchObject({ status: 'done', attempts: 1 });
+  expect(JSON.parse(result!.body!)).toMatchObject({ cursor: 2, updated: 2 });
+  const receipts = await checkpoints(queued.id);
+  expect(receipts).toEqual([{ acting_via: `job:${queued.id}`, data_class: 'phi', detail: expect.any(String) }]);
+  expect(JSON.parse(receipts[0].detail)).toMatchObject({ cursor_before: 0, cursor_after: 2, changed: 2, status: 'done' });
 });
+
+it.each([
+  "BEFORE UPDATE OF status ON admin_jobs WHEN NEW.status = 'done' BEGIN SELECT RAISE(IGNORE); END",
+  "AFTER INSERT ON audit_events WHEN NEW.action = 'job.bulk-slice' BEGIN UPDATE audit_events SET detail = '{}' WHERE seq = NEW.seq; END",
+  "AFTER INSERT ON audit_events WHEN NEW.action = 'job.bulk-slice' BEGIN UPDATE audit_events SET detail = '{}' WHERE action = 'page.update'; END",
+])('rolls back page changes if their job checkpoint fails with %s', async sql => {
+  const queued = await job();
+  const before = await state();
+  await env.DB.prepare(`CREATE TRIGGER ${trigger} ${sql}`).run();
+  await runCmsAdminJob(env, queued.id);
+  expect(await state()).toEqual(before);
+  expect(await events()).toEqual([]);
+  expect(await checkpoints(queued.id)).toEqual([]);
+  expect(await getAdminJob(env.DB, queued.id)).toMatchObject({ status: 'failed', body: queued.body });
+});
+
+it('resumes at the saved cursor when sending the next message fails', async () => {
+  const queued = await job([9991, ...Array.from({ length: 99 }, (_, i) => i + 1), 9992]);
+  const ADMIN_JOBS_QUEUE = { send: async () => { throw new Error('Synthetic send failure'); } } as Env['ADMIN_JOBS_QUEUE'];
+  await expect(runCmsAdminJob({ ...env, ADMIN_JOBS_QUEUE, DB: race(async () => {}, true) }, queued.id))
+    .rejects.toThrow('Synthetic send failure');
+  const saved = await getAdminJob(env.DB, queued.id);
+  expect(saved?.status).toBe('queued');
+  expect(JSON.parse(saved!.body!)).toMatchObject({ cursor: 100, updated: 1 });
+  await runCmsAdminJob(env, queued.id);
+  const completed = await getAdminJob(env.DB, queued.id);
+  expect(completed).toMatchObject({ status: 'done', attempts: 2 });
+  expect(JSON.parse(completed!.body!)).toMatchObject({ cursor: 101, updated: 2 });
+  expect(await events()).toHaveLength(2);
+  expect((await checkpoints(queued.id)).map(row => JSON.parse(row.detail).cursor_after)).toEqual([100, 101]);
+});
+
+it('records a checkpoint when none of the selected pages remain', async () => {
+  const queued = await job([25]);
+  await runCmsAdminJob(env, queued.id);
+  expect(await events()).toEqual([]);
+  expect(await getAdminJob(env.DB, queued.id)).toMatchObject({ status: 'done' });
+  const [receipt] = await checkpoints(queued.id);
+  expect(JSON.parse(receipt.detail)).toMatchObject({ cursor_after: 1, changed: 0, status: 'done' });
+});
+
 it('retains exact tag identifiers in per-page evidence without copying labels',async()=>{
   expect(await call('add_tag')).toBe(200);const row=(await events())[0];expect(JSON.parse(String(row.detail))).toMatchObject({tags_before:[],tags_after:[9994],tag_count:1});
 });
