@@ -1,7 +1,8 @@
 #!/bin/sh
 # Once the CMS's memory use passes a threshold, restart its workerd runtime in
-# place: SIGUSR2 makes server.mjs replace the workerd process and keep its own,
-# so the CMS serves again within seconds and the container keeps running.
+# place: SIGUSR2 makes server.mjs (or docker/workerd.sh, with
+# CMS_RUNTIME=workerd) replace the workerd process and keep running itself, so
+# the CMS serves again within seconds and the container keeps running.
 # Meant for cron; silent unless it acts. compose.yaml's mem_limit is the hard
 # backstop, for growth between checks or in the Node process itself.
 #

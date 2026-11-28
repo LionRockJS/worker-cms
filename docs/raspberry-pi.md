@@ -327,7 +327,14 @@ full backup above.
 
 ## Memory
 
-The CMS normally uses 300–350 MiB. Two limits guard against growth:
+The CMS normally uses 300–350 MiB, about 220 MiB of it a Node process that
+runs Miniflare beside workerd. To drop that, set `CMS_RUNTIME=workerd` in
+`.env` and run `docker compose up -d`: Node then only writes a standalone
+workerd config and exits, and the container starts at about 65 MiB. Media
+thumbnails are then served as the original images, since plain workerd has no
+Images transforms. See README "Runtime".
+
+Two limits guard against growth:
 
 - `docker/memory-check.sh` restarts the CMS's workerd runtime once the
   container uses 720 MiB, but not within 15 minutes of the last start or

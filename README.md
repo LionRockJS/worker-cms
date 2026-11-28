@@ -558,9 +558,18 @@ cp cms.env.example cms.env && chmod 600 cms.env
 `BASE_URL` is the origin browsers use. At start the entrypoint derives
 `CANONICAL_ORIGIN` and `OAUTH_REDIRECT_URI` (`<BASE_URL>/auth/callback`) from it,
 so one image serves any host. Optional compose settings: `CMS_TAG` (image tag,
-default `development`), `CMS_PORT` (host port, default `8787`) and
+default `development`), `CMS_PORT` (host port, default `8787`),
 `CMS_MEMORY_LIMIT` (hard memory cap, default `1g`; past it the CMS is killed
-and restarted).
+and restarted) and `CMS_RUNTIME` (below).
+
+**Runtime.** By default (`CMS_RUNTIME=miniflare`) the container runs
+`server.mjs`, which keeps Node and Miniflare resident beside workerd. With
+`CMS_RUNTIME=workerd`, Node only writes a standalone config with
+`server-workerd.mjs` and exits, and [docker/workerd.sh](docker/workerd.sh)
+keeps workerd alone running. It also runs the scheduled jobs and restarts
+workerd in place on `SIGUSR2`. On a Raspberry Pi 4 the container starts at
+about 65 MiB instead of 320 MiB. The trade-off: there are no Images transforms,
+so media thumbnails are served as the original images.
 
 In `cms.env`, set `JWT_SECRET` (the container refuses to start without it), then
 uncomment `ENABLED_PROVIDERS` and the credentials for each provider. The file
@@ -1779,6 +1788,7 @@ features on and off.
 ├── cms.env.example        # Container secrets template -> cms.env (gitignored)
 ├── docker/
 │   ├── entrypoint.sh      # BASE_URL -> origin settings, migrations, then serve
+│   ├── workerd.sh         # CMS_RUNTIME=workerd: run workerd alone, plus cron and restarts
 │   ├── runtime-lock.mjs   # Wrangler's slice of package-lock.json for the image
 │   ├── update.sh          # Host: pull the newest image and restart if it changed
 │   ├── d1-snapshot.sh     # Host (cron): dated D1 snapshots, 30-day retention

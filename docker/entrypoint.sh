@@ -17,4 +17,12 @@ node_modules/.bin/wrangler d1 migrations apply DB --local
 if node -e "process.exit(JSON.parse(require('fs').readFileSync('cms.features.json', 'utf8')).features?.publish ? 0 : 1)"; then
   node_modules/.bin/wrangler d1 migrations apply PUBLISHED_DB --local
 fi
+
+# CMS_RUNTIME=workerd: Node only writes config.capnp, then exits, and workerd
+# serves alone (about 220 MiB less memory). It has no Images transforms; see
+# docker/workerd.sh. The default runs everything under Miniflare (server.mjs).
+if [ "${CMS_RUNTIME:-miniflare}" = workerd ]; then
+  node server-workerd.mjs
+  exec sh docker/workerd.sh
+fi
 exec node server.mjs "$@"

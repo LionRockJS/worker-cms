@@ -3,7 +3,8 @@
 # or build it from this checkout instead:
 #   BASE_URL=https://cms.example.com docker compose up -d --build
 # CMS_TAG picks the image tag: development (default), latest (the main branch)
-# or a fixed sha-<commit>.
+# or a fixed sha-<commit>. CMS_RUNTIME=workerd serves on plain workerd without
+# Node (about 220 MiB less, no Images transforms); the default is miniflare.
 # Secrets (JWT_SECRET, *_CLIENT_SECRET, ...) go in cms.env, which is gitignored:
 #   cp cms.env.example cms.env
 services:
@@ -23,6 +24,7 @@ services:
       - "127.0.0.1:${CMS_PORT:-8787}:8787"
     environment:
       BASE_URL: ${BASE_URL:-http://localhost:8787}
+      CMS_RUNTIME: ${CMS_RUNTIME:-miniflare}
     env_file: cms.env
     volumes:
       - cms-state:/app/.wrangler/state
