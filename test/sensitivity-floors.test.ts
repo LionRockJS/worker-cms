@@ -8,7 +8,6 @@ import { publishPageToTargets } from '../src/features/publish';
 import { getLiveLect } from '../src/features/publish';
 import { createAdvancedSearchBulkActionJob, getAdminJob } from '../src/features/jobs/queue';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
-import { pullPublishedPageToDraft } from '../src/features/publish/pull';
 import { ingestSubmissions } from '../src/features/publish/submission-ingest';
 import { clearConfigCache } from '../src/core/db/content-config';
 import { clearManifestCache, __clearInjectedFetchers, __injectPluginFetcher } from './plugin-fixtures';
@@ -156,8 +155,13 @@ it.each(['pull', 'ingest'])('preserves actual published-only taxonomy sensitivit
   await env.PUBLISHED_DB.prepare("INSERT INTO pages (id, uuid, name, slug, page_type, lect) VALUES (7030, 'incoming-floor', 'Incoming private', 'incoming-floor', 'article', '{}')").run();
   await env.PUBLISHED_DB.prepare("INSERT INTO tags (id, name, slug, taxonomy_slug) VALUES (7011, 'Private association', 'private-association', 'clinical')").run();
   await env.PUBLISHED_DB.prepare('INSERT INTO page_tags (page_id, tag_id) VALUES (7030, 7011)').run();
-  if (operation === 'pull') expect((await pullPublishedPageToDraft(env as Env, 'incoming-floor', actor))?.created).toBe(true);
-  else expect((await ingestSubmissions(env)).created).toBe(1);
+  if (operation === 'pull') {
+    expect((await admin('/pages/pull/incoming-floor', new URLSearchParams())).status).toBe(302);
+    expect(await env.DB.prepare("SELECT data_class, retention_class FROM audit_events WHERE action = 'page.pull' AND target_id = 'incoming-floor'").first())
+      .toEqual({ data_class: 'phi', retention_class: 'phi_mutation' });
+  } else {
+    expect((await ingestSubmissions(env)).created).toBe(1);
+  }
   expect(await floor('incoming-floor')).toBe('phi');
   const page = await env.DB.prepare("SELECT id FROM pages WHERE uuid = 'incoming-floor'").first<{ id: number }>();
   expect((await publishPageToTargets(env, page!.id, actor))?.refused).toBe(true);

@@ -3,11 +3,8 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { signJWT } from './auth-fixtures';
 import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache } from './plugin-fixtures';
 import { clearConfigCache } from '../src/core/db/content-config';
-import { pullPublishedPageToDraft } from '../src/features/publish/pull';
-import type { Env } from '../src/types';
 
 const worker = (exports as unknown as { default: Fetcher }).default;
-const actor = { userId: '9701', roles: 'admin', sessionSid: null, via: null };
 let cookie: string;
 let pluginRowId: number;
 let requestNo = 0;
@@ -69,9 +66,9 @@ function api(method: string, path: string, body?: unknown) {
   }));
 }
 
-function admin(path: string) {
+function admin(path: string, method = 'GET') {
   requestNo++;
-  return worker.fetch(new Request(`http://localhost/admin${path}`, { headers: { Cookie: cookie, 'CF-Connecting-IP': `10.91.0.${requestNo % 250 + 1}` } }));
+  return worker.fetch(new Request(`http://localhost/admin${path}`, { method, redirect: 'manual', headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-origin', 'CF-Connecting-IP': `10.91.0.${requestNo % 250 + 1}` } }));
 }
 
 it.each([
@@ -237,16 +234,58 @@ it('audits the published source before manual copying and preserves the actual a
   await classify('page_type', 'chart');
   await env.PUBLISHED_DB.prepare("INSERT INTO pages (uuid, name, slug, page_type, lect) VALUES ('manual-pull', 'Private incoming', 'manual-pull', 'chart', '{}')").run();
   await failAudit();
-  await expect(pullPublishedPageToDraft(env as unknown as Env, 'manual-pull', actor)).rejects.toThrow();
+  expect((await admin('/pages/pull/manual-pull', 'POST')).status).toBe(503);
   expect(await env.DB.prepare("SELECT id FROM pages WHERE uuid = 'manual-pull'").first()).toBeNull();
   await env.DB.prepare('DROP TRIGGER coverage_audit_fail').run();
-  expect((await pullPublishedPageToDraft(env as unknown as Env, 'manual-pull', actor))?.created).toBe(true);
+  expect((await admin('/pages/pull/manual-pull', 'POST')).status).toBe(302);
   expect(await env.DB.prepare("SELECT target_id, actor_user_id FROM audit_events WHERE action = 'page.pull-read'").first()).toEqual({ target_id: 'manual-pull', actor_user_id: '9701' });
+});
+
+it.each([
+  "BEFORE INSERT ON page_versions WHEN NEW.action = 'pull-published' BEGIN SELECT RAISE(IGNORE); END",
+  "AFTER INSERT ON audit_events WHEN NEW.action = 'page.pull' BEGIN UPDATE audit_events SET detail = '{}' WHERE seq = NEW.seq; END",
+  "AFTER INSERT ON page_versions WHEN NEW.action = 'pull-published' BEGIN DELETE FROM sessions WHERE user_id = 9701; END",
+  "AFTER INSERT ON audit_events WHEN NEW.action = 'page.pull' BEGIN UPDATE page_tags SET weight = 99 WHERE uuid = 'retry-link'; END",
+])('rolls back the entire manual pull and permits retry after %s', async fault => {
+  await classify('taxonomy', 'diagnosis');
+  await env.PUBLISHED_DB.batch([
+    env.PUBLISHED_DB.prepare("INSERT INTO pages (id, uuid, name, slug, page_type, lect) VALUES (9710, 'pull-retry', 'Incoming', 'pull-retry', 'default', '{}')"),
+    env.PUBLISHED_DB.prepare("INSERT INTO tags (id, slug, name, taxonomy_slug) VALUES (9706, 'live-diagnosis', 'Diagnosis', 'diagnosis')"),
+    env.PUBLISHED_DB.prepare("INSERT INTO page_tags (uuid, page_id, tag_id, weight) VALUES ('retry-link', 9710, 9706, 9)"),
+  ]);
+  await env.DB.prepare(`CREATE TRIGGER pull_fault ${fault}`).run();
+  try {
+    expect((await admin('/pages/pull/pull-retry', 'POST')).status).toBe(503);
+    for (const query of [
+      "SELECT 1 FROM pages WHERE uuid = 'pull-retry'",
+      "SELECT 1 FROM page_tags WHERE uuid = 'retry-link'",
+      "SELECT 1 FROM page_versions WHERE action = 'pull-published'",
+      "SELECT 1 FROM page_sensitivity_floors WHERE uuid = 'pull-retry'",
+      "SELECT 1 FROM audit_events WHERE action = 'page.pull' AND target_id = 'pull-retry'",
+    ]) expect(await env.DB.prepare(query).first()).toBeNull();
+  } finally {
+    await env.DB.prepare('DROP TRIGGER pull_fault').run();
+  }
+
+  const retry = await admin('/pages/pull/pull-retry', 'POST');
+  expect(retry.status).toBe(302);
+  expect((await admin('/pages/pull/pull-retry', 'POST')).status).toBe(302);
+  const versions = (await env.DB.prepare("SELECT uuid, lect FROM page_versions WHERE action = 'pull-published'").all<{ uuid: string; lect: string }>()).results;
+  expect(versions).toEqual([{ uuid: expect.any(String), lect: '{}' }]);
+  expect(await env.DB.prepare("SELECT weight FROM page_tags WHERE uuid = 'retry-link'").first()).toEqual({ weight: 9 });
+  expect(await env.DB.prepare("SELECT level FROM page_sensitivity_floors WHERE uuid = 'pull-retry'").first()).toEqual({ level: 2 });
+  const receipts = (await env.DB.prepare("SELECT actor_user_id, data_class, retention_class, detail FROM audit_events WHERE action = 'page.pull' AND target_id = 'pull-retry'")
+    .all<{ actor_user_id: string; data_class: string; retention_class: string; detail: string }>()).results;
+  expect(receipts).toEqual([{ actor_user_id: '9701', data_class: 'phi', retention_class: 'phi_mutation', detail: expect.any(String) }]);
+  expect(JSON.parse(receipts[0].detail)).toMatchObject({
+    version_uuid: versions[0].uuid,
+    tag_links: [{ uuid: 'retry-link', tag_id: 9706, weight: 9 }],
+  });
 });
 
 it('does not silently read an existing draft during manual pull on an audit outage', async () => {
   await classify('page_type', 'chart'); await failAudit();
-  await expect(pullPublishedPageToDraft(env as unknown as Env, 'coverage-page', actor)).rejects.toThrow();
+  expect((await admin('/pages/pull/coverage-page', 'POST')).status).toBe(503);
 });
 
 it('retains PHI sensitivity when reading the audit trail despite a lower table policy', async () => {

@@ -1,5 +1,5 @@
 import { notice } from '../../core/http/notice';
-import { requestPageAllowed, requestPageFilter } from '../../core/auth/page-access';
+import { requestPageAllowed } from '../../core/auth/page-access';
 import { Hono } from 'hono';
 import type { Env, Variables } from '../../types';
 import { announcePageEvent } from '../../core/page-events';
@@ -8,6 +8,9 @@ import { requirePermission } from '../../core/auth/guards';
 import { contextActor, logAudit } from '../../core/db/audit';
 import { publishFlash, publishPageToTargets, publishTagsToTargets, unpublishPageFromTargets } from './index';
 import { pullPublishedPageToDraft } from './pull';
+import { contentMutationUnavailable } from '../../core/evidence/mutation-evidence';
+import { RegulatedWritesUnavailableError } from '../../core/http/regulated-writes';
+import { ReadAuditUnavailableError } from '../../core/http/access-log';
 import { isSubmissionMirror } from './submission-mirrors';
 
 export const publishRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -40,10 +43,11 @@ publishRoutes.post('/pages/:id/publish', requirePermission('content:publish'), a
 // ── Pull published page (PUBLISHED → DRAFT) ───────────────────────────────────
 
 publishRoutes.post('/pages/pull/:uuid', requirePermission('content:write'), async (c) => {
-  const uuid = c.req.param('uuid');
-  const access = await requestPageFilter(c, 'write', 'target.uuid');
-  if (!await c.env.DB.prepare(`SELECT 1 FROM (SELECT ? uuid) target WHERE ${access.sql}`).bind(uuid, ...access.args).first()) return c.notFound();
-  const result = await pullPublishedPageToDraft(c.env, uuid, contextActor(c));
+  const result = await pullPublishedPageToDraft(c, c.req.param('uuid')).catch(error => {
+    if (error instanceof RegulatedWritesUnavailableError || error instanceof ReadAuditUnavailableError) throw error;
+    return contentMutationUnavailable(c, error);
+  });
+  if (result instanceof Response) return result;
   if (!result) return c.notFound();
 
   if (result.created) {

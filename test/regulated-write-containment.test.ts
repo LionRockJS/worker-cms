@@ -10,14 +10,12 @@ import { __injectPluginFetcher, __clearInjectedFetchers, clearManifestCache, get
 import { createAdvancedSearchBulkActionJob, createPluginAdminActionJob, getAdminJob } from '../src/features/jobs/queue';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
 import { ingestSubmissions } from '../src/features/publish/submission-ingest';
-import { pullPublishedPageToDraft } from '../src/features/publish/pull';
 import { applyBulkPageAction } from '../src/core/pages/bulk-action';
 import { sweepCreditSubscriptions } from '../src/features/credits/subscriptions';
 import { signJWT } from './auth-fixtures';
 import type { JWTPayload } from '../src/types';
 
 const user: JWTPayload = { sub: '8250', email: 'operator@example.invalid', name: 'Operator', role: 'admin', type: 'access', iat: 1, exp: 9999999999 };
-const actor = { userId: user.sub, roles: user.role, sessionSid: null, via: null };
 const originalQueueHandler = coreExtensions().handleQueueMessage;
 let cookie: string;
 let requests = 0;
@@ -190,10 +188,10 @@ it('rejects queue batches before dispatch even when no job handler is installed'
   expect(dispatched).toBe(0);
 });
 
-it('stops direct ingestion, pull, billing and bulk mutation without changing source state', async () => {
+it('stops ingestion, pull, billing and bulk mutation without changing source state', async () => {
   await env.PUBLISHED_DB.prepare("INSERT INTO pages (uuid, name, slug, page_type, lect) VALUES ('incoming-contained', 'Incoming', 'incoming', 'chart', '{}')").run();
   await expect(ingestSubmissions(configured())).rejects.toThrow('durable mutation evidence');
-  await expect(pullPublishedPageToDraft(configured(), 'incoming-contained', actor)).rejects.toThrow('durable mutation evidence');
+  expect((await http('POST', '/admin/pages/pull/incoming-contained')).status).toBe(503);
   await expect(sweepCreditSubscriptions(configured())).rejects.toThrow('durable mutation evidence');
   await expect(applyBulkPageAction(configured(), user, 'replace_text', [8251], { searchText: 'Private', replacementText: 'Changed' }))
     .rejects.toThrow('durable mutation evidence');
