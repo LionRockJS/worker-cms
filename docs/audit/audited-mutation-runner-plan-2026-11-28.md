@@ -102,11 +102,19 @@ The remaining writers were checked against the code, not just their read pattern
 
 Revisit only together with the deferred page pattern, and only if that design also covers a non-request (environment) context.
 
+## Page pattern prototype (28 November 2026)
+
+Design: an **aggregate** for one draft page ([`page-snapshot.ts`](../../src/core/pages/page-snapshot.ts)), loaded through one small runner seam (**source**). The aggregate owns the rules page writers repeat by hand: write access checked before anything else is read, the one logged page read (keyed by page type and UUID), guards that the page, its links, its tags and its floor are unchanged, ID allocation for a new link, and a final floor that may rise but never fall. The runner gained only the seam (`tools.source`), `read: null` for snapshots that are guarded but not logged, and a read-only `tools.dataClass()`.
+
+First user: [page–tag association](../../src/core/evidence/tag-association-evidence.ts), 102 → 61 lines, with all 87 tests unchanged. Counted from code, an add drops from about 10 round trips to 7. Dropping the aggregate's floor check fails two tests. Dropping its page-access guard fails none: no test revokes page access during a request, a gap that predates this change.
+
+Next candidates for the aggregate are the draft editor and the batch writer, which repeat the same guards. They also need request-buffered page reads, 409 and denial answers, and multi-page snapshots, so each is a separate decision.
+
 ### Wave A2: content writers — deferred (page pattern)
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
-| [Page–tag association](../../src/core/evidence/tag-association-evidence.ts) | 102 | `page-tag-association-evidence` | page pattern | Logs only the page read; page access mid-plan; raw floor query |
+| [Page–tag association](../../src/core/evidence/tag-association-evidence.ts) | 102 | `page-tag-association-evidence` | page aggregate | **Done** (page pattern prototype) |
 | [Taxonomies and tags](../../src/core/evidence/taxonomy-mutation-evidence.ts) | 188 | `taxonomy-mutation-evidence` | page pattern | Its writes move the policy version inside the batch; request-buffered reads |
 | [Draft content and history](../../src/core/evidence/mutation-evidence.ts) | 147 | `content-mutation-evidence`, `quick-create-mutation-evidence` | E2, E3, E4, E6, E9 | The largest guard set (versions, tags, floors, access policy). Port `removeDraftHistory` first, then `saveDraftContent` |
 | [Trash routes](../../src/features/trash/routes.ts) | 232 | `page-lifecycle-mutation-evidence` | — | **Stays as is.** Hold changes are about six lines with no snapshot and no policy guard; the runner would only add guards |

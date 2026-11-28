@@ -31,7 +31,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                 runner: the transaction clock (with trusted extra columns,
  *                 such as a next ID, reused as the timestamp baseline) and
  *                 follow-up snapshots that depend on the first rows, read
- *                 and guarded exactly like step 3
+ *                 and guarded exactly like step 3. A follow-up may also be a
+ *                 source: an aggregate (such as a page) that reads its own
+ *                 rows and states how they are classified, logged and guarded
  *   5. commit     one D1 batch:
  *                   admission  authority, policy, every snapshot unchanged,
  *                              plus the plan's own pre-write checks
@@ -59,8 +61,24 @@ export interface SnapshotSpec {
   args: Binding[];
   /** Fixed trusted SQL; defaults to the first field. */
   order?: string;
-  /** How reading these rows is logged before the change. */
-  read: Omit<PendingRead, 'ids' | 'count'> & { id: (row: Record<string, Binding>) => string | Promise<string> };
+  /** How reading these rows is logged before the change; null when another
+   *  read (such as the page they belong to) is the logged one. */
+  read: (Omit<PendingRead, 'ids' | 'count'> & { id: (row: Record<string, Binding>) => string | Promise<string> }) | null;
+}
+
+/** What a source hands back: its rows, the containers that classify them,
+ *  the reads to log (raised to the change's class) and its admission guards. */
+export interface LoadedSource<T> {
+  value: T;
+  classify: Containers;
+  reads: PendingRead[];
+  guards: () => D1PreparedStatement[];
+}
+
+/** An aggregate that loads its own consistent snapshot. Its reads should share
+ *  a batch with `policyGuard()` so they happened under the guarded policy. */
+export interface SnapshotSource<T> {
+  load(context: { c: AppContext; authority: AccessAuthorization; policy: DataClassMap; policyGuard: () => D1PreparedStatement }): Promise<LoadedSource<T>>;
 }
 
 export interface PlannedWrite {
@@ -109,6 +127,10 @@ export interface DecideTools {
    *  rows just read) adds containers to both these reads and the change's
    *  evidence. Guarded at admission. */
   snapshot(specs: SnapshotSpec[], classify?: Containers | ((rows: Array<Array<Record<string, Binding>>>) => Containers)): Promise<Array<Array<Record<string, Binding>>>>;
+  /** Load a source as a follow-up snapshot. */
+  source<T>(source: SnapshotSource<T>): Promise<T>;
+  /** The change's evidence class from everything classified so far. */
+  dataClass(): DataClass | 'none';
   /** The classification policy this change is guarded by. Read only. */
   policy: DataClassMap;
 }
@@ -143,24 +165,35 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
     // 3. snapshot: one round trip for every snapshot, behind the policy guard
     let containers: Containers = [];
     const classOf = (more: Containers = []) => strongestClass([...containers, ...more].map(item => typeof item === 'string' ? item : classFor(policy, item[0], item[1])));
-    const guards: Array<() => D1PreparedStatement> = [];
+    const guards: Array<() => D1PreparedStatement[]> = [];
+    /** Classify, log and guard what was read; shared by table snapshots and sources. */
+    const settle = async (classify: Containers, reads: PendingRead[], admit: () => D1PreparedStatement[]) => {
+      containers = [...containers, ...classify];
+      const dataClass = classOf();
+      const raised = reads.map(read => ({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...read }));
+      if (raised.length) await auditBackgroundReads(c.env, raised, contextActor(c), { policy });
+      if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+      guards.push(admit);
+    };
     const read = async (specs: SnapshotSpec[], classify: (rows: Array<Array<Record<string, Binding>>>) => Containers) => {
-      const results = await c.env.DB.batch<{ snapshot: string }>([
+      const results = specs.length ? await c.env.DB.batch<{ snapshot: string }>([
         classificationPolicyGuard(c.env, policy),
         ...specs.map(({ table, fields, where, args, order }) => snapshotStatement(c, table, fields, where, args, order)),
-      ]);
+      ]) : [];
       const captured = specs.map((s, index) => snapshotRows<Record<string, Binding>>(s.fields, results[index + 1].results[0]));
-      containers = [...containers, ...classify(captured)];
-      const dataClass = classOf();
       const reads: PendingRead[] = [];
-      for (const [index, { read: { id, ...pending } }] of specs.entries()) {
-        reads.push({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...pending,
-          ids: await Promise.all(captured[index].map(id)), count: captured[index].length });
+      for (const [index, { read }] of specs.entries()) {
+        if (!read) continue;
+        const { id, ...pending } = read;
+        reads.push({ ...pending, ids: await Promise.all(captured[index].map(id)), count: captured[index].length });
       }
-      await auditBackgroundReads(c.env, reads, contextActor(c), { policy });
-      if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
-      specs.forEach(({ table, fields, where, args }, index) => guards.push(() => guard(c, table, fields, captured[index], where, args)));
+      await settle(classify(captured), reads, () => specs.map(({ table, fields, where, args }, index) => guard(c, table, fields, captured[index], where, args)));
       return captured;
+    };
+    const load = async <T>(source: SnapshotSource<T>) => {
+      const loaded = await source.load({ c, authority, policy, policyGuard: () => classificationPolicyGuard(c.env, policy) });
+      await settle(loaded.classify, loaded.reads, loaded.guards);
+      return loaded.value;
     };
     const names = Object.keys(spec.snapshot) as Array<keyof S>;
     const rows = {} as Snapshots<S>;
@@ -169,12 +202,12 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
       return typeof spec.classify === 'function' ? spec.classify(rows) : spec.classify;
     });
 
-    const admission = () => [authority.guard(), classificationPolicyGuard(c.env, policy), ...guards.map(g => g())];
-    prepared = { authority, policy, classOf, rows, admission, read };
+    const admission = () => [authority.guard(), classificationPolicyGuard(c.env, policy), ...guards.flatMap(g => g())];
+    prepared = { authority, policy, classOf, rows, admission, read, load };
   } catch (error) {
     return fail(error);
   }
-  const { authority, policy, classOf, rows, admission, read } = prepared;
+  const { authority, policy, classOf, rows, admission, read, load } = prepared;
 
   return {
     rows,
@@ -192,6 +225,8 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
             return clock;
           },
           snapshot: (specs, classify = []) => read(specs, rows => typeof classify === 'function' ? classify(rows) : classify),
+          source: load,
+          dataClass: () => classOf(),
           policy,
         };
         const plan = await decide(rows, tools);

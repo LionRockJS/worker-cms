@@ -1,102 +1,61 @@
-import { pageAccessGuard, pageAllowed } from '../auth/page-access';
 import type { AppContext } from '../http/context';
-import { captureSelfAuthorization } from '../auth/access-authorization';
-import { classFor, resolveDataClasses, classificationPolicyGuard } from '../db/data-classes';
-import { attributedMutationAuditEvidence } from '../db/audit';
-import { abortIf } from '../db/transaction-guard';
-import { guard, json, snapshot, type Row } from '../db/bounded-mutation';
-import { auditBackgroundReads } from '../http/access-log';
-import { recordAuditOutage } from '../db/audit-outages';
+import type { ContainerKind } from '../db/data-classes';
+import { json, type Row } from '../db/bounded-mutation';
 import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
+import { pageSnapshot, PAGE_LINK } from '../pages/page-snapshot';
+import { beginAuditedMutation, type MutationPlan } from './audited-mutation';
 
-const PAGE = ['id','uuid','page_type','updated_at'];
-const LINK = ['id','uuid','created_at','updated_at','page_id','tag_id','weight'];
-const TAG = ['id','uuid','taxonomy_slug'];
 type Change = {action:'add';pageId:number;tagId:number}|{action:'remove';id:number};
 export class PageTagEvidenceUnavailableError extends Error { constructor(){super('Page tag change unavailable');} }
+
 /** Host HTTP associations only. A missing add target returns null; a missing
  * removal is a guarded no-op. No publication, history or hook effect is added. */
 export async function mutateHostPageTag(c:AppContext,change:Change):Promise<{id:number;created:boolean}|null> {
   assertRegulatedWritesAllowed(c.env);
-  try {return await mutate(c,change);}
-  catch {
-    await recordAuditOutage(c.env,'health',[],undefined,undefined,{captureIncomplete:true});
-    throw new PageTagEvidenceUnavailableError();
-  }
-}
-async function mutate(c:AppContext,change:Change):Promise<{id:number;created:boolean}|null> {
-  const env=c.env,user=c.get('user');
   const input=change.action==='add'?[change.pageId,change.tagId]:[change.id];
-  if(input.some(id=>!Number.isSafeInteger(id)||id<=0))throw new Error('Invalid association selection');
-  const authority=await captureSelfAuthorization(env,user);
-  if(!authority.allowed)throw new Error('Association authority unavailable');
-  const policy=await resolveDataClasses(env,true);
-  if(!policy.ok)throw new Error('Association classification unavailable');
-  const admission=[authority.guard(),classificationPolicyGuard(env,policy)];
-  const selected=change.action==='remove'?await snapshot<Row>(c,'page_tags',LINK,'id=?',[change.id]):[];
-  if(change.action==='remove'&&!selected.length) {
-    await env.DB.batch([...admission,guard(c,'page_tags',LINK,[],'id=?',[change.id])]);
-    return {id:change.id,created:false};
-  }
-  const pageId=change.action==='add'?change.pageId:Number(selected[0].page_id);
-  if(!Number.isSafeInteger(pageId)||pageId<=0)throw new Error('Association owner unavailable');
-  const pages=await snapshot<Row>(c,'pages',PAGE,'id=?',[pageId]);
-  const page=pages[0];
-  if(!page) {
-    if(change.action==='remove')throw new Error('Association owner unavailable');
-    await env.DB.batch([...admission,guard(c,'pages',PAGE,[],'id=?',[pageId])]);
-    return null;
-  }
-  const legacy = authority.permissions.has('content:write');
-  if (!await pageAllowed(env, user, pageId, 'write', legacy)) return null;
-  admission.push(pageAccessGuard(env,user,[String(page.uuid)],legacy));
-  const links=await snapshot<Row>(c,'page_tags',LINK,'page_id=?',[pageId]);
-  if(links.some(l=>!Number.isSafeInteger(l.tag_id)||Number(l.tag_id)<=0||(l.weight!==null&&!Number.isFinite(l.weight))))throw new Error('Invalid association metadata');
-  const tagIds=[...new Set([...links.map(l=>l.tag_id),...(change.action==='add'?[change.tagId]:[])])];
-  const tagWhere='id IN (SELECT value FROM json_each(?))', tagArgs=[json(tagIds)];
-  const tags=await snapshot<Row>(c,'tags',TAG,tagWhere,tagArgs);
-  const floor=await env.DB.prepare('SELECT level FROM page_sensitivity_floors WHERE uuid=?').bind(page.uuid).first<{level:number}>();
-  if(floor&&floor.level!==1&&floor.level!==2)throw new Error('Invalid association sensitivity');
-  const classes=['pages','page_tags','tags','taxonomies'].map(t=>classFor(policy,'table',t));
-  classes.push(classFor(policy,'page_type',String(page.page_type??'default')));
-  for(const tag of tags)classes.push(classFor(policy,'taxonomy',String(tag.taxonomy_slug??'default')));
-  const inherited=[classFor(policy,'page_type',String(page.page_type??'default')),...tags.map(t=>classFor(policy,'taxonomy',String(t.taxonomy_slug??'default')))];
-  const minimumFloor=Math.max(floor?.level??0,inherited.includes('phi')?2:inherited.includes('pii')?1:0);
-  const dataClass=floor?.level===2||classes.includes('phi')?'phi':floor?.level===1||classes.includes('pii')?'pii':'none';
-  await auditBackgroundReads(env,[{action:'page.tag-association-read',kind:'page_type',key:String(page.page_type??'default'),targetType:'page',ids:[String(page.id)],count:1,
-    uuidById:{[String(page.id)]:String(page.uuid)},minimumClass:dataClass==='none'?undefined:dataClass}],
-    {userId:user.sub,roles:user.role,sessionSid:user.sid??null,via:null});
-  const common=[...admission,guard(c,'pages',PAGE,pages,'id=?',[pageId]),guard(c,'page_tags',LINK,links,'page_id=?',[pageId]),
-    guard(c,'tags',TAG,tags,tagWhere,tagArgs),
-    abortIf(env,'COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)<>?',[page.uuid,floor?.level??0])];
-  if(change.action==='remove')common.push(guard(c,'page_tags',LINK,selected,'id=?',[change.id]));
-  // Refuse dangling new targets; legacy unrelated dangling links are preserved.
-  if(change.action==='add'&&!tags.some(t=>t.id===change.tagId)) {await env.DB.batch(common);return null;}
-  const existing=change.action==='add'?links.find(l=>l.tag_id===change.tagId):undefined;
-  if(existing) {await env.DB.batch(common);return {id:Number(existing.id),created:false};}
-  const clock=await env.DB.prepare("SELECT CURRENT_TIMESTAMP AS now").first<{now:string}>();
-  if(!clock)throw new Error('Association clock unavailable');
-  let affected:Row;
-  if(change.action==='add') {
-    if(links.length>=5000)throw new Error('Association manifest requires review');
-    const next=await env.DB.prepare(`SELECT MAX(COALESCE(MAX(id),0),(CAST(strftime('%s','now') AS INTEGER)-1563741060)*100000+(RANDOM() & 65535))+1 id FROM page_tags`).first<{id:number}>();
-    if(!next||!Number.isSafeInteger(next.id)||next.id<=0)throw new Error('Unsafe association identity');
-    affected={id:next.id,uuid:crypto.randomUUID(),created_at:clock.now,updated_at:clock.now,page_id:pageId,tag_id:change.tagId,weight:5};
-  } else affected=selected[0];
-  const finalLinks=change.action==='add'?[...links,affected]:links.filter(l=>l.id!==affected.id);
-  const detail={operation_id:crypto.randomUUID(),fields:['tags'],page:{id:page.id,uuid:page.uuid},
-    association:affected,links_before:links,links_after:finalLinks};json(detail);
-  const receipt=attributedMutationAuditEvidence(env,user,{action:change.action==='add'?'page.tag-add':'page.tag-remove',entityType:'page',entityId:String(page.uuid),detail},dataClass,policy,{context:c});
-  const business=change.action==='add'
-    ?env.DB.prepare(`INSERT INTO page_tags(${LINK.join(',')}) VALUES (${LINK.map(()=>'?').join(',')})`).bind(...LINK.map(f=>affected[f]))
-    :env.DB.prepare('DELETE FROM page_tags WHERE id=?').bind(affected.id);
-  await env.DB.batch([...common,business,abortIf(env,'changes()<>1'),
-    env.DB.prepare('UPDATE pages SET updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(pageId),abortIf(env,'changes()<>1'),
-    receipt.write,receipt.guard,
-    guard(c,'pages',PAGE.filter(f=>f!=='updated_at'),pages,'id=?',[pageId]),
-    abortIf(env,'NOT EXISTS (SELECT 1 FROM pages WHERE id=? AND updated_at>=? AND updated_at<=CURRENT_TIMESTAMP)',[pageId,clock.now]),guard(c,'page_tags',LINK,finalLinks,'page_id=?',[pageId]),
-    guard(c,'tags',TAG,tags,tagWhere,tagArgs),classificationPolicyGuard(env,policy),authority.guard(),
-    abortIf(env,`COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)<? OR
-      COALESCE((SELECT level FROM page_sensitivity_floors WHERE uuid=?),0)>?`,[page.uuid,minimumFloor,page.uuid,dataClass==='phi'?2:dataClass==='pii'?1:0])]);
-  return {id:Number(affected.id),created:change.action==='add'};
+  let result:{id:number;created:boolean}|null=null;
+  const mutation=await beginAuditedMutation(c,{
+    permission:'self',
+    classify:['pages','page_tags','tags','taxonomies'].map(t=>['table',t] as [ContainerKind,string]),
+    snapshot:{},
+    unavailable:()=>new PageTagEvidenceUnavailableError(),
+  });
+  await mutation.commit(async(_rows,tools):Promise<MutationPlan|null>=>{
+    if(input.some(id=>!Number.isSafeInteger(id)||id<=0))throw new Error('Invalid association selection');
+    let selected:Row|undefined;
+    if(change.action==='remove'){
+      // The page is the logged read; the selected link only names it.
+      const [rows]=await tools.snapshot([{table:'page_tags',fields:PAGE_LINK,where:'id=?',args:[change.id],read:null}]);
+      if(!rows.length){result={id:change.id,created:false};return null;}
+      selected=rows[0] as Row;
+    }
+    const pageId=change.action==='add'?change.pageId:Number(selected!.page_id);
+    if(!Number.isSafeInteger(pageId)||pageId<=0)throw new Error('Association owner unavailable');
+    const snap=await tools.source(pageSnapshot(pageId,{readAction:'page.tag-association-read',extraTagIds:change.action==='add'?[change.tagId]:[]}));
+    if(snap===null){if(change.action==='remove')throw new Error('Association owner unavailable');return null;}
+    if(snap==='denied')return null;
+    const {page,links,tags}=snap;
+    // Refuse dangling new targets; legacy unrelated dangling links are preserved.
+    if(change.action==='add'&&!tags.some(t=>t.id===change.tagId))return null;
+    const existing=change.action==='add'?links.find(l=>l.tag_id===change.tagId):undefined;
+    if(existing){result={id:Number(existing.id),created:false};return null;}
+    const clock=await tools.clock();
+    let affected:Row;
+    if(change.action==='add') {
+      if(links.length>=5000)throw new Error('Association manifest requires review');
+      affected={id:await snap.allocateLinkId(),uuid:crypto.randomUUID(),created_at:clock.now,updated_at:clock.now,page_id:pageId,tag_id:change.tagId,weight:5};
+    } else affected=selected!;
+    const finalLinks=change.action==='add'?[...links,affected]:links.filter(l=>l.id!==affected.id);
+    const detail={fields:['tags'],page:{id:page.id,uuid:page.uuid},association:affected,links_before:links,links_after:finalLinks};json(detail);
+    result={id:Number(affected.id),created:change.action==='add'};
+    return {
+      writes:[change.action==='add'
+        ?{sql:`INSERT INTO page_tags(${PAGE_LINK.join(',')}) VALUES (${PAGE_LINK.map(()=>'?').join(',')})`,args:PAGE_LINK.map(f=>affected[f])}
+        :{sql:'DELETE FROM page_tags WHERE id=?',args:[affected.id]},
+        {sql:'UPDATE pages SET updated_at=CURRENT_TIMESTAMP WHERE id=?',args:[pageId]}],
+      evidence:{entry:{action:change.action==='add'?'page.tag-add':'page.tag-remove',entityType:'page',entityId:String(page.uuid),detail}},
+      expect:since=>snap.expect({links:finalLinks,since,dataClass:tools.dataClass()}),
+    };
+  });
+  return result;
 }
