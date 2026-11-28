@@ -83,6 +83,18 @@ it('advances the policy generation for an authorized classified taxonomy rename 
   expect((await call('taxUpdate')).status).toBe(302);const event=(await events())[0];expect(event.data_class).toBe('phi');expect(JSON.parse(String(event.detail))).toMatchObject({classification_policy_version_before:before,classification_policy_version:before+1,moved_tag_ids:[10020,10021]});
   expect(await env.DB.prepare("SELECT level FROM data_class_floors WHERE container_kind='taxonomy' AND container_key='renamed'").first()).toEqual({level:2});
 });
+it('rolls back a classified taxonomy rename if its receipt revokes the session',async()=>{
+  await classify('taxonomy','old');
+  const before=await state();
+  const sessionSql='SELECT id FROM sessions WHERE user_id=10000';
+  const sessions=(await env.DB.prepare(sessionSql).all()).results;
+  await env.DB.prepare(`CREATE TRIGGER ${fault} AFTER INSERT ON audit_events WHEN NEW.action='taxonomy.update'
+    BEGIN DELETE FROM sessions WHERE user_id=10000; END`).run();
+  expect((await call('taxUpdate')).status).toBe(503);
+  expect(await state()).toEqual(before);
+  expect((await env.DB.prepare(sessionSql).all()).results).toEqual(sessions);
+  expect(await events()).toEqual([]);
+});
 it('refuses an unreviewed taxonomy removal that would lower its tag classification',async()=>{await classify('taxonomy','old');const before=await state();expect((await call('taxDelete')).status).toBe(409);expect(await state()).toEqual(before);expect(await events()).toEqual([]);});
 it('permits orphaning into an equally protected default taxonomy',async()=>{await classify('taxonomy','old');await classify('taxonomy','default');expect((await call('taxDelete')).status).toBe(302);expect((await events())[0].data_class).toBe('phi');});
 it('records exact live/trash removals and child-parent changes on tag deletion',async()=>{

@@ -16,7 +16,8 @@ export interface AccessAuthorization {
   roleMap: Map<string, Set<Permission>>;
   /** The classification policy this authority's guard was built from. */
   policy: DataClassMap;
-  guard(): D1PreparedStatement;
+  /** Recheck the captured subject against a planned post-write generation. */
+  guard(policyVersion?: number): D1PreparedStatement;
 }
 
 export async function captureAccessAuthorization(env: Env, actor: JWTPayload,
@@ -64,7 +65,7 @@ async function captureAuthorization(env: Env, actor: JWTPayload, permission: Acc
     allowed: ipAllowed && (admin || ((permission === 'authenticated' || effective.has(permission)) &&
       (!additionalPermission || effective.has(additionalPermission)))),
     admin, permissions: effective, roleMap, policy,
-    guard: () => abortIf(env, `(${policyFailure}) OR NOT EXISTS (SELECT 1 FROM users u
+    guard: (version = policy.version) => abortIf(env, `(${version === policy.version ? policyFailure : classificationPolicyFailureSql({ ...policy, version })}) OR NOT EXISTS (SELECT 1 FROM users u
         WHERE u.disabled_at IS NULL AND u.id = ? AND u.role IS ? AND u.ip_unrestricted IS ? ${sessionRequired ? `AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.id = ?
           AND ? > CAST(strftime('%s', 'now') AS INTEGER) AND s.expires_at > CURRENT_TIMESTAMP AND s.created_at > datetime('now', '-30 days'))` : ''})
       OR (SELECT COUNT(*) FROM roles) <> ?

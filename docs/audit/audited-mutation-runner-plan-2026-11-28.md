@@ -46,6 +46,7 @@ Each extension is added by the first writer that needs it (named in the "First u
 | E13 | Follow-up snapshots | `decide` may snapshot rows that depend on the first ones (for example a plugin's owned approvals). They are read, logged and guarded at admission exactly like the first snapshot | Plugin registration (done) |
 | E14 | Policy-derived classes | `decide` can read `tools.policy` and add raw classes, for rules such as a wildcard page-type grant covering every classified page type. Follow-up snapshots may classify from the rows they read | Plugin financial settings (done) |
 | E12 | Decide clock | `decide` may read the transaction clock once, with trusted extra columns such as a next ID; the runner reuses it as the timestamp baseline. A `null` plan means no change | Runtime types (done) |
+| E15 | Planned policy advance | Admit against the captured generation. Check the receipt and current authority against the exact expected final generation. Static final checks need no clock read. | Taxonomies and tags (implemented) |
 
 ## Waves
 
@@ -163,7 +164,7 @@ The same HTTP fixtures executed the following D1 calls before and after P1. Thes
 |---|---|---|
 | P2 | Plugin page update, create and duplicate | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
-| P4 | Taxonomies and tags | Writes that move the classification policy version inside the batch |
+| P4 | Taxonomies and tags | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 
 #### P2 fit check
 
@@ -227,12 +228,31 @@ All **209 existing create and duplicate tests** and **1,000 update and P1 regres
 
 All **352 existing P3 tests** and **1,209 earlier regressions** passed in standalone workerd. The bulk publication round-trip budget stayed within its existing limits, and removing final receipt verification caused the checkpoint and plugin receipt corruption tests to fail. Standard `npm test` remains blocked by the localhost listener restriction.
 
-### Wave A2: content writers — deferred (page pattern)
+#### P4 taxonomy and tag transactions
+
+Taxonomy and tag create, edit and delete, plus batch tag weights, now use the runner. The shared snapshot reads current tag and taxonomy metadata, related draft and trash links, and retained page floors in policy-guarded batches. Existing tag and taxonomy read events keep their request attribution.
+
+A rename with a retained taxonomy floor declares a one-generation advance. The runner admits against the original policy and verifies the exact expected generation in the receipt and final authorization guard. The writer verifies the destination floor. Ordinary writes expect the original generation throughout the transaction. Publication still follows a successful local commit.
+
+| Request fixture | D1 calls before → after |
+|---|---:|
+| Taxonomy create | 11 → 10 |
+| Taxonomy rename | 19 → 18 |
+| Classified taxonomy rename | 17 → 16 |
+| Taxonomy delete | 19 → 18 |
+| Tag create | 18 → 17 |
+| Tag edit | 19 → 18 |
+| Tag delete | 16 → 15 |
+| Batch tag weights | 18 → 17 |
+
+All **166 taxonomy, policy-generation and settings-import tests** and **1,561 earlier regressions** passed in standalone workerd. Disabling the after-write authority check caused the session-revocation regression to fail. Standard `npm test` remains blocked by the localhost listener restriction.
+
+### Wave A2: page and taxonomy writers
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
 | [Page–tag association](../../src/core/evidence/tag-association-evidence.ts) | 102 | `page-tag-association-evidence` | page aggregate | **Done** (page pattern prototype) |
-| [Taxonomies and tags](../../src/core/evidence/taxonomy-mutation-evidence.ts) | 188 | `taxonomy-mutation-evidence` | page pattern | Its writes move the policy version inside the batch; request-buffered reads |
+| [Taxonomies and tags](../../src/core/evidence/taxonomy-mutation-evidence.ts) | 272 | `taxonomy-mutation-evidence`, `classification-policy-version`, `config-transfer` | E3, E15 | **Done** (P4). Exact generation advance and request-buffered reads. |
 | [Draft content and history](../../src/core/evidence/mutation-evidence.ts) | 147 | `content-mutation-evidence`, `quick-create-mutation-evidence` | E2, E3, E4, E6, E9 | The largest guard set (versions, tags, floors, access policy). Port `removeDraftHistory` first, then `saveDraftContent` |
 | [Trash routes](../../src/features/trash/routes.ts) | 232 | `page-lifecycle-mutation-evidence` | — | **Stays as is.** Hold changes are about six lines with no snapshot and no policy guard; the runner would only add guards |
 | [Audit administration](../../src/features/audit/routes.ts) | 319 | `audit-review`, `classification-policy-version` | — | **Stays as is.** `data_class.set` moves the policy version in its batch and answers a declassification with 409; already about 20 lines |

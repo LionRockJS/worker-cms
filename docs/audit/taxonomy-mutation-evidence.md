@@ -16,6 +16,8 @@ Events use stable taxonomy/tag UUID targets. Known existing numeric IDs and affe
 
 ## Admission, concurrency and classification
 
+The P4 refactor passes the scoped snapshots, writes and final checks through `src/core/evidence/audited-mutation.ts`. The runner admits against the captured policy and checks the receipt and authorization against the exact expected post-write generation. Related UUID floors now load with the other scoped relationships, saving one D1 call per measured request.
+
 The service requires current `taxonomy:write` or `tag:write` authority as appropriate, with the owning unexpired session/token, stored actor role and complete role/grant catalogue rechecked in the transaction. Taxonomy authority continues to cover its associated regrouping; it does not become a general tag-management grant.
 
 Classification conservatively takes the highest applicable table, prior/new/default taxonomy, related live/trash page-type and retained UUID floor. Snapshot guards cover scoped tag/taxonomy metadata and the edited tag body, live/trash link metadata, related page identity/type, retained floor state and optional-trash schema presence. A scoped taxonomy includes its related tags, so a concurrent edit elsewhere in that scope can conservatively refuse the request. Pending strict protected-read evidence is flushed before mutation.

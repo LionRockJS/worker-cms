@@ -46,6 +46,8 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                   re-admit   authority and policy again, so business
  *                              triggers inside the batch cannot slip past
  *                   returning  optional final SELECT, returned by commit
+ *   A policy-changing plan admits against the captured generation and checks
+ *   its exact expected final generation in the receipt and re-admission.
  *   Grouped plans pair writes with individually classified receipts, run any
  *   checkpoint, and verify final state and every receipt before returning.
  *   A job may verify a lost acknowledgment without replaying the mutation.
@@ -109,8 +111,9 @@ interface MutationChecks {
    *  allocator still matching what decide read. */
   admit?: D1PreparedStatement[];
   /** Postconditions after the writes. `since` is the database clock read just
-   *  before the batch, for rows whose timestamps the transaction sets. */
-  expect: (since: string) => D1PreparedStatement[];
+   *  before the batch, for rows whose timestamps the transaction sets. Plans
+   *  with static checks can supply those statements directly. */
+  expect: D1PreparedStatement[] | ((since: string) => D1PreparedStatement[]);
   /** Fixed trusted SQL run last in the batch. */
   returning?: { sql: string; args: Binding[] };
 }
@@ -118,6 +121,8 @@ interface MutationChecks {
 export interface MutationPlan extends MutationChecks {
   writes: PlannedWrite[];
   evidence: { entry: AuditEntry; targetIds?: string[] };
+  /** Exact generation increase caused by this plan's own policy writes. */
+  policyVersionAdvance?: number;
   /** Containers the change itself touches, raising the evidence class. */
   classify?: Containers;
 }
@@ -128,15 +133,13 @@ export interface MutationGroup {
   evidence: { entry: AuditEntry; dataClass: DataClass | 'none'; targetIds?: string[] };
 }
 
-export interface GroupedMutationPlan extends Omit<MutationChecks, 'expect'> {
+export interface GroupedMutationPlan extends MutationChecks {
   /** Writes shared by the groups, such as inserting all pages before history. */
   leadingWrites?: PlannedWrite[];
   /** The writer bounds its business manifests before submitting the groups. */
   groups: MutationGroup[];
   /** Job checkpoint or other statements that precede the final guards. */
   tail?: D1PreparedStatement[];
-  /** Provide statements directly when no transaction clock is needed. */
-  expect: MutationChecks['expect'] | D1PreparedStatement[];
   /** Read-only guards proving the outcome of the submitted batch. */
   reconcile?: (receipts: D1PreparedStatement[]) => D1PreparedStatement[];
 }
@@ -184,7 +187,7 @@ type Decide<S, P> = (rows: Snapshots<S>, tools: DecideTools) => P | null | Promi
 
 interface MutationAuthority {
   policy: DataClassMap;
-  check(): D1PreparedStatement[];
+  check(policyVersion?: number): D1PreparedStatement[];
   session?: AccessAuthorization;
 }
 
@@ -193,7 +196,7 @@ type ReceiptAttribution = { actor: AuditActor } | { user: JWTPayload; via?: stri
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
   const mutation = await prepareAuditedMutation(c.env, c, spec, async () => {
     const { authority, policy } = await captureMutationAuthority(c, spec.permission, spec.onDenied);
-    return { policy, check: () => [authority.guard()], session: authority };
+    return { policy, check: version => [authority.guard(version)], session: authority };
   }, { user: c.get('user') });
   return {
     rows: mutation.rows,
@@ -294,7 +297,7 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(en
       return typeof spec.classify === 'function' ? spec.classify(rows) : spec.classify;
     });
 
-    const recheck = () => [...authority.check(), classificationPolicyGuard(env, policy)];
+    const recheck = (expectedPolicy = policy) => [...authority.check(expectedPolicy.version), classificationPolicyGuard(env, expectedPolicy)];
     const admission = () => [...recheck(), ...guards.flatMap(g => g())];
     prepared = { policy, classOf, rows, admission, read, load, recheck };
   } catch (error) {
@@ -340,12 +343,15 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(en
         }
 
         // 5. commit
+        const advance = 'writes' in plan ? plan.policyVersionAdvance ?? 0 : 0;
+        if (!Number.isSafeInteger(advance) || advance < 0) throw new Error('Invalid policy generation advance');
+        const finalPolicy = advance ? { ...policy, version: policy.version! + advance } : policy;
         const expected = typeof plan.expect === 'function' ? plan.expect((clock ?? await tools.clock()).now) : plan.expect;
         const operationId = crypto.randomUUID();
         const withOperation = (entry: AuditEntry) => ({ ...entry, detail: { operation_id: operationId, ...entry.detail } });
         const prepareReceipt = (entry: AuditEntry, dataClass: DataClass | 'none', targetIds?: string[]) => 'actor' in attribution
-          ? serviceMutationAuditEvidence(env, withOperation(entry), attribution.actor, dataClass, policy, request)
-          : attributedMutationAuditEvidence(env, attribution.user, withOperation(entry), dataClass, policy, {
+          ? serviceMutationAuditEvidence(env, withOperation(entry), attribution.actor, dataClass, finalPolicy, request)
+          : attributedMutationAuditEvidence(env, attribution.user, withOperation(entry), dataClass, finalPolicy, {
             context: request, via: attribution.via, targetIds,
           });
         const prepareWrites = (writes: PlannedWrite[]) => writes.flatMap(({ sql, args, changes = 1 }) => [
@@ -371,7 +377,7 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(en
           ...statements,
           ...expected,
           ...receiptChecks,
-          ...recheck(),
+          ...recheck(finalPolicy),
           ...(plan.returning ? [env.DB.prepare(plan.returning.sql).bind(...plan.returning.args)] : []),
         ];
         batchSubmitted = true;
