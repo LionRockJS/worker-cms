@@ -37,12 +37,13 @@ Each extension is added by the first writer that needs it (named in the "First u
 | E3 | Read logging options | `read` becomes optional per snapshot, and can carry `uuidById` and page-type kinds so floor-aware page reads keep their exact evidence | Draft content |
 | E4 | Extra admission guards | `admit(rows)` returns more statements emitted with the admission guards and again at re-admission (page access, floors, version sets) | Page access |
 | E5 | Actor adapters | `sessionUser(permission)` exists. Adds `self()`, `job(lease, capability)`, `pluginCredential(auth, storeTable?)` and `system(via)`. Each returns the actor, its guards and how receipts are attributed (attributed vs service) | `self`: tag association; `job`: batch; `plugin`: automatic identity; `system`: job retention |
-| E6 | Result rows | `returning` statement appended last; its rows come back from `commit` (for example saving a draft returns the page) | Draft content |
+| E6 | Result rows | `returning` statement appended last; its first row comes back from `commit` | Plugin registration (done) |
 | E7 | Trailing statements | `tail(plan)` adds statements after the postconditions, such as job checkpoints and delegation guards | Batch edits |
 | E8 | Sinks | `primary` (default), `outbox` (containment operations that must succeed during a primary audit outage, with delivery after commit) and `planned` (counter projections with a final guard) | `outbox`: identity disconnect; `planned`: plugin sequences |
 | E9 | Error passthrough | `passthrough(error)` lets the writer's own errors escape unchanged, with no outage incident | Locales (done) |
 | E10 | External inputs | Reads from another database (`PUBLISHED_DB`, R2) are passed into `decide` as unguarded input, because they cannot share the private D1 batch | Published-to-draft pull |
 | E11 | Lost-acknowledgment reconcile | `reconcile(plan)` checks for the writer's own receipt after an uncertain commit, returning the result or rethrowing; it never replays the write | Trash lifecycle |
+| E13 | Follow-up snapshots | `decide` may snapshot rows that depend on the first ones (for example a plugin's owned approvals). They are read, logged and guarded at admission exactly like the first snapshot | Plugin registration (done) |
 | E12 | Decide clock | `decide` may read the transaction clock once, with trusted extra columns such as a next ID; the runner reuses it as the timestamp baseline. A `null` plan means no change | Runtime types (done) |
 
 ## Waves
@@ -61,7 +62,7 @@ Line counts are the current file sizes. Estimates are engineering days, rough, a
 |---|---|---|---|---|
 | [Runtime types and blueprint extensions](../../src/features/runtime-content-types/mutation-evidence.ts) | 96 | `runtime-type-mutation-evidence` | E2, E12 | **Done.** Three operations with one receipt each. Round trips: create 9 → 5, no-op 8 → 4, remove 8 → 5 |
 | [Locales and messages](../../src/features/i18n/mutation-evidence.ts) | 106 | `locale-mutation-evidence`, `i18n` | E9 | **Done** (`e642aab`). Message save 8 → 5, no-op 8 → 4 |
-| [Plugin registration](../../src/features/plugins/registration-evidence.ts) | 102 | `plugin-registration-evidence` | E1 | Port before approval and settings: its `capturePluginMutationContext` is their shared snapshot |
+| [Plugin registration](../../src/features/plugins/registration-evidence.ts) | 102 | `plugin-registration-evidence` | E6, E9, E12, E13 | **Done.** Create, toggle and remove 7 → 5. `capturePluginMutationContext` stays until approval and settings move |
 | [Plugin approval](../../src/features/plugins/approval-evidence.ts) | 212 | `plugin-approval-evidence` | E1 | Builds on the registration snapshot. Also guards before disclosing to the plugin |
 | [Plugin financial settings](../../src/features/plugins/settings-evidence.ts) | 68 | `plugin-financial-settings-evidence` | — | Builds on the registration snapshot |
 | [Credits administration](../../src/features/credits/admin-mutation.ts) | 118 | `financial-administration-evidence` | E5 `self` | Uses both access and self authority |

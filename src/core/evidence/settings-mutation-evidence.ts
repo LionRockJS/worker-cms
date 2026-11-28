@@ -29,8 +29,8 @@ export async function prepareHostSettingsMutation(c:AppContext, scope: readonly 
   const rows = mutation.rows.settings;
   return {
     value(key:HostSettingKey):string|null {return (rows.find(r=>r.key===key)?.value as string|undefined)??null;},
-    commit(writes: HostSettingWrite[]):Promise<void> {
-      return mutation.commit(() => {
+    async commit(writes: HostSettingWrite[]):Promise<void> {
+      await mutation.commit(() => {
         if(writes.length>scope.length||new Set(writes.map(w=>w.key)).size!==writes.length||writes.some(w=>!scope.includes(w.key)||typeof w.value!=='string'))throw new Error('Invalid settings scope');
         const changed=writes.filter(w=>rows.find(r=>r.key===w.key)?.value!==w.value);
         const created=changed.filter(w=>!rows.some(r=>r.key===w.key));

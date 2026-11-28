@@ -26,9 +26,11 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *   3. snapshot   bounded reads batched behind a policy guard, so the read
  *                 evidence is classified by the policy in force at the read,
  *                 and never below the change's own class; flushed at once
- *   4. decide     writer's plan; its only database access is the runner's
- *                 transaction clock (with any trusted extra columns, such
- *                 as a next ID), reused as the timestamp baseline
+ *   4. decide     writer's plan; its only database access goes through the
+ *                 runner: the transaction clock (with trusted extra columns,
+ *                 such as a next ID, reused as the timestamp baseline) and
+ *                 follow-up snapshots that depend on the first rows, read
+ *                 and guarded exactly like step 3
  *   5. commit     one D1 batch:
  *                   admission  authority, policy, every snapshot unchanged
  *                   writes     each followed by its exact changes() check
@@ -36,6 +38,7 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                   expect     writer's postconditions
  *                   re-admit   authority and policy again, so business
  *                              triggers inside the batch cannot slip past
+ *                   returning  optional final SELECT, returned by commit
  *   6. fail       any error: coarse outage incident, then the writer's error.
  *                 Errors the writer marks as its own (validation, policy
  *                 refusals) pass through unchanged, with no incident.
@@ -76,6 +79,8 @@ export interface MutationPlan {
   /** Postconditions after the writes. `since` is the database clock read just
    *  before the batch, for rows whose timestamps the transaction sets. */
   expect: (since: string) => D1PreparedStatement[];
+  /** Fixed trusted SQL run last in the batch; its first row is returned. */
+  returning?: { sql: string; args: Binding[] };
 }
 
 export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
@@ -93,11 +98,14 @@ export type Snapshots<S> = { [K in keyof S]: Array<Record<string, Binding>> };
 export interface DecideTools {
   /** Transaction clock, read once; `columns` is fixed trusted SQL. */
   clock(columns?: string): Promise<{ now: string } & Record<string, Binding>>;
+  /** Snapshots that depend on the first rows. `classify` adds containers to
+   *  both these reads and the change's evidence. Guarded at admission. */
+  snapshot(specs: SnapshotSpec[], classify?: Containers): Promise<Array<Array<Record<string, Binding>>>>;
 }
 
 export interface AuditedMutation<S> {
   rows: Snapshots<S>;
-  commit(decide: (rows: Snapshots<S>, tools: DecideTools) => MutationPlan | null | Promise<MutationPlan | null>): Promise<void>;
+  commit(decide: (rows: Snapshots<S>, tools: DecideTools) => MutationPlan | null | Promise<MutationPlan | null>): Promise<Record<string, Binding> | undefined>;
 }
 
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
@@ -116,43 +124,40 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
     const { authority, policy } = await captureMutationAuthority(c, spec.permission);
 
     // 3. snapshot: one round trip for every snapshot, behind the policy guard
-    const names = Object.keys(spec.snapshot) as Array<keyof S>;
-    const results = await c.env.DB.batch<{ snapshot: string }>([
-      classificationPolicyGuard(c.env, policy),
-      ...names.map(name => {
-        const { table, fields, where, args, order } = spec.snapshot[name];
-        return snapshotStatement(c, table, fields, where, args, order);
-      }),
-    ]);
-    const rows = {} as Snapshots<S>;
-    names.forEach((name, index) => { rows[name] = snapshotRows(spec.snapshot[name].fields, results[index + 1].results[0]); });
-    const containers = typeof spec.classify === 'function' ? spec.classify(rows) : spec.classify;
+    let containers: Containers = [];
     const classOf = (more: Containers = []) => strongestClass([...containers, ...more].map(([kind, key]) => classFor(policy, kind, key)));
-    const dataClass = classOf();
-    const reads: PendingRead[] = [];
-    for (const name of names) {
-      const { read } = spec.snapshot[name];
-      const captured = rows[name];
-      const { id, ...pending } = read;
-      reads.push({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...pending,
-        ids: await Promise.all(captured.map(id)), count: captured.length });
-    }
-    await auditBackgroundReads(c.env, reads, contextActor(c), { policy });
-    if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+    const guards: Array<() => D1PreparedStatement> = [];
+    const read = async (specs: SnapshotSpec[], classify: (rows: Array<Array<Record<string, Binding>>>) => Containers) => {
+      const results = await c.env.DB.batch<{ snapshot: string }>([
+        classificationPolicyGuard(c.env, policy),
+        ...specs.map(({ table, fields, where, args, order }) => snapshotStatement(c, table, fields, where, args, order)),
+      ]);
+      const captured = specs.map((s, index) => snapshotRows<Record<string, Binding>>(s.fields, results[index + 1].results[0]));
+      containers = [...containers, ...classify(captured)];
+      const dataClass = classOf();
+      const reads: PendingRead[] = [];
+      for (const [index, { read: { id, ...pending } }] of specs.entries()) {
+        reads.push({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...pending,
+          ids: await Promise.all(captured[index].map(id)), count: captured[index].length });
+      }
+      await auditBackgroundReads(c.env, reads, contextActor(c), { policy });
+      if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
+      specs.forEach(({ table, fields, where, args }, index) => guards.push(() => guard(c, table, fields, captured[index], where, args)));
+      return captured;
+    };
+    const names = Object.keys(spec.snapshot) as Array<keyof S>;
+    const rows = {} as Snapshots<S>;
+    await read(names.map(name => spec.snapshot[name]), captured => {
+      names.forEach((name, index) => { rows[name] = captured[index]; });
+      return typeof spec.classify === 'function' ? spec.classify(rows) : spec.classify;
+    });
 
-    const admission = () => [
-      authority.guard(),
-      classificationPolicyGuard(c.env, policy),
-      ...Object.keys(spec.snapshot).map(name => {
-        const { table, fields, where, args } = spec.snapshot[name];
-        return guard(c, table, fields, rows[name as keyof S], where, args);
-      }),
-    ];
-    prepared = { authority, policy, classOf, rows, admission };
+    const admission = () => [authority.guard(), classificationPolicyGuard(c.env, policy), ...guards.map(g => g())];
+    prepared = { authority, policy, classOf, rows, admission, read };
   } catch (error) {
     return fail(error);
   }
-  const { authority, policy, classOf, rows, admission } = prepared;
+  const { authority, policy, classOf, rows, admission, read } = prepared;
 
   return {
     rows,
@@ -169,13 +174,14 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
             if (!clock) throw new Error('Mutation clock unavailable');
             return clock;
           },
+          snapshot: (specs, classify = []) => read(specs, () => classify),
         };
         const plan = await decide(rows, tools);
         json(plan?.writes ?? []);
         if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
         if (!plan?.writes.length) {
           await c.env.DB.batch(admission());
-          return;
+          return undefined;
         }
 
         // 5. commit
@@ -184,7 +190,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
         const receipt = attributedMutationAuditEvidence(c.env, c.get('user'),
           { ...entry, detail: { operation_id: crypto.randomUUID(), ...entry.detail } },
           classOf(plan.classify), policy, { context: c, targetIds });
-        await c.env.DB.batch([
+        const results = await c.env.DB.batch([
           ...admission(),
           ...plan.writes.flatMap(w => [
             c.env.DB.prepare(w.sql).bind(...w.args),
@@ -195,9 +201,14 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
           ...plan.expect(since.now),
           authority.guard(),
           classificationPolicyGuard(c.env, policy),
+          ...(plan.returning ? [c.env.DB.prepare(plan.returning.sql).bind(...plan.returning.args)] : []),
         ]);
+        if (!plan.returning) return undefined;
+        const returned = results.at(-1)?.results[0] as Record<string, Binding> | undefined;
+        if (!returned) throw new Error('Mutation result unavailable');
+        return returned;
       } catch (error) {
-        await fail(error);
+        return fail(error);
       }
     },
   };
