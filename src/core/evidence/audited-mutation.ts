@@ -23,8 +23,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *   2. authorize  fresh authority; its classification policy is read once
  *                 and reused for every later step
  *   3. snapshot   bounded reads batched behind a policy guard, so the read
- *                 evidence is classified by the policy in force at the read
- *   4. decide     writer's plan (no database access)
+ *                 evidence is classified by the policy in force at the read,
+ *                 and never below the change's own class; flushed at once
+ *   4. decide     writer's plan (no database access; may be async)
  *   5. commit     one D1 batch:
  *                   admission  authority, policy, every snapshot unchanged
  *                   writes     each followed by its exact changes() check
@@ -32,7 +33,9 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                   expect     writer's postconditions
  *                   re-admit   authority and policy again, so business
  *                              triggers inside the batch cannot slip past
- *   6. fail       any error: coarse outage incident, then the writer's error
+ *   6. fail       any error: coarse outage incident, then the writer's error.
+ *                 Errors the writer marks as its own (validation, policy
+ *                 refusals) pass through unchanged, with no incident.
  *
  * A plan without writes commits only the admission guards and records no event.
  */
@@ -45,8 +48,10 @@ export interface SnapshotSpec {
   /** Fixed trusted SQL; values go in args. */
   where: string;
   args: Binding[];
+  /** Fixed trusted SQL; defaults to the first field. */
+  order?: string;
   /** How reading these rows is logged before the change. */
-  read: Omit<PendingRead, 'ids' | 'count'> & { id: (row: Record<string, Binding>) => string };
+  read: Omit<PendingRead, 'ids' | 'count'> & { id: (row: Record<string, Binding>) => string | Promise<string> };
 }
 
 export interface PlannedWrite {
@@ -71,17 +76,20 @@ export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
   snapshot: S;
   /** The writer's own refusal, so its route keeps its existing 503 body. */
   unavailable: () => Error;
+  /** Errors that are the writer's own answer, such as invalid input. */
+  passthrough?: (error: unknown) => boolean;
 }
 
 export type Snapshots<S> = { [K in keyof S]: Array<Record<string, Binding>> };
 
 export interface AuditedMutation<S> {
   rows: Snapshots<S>;
-  commit(decide: (rows: Snapshots<S>) => MutationPlan): Promise<void>;
+  commit(decide: (rows: Snapshots<S>) => MutationPlan | Promise<MutationPlan>): Promise<void>;
 }
 
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
-  const fail = async (): Promise<never> => {
+  const fail = async (error: unknown): Promise<never> => {
+    if (spec.passthrough?.(error)) throw error;
     await recordAuditOutage(c.env, 'health', [], contextActor(c), undefined, { captureIncomplete: true });
     throw spec.unavailable();
   };
@@ -100,20 +108,22 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
     const results = await c.env.DB.batch<{ snapshot: string }>([
       classificationPolicyGuard(c.env, policy),
       ...names.map(name => {
-        const { table, fields, where, args } = spec.snapshot[name];
-        return snapshotStatement(c, table, fields, where, args);
+        const { table, fields, where, args, order } = spec.snapshot[name];
+        return snapshotStatement(c, table, fields, where, args, order);
       }),
     ]);
     const rows = {} as Snapshots<S>;
     const reads: PendingRead[] = [];
-    names.forEach((name, index) => {
+    for (const [index, name] of names.entries()) {
       const { fields, read } = spec.snapshot[name];
       const captured = snapshotRows<Record<string, Binding>>(fields, results[index + 1].results[0]);
       rows[name] = captured;
       const { id, ...pending } = read;
-      reads.push({ ...pending, ids: captured.map(id), count: captured.length });
-    });
+      reads.push({ minimumClass: dataClass === 'none' ? undefined : dataClass, ...pending,
+        ids: await Promise.all(captured.map(id)), count: captured.length });
+    }
     await auditBackgroundReads(c.env, reads, contextActor(c), { policy });
+    if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
 
     const admission = () => [
       authority.guard(),
@@ -124,8 +134,8 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
       }),
     ];
     prepared = { authority, policy, dataClass, rows, admission };
-  } catch {
-    return fail();
+  } catch (error) {
+    return fail(error);
   }
   const { authority, policy, dataClass, rows, admission } = prepared;
 
@@ -136,7 +146,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
         assertRegulatedWritesAllowed(c.env);
 
         // 4. decide
-        const plan = decide(rows);
+        const plan = await decide(rows);
         json(plan.writes);
         if (await flushReadAudit(c)) throw new Error('Mutation read evidence unavailable');
         if (!plan.writes.length) {
@@ -163,8 +173,8 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
           authority.guard(),
           classificationPolicyGuard(c.env, policy),
         ]);
-      } catch {
-        await fail();
+      } catch (error) {
+        await fail(error);
       }
     },
   };
