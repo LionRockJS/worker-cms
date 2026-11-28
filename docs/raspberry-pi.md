@@ -329,17 +329,25 @@ full backup above.
 
 The CMS normally uses 300–350 MiB. Two limits guard against growth:
 
-- `docker/memory-check.sh` restarts the CMS cleanly (it shuts Miniflare down
-  first) once it uses 720 MiB, but not within 15 minutes of its last start.
-  It measures memory the way `docker stats` does and prints only when it acts.
+- `docker/memory-check.sh` restarts the CMS's workerd runtime once the
+  container uses 720 MiB, but not within 15 minutes of the last start or
+  restart. It sends `SIGUSR2`, and `server.mjs` swaps in a fresh workerd
+  process while the container and the Node process keep running: the CMS
+  serves again in about 3 seconds, where a container restart takes about 45 on
+  a Pi 4 (it reruns the migrations and reloads Wrangler). Requests in flight
+  during those seconds fail; stored data is unaffected. The script measures
+  memory the way `docker stats` does and prints only when it acts.
 - `mem_limit` in `compose.yaml` is a hard cap, 1 GiB by default: past it the
-  kernel kills the CMS and Docker starts it again. It catches growth between
-  checks. Set `CMS_MEMORY_LIMIT` in `.env` to change it, for example `1500m`.
+  kernel kills the CMS and Docker starts the container again. It catches
+  growth between checks, and growth in the Node process, which a workerd
+  restart does not free. Set `CMS_MEMORY_LIMIT` in `.env` to change it, for
+  example `1500m`.
 
 [Step 10](#10-scheduled-jobs) runs the check every 5 minutes. To change the
 threshold, pass it in MiB in the crontab line (`crontab -e`), for example
 `memory-check.sh 900`, and keep it below `CMS_MEMORY_LIMIT`. `~/cms-memory.log` lists each restart with
-the memory use that caused it.
+the memory use before it and 10 seconds after. To restart the runtime by hand:
+`docker compose kill -s SIGUSR2 cms`.
 
 ## Troubleshooting
 

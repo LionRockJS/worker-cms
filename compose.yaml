@@ -12,8 +12,9 @@ services:
     image: ghcr.io/lionrockjs/0xcms:${CMS_TAG:-development}
     restart: unless-stopped
     # Hard memory cap: past it the kernel kills the CMS and the restart policy
-    # starts it again. docker/memory-check.sh restarts it cleanly well before
-    # (720 MiB by default); this only catches growth between its checks.
+    # starts it again. docker/memory-check.sh restarts the workerd runtime in
+    # place well before (720 MiB by default); this catches growth between its
+    # checks and in the Node process, which that restart does not free.
     mem_limit: ${CMS_MEMORY_LIMIT:-1g}
     memswap_limit: ${CMS_MEMORY_LIMIT:-1g}
     # Loopback only: the reverse proxy on this host is the way in. Docker's

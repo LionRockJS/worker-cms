@@ -600,7 +600,7 @@ the `*/N` cron triggers itself.
 | --- | --- |
 | [docker/update.sh](docker/update.sh) | Pulls the checkout and the image, recreates the container only if the image changed, waits until the CMS answers, and prints the commits it moved between |
 | [docker/d1-snapshot.sh](docker/d1-snapshot.sh) | Copies the live D1 databases to standalone SQLite files in a dated folder (`VACUUM INTO`, CMS keeps running) and deletes snapshots older than 30 days; for a nightly cron job |
-| [docker/memory-check.sh](docker/memory-check.sh) | Restarts the CMS cleanly once it uses 720 MiB, at most once per 15 minutes; for a cron job every 5 minutes |
+| [docker/memory-check.sh](docker/memory-check.sh) | Once the container uses 720 MiB, sends `SIGUSR2`, which makes `server.mjs` replace its workerd runtime in place (serving again in seconds, container kept); at most once per 15 minutes; for a cron job every 5 minutes |
 
 [docs/raspberry-pi.md](docs/raspberry-pi.md) sets all of this up on a
 Raspberry Pi running Ubuntu, including the crontab, nginx and a self-signed
@@ -1783,7 +1783,7 @@ features on and off.
 │   ├── update.sh          # Host: pull the newest image and restart if it changed
 │   ├── d1-snapshot.sh     # Host (cron): dated D1 snapshots, 30-day retention
 │   ├── d1-snapshot.mjs    # Writes the snapshots; run inside a throwaway container
-│   ├── memory-check.sh    # Host (cron): clean restart past 720 MiB
+│   ├── memory-check.sh    # Host (cron): restart workerd in place past 720 MiB
 │   └── nginx/cms.conf     # TLS reverse proxy example for the container
 ├── .github/workflows/docker.yml  # Publishes the multi-arch image to GHCR
 ├── package.json

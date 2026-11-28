@@ -19,6 +19,7 @@
 //   node server.mjs --no-cron    do not fire the cron triggers
 //   PORT=8788 node server.mjs    another port
 //   HOST=0.0.0.0 node server.mjs listen beyond loopback (proxy on another host)
+//   kill -USR2 <pid>             restart the workerd runtime in place (frees its memory)
 //
 // PORT and HOST can also live in .env. That file configures this server only;
 // Worker vars and secrets stay in .dev.vars. Variables already set in the shell win.
@@ -86,26 +87,25 @@ if (publicOrigin) {
 }
 
 // wrangler's helper still emits Miniflare 4-shaped options; Miniflare 5 converts them.
-const mf = new Miniflare(
-  convertV4MiniflareOptions({
-    workers: [
-      {
-        ...workerOptions,
-        // Durable Object state is keyed by worker name + class (e.g. local-PageSyncDO).
-        name: config.name,
-        modules: [{ type: "ESModule", path: BUNDLE }],
-      },
-    ],
-    host: HOST,
-    port: PORT,
-    // Public mode: rewrite each request's URL and Host to the public origin, as
-    // wrangler dev --local-upstream does. The browser-facing scheme is https at
-    // the proxy even though the hop to this server is plain http.
-    ...(publicOrigin ? { upstream: publicOrigin } : {}),
-    resourcePersistencePath: PERSIST,
-    log: new Log(LogLevel.ERROR),
-  }),
-);
+const options = convertV4MiniflareOptions({
+  workers: [
+    {
+      ...workerOptions,
+      // Durable Object state is keyed by worker name + class (e.g. local-PageSyncDO).
+      name: config.name,
+      modules: [{ type: "ESModule", path: BUNDLE }],
+    },
+  ],
+  host: HOST,
+  port: PORT,
+  // Public mode: rewrite each request's URL and Host to the public origin, as
+  // wrangler dev --local-upstream does. The browser-facing scheme is https at
+  // the proxy even though the hop to this server is plain http.
+  ...(publicOrigin ? { upstream: publicOrigin } : {}),
+  resourcePersistencePath: PERSIST,
+  log: new Log(LogLevel.ERROR),
+});
+const mf = new Miniflare(options);
 
 const url = await mf.ready;
 if (publicOrigin) {
@@ -151,3 +151,22 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// SIGUSR2 replaces the workerd process with a fresh one and keeps this one,
+// which frees the runtime's memory without a full restart. Persisted state
+// survives; requests in flight fail. docker/memory-check.sh sends it.
+let restarting = false;
+process.on("SIGUSR2", async () => {
+  if (restarting) return;
+  restarting = true;
+  const started = Date.now();
+  try {
+    await mf.setOptions(options);
+    await mf.ready;
+    console.log(`Restarted the workerd runtime in ${Date.now() - started} ms`);
+  } catch (error) {
+    console.error("Restarting the workerd runtime failed:", error);
+  } finally {
+    restarting = false;
+  }
+});
