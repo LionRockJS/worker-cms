@@ -1,11 +1,11 @@
 import type { AppContext } from '../../core/http/context';
 import { resolveCmsConfig } from '../../core/db/content-config';
-import { serviceMutationAuditEvidence } from '../../core/db/audit';
-import { guard, json, resultGuard, snapshot } from '../../core/db/bounded-mutation';
+import { guard, json, resultGuard, type Row } from '../../core/db/bounded-mutation';
 import { classFor, strongestClass } from '../../core/db/data-classes';
 import { abortIf } from '../../core/db/transaction-guard';
+import { beginServiceAuditedMutation } from '../../core/evidence/audited-mutation';
 import { nextIdSql } from '../../core/pages/snapshot-id';
-import { auditBackgroundReads, flushReadAudit } from '../../core/http/access-log';
+import { auditBackgroundReads } from '../../core/http/access-log';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 import { slugify } from '../../core/http/forms';
 import { noteActingUser, unavailable } from './evidence-common';
@@ -15,7 +15,7 @@ const MAX_TAXONOMIES = 100;
 const TAXONOMY_FIELDS = ['id', 'uuid', 'name', 'slug', 'created_at', 'updated_at'];
 const NEXT_TAXONOMY_ID = nextIdSql('taxonomies');
 
-interface TaxonomyIdentity {
+interface TaxonomyIdentity extends Row {
   name: string;
   slug: string;
   uuid: string;
@@ -47,7 +47,11 @@ export async function ensurePluginTaxonomies(c: AppContext, authority: PluginPag
       SELECT 1 FROM json_each(?) e WHERE slug = e.value OR substr(slug, 1, length(e.value) + 1) = e.value || '-'
     )`;
     const args = [json([...names]), json([...new Set(bases.values())])];
-    const existing = await snapshot<TaxonomyIdentity & { id: number }>(c, 'taxonomies', TAXONOMY_FIELDS, scope, args);
+    const mutation = await beginServiceAuditedMutation(c, {
+      classify: [],
+      snapshot: { taxonomies: { table: 'taxonomies', fields: TAXONOMY_FIELDS, where: scope, args, read: null } },
+    }, authority);
+    const existing = mutation.rows.taxonomies as Array<TaxonomyIdentity & { id: number }>;
     const byName = new Map(existing.map(row => [row.name, row]));
     const occupied = new Set(existing.map(row => row.slug));
     const created: TaxonomyIdentity[] = [];
@@ -70,37 +74,28 @@ export async function ensurePluginTaxonomies(c: AppContext, authority: PluginPag
       action: 'plugin.taxonomy-ensure-source-read', kind: 'table', key: 'taxonomies',
       targetType: 'taxonomies', ids: existing.map(row => String(row.id)), count: existing.length,
       minimumClass: dataClass === 'none' ? undefined : dataClass,
-    }], authority.actor);
-    if (await flushReadAudit(c)) throw new Error('Taxonomy source evidence unavailable');
+    }], authority.actor, { policy: authority.policy });
 
-    const clock = await c.env.DB.prepare('SELECT CURRENT_TIMESTAMP now').first<{ now: string }>();
-    if (!clock) throw new Error('Taxonomy clock unavailable');
     const detail: Record<string, unknown> = {
-      operation_id: crypto.randomUUID(), registry_id: authority.registryId,
+      registry_id: authority.registryId,
       identity_fingerprint: authority.identityFingerprint, principal: 'credential_authenticated_plugin',
     };
     noteActingUser(c, detail);
-    const statements = [...authority.check(), guard(c, 'taxonomies', TAXONOMY_FIELDS, existing, scope, args)];
-    const receipts = created.map(row => {
-      const receipt = serviceMutationAuditEvidence(c.env, {
-        action: 'taxonomy.create', entityType: 'taxonomy', entityId: row.uuid, detail,
-      }, authority.actor, dataClass, authority.policy, c);
-      statements.push(
-        c.env.DB.prepare(`INSERT INTO taxonomies(id, uuid, name, slug) VALUES (${NEXT_TAXONOMY_ID}, ?, ?, ?)`).bind(row.uuid, row.name, row.slug),
-        abortIf(c.env, 'changes() < 1'),
-        receipt.write,
-      );
-      return receipt;
-    });
     const finalRows = [...existing, ...created.map(row => ({ ...row, created_at: null, updated_at: null }))];
-    statements.push(
-      resultGuard(c, 'taxonomies', TAXONOMY_FIELDS.filter(field => field !== 'id'), finalRows, clock.now, scope, args),
-      guard(c, 'taxonomies', TAXONOMY_FIELDS, existing, `(${scope}) AND uuid NOT IN (SELECT value FROM json_each(?))`, [...args, json(created.map(row => row.uuid))]),
-      abortIf(c.env, `EXISTS (SELECT 1 FROM taxonomies WHERE (${scope}) AND (typeof(id) <> 'integer' OR id < 1 OR id > 9007199254740991))`, args),
-      ...receipts.map(receipt => receipt.guard),
-      ...authority.check(),
-    );
-    await c.env.DB.batch(statements);
+    await mutation.commit(() => ({
+      groups: created.map(row => ({
+        writes: [{
+          sql: `INSERT INTO taxonomies(id, uuid, name, slug) VALUES (${NEXT_TAXONOMY_ID}, ?, ?, ?)`,
+          args: [row.uuid, row.name, row.slug],
+        }],
+        evidence: { entry: { action: 'taxonomy.create', entityType: 'taxonomy', entityId: row.uuid, detail }, dataClass },
+      })),
+      expect: since => [
+        resultGuard(c, 'taxonomies', TAXONOMY_FIELDS.filter(field => field !== 'id'), finalRows, since, scope, args),
+        guard(c, 'taxonomies', TAXONOMY_FIELDS, existing, `(${scope}) AND uuid NOT IN (SELECT value FROM json_each(?))`, [...args, json(created.map(row => row.uuid))]),
+        abortIf(c.env, `EXISTS (SELECT 1 FROM taxonomies WHERE (${scope}) AND (typeof(id) <> 'integer' OR id < 1 OR id > 9007199254740991))`, args),
+      ],
+    }));
     const slugs = new Map([...existing, ...created].map(row => [row.name, row.slug]));
     return c.json({ taxonomies: [...names].map(name => ({ name, slug: slugs.get(name)! })) });
   } catch {

@@ -51,9 +51,10 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *   Grouped plans pair writes with individually classified receipts, run any
  *   checkpoint, and verify final state and every receipt before returning.
  *   A job may verify a lost acknowledgment without replaying the mutation.
- *   6. fail       any error: coarse outage incident, then the writer's error.
- *                 Errors the writer marks as its own (validation, policy
- *                 refusals) pass through unchanged, with no incident.
+ *   6. fail       record the writer's own failure outcome if needed, report
+ *                 the coarse outage incident, then throw the writer's error.
+ *                 Validation and policy refusals marked for passthrough
+ *                 escape unchanged, with no incident.
  *
  * A null plan or a session plan without writes commits only the admission
  * guards. A service plan can also verify an empty result.
@@ -147,9 +148,9 @@ export interface GroupedMutationPlan extends MutationChecks {
 interface SnapshotMutationSpec<S extends Record<string, SnapshotSpec>> {
   classify: Containers | ((rows: Snapshots<S>) => Containers);
   snapshot: S;
-  /** Omit when the caller owns failure reporting. A failed submission can
-   *  have an unknown outcome when deciding whether a refund is due. */
-  unavailable?: (error: unknown, batchSubmitted: boolean) => Error;
+  /** Omit when the caller owns failure reporting. The writer can record its
+   *  known or uncertain outcome before the runner reports the outage. */
+  unavailable?: (error: unknown, batchSubmitted: boolean) => Error | Promise<Error>;
   /** Errors that are the writer's own answer, such as invalid input. */
   passthrough?: (error: unknown) => boolean;
 }
@@ -239,8 +240,9 @@ async function prepareAuditedMutation<S extends Record<string, SnapshotSpec>>(en
   };
   const fail = async (error: unknown, batchSubmitted = false): Promise<never> => {
     if (!spec.unavailable || spec.passthrough?.(error)) throw error;
+    const unavailable = await spec.unavailable(error, batchSubmitted);
     await recordAuditOutage(env, 'health', [], actor, undefined, { captureIncomplete: true });
-    throw spec.unavailable(error, batchSubmitted);
+    throw unavailable;
   };
 
   // 1. gate (outside the try: a refusal here is reported by the caller's route)

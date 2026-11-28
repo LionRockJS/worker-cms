@@ -1641,6 +1641,29 @@ describe('Plugin API content-meta, tag ensure, and lookup projections', () => {
     }
   });
 
+  it('rechecks earlier taxonomy receipts after the final receipt is written', async () => {
+    const registrationId = await registerPlugin({ id: 'import-export', name: 'Import / Export', version: '1.0.0', capabilities: ['taxonomy:create'] });
+    const screen = await taxonomyApprovalScreen(registrationId);
+    expect((await screen('capabilities/taxonomy-create/approve', 'POST')).status).toBe(302);
+    const names = ['Receipt First Taxonomy', 'Receipt Last Taxonomy'];
+    const count = async () => (await env.DB.prepare("SELECT COUNT(*) n FROM audit_events WHERE action='taxonomy.create'").first<{ n: number }>())!.n;
+    const before = await count();
+    await env.DB.prepare(`CREATE TRIGGER rewrite_earlier_taxonomy_receipt AFTER INSERT ON audit_events
+      WHEN NEW.action='taxonomy.create' AND NEW.target_id=(SELECT uuid FROM taxonomies WHERE name='Receipt Last Taxonomy')
+      BEGIN
+        UPDATE audit_events SET outcome='denied'
+        WHERE action='taxonomy.create' AND target_id=(SELECT uuid FROM taxonomies WHERE name='Receipt First Taxonomy');
+      END`).run();
+    try {
+      const response = await cmsApi('POST', '/__cms/taxonomies/ensure', { names }, { 'x-plugin-id': 'import-export' });
+      expect(response.status).toBe(503);
+      expect(await env.DB.prepare('SELECT id FROM taxonomies WHERE name IN (?,?)').bind(...names).first()).toBeNull();
+      expect(await count()).toBe(before);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER rewrite_earlier_taxonomy_receipt').run();
+    }
+  });
+
   it('ensures tags by taxonomy and name, reusing existing rows', async () => {
     await env.DB.prepare("INSERT INTO taxonomies (name, slug) VALUES ('Topic', 'topic')").run();
 

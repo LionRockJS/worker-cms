@@ -1,6 +1,6 @@
 # Audited mutation runner: porting plan
 
-**Status (28 November 2026)** Host settings, Wave A1 and the page–tag prototype are complete. P1 landed in `00e875f` and passed its targeted Workers regressions. The standard full suite remains pending.
+**Status (29 November 2026)** Host settings, Wave A1, the page–tag prototype and P1–P5 are implemented. Targeted Workers regressions passed. The standard full suite remains pending.
 
 ## Goal
 
@@ -40,7 +40,7 @@ Each extension is added by the first writer that needs it (named in the "First u
 | E6 | Result rows | `returning` runs last. A session plan returns the first row and a service plan returns all rows. | Plugin registration and plugin page update (implemented) |
 | E7 | Trailing statements | A grouped plan can run checkpoint statements after its page receipts and before final state and receipt verification. | Batch edits (implemented) |
 | E8 | Sinks | `primary` (default), `outbox` (containment operations that must succeed during a primary audit outage, with delivery after commit) and `planned` (counter projections with a final guard) | `outbox`: identity disconnect; `planned`: plugin sequences |
-| E9 | Error passthrough | `passthrough(error)` lets the writer's own errors escape unchanged, with no outage incident | Locales (done) |
+| E9 | Error mapping | `passthrough(error)` keeps the writer's own errors and skips the outage incident. An async `unavailable` callback can record the writer's failure outcome before the runner reports the outage. | Locales (passthrough), plugin tag ensure (async outcome) |
 | E10 | External inputs | Reads from another database (`PUBLISHED_DB`, R2) are passed into `decide` as unguarded input, because they cannot share the private D1 batch | Published-to-draft pull |
 | E11 | Lost-acknowledgment reconciliation | The runner can verify exact receipts, state and current authority in a read-only batch after a failed submission. The original write is submitted once. | Trash lifecycle (implemented) |
 | E13 | Follow-up snapshots | `decide` may snapshot rows that depend on the first ones (for example a plugin's owned approvals). They are read, logged and guarded at admission exactly like the first snapshot | Plugin registration (done) |
@@ -111,7 +111,7 @@ First user: [page–tag association](../../src/core/evidence/tag-association-evi
 
 Next candidates for the aggregate are the draft editor and the batch writer, which repeat the same guards. They also need request-buffered page reads, 409 and denial answers, and multi-page snapshots, so each is a separate decision.
 
-## Next implementation: draft editor on the page aggregate (P1)
+## P1 draft editor on the page aggregate
 
 **Goal:** move [`saveDraftContent` and `removeDraftHistory`](../../src/core/evidence/mutation-evidence.ts) (147 lines; the page editor, quick create, restore and history deletion) onto `PageSnapshot`, so the second and largest page writer proves the aggregate generalizes. The runner stays as it is apart from one read mode.
 
@@ -160,11 +160,12 @@ The same HTTP fixtures executed the following D1 calls before and after P1. Thes
 
 ### After P1 (each a separate decision)
 
-| Phase | Writers | Blocked on |
+| Phase | Writers | Status |
 |---|---|---|
 | P2 | Plugin page update, create and duplicate | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P3 | Batch weights and bulk edits, trash lifecycle, plugin page delete | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 | P4 | Taxonomies and tags | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
+| P5 | Plugin taxonomy and tag ensure | Implemented. Targeted verification passed. Standard full-suite verification is pending. |
 
 #### P2 fit check
 
@@ -247,13 +248,32 @@ A rename with a retained taxonomy floor declares a one-generation advance. The r
 
 All **166 taxonomy, policy-generation and settings-import tests** and **1,561 earlier regressions** passed in standalone workerd. Disabling the after-write authority check caused the session-revocation regression to fail. Standard `npm test` remains blocked by the localhost listener restriction.
 
+#### P5 plugin taxonomy and tag provisioning
+
+Both ensure routes use the grouped runner and reuse the plugin page authority captured before parsing. The runner guards the bounded snapshots under the captured policy and checks that authority and every receipt again before returning. Taxonomy ensure preserves its separate `taxonomy:create` approval and its guarded reuse path. Tag ensure keeps its per-tag, batch, and denial receipts, ordered results, and optional trash-link checks.
+
+Tag ensure records known rollback or uncertain submission before the outage incident. An acknowledged transaction still precedes catalogue publication, and an error after acknowledgement records the local batch as committed.
+
+| Request fixture | D1 calls before → after |
+|---|---:|
+| Taxonomy provision | 26 → 25 |
+| Classified taxonomy provision | 18 → 17 |
+| Taxonomy reuse | 17 → 16 |
+| Mixed tag provision and reuse | 27 → 25 |
+| Classified mixed tag provision and reuse | 26 → 24 |
+| Tag reuse | 27 → 25 |
+| Empty tag request | 22 → 20 |
+| Tag write-scope denial | 12 → 12 |
+
+All **69 focused plugin API and tag ensure tests** and **1,727 earlier regressions** passed in standalone workerd. Removing the final receipt verification caused both writers' regressions for a later receipt corrupting an earlier receipt to fail. The new taxonomy regression also passed on the original writer. Standard `npm test` remains blocked by the localhost listener restriction.
+
 ### Wave A2: page and taxonomy writers
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
 | [Page–tag association](../../src/core/evidence/tag-association-evidence.ts) | 102 | `page-tag-association-evidence` | page aggregate | **Done** (page pattern prototype) |
 | [Taxonomies and tags](../../src/core/evidence/taxonomy-mutation-evidence.ts) | 272 | `taxonomy-mutation-evidence`, `classification-policy-version`, `config-transfer` | E3, E15 | **Done** (P4). Exact generation advance and request-buffered reads. |
-| [Draft content and history](../../src/core/evidence/mutation-evidence.ts) | 147 | `content-mutation-evidence`, `quick-create-mutation-evidence` | E2, E3, E4, E6, E9 | The largest guard set (versions, tags, floors, access policy). Port `removeDraftHistory` first, then `saveDraftContent` |
+| [Draft content and history](../../src/core/evidence/mutation-evidence.ts) | 147 | `content-mutation-evidence`, `quick-create-mutation-evidence` | E2, E3, E4, E6, E9 | **Done** (P1). Uses the page aggregate to guard content, versions, links, floors, and the owner policy. |
 | [Trash routes](../../src/features/trash/routes.ts) | 232 | `page-lifecycle-mutation-evidence` | — | **Stays as is.** Hold changes are about six lines with no snapshot and no policy guard; the runner would only add guards |
 | [Audit administration](../../src/features/audit/routes.ts) | 319 | `audit-review`, `classification-policy-version` | — | **Stays as is.** `data_class.set` moves the policy version in its batch and answers a declassification with 409; already about 20 lines |
 
@@ -278,11 +298,11 @@ All of these authenticate a plugin by its registry row, secret and identity pin 
 | [Automatic plugin identity](../../src/features/plugins/automatic-identity-evidence.ts) | 52 | `plugin-registration-evidence` | E5 `plugin` | Smallest; introduces the adapter |
 | [Plugin state](../../src/features/plugins/state-evidence.ts) | 54 | `plugin-state-mutation-evidence`, `plugin-state` | store option | |
 | [Record holds](../../src/features/plugins/hold-evidence.ts) | 119 | `plugin-holds` | store option, E1 | |
-| [Taxonomy ensure](../../src/features/plugins/taxonomy-ensure.ts) | 109 | `plugin-tag-ensure-evidence` | — | |
-| [Tag ensure](../../src/features/plugins/tag-ensure-evidence.ts) | 88 | `plugin-tag-ensure-evidence` | E1 | Per-tag and batch receipts |
-| [Page update](../../src/features/plugins/page-update-evidence.ts) | 185 | `plugin-page-update-evidence` | E2, E4 | Uses the highest audit `seq` as a concurrency witness; keep it as an admission guard |
-| [Page create and duplicate](../../src/features/plugins/page-create-evidence.ts) | 199 | `plugin-page-create-evidence`, `plugin-page-duplicate-evidence` | E1, E2, E4 | Seven receipts and 21 guards: the hardest in this wave. Escape hatch candidate |
-| [Page delete](../../src/features/plugins/page-delete-evidence.ts) | 113 | `plugin-page-delete-evidence` | Wave B lifecycle | Each content chunk commits through the lifecycle runner. The route retains operation intent and progress. |
+| [Taxonomy ensure](../../src/features/plugins/taxonomy-ensure.ts) | 104 | `cms-api` | E1, E5 | **Done** (P5). Separate taxonomy approval and per-taxonomy receipts. |
+| [Tag ensure](../../src/features/plugins/tag-ensure-evidence.ts) | 172 | `plugin-tag-ensure-evidence`, `cms-api` | E1, E5, E9 | **Done** (P5). Per-tag and batch receipts, guarded return rows and outcome evidence. |
+| [Page update](../../src/features/plugins/page-update-evidence.ts) | 185 | `plugin-page-update-evidence` | E2, E4 | **Done** (P2). Keeps the highest audit `seq` as a concurrency witness. |
+| [Page create and duplicate](../../src/features/plugins/page-create-evidence.ts) | 199 | `plugin-page-create-evidence`, `plugin-page-duplicate-evidence` | E1, E2, E4 | **Done** (P2). Keeps quota, credit compensation and progress in the writer. |
+| [Page delete](../../src/features/plugins/page-delete-evidence.ts) | 113 | `plugin-page-delete-evidence` | Wave B lifecycle | **Done** (P3). Each content chunk commits through the lifecycle runner. The route retains operation intent and progress. |
 | [Metered debits](../../src/features/credits/debit-evidence.ts) and [contributor credits API](../../src/features/credits/routes/contributor-api.ts) | 506 | `plugin-credits`, `credits`, `diamond-credits` | E1 | Keyed replay must still prove the stored response in the debit batch |
 | [Plugin publish API](../../src/features/plugins/routes/publish-api.ts) | 157 | `outbound-publication-audit` | — | |
 | [Submission ingestion](../../src/features/publish/submission-ingest.ts) | 276 | `submission-ingest` | E10, `system` or `plugin` | Two entry points: scheduled service and plugin |

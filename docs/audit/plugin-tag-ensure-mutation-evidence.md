@@ -16,6 +16,8 @@ Source reads are awaited before mutation. Evidence classification takes the maxi
 
 ## Atomic local receipts
 
+The [tag writer](../../src/features/plugins/tag-ensure-evidence.ts) uses the [grouped audited mutation runner](../../src/core/evidence/audited-mutation.ts) with the plugin page authority captured before the body. The runner guards the source reads, local writes, receipts and returned identities. The writer supplies the exact catalogue postconditions and records any uncertain commit outcome.
+
 All accepted creations share a transaction with one `tag.create` receipt per unique new pair, one `tag.ensure` receipt per unique reused pair and a `tag.ensure.batch` operation manifest. Per-tag receipts carry taxonomy ID/UUID and all corresponding input indices. The batch manifest records created/reused UUIDs and exact indexed errors. A request containing only invalid entries still requires its decision manifest; an empty request is a guarded no-op without invented mutation receipts. A write-scope refusal requires an exact classified `tag.ensure` denial before a normal 403.
 
 The transaction rechecks taxonomy existence/metadata, exact matching tag sets, slug owners, current authority and policy. A taxonomy appearing after an unknown-taxonomy decision, a concurrently created name match, metadata/body changes, slug claims or revoked credentials/grants refuse the captured plan. No concurrent object is silently adopted mid-transaction. All valid entries commit together or roll back; validation errors remain explicit item decisions.
