@@ -291,8 +291,11 @@ it('stops a queued bulk mutation when its retained private read cannot persist',
   await associate(); await classify('taxonomy', 'clinical'); await env.DB.prepare('DELETE FROM page_tags').run();
   const job = await createAdvancedSearchBulkActionJob(env, { action: 'replace_text', scope: 'selected', ids: [7000], pageTypes: ['article'], criteria: [], operator: 'AND', targetTagIds: [],
     searchText: 'historic', replacementText: 'Changed', returnTo: '/admin', user: { sub: '7002', name: 'Operator', email: 'operator@example.invalid', role: 'admin', type: 'access', exp: 9999999999 } });
-  await failAudit(); await runCmsAdminJob(env, job.id);
+  // Only the read evidence fails: the claim and failure receipts must still commit.
+  await env.DB.prepare("CREATE TRIGGER floor_audit_fail BEFORE INSERT ON audit_events WHEN NEW.action = 'page.batch-mutation-read' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END").run();
+  await runCmsAdminJob(env, job.id);
   expect((await getAdminJob(env.DB, job.id))?.status).toBe('failed');
+  expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'page.batch-mutation-read'").first<{ n: number }>())?.n).toBe(0);
   expect((await env.DB.prepare('SELECT lect FROM pages WHERE id = 7000').first<{ lect: string }>())?.lect).toContain('historic-private-value');
 });
 
