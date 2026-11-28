@@ -3,6 +3,7 @@
 // append-only ledger. Every write is one guarded DB.batch; see ./service.ts.
 
 import type { Env } from '../../types';
+import { debitWithEvidence, type DebitEvidence } from './debit-evidence';
 import { insertChargeReceipt, type ChargeReceiptKey } from './charge-receipts';
 import { DEFAULT_CREDIT_CURRENCY, isCreditCurrency, emptyCurrencyTotals, type CreditCurrency } from './currencies';
 
@@ -13,6 +14,7 @@ export interface DebitSettlement {
   eligible: string;
   bindings: readonly (string | number | null)[];
   advance: D1PreparedStatement;
+  verify?: D1PreparedStatement;
 }
 
 export interface CreditChargeInput {
@@ -42,6 +44,7 @@ export interface CreditChargeInput {
   createdBy: string;
   receipt?: ChargeReceiptKey;
   settlement?: DebitSettlement;
+  evidence?: DebitEvidence;
 }
 
 export type CreditChargeResult =
@@ -107,6 +110,13 @@ export async function chargeCredits(env: Env, input: CreditChargeInput): Promise
   const amount = Math.trunc(input.amount);
   if (amount <= 0) throw new Error(`chargeCredits amount must be > 0, got ${input.amount}`);
   const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
+  if (input.evidence) {
+    const balanceAfter = await debitWithEvidence(env, { ...input, source: 'user', owner: input.userId, amount, currency }, input.evidence);
+    if (balanceAfter !== null) return { ok: true, balanceAfter };
+    const balance = await getCreditBalance(env, input.userId, currency);
+    return balance === null ? { ok: false, error: 'unknown_user', balance: 0, required: amount }
+      : { ok: false, error: 'insufficient_credits', balance, required: amount };
+  }
 
   const where = `user_id = ? AND currency = ? AND balance >= ?${input.settlement ? ` AND (${input.settlement.eligible})` : ''}`;
   const bindings = [input.userId, currency, amount, ...(input.settlement?.bindings ?? [])];
@@ -286,6 +296,7 @@ interface SharedCreditChangeInput {
   createdBy: string;
   receipt?: ChargeReceiptKey;
   settlement?: DebitSettlement;
+  evidence?: DebitEvidence;
 }
 
 /** Atomic pool write: ledger INSERT + balance UPDATE sharing one guard, like
@@ -341,6 +352,12 @@ export async function chargeSharedCredits(
 ): Promise<SharedCreditResult> {
   const amount = Math.trunc(input.amount);
   if (amount <= 0) throw new Error(`chargeSharedCredits amount must be > 0, got ${input.amount}`);
+  if (input.evidence) {
+    const currency = input.currency ?? DEFAULT_CREDIT_CURRENCY;
+    const balanceAfter = await debitWithEvidence(env, { ...input, source: 'shared', userId: input.userId!, amount, currency }, input.evidence);
+    return balanceAfter !== null ? { ok: true, balanceAfter }
+      : { ok: false, error: 'insufficient_credits', balance: await getSharedCreditBalance(env, currency), required: amount };
+  }
   return writeSharedCredits(env, -amount, true, input);
 }
 
@@ -394,6 +411,7 @@ interface PluginCreditChangeInput {
   createdBy: string;
   receipt?: ChargeReceiptKey;
   settlement?: DebitSettlement;
+  evidence?: DebitEvidence;
 }
 
 export async function getPluginCreditBalance(
@@ -478,6 +496,12 @@ export async function chargePluginCredits(
 ): Promise<SharedCreditResult> {
   const balance = await getPluginCreditBalance(env, pluginId, input.currency);
   if (balance < amount) return { ok: false, error: 'insufficient_credits', balance, required: amount };
+  if (input.evidence) {
+    const balanceAfter = await debitWithEvidence(env, { ...input, source: 'plugin', owner: pluginId,
+      userId: input.userId!, amount, currency: input.currency ?? DEFAULT_CREDIT_CURRENCY }, input.evidence);
+    return balanceAfter !== null ? { ok: true, balanceAfter }
+      : { ok: false, error: 'insufficient_credits', balance: await getPluginCreditBalance(env, pluginId, input.currency), required: amount };
+  }
   return writePluginCredits(env, pluginId, -amount, true, input);
 }
 

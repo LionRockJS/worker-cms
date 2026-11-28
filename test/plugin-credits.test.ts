@@ -384,6 +384,23 @@ describe('grant API', () => {
     }
   });
 
+  it('rolls back the wallet, ledger and replay receipt if the metered audit receipt is rewritten', async () => {
+    await seedUser(PAYER_ID, 100);
+    const body = { key: 'send_edm', quantity: 10, charge_id: 'audit-fault' };
+    await env.DB.prepare(`CREATE TRIGGER metered_audit_fault AFTER INSERT ON audit_events
+      WHEN NEW.action = 'credit.metered-charge' BEGIN UPDATE audit_events SET detail = '{}' WHERE seq = NEW.seq; END`).run();
+    try {
+      expect((await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', body)).status).toBe(503);
+      expect((await getCreditBalances(env, PAYER_ID))?.credit).toBe(100);
+      expect(await env.DB.prepare("SELECT 1 FROM plugin_charge_receipts WHERE charge_id = 'audit-fault'").first()).toBeNull();
+      expect(await env.DB.prepare("SELECT 1 FROM credit_ledger WHERE action = ?").bind(`${PLUGIN_ID}:send_edm`).first()).toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER metered_audit_fault').run();
+    }
+    expect((await cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', body)).status).toBe(200);
+    expect((await getCreditBalances(env, PAYER_ID))?.credit).toBe(80);
+  });
+
   it('allows the same charge ID after an insufficient-funds response', async () => {
     const charge = () => cmsApiAs(PAYER_ID, 'POST', '/__cms/credits/charge', {
       key: 'send_edm', charge_id: 'retry-after-top-up',

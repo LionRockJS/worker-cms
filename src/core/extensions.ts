@@ -311,6 +311,7 @@ export interface PluginActionJob {
   path: string;
   contentType: string | null;
   body: string | null;
+  beforeDispatch(permissions: string[], destinationChecks: D1PreparedStatement[]): Promise<void>;
   user: { sub: string | number; email: string; name: string; role: string };
 }
 

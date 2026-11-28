@@ -9,7 +9,7 @@ import { requestContext } from '../http/request-context';
 /** Prepared from one D1 snapshot; the admission guard must be the first
  * statement in the same batch as the access-management mutation/evidence. */
 export interface AccessAuthorization {
-  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'content:publish' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' | 'credits:share' | 'records:hold' | 'authenticated';
+  capability: 'users:manage' | 'roles:manage' | 'menu:manage' | 'content:write' | 'content:publish' | 'tag:write' | 'taxonomy:write' | 'content:delete' | 'trash:restore' | 'trash:purge' | 'pagetype:write' | 'blocktype:write' | 'plugin:manage' | 'plugin:access' | 'credits:share' | 'records:hold' | 'authenticated';
   allowed: boolean;
   admin: boolean;
   permissions: Set<Permission>;
@@ -30,7 +30,7 @@ export function captureSelfAuthorization(env: Env, actor: JWTPayload): Promise<A
 
 /** Trusted claimed-job callers must execute BOTH returned guards in the same
  * business batch. A persisted job delegates work; an old JWT is not its lease. */
-export async function captureContentJobAuthorization(env: Env, actor: JWTPayload, delegationGuard: D1PreparedStatement, capability: 'content:write'|'content:delete' = 'content:write') {
+export async function captureContentJobAuthorization(env: Env, actor: JWTPayload, delegationGuard: D1PreparedStatement, capability: 'content:write' | 'content:delete' | 'content:publish' | 'plugin:access' = 'content:write') {
   return { authorization: await captureAuthorization(env, actor, capability, false), delegationGuard };
 }
 

@@ -225,6 +225,18 @@ describe('retention', () => {
     expect(JSON.parse(purge!.detail).retention_days).toBe(30);
   });
 
+  it('resends only stale committed continuations to the job queue', async () => {
+    const old = '2020-01-01T00:00:00.000Z';
+    const send = async (message: { jobId: string }) => { sent.push(message.jobId); };
+    const sent: string[] = [];
+    for (const [id, status, attempts] of [['old-continuation', 'queued', 1], ['initial', 'queued', 0], ['in-flight', 'running', 1]] as const) {
+      await env.DB.prepare(`INSERT INTO admin_jobs (id, type, status, attempts, created_at, updated_at)
+        VALUES (?, 'advanced_search_bulk_action', ?, ?, ?, ?)`).bind(id, status, attempts, old, old).run();
+    }
+    await jobsServices.scheduled!({ ...env, ADMIN_JOBS_QUEUE: { send } as Env['ADMIN_JOBS_QUEUE'] });
+    expect(sent).toEqual(['old-continuation']);
+  });
+
   it('clears finished job bodies only once JOB_RETENTION_DAYS is set', async () => {
     const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
     const recent = new Date().toISOString();
@@ -233,6 +245,14 @@ describe('retention', () => {
         VALUES (?, 'plugin_admin_action', ?, 'name=Guest&email=guest@example.invalid', '{"sub":"1"}', ?, ?)`).bind(id, status, at, at).run();
     }
     expect(await jobsServices.scheduled!({ ...env } as Env)).toBeNull();
+    await env.DB.prepare(`CREATE TRIGGER job_retention_fault BEFORE INSERT ON audit_events
+      WHEN NEW.action = 'job.retention-clear' BEGIN SELECT RAISE(IGNORE); END`).run();
+    try {
+      await expect(jobsServices.scheduled!({ ...env, JOB_RETENTION_DAYS: '30' })).rejects.toThrow();
+      expect(await env.DB.prepare("SELECT body FROM admin_jobs WHERE id='old-done'").first('body')).not.toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER job_retention_fault').run();
+    }
     expect(await jobsServices.scheduled!({ ...env, JOB_RETENTION_DAYS: '30' } as Env)).toBe('job retention: cleared 2');
     const rows = (await env.DB.prepare('SELECT id, status, body, user_json FROM admin_jobs ORDER BY id').all()).results;
     expect(rows).toEqual([

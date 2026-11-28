@@ -16,6 +16,7 @@ export interface ContentJobLease {
   /** Prepared by the owning optional feature; core never imports its schema. */
   guard: D1PreparedStatement;
   /** Local bulk slices commit their job progress with the page outcomes. */
+  authorizePublication?: (uuids: string[]) => Promise<void>;
   checkpoint?: (updated: number, dataClass: DataClass | 'none') => Promise<D1PreparedStatement[]>;
 }
 export interface ContentBatchContext { request?: AppContext; job?: ContentJobLease }

@@ -16,7 +16,10 @@ import type { Env, Variables } from '../../../types';
 import type { AppContext } from '../../../core/http/context';
 import { coreExtensions, type ApiCallerIdentity } from '../../../core/extensions';
 import { fingerprint } from '../../../core/db/bounded-mutation';
-import { recordRead, recordTableReads } from '../../../core/http/access-log';
+import { ServiceMutationUnavailableError, serviceMutationAuditEvidence } from '../../../core/db/audit';
+import { classFor, resolveDataClasses, strongestClass, classificationPolicyGuard } from '../../../core/db/data-classes';
+import { abortIf } from '../../../core/db/transaction-guard';
+import { auditBackgroundReads, recordRead, recordTableReads } from '../../../core/http/access-log';
 import { recordWalletReads } from '../read-audit';
 import type { CreditCurrency } from '../currencies';
 import {
@@ -31,7 +34,7 @@ import {
   spendCredits,
 } from '../service';
 import { isCreditCurrency } from '../currencies';
-import { insertChargeReceipt, readChargeReceipt } from '../charge-receipts';
+import { insertChargeReceipt, readChargeReceipt, verifyChargeReceipt } from '../charge-receipts';
 import { listSubscriptionsForPlugin, reportSubscriptionUsage, type CreditSubscriptionRow } from '../subscriptions';
 
 export const creditApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -192,10 +195,21 @@ creditApiRoutes.post('/credits/charge', async (c) => {
     chargeId,
     fingerprint: await fingerprint(JSON.stringify([payer, key, quantity, entityType, entityId, note])),
   };
+  const authority = await auth.captureMutationAuthority?.().catch(() => { throw new ServiceMutationUnavailableError(); });
+  if (!authority) throw new ServiceMutationUnavailableError();
+  const policy = await resolveDataClasses(c.env, true);
+  if (!policy.ok) throw new ServiceMutationUnavailableError();
+  const dataClass = strongestClass([classFor(policy, 'plugin', auth.callerId),
+    ...['plugin_charge_receipts', 'credit_wallets', 'users'].map(table => classFor(policy, 'table', table))]);
+  const checks = () => [...authority.check(), classificationPolicyGuard(c.env, policy)];
   const replay = async () => {
     if (!receipt) return null;
     const saved = await readChargeReceipt(c.env, receipt);
     if (!saved) return null;
+    await auditBackgroundReads(c.env, [{ action: 'credit.charge-receipt-read', kind: 'table', key: 'plugin_charge_receipts',
+      targetType: 'credit_charge', ids: [auth.callerId], count: 1,
+      minimumClass: dataClass === 'none' ? undefined : dataClass }], authority.actor, { exact: true });
+    await c.env.DB.batch(checks());
     return saved.conflict ? c.json({ error: 'charge_id_conflict' }, 409) : c.json(saved.response);
   };
   const previous = await replay();
@@ -207,6 +221,9 @@ creditApiRoutes.post('/credits/charge', async (c) => {
 
   const currency = credit.def.currency;
   const total = credit.value * quantity;
+  if (!Number.isSafeInteger(total) || total < 0) throw new ServiceMutationUnavailableError();
+  const target = crypto.randomUUID();
+  const detail = { plugin_id: auth.callerId, credit_key: key, quantity, keyed: !!receipt };
   announceBalances(c, auth.callerId, [currency]);
   announceContributor(c, auth.callerId);
   const spend = () => spendCredits(c.env, {
@@ -223,13 +240,21 @@ creditApiRoutes.post('/credits/charge', async (c) => {
     pluginOnly: credit.def.pluginOnly,
     createdBy: `plugin:${auth.callerId}`,
     receipt,
+    evidence: { actor: authority.actor, policy, action: 'credit.metered-charge', target, detail, checks, context: c },
   });
 
   let charge: Awaited<ReturnType<typeof spendCredits>>;
   try {
     if (total === 0) {
-      if (!receipt) return c.json({ ok: true, charged: 0, currency, balance: await getCreditBalance(c.env, payer, currency) });
-      await insertChargeReceipt(c.env, receipt, payer, currency, 0).run();
+      if (!receipt) {
+        await c.env.DB.batch(checks());
+        return c.json({ ok: true, charged: 0, currency, balance: await getCreditBalance(c.env, payer, currency) });
+      }
+      const evidence = serviceMutationAuditEvidence(c.env, { action: 'credit.metered-charge', entityType: 'credit_charge', entityId: target,
+        detail: { ...detail, billed_user_id: payer, amount: 0, currency } }, authority.actor, dataClass, policy, c);
+      await c.env.DB.batch([...checks(),
+        insertChargeReceipt(c.env, receipt, payer, currency, 0), abortIf(c.env, 'changes() <> 1'),
+        evidence.write, evidence.guard, verifyChargeReceipt(c.env, receipt, payer, currency, 0), ...checks()]);
       const saved = await replay();
       if (!saved) throw new Error('Metered charge receipt unavailable');
       return saved;
@@ -239,7 +264,7 @@ creditApiRoutes.post('/credits/charge', async (c) => {
     // A concurrent request can win the receipt's unique constraint.
     const saved = await replay();
     if (saved) return saved;
-    throw error;
+    throw new ServiceMutationUnavailableError();
   }
   // Read even after a decline. A concurrent debit may have used the last funds.
   const saved = await replay();

@@ -170,6 +170,22 @@ it('does not run a queued bulk job after its account is deleted', async () => {
   expect(await env.DB.prepare('SELECT id FROM pages WHERE id = 310').first()).not.toBeNull();
 });
 
+it('withholds plugin dispatch when its claim changes after disclosure intent', async () => {
+  const job = await createPluginAdminActionJob(env, { pluginId: 'reader', method: 'POST', path: '/__plugin/admin/export',
+    contentType: 'application/json', body: '{}', user: actor });
+  await env.DB.prepare("INSERT INTO data_classes(container_kind,container_key,class) VALUES ('table','admin_jobs','pii')").run();
+  await env.DB.prepare(`CREATE TRIGGER stale_plugin_claim AFTER INSERT ON audit_events
+    WHEN NEW.action = 'job.plugin-disclosure' AND NEW.target_type = 'admin_job'
+    BEGIN UPDATE admin_jobs SET attempts = attempts + 1 WHERE id = NEW.target_id; END`).run();
+  try {
+    await runCmsAdminJob(env, job.id);
+    expect(deliveries).toEqual([]);
+    expect(await getAdminJob(env.DB, job.id)).toMatchObject({ status: 'running', attempts: 2 });
+  } finally {
+    await env.DB.prepare('DROP TRIGGER stale_plugin_claim').run();
+  }
+});
+
 it('refreshes role policy when a job runs inside its originating request context', async () => {
   const job = await createAdvancedSearchBulkActionJob(env, { action: 'replace_text', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: 'Private', replacementText: 'Replaced', returnTo: '/admin', user: actor });
   await env.DB.prepare("UPDATE users SET role = 'editor' WHERE id = 311").run();

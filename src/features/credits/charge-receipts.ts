@@ -1,3 +1,4 @@
+import { abortIf } from '../../core/db/transaction-guard';
 import type { Env } from '../../types';
 import type { CreditSource } from './balances';
 import type { CreditCurrency } from './currencies';
@@ -47,4 +48,18 @@ export function insertChargeReceipt(
      SELECT ?, ?, ?, ${response} WHERE ${eligible}`,
   ).bind(key.pluginId, key.chargeId, key.fingerprint, amount, currency,
     source === 'user' ? amount : 0, currency, userId, ...(source ? [source] : []), ...eligibilityArgs);
+}
+
+/** After a successful debit, the receipt must reflect the user's current wallet
+ * balance even when the plugin or shared wallet paid. */
+export function verifyChargeReceipt(env: Env, key: ChargeReceiptKey, userId: number, currency: CreditCurrency,
+  amount: number, source?: CreditSource): D1PreparedStatement {
+  return abortIf(env, `NOT EXISTS (SELECT 1 FROM plugin_charge_receipts WHERE plugin_id = ? AND charge_id = ?
+    AND fingerprint = ? AND json_type(response, '$.ok') = 'true'
+    AND json_extract(response, '$.charged') IS ? AND json_extract(response, '$.currency') IS ?
+    AND json_type(response, '$.balance') IS NOT NULL AND json_extract(response, '$.balance') IS
+      (SELECT COALESCE(w.balance, 0) FROM users u LEFT JOIN credit_wallets w ON w.user_id = u.id AND w.currency = ? WHERE u.id = ?)
+    AND (SELECT COUNT(*) FROM json_each(response)) = ${source ? 5 : 4}
+    ${source ? "AND json_extract(response, '$.source') IS ?" : ''})`,
+  [key.pluginId, key.chargeId, key.fingerprint, amount, currency, currency, userId, ...(source ? [source] : [])]);
 }

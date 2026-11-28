@@ -215,6 +215,19 @@ it('withholds PHI catalogue rows while syncing public tags', async () => {
   expect(calls[0].body).not.toContain('Private diagnosis');
 });
 
+it('pairs destination intent and outcome and withholds a queued transfer when authority fails', async () => {
+  const page = (await env.DB.prepare('SELECT * FROM pages WHERE id = 5700').first<Page>())!;
+  await expect(publishPagesToTargets(publishEnv(), [page], actor, async () => { throw new Error('Synthetic grant change'); }))
+    .rejects.toThrow('Queued publication authority unavailable');
+  expect(calls).toEqual([]);
+  const { results } = await env.DB.prepare("SELECT target_id, detail FROM audit_events WHERE action = 'publish.delivery-outcome' ORDER BY seq").all<{target_id:string; detail:string}>();
+  expect(results.map(row => JSON.parse(row.detail).destination).sort()).toEqual(['d1', 'plugin:outbound-target', 'r2']);
+  for (const row of results) {
+    expect(JSON.parse(row.detail)).toMatchObject({ result: 'withheld', delivery_id: row.target_id });
+    expect(await env.DB.prepare("SELECT 1 FROM audit_events WHERE action = 'publish.delivery-intent' AND target_id = ?").bind(row.target_id).first()).not.toBeNull();
+  }
+});
+
 it('audits classified tag-only sync before any catalogue receives it', async () => {
   await publishTagsToTargets(publishEnv(), [5750], actor);
   expect(calls[0].auditRows).toBeGreaterThan(0);

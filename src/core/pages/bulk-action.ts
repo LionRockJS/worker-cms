@@ -184,7 +184,7 @@ export async function applyBulkPageAction(
   if (action === 'publish') {
     const outcome = await publishing.publishPagesToTargets(env, pages, {
       userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null,
-    });
+    }, context.job?.authorizePublication);
     outcome.failures.forEach((target) => failedTargets.add(target));
     succeeded.push(...outcome.published);
     updated += outcome.published.length;
@@ -195,6 +195,7 @@ export async function applyBulkPageAction(
       env,
       pages.map((page) => ({ uuid: page.uuid, submission_origin: mirrors.has(page.id) ? 1 : 0 })),
       { userId: user.sub, roles: user.role, sessionSid: user.sid ?? null, via: null },
+      context.job?.authorizePublication,
     );
     outcome.failures.forEach((target) => failedTargets.add(target));
     succeeded.push(...pages.filter((page) => !mirrors.has(page.id)));

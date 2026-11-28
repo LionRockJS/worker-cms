@@ -88,9 +88,9 @@ export interface DashboardPublicationQuery {
 
 export interface PublicationService {
   publishPageToTargets(env: Env, pageId: number, actor?: AuditActor): Promise<PublishOutcome | null>;
-  publishPagesToTargets(env: Env, pages: Page[], actor?: AuditActor): Promise<BulkPublishOutcome>;
+  publishPagesToTargets(env: Env, pages: Page[], actor?: AuditActor, beforeDispatch?: (uuids: string[]) => Promise<void>): Promise<BulkPublishOutcome>;
   unpublishPageFromTargets(env: Env, uuid: string, isSubmission?: boolean, actor?: AuditActor): Promise<PublishOutcome>;
-  unpublishPagesFromTargets(env: Env, pages: Array<{ uuid: string; submission_origin?: number | boolean }>, actor?: AuditActor): Promise<BulkUnpublishOutcome>;
+  unpublishPagesFromTargets(env: Env, pages: Array<{ uuid: string; submission_origin?: number | boolean }>, actor?: AuditActor, beforeDispatch?: (uuids: string[]) => Promise<void>): Promise<BulkUnpublishOutcome>;
   publishTagToTargets(env: Env, tagId: number, actor?: AuditActor): Promise<PublishOutcome>;
   publishTagsToTargets(env: Env, tagIds?: number[], actor?: AuditActor): Promise<PublishOutcome & { count: number; refusedCount?: number }>;
   removeTagFromTargets(env: Env, tagId: number, actor?: AuditActor): Promise<PublishOutcome>;

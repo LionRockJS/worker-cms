@@ -6,11 +6,11 @@ import { prepareReadAudits, type PendingRead } from './access-log';
  * declaration. Containment may continue with explicit degraded evidence. */
 export async function auditOutboundIntent(env: Env, input: {
   action: string; destination: string; operation: string; targetType: string;
-  ids: string[]; actor: AuditActor; containment?: boolean;
+  ids: string[]; actor: AuditActor; containment?: boolean; deliveryId?: string;
   reads: PendingRead[] | (() => Promise<PendingRead[]>);
 }): Promise<boolean> {
   const detail = { destination: input.destination, operation: input.operation,
-    delivery_id: crypto.randomUUID(), phase: 'intent', containment: !!input.containment };
+    delivery_id: input.deliveryId ?? crypto.randomUUID(), phase: 'intent', containment: !!input.containment };
   let classified: AuditRow[] = [];
   let classificationAvailable = true;
   try {

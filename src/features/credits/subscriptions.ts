@@ -230,6 +230,49 @@ export interface SweepResult {
   failed: number;
 }
 
+type ScheduleOutcome = 'deferred' | 'canceled' | 'past_due' | 'settled_without_debit';
+const scheduleFields = ['id', 'user_id', 'plugin_id', 'credit_key', 'quantity', 'peak_quantity', 'status', 'next_charge_at',
+  'last_charged_at', 'last_mode', 'created_at', 'updated_at'] as const;
+const scheduleMatch = scheduleFields.map(field => `${field} IS ?`).join(' AND ');
+const scheduleValues = (row: CreditSubscriptionRow) => scheduleFields.map(field => row[field]);
+const sweepActor = { userId: null, roles: null, sessionSid: null, via: 'system:credit-subscriptions' };
+
+function scheduleGuard(env: Env, row: CreditSubscriptionRow) {
+  return abortIf(env, `NOT EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${scheduleMatch})`, scheduleValues(row));
+}
+
+async function auditScheduleOutcome(env: Env, before: CreditSubscriptionRow,
+  changes: Partial<Pick<CreditSubscriptionRow, 'status' | 'next_charge_at' | 'updated_at' | 'last_charged_at' | 'last_mode' | 'peak_quantity'>>,
+  outcome: ScheduleOutcome): Promise<boolean> {
+  const db = env.DB;
+  const next = { ...before, ...changes };
+  const policy = await resolveDataClasses(env, true);
+  const receipt = serviceMutationAuditEvidence(env, {
+    action: 'credit.subscription-schedule', entityType: 'credit_subscription', entityId: before.id,
+    detail: { outcome, previous_status: before.status, status: next.status,
+      due_before: before.next_charge_at, due_after: next.next_charge_at, last_mode: next.last_mode },
+  }, sweepActor, strongestClass([classFor(policy, 'table', 'credit_subscriptions'), classFor(policy, 'plugin', before.plugin_id)]), policy);
+  const fields = Object.keys(changes) as Array<keyof typeof changes>;
+  try {
+    await db.batch([
+      db.prepare(`UPDATE credit_subscriptions SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE ${scheduleMatch}`)
+        .bind(...fields.map(field => next[field]), ...scheduleValues(before)),
+      abortIf(env, 'changes() <> 1'), receipt.write, receipt.guard, scheduleGuard(env, next),
+    ]);
+    return true;
+  } catch (error) {
+    const stored = await db.prepare('SELECT * FROM credit_subscriptions WHERE id = ?').bind(before.id).first<CreditSubscriptionRow>();
+    if (stored && scheduleFields.every(field => stored[field] === next[field])) {
+      try {
+        await db.batch([scheduleGuard(env, next), receipt.verify()]);
+        return true;
+      } catch { /* A concurrent writer can land the same state with its own receipt. */ }
+    }
+    if (!stored || scheduleFields.some(field => stored[field] !== before[field])) return false;
+    throw error;
+  }
+}
+
 /**
  * Bills every due subscription (one bounded batch per call — the cron runs
  * every 5 minutes, so backlogs drain quickly). See the module header for the
@@ -257,20 +300,17 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
     try {
       // Amount and mode were calculated from this snapshot. A report or another
       // sweep can change billing fields between the due query and the write.
-      const current = `id = ? AND next_charge_at = ? AND status = ? AND quantity = ?
-        AND peak_quantity = ? AND last_charged_at IS ? AND last_mode IS ?`;
-      const bindings = [row.id, row.next_charge_at, row.status, row.quantity,
-        row.peak_quantity, row.last_charged_at, row.last_mode];
+      const bindings = scheduleValues(row);
+      const updated_at = sqliteDate(now);
 
       const contributor = contributors.get(row.plugin_id);
       if (!contributor) {
         // Unreachable or disabled — likely transient, so defer without touching
         // status; a permanently removed plugin keeps deferring hourly until an
         // admin clears it or it comes back.
-        const deferred = await env.DB.prepare(
-          `UPDATE credit_subscriptions SET next_charge_at = ?, updated_at = ? WHERE ${current} RETURNING id`,
-        ).bind(sqliteDate(new Date(now.getTime() + HOUR_MS)), sqliteDate(now), ...bindings).first();
-        if (deferred) result.deferred += 1;
+        if (await auditScheduleOutcome(env, row, {
+          next_charge_at: sqliteDate(new Date(now.getTime() + HOUR_MS)), updated_at,
+        }, 'deferred')) result.deferred += 1;
         continue;
       }
 
@@ -283,10 +323,7 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
       if (!credit || credit.def.charge !== 'recurring') {
         // The manifest is authoritative: the cost no longer exists, so the
         // subscription ends. A future usage report recreates it.
-        const canceled = await env.DB.prepare(
-          `UPDATE credit_subscriptions SET status = 'canceled', updated_at = ? WHERE ${current} RETURNING id`,
-        ).bind(sqliteDate(now), ...bindings).first();
-        if (canceled) result.canceled += 1;
+        if (await auditScheduleOutcome(env, row, { status: 'canceled', updated_at }, 'canceled')) result.canceled += 1;
         continue;
       }
 
@@ -318,16 +355,13 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
       // when the resulting date is still past due.
       let nextAt = addMonthsUTC(parseSqliteDate(row.next_charge_at), 1);
       if (nextAt.getTime() <= now.getTime()) nextAt = addMonthsUTC(now, 1);
-      const advance = (afterDebit: boolean) => env.DB.prepare(
-        `UPDATE credit_subscriptions
-            SET next_charge_at = ?, last_charged_at = ?, last_mode = ?, updated_at = ?,
-                peak_quantity = quantity,
-                status = CASE WHEN quantity = 0 THEN 'canceled' ELSE 'active' END
-          WHERE ${current}${afterDebit ? ' AND changes() = 1' : ''}
-          RETURNING id`,
-      ).bind(sqliteDate(nextAt), sqliteDate(now), mode, sqliteDate(now), ...bindings);
-
+      const next = {
+        next_charge_at: sqliteDate(nextAt), last_charged_at: updated_at, last_mode: mode, updated_at,
+        peak_quantity: row.quantity, status: row.quantity === 0 ? 'canceled' as const : 'active' as const,
+      };
+      if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Invalid settlement amount');
       if (amount > 0) {
+        const policy = await resolveDataClasses(env, true);
         const charge = await spendCredits(env, {
           userId: row.user_id,
           amount,
@@ -344,28 +378,30 @@ export async function sweepCreditSubscriptions(env: Env, opts: { now?: Date } = 
           note,
           createdBy: 'system:cron',
           settlement: {
-            eligible: `EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${current})`,
+            eligible: `EXISTS (SELECT 1 FROM credit_subscriptions WHERE ${scheduleMatch})`,
             bindings,
-            advance: advance(true),
+            advance: env.DB.prepare(`UPDATE credit_subscriptions SET next_charge_at = ?, last_charged_at = ?,
+              last_mode = ?, updated_at = ?, peak_quantity = ?, status = ? WHERE ${scheduleMatch} AND changes() = 1`)
+              .bind(next.next_charge_at, next.last_charged_at, next.last_mode, next.updated_at, next.peak_quantity, next.status, ...bindings),
+            verify: scheduleGuard(env, { ...row, ...next }),
           },
+          evidence: { actor: sweepActor, policy, action: 'credit.subscription-settlement', target: String(row.id),
+            detail: { plugin_id: row.plugin_id, credit_key: row.credit_key, due_before: row.next_charge_at,
+              due_after: next.next_charge_at, mode, status: next.status } },
         });
         if (!charge.ok) {
           // A stale snapshot cannot debit any wallet or change the schedule.
           // A genuine decline keeps the billing state and schedules a retry.
           const status = charge.error === 'unknown_user' ? 'canceled' : 'past_due';
           const retryAt = status === 'canceled' ? row.next_charge_at : sqliteDate(new Date(now.getTime() + DAY_MS));
-          const declined = await env.DB.prepare(
-            `UPDATE credit_subscriptions SET status = ?, next_charge_at = ?, updated_at = ?
-              WHERE ${current} RETURNING id`,
-          ).bind(status, retryAt, sqliteDate(now), ...bindings).first();
-          if (declined) {
+          if (await auditScheduleOutcome(env, row, { status, next_charge_at: retryAt, updated_at }, status)) {
             if (status === 'canceled') result.canceled += 1;
             else result.pastDue += 1;
           }
           continue;
         }
         result.charged += 1;
-      } else if (!await advance(false).first()) {
+      } else if (!await auditScheduleOutcome(env, row, next, 'settled_without_debit')) {
         continue;
       }
 

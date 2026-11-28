@@ -1,6 +1,7 @@
 import { signedNotice } from '../../core/http/notice';
 import { requireTrashLifecycle } from '../services';
-import { pageAccessFilter } from '../../core/auth/page-access';
+import { captureContentJobAuthorization } from '../../core/auth/access-authorization';
+import { pageAccessFilter, pageAccessGuard } from '../../core/auth/page-access';
 import { featureInstalled } from '../index';
 import { abortIf } from '../../core/db/transaction-guard';
 // Running a claimed job: replay a recorded admin request, or walk a bulk page
@@ -70,6 +71,12 @@ export async function runCmsAdminJob(env: Env, jobId: string): Promise<void> {
   }
 }
 
+function claimGuard(env: Env, job: AdminJobRecord) {
+  return abortIf(env, `NOT EXISTS (SELECT 1 FROM admin_jobs WHERE id = ? AND type = ?
+    AND plugin_id IS ? AND method IS ? AND path IS ? AND content_type IS ?${claimedJobSql})`,
+  [job.id, job.type, job.pluginId, job.method, job.path, job.contentType, ...claimedJobBindings(job)]);
+}
+
 async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<void> {
   if (!job.pluginId || !job.method || !job.path || !job.user) throw new Error('Admin job is missing plugin request data');
 
@@ -85,12 +92,21 @@ async function runPluginAdminActionJob(env: Env, job: AdminJobRecord): Promise<v
     eventClass: 'export', detail: { job_id: job.id, destination: job.pluginId, phase: 'intent' },
   }], { userId: job.user.sub, roles: job.user.role, sessionSid: job.user.sid ?? null, via: null });
 
+  const user = job.user;
   const result = await run(env, {
     pluginId: job.pluginId,
     method: job.method,
     path: job.path,
     contentType: job.contentType,
     body: job.body,
+    async beforeDispatch(permissions, destinationChecks) {
+      const { authorization, delegationGuard } = await captureContentJobAuthorization(env, user, claimGuard(env, job), 'plugin:access');
+      if (!authorization.allowed || (!authorization.admin &&
+        (!permissions.length || permissions.some(permission => !authorization.permissions.has(permission as Permission))))) {
+        throw new Error('Job plugin permission revoked');
+      }
+      await env.DB.batch([delegationGuard, authorization.guard(), ...destinationChecks]);
+    },
     user: {
       sub: job.user.sub,
       email: job.user.email,
@@ -150,8 +166,12 @@ async function runAdvancedSearchBulkActionJob(env: Env, job: AdminJobRecord): Pr
   const user = job.user;
   const lease = {
     id: job.id, attempt: job.attempts,
-    guard: abortIf(env, `NOT EXISTS (SELECT 1 FROM admin_jobs WHERE id=? AND type='advanced_search_bulk_action'${claimedJobSql})`,
-      [job.id, ...claimedJobBindings(job)]),
+    guard: claimGuard(env, job),
+    async authorizePublication(uuids: string[]) {
+      const { authorization, delegationGuard } = await captureContentJobAuthorization(env, user, claimGuard(env, job), 'content:publish');
+      if (!authorization.allowed) throw new Error('Job publication permission revoked');
+      await env.DB.batch([delegationGuard, authorization.guard(), pageAccessGuard(env, user, uuids, true)]);
+    },
   };
   const options = { targetTagIds: input.targetTagIds, searchText: input.searchText, replacementText: input.replacementText };
   if (isLocalBulkEdit(input.action)) {

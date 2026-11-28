@@ -101,9 +101,10 @@ describe('bulk publish round trips', () => {
     expect(outcome.updated).toBe(BULK_ACTION_PAGE_LIMIT);
     const total = tally.draft + tally.published;
     // Reads: the draft pages, the submission-mirror check, the tag links, the
-    // live-id lookup; writes: a handful of batches. Comfortably under one per
-    // page — the loop this replaced cost ~603 here.
-    expect(total).toBeLessThan(25);
+    // live-id lookup; writes: a handful of batches, plus a delivery intent and
+    // outcome receipt per destination. Comfortably under one per page — the
+    // loop this replaced cost ~603 here.
+    expect(total).toBeLessThan(30);
   });
 
   it('does not grow per page: 10 and 100 cost about the same', async () => {

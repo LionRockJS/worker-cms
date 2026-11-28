@@ -1,8 +1,9 @@
 import type { Env, Page } from '../../types';
-import { writeBackgroundAuditRows, type AuditActor } from '../../core/db/audit';
+import { writeBackgroundAuditRows, type AuditActor, type AuditRow } from '../../core/db/audit';
 import { prepareReadAudits, type PendingRead } from '../../core/http/access-log';
 import type { PublishAdapter, PublishedTag } from '../../contracts/publish';
 import { auditOutboundIntent } from '../../core/http/outbound-audit';
+import { strongestClass } from '../../core/db/data-classes';
 import { assertRegulatedWritesAllowed } from '../../core/http/regulated-writes';
 
 /** Await disclosure intent before a publish destination receives content.
@@ -11,9 +12,10 @@ export async function auditPublishTransfer(
   env: Env, adapter: PublishAdapter, operation: 'page' | 'tags',
   pages: Page[], tags: PublishedTag[],
   actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: 'system:publish' },
-): Promise<void> {
+) {
   assertRegulatedWritesAllowed(env);
   const detail = { destination: adapter.id, operation, delivery_id: crypto.randomUUID(), phase: 'intent' };
+  const targetCount = operation === 'page' ? pages.length : tags.length;
   const reads: PendingRead[] = [];
   // Parent identifiers travel in the snapshot/catalogue even when the parent
   // record itself is absent. Apply its policy before exposing that reference.
@@ -62,9 +64,13 @@ export async function auditPublishTransfer(
     throw new Error('Regulated publication refused');
   }
   for (const group of groups) await writeBackgroundAuditRows(env, group.rows, group.actor, true);
+  const delivery = { actor, destination: adapter.id, operation, id: detail.delivery_id, targetCount,
+    dataClass: strongestClass(groups.flatMap(group => group.rows.map(row => row.dataClass))) };
+  await writeBackgroundAuditRows(env, [deliveryEvent(delivery, 'intent', 'success')], actor, true);
   // Audit preparation/persistence awaits I/O. Do not hand bytes to an adapter
   // if containment became active while that evidence was being prepared.
   assertRegulatedWritesAllowed(env);
+  return delivery;
 }
 
 /** Resolve only metadata. Draft, trash and published identifiers remain
@@ -108,12 +114,65 @@ export async function withdrawalReads(env: Env, operation: 'unpublish' | 'remove
   return reads;
 }
 
-export function auditWithdrawal(env: Env, adapter: PublishAdapter, operation: 'unpublish' | 'remove-tag', ids: string[],
+export async function auditWithdrawal(env: Env, adapter: PublishAdapter, operation: 'unpublish' | 'remove-tag', ids: string[],
   reads: () => Promise<PendingRead[]>, actor: AuditActor = { userId: null, roles: null, sessionSid: null, via: 'system:withdrawal' },
-): Promise<boolean> {
-  return auditOutboundIntent(env, { action: 'publish.withdrawal-intent', destination: adapter.id, operation,
-    targetType: operation === 'unpublish' ? 'withdrawal_page' : 'withdrawal_tag', ids, actor, containment: true,
+) {
+  const delivery = { actor, destination: adapter.id, operation, id: crypto.randomUUID(), targetCount: ids.length,
+    dataClass: 'none' as const, containment: true };
+  const audited = await auditOutboundIntent(env, { action: 'publish.withdrawal-intent', destination: adapter.id, operation,
+    targetType: operation === 'unpublish' ? 'withdrawal_page' : 'withdrawal_tag', ids, actor, containment: true, deliveryId: delivery.id,
     reads: async () => [...await reads(), ...(adapter.contributorId ? [{ action: 'plugin.withdrawal', kind: 'plugin' as const,
       key: adapter.contributorId, targetType: 'plugin', ids: [adapter.contributorId], count: 1 }] : [])],
   });
+  return { audited, delivery };
+}
+
+interface PublicationDelivery {
+  actor: AuditActor;
+  destination: string;
+  operation: string;
+  id: string;
+  targetCount: number;
+  dataClass: AuditRow['dataClass'];
+  containment?: boolean;
+}
+
+function deliveryEvent(delivery: PublicationDelivery, phase: 'intent' | 'outcome', outcome: AuditRow['outcome'],
+  result?: 'returned' | 'uncertain' | 'withheld'): AuditRow {
+  return {
+    action: `publish.delivery-${phase}`, eventClass: 'admin', retentionClass: 'admin_config', dataClass: delivery.dataClass,
+    outcome, targetType: 'publication_delivery', targetId: delivery.id, targetIds: null,
+    targetCount: delivery.targetCount, containerKey: null, queryFingerprint: null,
+    detail: { phase, delivery_id: delivery.id, destination: delivery.destination, operation: delivery.operation,
+      ...(result ? { result } : {}) },
+  };
+}
+
+export class PublicationDispatchRefusedError extends Error {
+  constructor(cause: unknown) { super('Queued publication authority unavailable', { cause }); }
+}
+
+export async function sendPublicationDelivery(env: Env, delivery: PublicationDelivery, send: () => Promise<void>,
+  authorize?: () => Promise<void>): Promise<boolean> {
+  const record = (outcome: AuditRow['outcome'], result: 'returned' | 'uncertain' | 'withheld') =>
+    writeBackgroundAuditRows(env, [deliveryEvent(delivery, 'outcome', outcome, result)], delivery.actor, true);
+  try {
+    await authorize?.();
+  } catch (error) {
+    await record('denied', 'withheld').catch(() => {});
+    throw new PublicationDispatchRefusedError(error);
+  }
+  try {
+    await send();
+  } catch (error) {
+    await record('error', 'uncertain').catch(() => {});
+    throw error;
+  }
+  try {
+    await record('success', 'returned');
+    return true;
+  } catch (error) {
+    if (!delivery.containment) throw error;
+    return false;
+  }
 }

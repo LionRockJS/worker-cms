@@ -262,6 +262,22 @@ describe('sweepCreditSubscriptions — advance', () => {
     expect(await getCreditBalance(env, PAYER_ID)).toBe(300);
   });
 
+  it.each([500, 0])('rolls back a paid or declined settlement when its receipt is missing (balance %s)', async balance => {
+    await seedUser(PAYER_ID, balance);
+    expect((await reportUsage('record_storage', 10)).status).toBe(200);
+    const before = await subscriptionRow('record_storage');
+    await env.DB.prepare(`CREATE TRIGGER subscription_sweep_fault BEFORE INSERT ON audit_events
+      WHEN NEW.action IN ('credit.subscription-settlement', 'credit.subscription-schedule') BEGIN SELECT RAISE(IGNORE); END`).run();
+    try {
+      expect((await sweepCreditSubscriptions(env)).failed).toBe(1);
+      expect(await subscriptionRow('record_storage')).toEqual(before);
+      expect(await getCreditBalance(env, PAYER_ID)).toBe(balance);
+      expect(await ledgerRows(PAYER_ID)).toEqual([]);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER subscription_sweep_fault').run();
+    }
+  });
+
   it('leaves a failed period due and bills the next subscription', async () => {
     await seedUser(PAYER_ID, 100);
     await reportUsage('record_storage', 100);

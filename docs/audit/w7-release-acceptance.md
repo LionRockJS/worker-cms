@@ -18,6 +18,23 @@ On 28 November the local drill from `acc57d7` identified private migrations 0010
 
 Type-check, feature profiles, import boundaries, generated files, inventory and requirement checks passed. All 11 Node checks for keepalive and schema validation passed. A local SQLite exercise of the ingestion code verified successful ingestion, PHI retention, retry without duplication and rollback after ignored version, read-evidence or mutation-evidence inserts. Across the broader Node suite, 36 of 37 passed. The self-hosted plugin-view test and the focused Worker suites could not start their loopback listeners in this environment. Worker CI and staging acceptance remain pending.
 
+### R6 verification matrix for the next candidate
+
+Type checking, repository checks and local SQLite fault exercises cover the source changes below. The upgrade drill from `5da5cd8` found matching private and published schemas and no rollback hazards. The Worker suite could not start its loopback listener here. Record Worker and staging results against the artifact and deployment profile under review.
+
+| Batch | Local evidence | Candidate verification |
+|---|---|---|
+| 1. Metered debit | Rollback and successful debit from plugin, user and shared wallets | Run receipt fault and funding-order tests against D1. |
+| 2. Metered replay | Keyed retry, conflict and zero-price receipt | Exercise overlapping keyed retries and credential rotation during replay. |
+| 3. Paid recurring settlement | Atomic debit, ledger and period rollback and retry | Run paid settlement, concurrent sweeps and billing-mode switches. |
+| 4. Schedule-only outcomes | Decline, zero-debit period and deferral rollback and retry | Stage cancellation and concurrent usage before the period boundary. |
+| 5. Job payload retention | Payload clear rolled back when its receipt was refused | Verify archive visibility, cutoff behavior and bounded cron throughput. |
+| 6. Queued plugin dispatch | Stale claim withheld before plugin delivery | Revoke a role or plugin registration between lookup and dispatch. |
+| 7. Queued publication dispatch | Authority refusal withheld destination writes | Exercise grant revocation across D1, R2 and plugin adapters. |
+| 8. Job continuation | Only the stale previously claimed queued job was re-signaled | Delay queue messages, inject a failed send and verify one claim per slice. |
+| 9. Publication outcomes | Correlated D1 publication, withdrawal and withheld receipts | Reconcile returned and uncertain outcomes with each destination. Measure the subrequest budget at peak fan-out. |
+| 10. Release evidence | Release and writer registers updated with these checks | Record the reviewed commit, artifact digest and deployed attempt before marking checks passed. |
+
 ### Results on 3 November (working tree at `f391688`)
 
 | From | Files to apply | Upgraded schema | Rollback |

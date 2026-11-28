@@ -1,3 +1,4 @@
+import { abortIf } from '../../core/db/transaction-guard';
 import { effectivePermissions, resolveRolePermissions, splitRoles } from '../../core/auth/roles';
 // The plugin platform's implementations of core's extension points.
 //
@@ -112,6 +113,12 @@ registerCoreExtensions({
       const granted = effectivePermissions(roleMap, job.user.role);
       if (!granted.has('plugin:access') || !permissions.length) throw new Error('Job plugin permission revoked');
     }
+    const registration = plugin.registration;
+    if (!registration) throw new Error('Job plugin registration unavailable');
+    await job.beforeDispatch(permissions, [abortIf(env, `NOT EXISTS (SELECT 1 FROM plugins p
+      JOIN plugin_identity_approvals i ON i.plugin_row_id = p.id
+      WHERE p.id = ? AND p.uuid = ? AND p.url = ? AND p.enabled = 1 AND COALESCE(p.secret, '') = ?
+        AND i.manifest_id = ?)`, [registration.id, registration.uuid, plugin.binding, plugin.apiSecret, job.pluginId])]);
     const headers = new Headers();
     headers.set('x-cms-user', pluginUserHeader(job.user, permissions));
     setPluginAuthHeaders(headers, plugin.secret, pluginTenantId(env));

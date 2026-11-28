@@ -30,7 +30,7 @@ import { r2Adapter } from './r2';
 import { isSubmissionMirror, submissionMirrorIds } from './submission-mirrors';
 import { projectLect, publishLectRules } from './projection';
 import { regulatedPages } from '../../core/db/regulated-pages';
-import { auditPublishTransfer, auditWithdrawal, withdrawalReads, type WithdrawalRead } from './audit';
+import { auditPublishTransfer, auditWithdrawal, sendPublicationDelivery, PublicationDispatchRefusedError, withdrawalReads, type WithdrawalRead } from './audit';
 import type { AuditActor } from '../../core/db/audit';
 import { classFor, resolveDataClasses } from '../../core/db/data-classes';
 import { inventoried } from '../../core/http/regulated-profile';
@@ -238,8 +238,8 @@ export async function publishPageToTargets(env: Env, pageId: number, actor?: Aud
   const snapshot = (await buildSnapshots(env, [page]))[0];
   const adapters = await getPublishAdapters(env);
   return runOnAll(adapters, async (adapter) => {
-    await auditPublishTransfer(env, adapter, 'page', [snapshot.page], snapshot.tagCatalogue, actor);
-    await adapter.publish(snapshot);
+    const delivery = await auditPublishTransfer(env, adapter, 'page', [snapshot.page], snapshot.tagCatalogue, actor);
+    await sendPublicationDelivery(env, delivery, () => adapter.publish(snapshot));
   });
 }
 
@@ -262,7 +262,7 @@ export async function publishPageToTargets(env: Env, pageId: number, actor?: Aud
  * single-page path, and reported in `refused` instead of being sent to any
  * adapter. A classification outage refuses the whole slice.
  */
-export async function publishPagesToTargets(env: Env, pages: Page[], actor?: AuditActor): Promise<BulkPublishOutcome> {
+export async function publishPagesToTargets(env: Env, pages: Page[], actor?: AuditActor, beforeDispatch?: (uuids: string[]) => Promise<void>): Promise<BulkPublishOutcome> {
   if (regulatedWritesBlocked(env)) return { targets: [], failures: [], published: [], refused: pages,
     refusedRegulated: [], refusedReason: 'writes_unavailable' };
   const adapters = await getPublishAdapters(env);
@@ -292,17 +292,20 @@ export async function publishPagesToTargets(env: Env, pages: Page[], actor?: Aud
   const failures: string[] = [];
   const results = await Promise.allSettled(adapters.map(async (adapter) => {
     if (adapter.publishMany) {
-      await auditPublishTransfer(env, adapter, 'page', snapshots.map(s => s.page), snapshots.flatMap(s => s.tagCatalogue), actor);
-      await adapter.publishMany(snapshots);
+      const delivery = await auditPublishTransfer(env, adapter, 'page', snapshots.map(s => s.page), snapshots.flatMap(s => s.tagCatalogue), actor);
+      await sendPublicationDelivery(env, delivery, () => adapter.publishMany!(snapshots),
+        beforeDispatch && (() => beforeDispatch(snapshots.map(snapshot => snapshot.page.uuid))));
     } else {
       for (const snapshot of snapshots) {
-        await auditPublishTransfer(env, adapter, 'page', [snapshot.page], snapshot.tagCatalogue, actor);
-        await adapter.publish(snapshot);
+        const delivery = await auditPublishTransfer(env, adapter, 'page', [snapshot.page], snapshot.tagCatalogue, actor);
+        await sendPublicationDelivery(env, delivery, () => adapter.publish(snapshot),
+          beforeDispatch && (() => beforeDispatch([snapshot.page.uuid])));
       }
     }
   }));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
+      if (result.reason instanceof PublicationDispatchRefusedError) throw result.reason;
       failures.push(adapters[index].id);
       console.error(`Publish target ${adapters[index].id} bulk publish failed:`, result.reason);
     }
@@ -321,8 +324,10 @@ export async function unpublishPageFromTargets(env: Env, uuid: string, isSubmiss
   const auditFailures = new Set<string>();
   let metadata: Promise<WithdrawalRead[]> | undefined;
   const outcome = await runOnAll(adapters, async (adapter) => {
-    if (!await auditWithdrawal(env, adapter, 'unpublish', [uuid], () => metadata ??= withdrawalReads(env, 'unpublish', [uuid]), actor)) auditFailures.add(adapter.id);
-    await adapter.unpublish(uuid);
+    const intent = await auditWithdrawal(env, adapter, 'unpublish', [uuid], () => metadata ??= withdrawalReads(env, 'unpublish', [uuid]), actor);
+    if (!intent.audited) auditFailures.add(adapter.id);
+    const recorded = await sendPublicationDelivery(env, intent.delivery, () => adapter.unpublish(uuid));
+    if (!recorded) auditFailures.add(adapter.id);
   });
   return { ...outcome, ...(auditFailures.size ? { auditFailures: outcome.targets.filter(id => auditFailures.has(id)) } : {}) };
 }
@@ -342,6 +347,7 @@ export async function unpublishPagesFromTargets(
   env: Env,
   pages: Array<{ uuid: string; submission_origin?: number | boolean }>,
   actor?: AuditActor,
+  beforeDispatch?: (uuids: string[]) => Promise<void>,
 ): Promise<BulkUnpublishOutcome> {
   const targetable = pages.filter((page) => !page.submission_origin);
   const refusedCount = pages.length - targetable.length;
@@ -356,17 +362,24 @@ export async function unpublishPagesFromTargets(
   const results = await Promise.allSettled(adapters.map(async (adapter) => {
     const reads = () => metadata ??= withdrawalReads(env, 'unpublish', uuids);
     if (adapter.unpublishMany) {
-      if (!await auditWithdrawal(env, adapter, 'unpublish', uuids, reads, actor)) auditFailures.add(adapter.id);
-      await adapter.unpublishMany(uuids);
+      const intent = await auditWithdrawal(env, adapter, 'unpublish', uuids, reads, actor);
+      if (!intent.audited) auditFailures.add(adapter.id);
+      const recorded = await sendPublicationDelivery(env, intent.delivery, () => adapter.unpublishMany!(uuids),
+        beforeDispatch && (() => beforeDispatch(uuids)));
+      if (!recorded) auditFailures.add(adapter.id);
     } else {
       for (const uuid of uuids) {
-        if (!await auditWithdrawal(env, adapter, 'unpublish', [uuid], async () => (await reads()).filter(read => read.withdrawalUuid === uuid), actor)) auditFailures.add(adapter.id);
-        await adapter.unpublish(uuid);
+        const intent = await auditWithdrawal(env, adapter, 'unpublish', [uuid], async () => (await reads()).filter(read => read.withdrawalUuid === uuid), actor);
+        if (!intent.audited) auditFailures.add(adapter.id);
+        const recorded = await sendPublicationDelivery(env, intent.delivery, () => adapter.unpublish(uuid),
+          beforeDispatch && (() => beforeDispatch([uuid])));
+        if (!recorded) auditFailures.add(adapter.id);
       }
     }
   }));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
+      if (result.reason instanceof PublicationDispatchRefusedError) throw result.reason;
       failures.push(adapters[index].id);
       console.error(`Publish target ${adapters[index].id} bulk unpublish failed:`, result.reason);
     }
@@ -380,8 +393,10 @@ export async function removeTagFromTargets(env: Env, tagId: number, actor?: Audi
   const auditFailures = new Set<string>();
   let metadata: Promise<WithdrawalRead[]> | undefined;
   const outcome = await runOnAll(adapters, async (adapter) => {
-    if (!await auditWithdrawal(env, adapter, 'remove-tag', [String(tagId)], () => metadata ??= withdrawalReads(env, 'remove-tag', [String(tagId)]), actor)) auditFailures.add(adapter.id);
-    await adapter.removeTag!(tagId);
+    const intent = await auditWithdrawal(env, adapter, 'remove-tag', [String(tagId)], () => metadata ??= withdrawalReads(env, 'remove-tag', [String(tagId)]), actor);
+    if (!intent.audited) auditFailures.add(adapter.id);
+    const recorded = await sendPublicationDelivery(env, intent.delivery, () => adapter.removeTag!(tagId));
+    if (!recorded) auditFailures.add(adapter.id);
   });
   return { ...outcome, ...(auditFailures.size ? { auditFailures: outcome.targets.filter(id => auditFailures.has(id)) } : {}) };
 }
@@ -468,8 +483,8 @@ export async function publishTagsToTargets(
   const outcome = await runOnAll(adapters, async (adapter) => {
     for (let index = 0; index < tags.length; index += TAG_SYNC_CHUNK) {
       const chunk = tags.slice(index, index + TAG_SYNC_CHUNK);
-      await auditPublishTransfer(env, adapter, 'tags', [], chunk, actor);
-      await adapter.publishTags!(chunk);
+      const delivery = await auditPublishTransfer(env, adapter, 'tags', [], chunk, actor);
+      await sendPublicationDelivery(env, delivery, () => adapter.publishTags!(chunk));
     }
   });
   return { ...outcome, count: tags.length, ...(refusedCount ? { refusedCount } : {}) };
