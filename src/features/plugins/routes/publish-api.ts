@@ -1,3 +1,6 @@
+import { serviceMutationAuditEvidence } from '../../../core/db/audit';
+import { unavailable } from '../evidence-common';
+import { capturePluginPageMutationAuthority } from '../page-update-evidence';
 import { legacyPageFilter } from '../../../core/auth/page-access';
 import { Hono } from 'hono';
 import type { Env, Page, Variables } from '../../../types';
@@ -132,12 +135,23 @@ pluginPublishRoutes.post('/ingest/submissions', async (c) => {
   const auth = await authenticatePlugin(c);
   if (auth instanceof Response) return auth;
 
-  if (!(auth.plugin.manifest.hooks ?? []).includes('submission')) {
-    return c.json({ error: 'submission_hook_required' }, 403);
-  }
-
   const publishing = publication();
   if (!publishing) return c.notFound();
-  const result = await publishing.ingestSubmissions(c.env, { userId: null, roles: null, sessionSid: null, via: auth.pluginId });
-  return c.json({ ok: true, ...result });
+  const authority = await capturePluginPageMutationAuthority(c, auth, 'submission-ingest');
+  const detail = { registry_id: authority.registryId, identity_fingerprint: authority.identityFingerprint };
+  try {
+    if (!(auth.plugin.manifest.hooks ?? []).includes('submission')) {
+      const receipt = serviceMutationAuditEvidence(c.env, {
+        action: 'submission.ingest', entityType: 'submission_ingest_operation', outcome: 'denied',
+        detail: { ...detail, reason: 'submission_hook_required' },
+      }, authority.actor, authority.dataClass, authority.policy, c);
+      await c.env.DB.batch([...authority.check(), receipt.write, receipt.guard, ...authority.check(), receipt.guard]);
+      return c.json({ error: 'submission_hook_required' }, 403);
+    }
+
+    const result = await publishing.ingestSubmissions(c.env, authority.actor, { ...authority, detail });
+    return c.json({ ok: true, ...result });
+  } catch {
+    return unavailable(c, authority.actor);
+  }
 });

@@ -316,6 +316,28 @@ describe('Plugin API auth + scoping', () => {
     expect(await env.DB.prepare(
       "SELECT action FROM page_versions WHERE page_id = ? AND action = 'ingest-submission'",
     ).bind(mirrored!.id).first()).toEqual({ action: 'ingest-submission' });
+    const registry = await env.DB.prepare('SELECT uuid FROM plugins').first<{ uuid: string }>();
+    const receipt = await env.DB.prepare("SELECT actor_user_id,acting_via,detail FROM audit_events WHERE action='submission.ingest' AND target_id=?")
+      .bind(uuid).first<{ actor_user_id: string | null; acting_via: string; detail: string }>();
+    expect(receipt).toMatchObject({ actor_user_id: null, acting_via: `plugin:${registry!.uuid}` });
+    expect(JSON.parse(receipt!.detail)).toMatchObject({ version_uuid: expect.any(String), operation_id: expect.any(String) });
+    expect(receipt!.detail).not.toContain('Survey answer');
+  });
+
+  it('rolls back contributor ingest if its registry authority changes during the batch', async () => {
+    const uuid = 'facade02-0001-4001-8001-000000000001';
+    await env.PUBLISHED_DB.prepare("INSERT INTO pages(id,uuid,name,slug,page_type,lect) VALUES (-720001,?,'Submission','submission','survey_answer','{}')")
+      .bind(uuid).run();
+    await env.DB.prepare(`CREATE TRIGGER revoke_ingest_authority AFTER INSERT ON audit_events
+      WHEN NEW.action='submission.ingest.batch' BEGIN UPDATE plugins SET enabled=0; END`).run();
+    try {
+      const response = await cmsApi('POST', '/__cms/ingest/submissions');
+      expect(response.status).toBe(503);
+      expect(await env.DB.prepare('SELECT id FROM pages WHERE uuid=?').bind(uuid).first()).toBeNull();
+      expect(await env.DB.prepare("SELECT value FROM settings WHERE key='submissions.ingest.cursor'").first()).toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER revoke_ingest_authority').run();
+    }
   });
 
   it('requires the plugin manifest to subscribe to submission ingest', async () => {

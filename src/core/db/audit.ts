@@ -171,15 +171,15 @@ export function auditStatement(env: Env, row: AuditRow, actor: AuditActor) {
 }
 
 /** A mutation entry resolved to a row: the entity type picks the retention. */
-function mutationRow(entry: AuditEntry): AuditRow {
+function mutationRow(entry: AuditEntry, dataClass: AuditRow['dataClass'] = 'none'): AuditRow {
   const eventClass: EventClass = ADMIN_ENTITY_TYPES.has(entry.entityType) ? 'admin' : 'mutation';
   const hasTarget = entry.entityId !== undefined && entry.entityId !== null;
   return {
     action: entry.action,
     eventClass,
-    retentionClass: eventClass === 'admin' ? 'admin_config' : 'content_mutation',
+    retentionClass: eventClass === 'admin' ? 'admin_config' : dataClass === 'phi' ? 'phi_mutation' : 'content_mutation',
     outcome: entry.outcome ?? 'success',
-    dataClass: 'none',
+    dataClass,
     targetType: entry.entityType,
     targetId: hasTarget ? String(entry.entityId) : null,
     targetIds: null,
@@ -250,8 +250,7 @@ function preparedAuditEvidence(env: Env, row: AuditRow, actor: AuditActor, reque
  * no CMS session yet. Do not use this for existing-account identity linking. */
 export function registrationAuditEvidence(c: AppContext, oauthId: string, provider: string,
   dataClass: AuditRow['dataClass'], policy?: DataClassMap, initialRole = 'viewer'): MutationAuditEvidence {
-  const row = mutationRow({ action: 'user.create', entityType: 'user', detail: { provider, role_after: initialRole } });
-  row.dataClass = dataClass;
+  const row = mutationRow({ action: 'user.create', entityType: 'user', detail: { provider, role_after: initialRole } }, dataClass);
   row.targetCount = 1;
   return preparedAuditEvidence(c.env, row,
     { userId: null, roles: initialRole, sessionSid: null, via: `oauth:${provider}` }, requestFrom(c), true, { newUserOAuthId: oauthId }, policy);
@@ -262,8 +261,7 @@ export function registrationAuditEvidence(c: AppContext, oauthId: string, provid
  * detail must be field names/internal IDs, never provider subjects or profiles. */
 export function oauthAccountAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
   actor: AuditActor, identityOAuthId?: string, policy?: DataClassMap): MutationAuditEvidence {
-  const row = mutationRow(entry);
-  row.dataClass = dataClass;
+  const row = mutationRow(entry, dataClass);
   if (identityOAuthId !== undefined) row.targetCount = 1;
   return preparedAuditEvidence(c.env, row, actor, requestFrom(c), true, { identityOAuthId }, policy);
 }
@@ -276,8 +274,7 @@ export function auditEvidence(env: Env, row: AuditRow, actor: AuditActor): Mutat
 /** Prepare request-attributed evidence and its guard for the same D1 batch. */
 export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
   options: { requirePreviousChange?: boolean; policy?: DataClassMap } = {}): MutationAuditEvidence {
-  const row = mutationRow(entry);
-  row.dataClass = dataClass;
+  const row = mutationRow(entry, dataClass);
   return preparedAuditEvidence(c.env, row, actorFromUser(c.get('user')), requestFrom(c), options.requirePreviousChange, undefined, options.policy);
 }
 
@@ -285,7 +282,7 @@ export function mutationAuditEvidence(c: AppContext, entry: AuditEntry, dataClas
  * detail, never a fabricated CMS session or authenticated user principal. */
 export function serviceMutationAuditEvidence(env: Env, entry: AuditEntry, actor: AuditActor,
   dataClass: AuditRow['dataClass'], policy: DataClassMap, context?: AppContext): MutationAuditEvidence {
-  return preparedAuditEvidence(env,{...mutationRow(entry),dataClass},actor,
+  return preparedAuditEvidence(env,mutationRow(entry, dataClass),actor,
     context?requestFrom(context):requestContext.getStore()?.auditRequest??NO_REQUEST,false,undefined,policy);
 }
 
@@ -300,7 +297,7 @@ export function servicePlannedMutationAuditEvidence(env: Env, entry: AuditEntry,
     before: { sql: string; bindings: (string | number | null)[] };
     after: { sql: string; bindings: (string | number | null)[] };
   }): MutationAuditEvidence & { finalGuard: D1PreparedStatement; eventId: string } {
-  const row = { ...mutationRow(entry), dataClass, eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(),
+  const row = { ...mutationRow(entry, dataClass), eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(),
     detail: { ...entry.detail, classification_policy_version: policy.version } };
   const request = requestFrom(context), projected = projection(row.eventId);
   function parameters(part: typeof projected.write) {
@@ -323,7 +320,7 @@ export function servicePlannedMutationAuditEvidence(env: Env, entry: AuditEntry,
  * Complete batch manifests belong in detail; the indexed target list is capped. */
 export function attributedMutationAuditEvidence(env: Env, user: JWTPayload, entry: AuditEntry, dataClass: AuditRow['dataClass'],
   policy: DataClassMap, options: { context?: AppContext; targetIds?: string[]; via?: string } = {}): MutationAuditEvidence {
-  const row = { ...mutationRow(entry), dataClass };
+  const row = mutationRow(entry, dataClass);
   if (options.targetIds) { row.targetIds = options.targetIds.slice(0, 200); row.targetCount = options.targetIds.length; }
   return preparedAuditEvidence(env, row, actorFromUser(user, options.via ?? null), options.context ? requestFrom(options.context) : NO_REQUEST,
     false, undefined, policy);
@@ -357,7 +354,7 @@ export function sessionAuditEvidence(env: Env, envelope: AuditEnvelope, options:
 
 /** Outbox evidence uses the same envelope as the primary audit stream. */
 export function mutationAuditEnvelope(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'], actor: AuditActor): AuditEnvelope {
-  return { row: { ...mutationRow(entry), dataClass, eventId: crypto.randomUUID(), occurredAt: new Date().toISOString() },
+  return { row: { ...mutationRow(entry, dataClass), eventId: crypto.randomUUID(), occurredAt: new Date().toISOString() },
     actor, request: requestFrom(c) };
 }
 
@@ -397,7 +394,7 @@ const ROW_UUID_SQL = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '
  */
 export function mutationAuditSelect(c: AppContext, entry: AuditEntry, dataClass: AuditRow['dataClass'],
   occurredAt: string, perRow: AuditRowExpressions): MutationAuditSelect {
-  const row = { ...mutationRow(entry), dataClass, occurredAt };
+  const row = { ...mutationRow(entry, dataClass), occurredAt };
   const actor = actorFromUser(c.get('user'));
   const request = requestFrom(c);
   const values = auditValues(row, actor, request);
@@ -444,7 +441,7 @@ export function logAudit(
 export function logAuditBatch(env: Env, user: JWTPayload | undefined, entries: AuditEntry[]): Promise<void> {
   if (!entries.length) return Promise.resolve();
   const actor = actorFromUser(user);
-  const rows = entries.map(mutationRow);
+  const rows = entries.map(entry => mutationRow(entry));
   return env.DB.batch(rows.map((row) => statement(env, row, actor, NO_REQUEST)))
     .then(() => undefined)
     .catch(async (error) => { await recordAuditOutage(env, 'audit-write', rows, actor); console.error('audit log failed', error); });
@@ -459,7 +456,7 @@ export function logAuditBatchVia(c: AppContext, via: string, entries: AuditEntry
   if (!entries.length) return Promise.resolve();
   const actor = actorFromUser(undefined, via);
   const request = requestFrom(c);
-  const rows = entries.map(mutationRow);
+  const rows = entries.map(entry => mutationRow(entry));
   return c.env.DB.batch(rows.map((row) => statement(c.env, row, actor, request)))
     .then(() => undefined)
     .catch(async (error) => { await recordAuditOutage(c.env, 'audit-write', rows, actor); console.error('audit log failed', error); });
@@ -500,8 +497,19 @@ export async function writeAuditRows(
 /** Awaitable off-request writer for jobs, ingestion and pre-disclosure events. */
 export async function writeBackgroundAuditRows(env: Env, rows: AuditRow[], actor: AuditActor, strict = true): Promise<void> {
   if (!rows.length) return;
-  try { await env.DB.batch(rows.map(row => statement(env, row, actor, NO_REQUEST))); }
-  catch (error) {
+  try {
+    if (!strict) {
+      await env.DB.batch(rows.map(row => statement(env, row, actor, NO_REQUEST)));
+      return;
+    }
+    const receipts = rows.map(row => auditEvidence(env, row, actor));
+    // Check each insert immediately and again after later writes in the batch.
+    // This also rolls back a batch whose later write rewrites an earlier event.
+    await env.DB.batch([
+      ...receipts.flatMap(receipt => [receipt.write, receipt.guard]),
+      ...receipts.map(receipt => receipt.guard),
+    ]);
+  } catch (error) {
     await recordAuditOutage(env, 'audit-write', rows, actor);
     if (strict) throw error;
     console.error('background audit log failed', error);

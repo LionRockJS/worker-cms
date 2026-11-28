@@ -51,10 +51,21 @@ test('bootstrap shell and Liquid layout both load the keepalive asset', () => {
         assert.equal(request.method, 'POST');
         assert.equal(request.credentials, 'same-origin');
         assert.equal(request.headers['X-CMS-Idle-For'], '0');
+        assert.equal(request.headers['X-CMS-Interaction-Age'], undefined);
         assert.equal(request.headers['X-CMS-Background'], undefined);
       }
     });
   }
+
+  test('a visible page reports the actual age of input only once', async () => {
+    const page = browser();
+    page.advance(60_000);
+    page.events.keydown();
+    await page.tick();
+    assert.equal(page.requests[0].headers['X-CMS-Interaction-Age'], '300');
+    await page.tick();
+    assert.equal(page.requests[1].headers['X-CMS-Interaction-Age'], undefined);
+  });
 
   test(`${name}: hidden pages do not extend idle activity`, async () => {
     const page = browser();

@@ -1,3 +1,4 @@
+import { regulatedWritesBlocked } from '../http/regulated-writes';
 import { accountIpAllowed, connectingIp } from './ip-access';
 import type { Env, JWTPayload } from '../../types';
 import { generateTokenId, hashToken, signJWT, verifyJWT } from './jwt';
@@ -69,7 +70,10 @@ export function activityAge(c?: AppContext): number | null {
   if (!c || c.req.header(BACKGROUND_HEADER) === '1') return null;
   const idleFor = c.req.header(IDLE_FOR_HEADER);
   if (idleFor === undefined) return 0;
-  return /^\d{1,7}$/.test(idleFor) ? Number(idleFor) : null;
+  // Older keepalives report idle-for zero on visibility alone. Only the
+  // current client distinguishes an actual input from passive reading.
+  const age = regulatedWritesBlocked(c.env) ? c.req.header('X-CMS-Interaction-Age') : idleFor;
+  return age !== undefined && /^\d{1,7}$/.test(age) ? Number(age) : null;
 }
 
 export interface AuthDbUser {

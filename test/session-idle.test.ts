@@ -231,6 +231,18 @@ describe('background refresh does not keep an idle session alive', () => {
     expect(JSON.parse(String(row?.detail))).toMatchObject({ source: 'explicit-refresh', activity: 'background' });
   });
 
+  it('uses only reported input for regulated keepalives, including cached clients', () => {
+    const age = (mode: string, headers: Record<string, string>) => activityAgeOf({
+      env: { REGULATED_MODE: mode },
+      req: { header: (key: string) => headers[key] },
+    } as Parameters<typeof activityAgeOf>[0]);
+    const visible = { [IDLE_FOR_HEADER]: '0' };
+    expect(age('false', visible)).toBe(0);
+    expect(age('true', visible)).toBeNull();
+    expect(age('true', { ...visible, 'X-CMS-Interaction-Age': '300' })).toBe(300);
+    expect(age('true', { ...visible, 'X-CMS-Interaction-Age': '-1' })).toBeNull();
+  });
+
   it('reads no activity from an internal refresh', () => {
     expect(activityAgeOf(undefined)).toBeNull();
   });

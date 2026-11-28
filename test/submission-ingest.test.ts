@@ -148,6 +148,13 @@ describe('ingestSubmissions', () => {
       .bind(draft!.id)
       .first<{ action: string }>();
     expect(version?.action).toBe('ingest-submission');
+    const batch = await env.DB.prepare("SELECT detail FROM audit_events WHERE action='submission.ingest.batch' ORDER BY seq DESC LIMIT 1")
+      .first<{ detail: string }>();
+    expect(JSON.parse(batch!.detail)).toMatchObject({
+      cursor_before_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      cursor_after_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      created_uuids: ['facade01-0001-4001-8001-000000000001'],
+    });
 
     // The dedicated submission hook reached the subscribed plugin.
     expect(hookCalls.length).toBe(1);
@@ -347,4 +354,71 @@ describe('publish path refuses submission mirrors', () => {
       .first<{ id: number }>();
     expect(live?.id).toBe(-100203);
   });
+});
+
+describe('submission ingestion evidence', () => {
+  it.each([
+    ['an ignored source read', "BEFORE INSERT ON audit_events WHEN NEW.action='submission.ingest-read' BEGIN SELECT RAISE(IGNORE); END"],
+    ['an ignored initial version', 'BEFORE INSERT ON page_versions BEGIN SELECT RAISE(IGNORE); END'],
+    ['an ignored cursor write', "BEFORE INSERT ON settings WHEN NEW.key='submissions.ingest.cursor' BEGIN SELECT RAISE(IGNORE); END"],
+    ['a rewritten earlier receipt', "AFTER INSERT ON audit_events WHEN NEW.action='submission.ingest.batch' BEGIN UPDATE audit_events SET outcome='denied' WHERE action='submission.ingest'; END"],
+    ['a missing inherited floor', 'BEFORE INSERT ON page_sensitivity_floors BEGIN SELECT RAISE(IGNORE); END'],
+    ['a concurrent erasure recorded by a write trigger', "AFTER INSERT ON audit_events WHEN NEW.action='submission.ingest' BEGIN INSERT INTO submission_erasures(uuid) VALUES (NEW.target_id); END"],
+  ])('rolls back the local ingest when it observes %s', async (_failure, trigger) => {
+    const uuid = 'facade01-ingest-evidence-fault';
+    await seedLiveSubmission({ id: -77101, uuid, created_at: '2026-07-07 12:00:00', page_type: 'incoming', page_id: null });
+    await env.PUBLISHED_DB.prepare("INSERT INTO tags(id,name,slug,taxonomy_slug) VALUES (77103,'Private diagnosis','ingest-diagnosis','ingest-clinical')").run();
+    await env.PUBLISHED_DB.prepare('INSERT INTO page_tags(page_id,tag_id) VALUES (-77101,77103)').run();
+    await env.DB.prepare("INSERT INTO data_classes(container_kind,container_key,class) VALUES ('taxonomy','ingest-clinical','phi')").run();
+    await env.DB.prepare(`CREATE TRIGGER ingest_evidence_fault ${trigger}`).run();
+    try {
+      await expect(ingestSubmissions(env)).rejects.toThrow();
+      expect(await env.DB.prepare('SELECT id FROM pages WHERE uuid=?').bind(uuid).first()).toBeNull();
+      expect(await env.DB.prepare('SELECT level FROM page_sensitivity_floors WHERE uuid=?').bind(uuid).first()).toBeNull();
+      expect(await env.DB.prepare('SELECT value FROM settings WHERE key=?').bind(CURSOR_KEY).first()).toBeNull();
+      expect(await env.DB.prepare(`SELECT event_id FROM audit_events
+        WHERE (action='submission.ingest' AND target_id=?1)
+          OR (action='submission.ingest.batch' AND ?1 IN (SELECT value FROM json_each(detail,'$.created_uuids')))`).bind(uuid).first()).toBeNull();
+      expect(await env.PUBLISHED_DB.prepare('SELECT uuid FROM pages WHERE uuid=?').bind(uuid).first()).toEqual({ uuid });
+    } finally {
+      await env.DB.prepare('DROP TRIGGER ingest_evidence_fault').run();
+      await env.PUBLISHED_DB.prepare('DELETE FROM page_tags WHERE page_id=-77101').run();
+      await env.PUBLISHED_DB.prepare('DELETE FROM tags WHERE id=77103').run();
+      await env.DB.prepare("DELETE FROM data_classes WHERE container_kind='taxonomy' AND container_key='ingest-clinical'").run();
+    }
+  });
+});
+
+it('keeps the mirror, version and cursor after a lost batch acknowledgment', async () => {
+  const uuid = 'facade01-ingest-lost-ack';
+  await registerHookPlugin();
+  await seedLiveSubmission({ id: -77102, uuid, created_at: '2026-07-07 12:00:00', page_type: 'incoming', page_id: null });
+  const DB = new Proxy(env.DB, {
+    get(target, key) {
+      if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+        const results = await target.batch(statements);
+        if (await target.prepare("SELECT event_id FROM audit_events WHERE action='submission.ingest' AND target_id=?").bind(uuid).first()) {
+          throw new Error('Lost batch acknowledgment');
+        }
+        return results;
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  await expect(ingestSubmissions({ ...env, DB })).rejects.toThrow('Lost batch acknowledgment');
+  const draft = await env.DB.prepare('SELECT id FROM pages WHERE uuid=?').bind(uuid).first<{ id: number }>();
+  expect(await isSubmissionMirror(env.DB, draft!.id)).toBe(true);
+  expect((await cursor()).uuid).toBe(uuid);
+  expect(await ingestSubmissions(env)).toEqual({ scanned: 0, created: 0, more: false });
+  expect(hookCalls).toEqual([]);
+});
+
+it('verifies large submissions without serializing their bodies into a batch manifest', async () => {
+  const uuid = 'facade01-ingest-large';
+  const lect = { message: 'x'.repeat(1_010_000) };
+  await seedLiveSubmission({ id: -77104, uuid, created_at: '2026-07-07 12:00:00', page_type: 'incoming', page_id: null, lect });
+  expect((await ingestSubmissions(env)).created).toBe(1);
+  expect(await env.DB.prepare('SELECT length(lect) AS bytes FROM pages WHERE uuid=?').bind(uuid).first())
+    .toEqual({ bytes: JSON.stringify(lect).length });
 });

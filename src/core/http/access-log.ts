@@ -304,10 +304,11 @@ export async function prepareReadAudits(env: Env, pending: PendingRead[], fallba
   return [...groups.values()];
 }
 
-export async function auditBackgroundReads(env: Env, pending: PendingRead[], actor: AuditActor): Promise<AuditRow[]> {
+export async function auditBackgroundReads(env: Env, pending: PendingRead[], actor: AuditActor, options: { exact?: boolean } = {}): Promise<AuditRow[]> {
   const groups = await prepareReadAudits(env, pending, actor, true);
   for (const group of groups) {
-    await writeBackgroundAuditRows(env, group.rows, group.actor, group.strict || group.rows.some(row => row.eventClass === 'export'));
+    const strict = options.exact || group.strict || group.rows.some(row => row.eventClass === 'export');
+    await writeBackgroundAuditRows(env, group.rows, group.actor, strict);
   }
   return groups.flatMap(group => group.rows);
 }

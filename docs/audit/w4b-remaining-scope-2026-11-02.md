@@ -1,6 +1,19 @@
-# W4b remaining scope and estimate — 4 November 2026
+# W4b remaining scope · 28 November 2026
 
-This is a source-based planning estimate after the contributor tag-provisioning continuation, on baseline `b7089c6`, including the W10/W11 local assessment work. **Four work packages remain open (R3–R6). R1 and R2’s inventoried local engineering scopes are complete; release acceptance remains R6.** These are delivery groups, not a count of individual bugs or commits. There is no defensible percentage-complete calculation yet: the remaining writers have substantially different complexity, and deployed/plugin boundaries still require reconciliation.
+R1 and R2 have local implementation evidence. R3–R6 remain open. The earlier 18–32 person-day estimate is historical. Re-estimate after reconciling the writers, actors and recovery paths below against enabled features in the release candidate.
+
+## Initial writer inventory
+
+| Writer and entry point | Actor and transaction boundary | Evidence or recovery work remaining |
+|---|---|---|
+| [Submission ingestion](../../src/features/publish/submission-ingest.ts) | Scheduled service or credential-bound plugin. Private D1 commits page, history, floors, cursor and receipts in one batch. Source reads and hook delivery are separate. | Exercise both entry points in the Worker runtime. A retry detects a committed mirror. Recovering a missed external hook after a lost acknowledgement remains R4/R5. |
+| [Manual published-to-draft pull](../../src/features/publish/pull.ts) | Caller supplies the audit actor. Reads published D1 and writes private D1. | Next R3 slice. Bind current authority, local page/version/tag outcomes and a receipt to the same transaction. Exercise retry after a partial failure. |
+| [Settings import](../../src/routes/admin/config-transfer.ts) | Admin request applies sections and resumes multi-part imports. | Enumerate section writers, receipts, grant rechecks and duplicate/restart behavior. |
+| [Metered charges](../../src/features/credits/charge-receipts.ts) and [recurring billing](../../src/features/credits/subscriptions.ts) | Plugin charge with optional charge ID, or scheduled settlement. Charge receipt and debit share a batch when keyed. Settlement advances the period with the debit. | Credit keyed replay/conflict and guarded settlement. Reconcile unkeyed charges, usage writers, authority and audit evidence per outcome. |
+| [Job runner](../../src/features/jobs/runner.ts) | Queued work runs after initial authorization. | Map each dispatch, lease/grant recheck, outcome receipt and recovery after a lost acknowledgement. |
+| [Publication](../../src/features/publish/index.ts), [media](../../src/features/media/routes/upload.ts) and [hooks](../../src/features/plugins/hooks.ts) | Interactive and service actors cross private/published databases, storage and plugin destinations. | Enumerate withdrawal and deletion alongside creation, verify each destination receipt, and design controlled recovery of partial effects. |
+
+Shared strict background read acknowledgements and PHI content-mutation retention were addressed in this working tree. R6 still needs deployment fault, capacity and recovery evidence. Complete the inventory with optional profiles and direct SQL/migration operators before sizing R3–R6.
 
 ## Delivered foundations
 
@@ -10,20 +23,18 @@ The editor slice covers five operation families: page creation, page save (inclu
 
 ## Remaining packages
 
-| ID | Work package | Concrete remaining scope and source anchors | Engineering estimate |
-|---|---|---|---|
-| R3 | Contributor, service and background writers | Local queued text/tag/delete slices have current-grant and lease checks; automatic identity claims and point-state PUT/DELETE now have durable service receipts and current registry/pin authority. Sequence-counter advances now have transaction-time plans and exact issued-number receipts without stale value CAS. Single and batch contributor updates now have atomic page/history/tag receipts and current grants, including a registry-receipt witness against same-second lifecycle replacement. Single/batch creation now has guarded durable intent and atomic page/history/tag receipts with current quota checks and reservation correlation; general financial completion/recovery remains open. Duplication now has frozen source/protection provenance and exact per-clone/chunk receipts with guarded cursors and conservative prefix/refund outcomes. Single/batch/children contributor deletion now uses the guarded host lifecycle transaction with service attribution, bounded selection/intent and exact trash receipts. Contributor tag provisioning now has atomic creation/reuse and indexed-decision receipts with current authority and bounded slug/taxonomy checks. Remaining contributor submission ingestion (`POST /ingest/submissions` in `src/features/plugins/routes/publish-api.ts`, running `src/features/publish/submission-ingest.ts`) and related import/copy callers, credit charge/usage APIs and recurring billing, other import/copy paths and jobs/queue execution. Reuse neutral core transaction helpers with verified service/delegation attribution, scope/approval/classification revalidation at execution and durable batch outcomes. Do not manufacture an HTTP user to call the editor service. | 7–12 person-days |
-| R4 | External and multi-store effects | Publication/withdrawal across D1/R2/plugin targets, media upload/delete, hooks and external plugin operations: durable intent, bounded retries, exact delivery receipts, partial-result reconciliation and recovery tools. Existing publication/read/withdrawal and hook safeguards are foundations, not evidence that this entire package is absent. Extend/reconcile those paths rather than rebuilding them. Business mutations and external delivery must have distinct outcomes. | 5–9 person-days |
-| R5 | Shared operation identity and uncertain-result recovery | Durable request/operation identities across retries, duplicate/conflict detection, receipt lookup, controlled retry/reconciliation and cross-step correlation. Extend the existing same-event outbox idempotency; it currently does not make a new HTTP request or arbitrary business mutation idempotent. Coordinate optional create-credit reservations and compensation with content outcomes. | 3–6 person-days |
-| R6 | Coverage reconciliation and release evidence | Inventory every in-scope writer and actor type, verify optional-feature/direct-store boundaries, add fault/concurrency/recovery acceptance, migration/rollback drills, staging capacity and receipt/retention/backlog/alert checks. Record deployment evidence and obtain responsible-owner acceptance. Direct SQL/import/migration operators need an explicit evidence contract. The intermittent Worker cancellation in route-suite validation remains unresolved. Reconcile shared read-audit exact acknowledgments: `writeBackgroundAuditRows` currently assumes a successful batch inserted every row, including under an ignored-insert fault. | 3–5 person-days of engineering, plus external acceptance lead time |
-
-**Total remaining engineering planning range: 18–32 person-days**, approximately **4–7 working weeks for one engineer** at five days/week, before external waiting time. This includes implementation, focused regressions, integration testing and technical documentation. It excludes production data remediation, third-party plugin rewrites outside this repository, organizational compliance work and certification. This range estimates human engineering effort, not how many chat iterations an agent will need.
+| Package | Closure work |
+|---|---|
+| R3 | Complete local writer coverage using the inventory above. |
+| R4 | Implement and verify delivery receipts for cross-store and external effects. |
+| R5 | Establish shared operation identity, uncertain-result lookup and controlled retry. |
+| R6 | Reconcile the complete inventory and run fault, concurrency, capacity, migration, rollback and operational acceptance against the release candidate. |
 
 R1's former 1–2 day allowance was removed after its host API/quick-create register completed. R2's former 5–9 day allowance is now removed after the configuration/financial register completes its inventoried local route scope. This is a source-based planning revision, not measured effort or deployment acceptance. Four packages remain open. Confidence remains moderate to low until R6's global writer/actor inventory and capacity review are complete, including the bounded financial-history writer contract. Optional-feature selection, external plugin contracts, operational limits and acceptable recovery semantics can change the range. R3 estimates local D1 writer integration; R4 estimates external effect orchestration; R5 estimates shared retry/recovery infrastructure once. Keep those boundaries to avoid counting infrastructure three times. The original plan's 5–8 day W4b estimate predates this broader inventory and should not be used as the remaining estimate.
 
 ## Suggested delivery order
 
-1. R3: current-authority/evidence integration for contributor submission ingestion, followed by other ingestion/import/jobs and financial charge/usage/billing callers. Reuse the local R1/R2 transaction foundations without manufacturing an HTTP actor. Complete denial gaps with their owning paths.
+1. Start with the manual published-to-draft pull. Continue through import, job and financial writers after reconciling existing receipts.
 2. Define R5's operation contract before adding R4's cross-store recovery, then integrate both with deferred R3 jobs. Preserve existing regulated gates throughout.
 3. Finish R6 fault/recovery/deployment acceptance against the host register and a reconciled global writer/actor inventory. Local R1/R2 implementation does not complete this operational acceptance.
 

@@ -25,7 +25,7 @@ const FLOOR = ['uuid','level'];
 const brand = Symbol('plugin-page-mutation-authority');
 /** Capture before reading the body. Blueprint declarations and wildcard
  * delegation remain requests: current exact write approvals are required. */
-export async function capturePluginPageMutationAuthority(c: AppContext, auth: PluginAuth, purpose: 'create'|'update'|'duplicate'|'delete'|'tag-ensure'|'taxonomy-ensure' = 'update') {
+export async function capturePluginPageMutationAuthority(c: AppContext, auth: PluginAuth, purpose: 'create'|'update'|'duplicate'|'delete'|'tag-ensure'|'taxonomy-ensure'|'submission-ingest' = 'update') {
   try {
     const registration = auth.plugin.registration;
     if (!registration || !Number.isSafeInteger(registration.id) || registration.id <= 0) throw new Error('Missing registration identity');
@@ -66,7 +66,7 @@ export async function capturePluginPageMutationAuthority(c: AppContext, auth: Pl
 }
 export type PluginPageMutationAuthority = Awaited<ReturnType<typeof capturePluginPageMutationAuthority>>;
 type Authority = PluginPageMutationAuthority;
-export function assertPluginPageAuthority(authority: Authority, purpose: 'create'|'update'|'duplicate'|'delete'|'tag-ensure'|'taxonomy-ensure'): void {
+export function assertPluginPageAuthority(authority: Authority, purpose: 'create'|'update'|'duplicate'|'delete'|'tag-ensure'|'taxonomy-ensure'|'submission-ingest'): void {
   if (!authority?.[brand] || authority.purpose !== purpose) throw new Error('Invalid page authority');
 }
 

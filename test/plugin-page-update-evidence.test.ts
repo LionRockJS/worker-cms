@@ -57,7 +57,7 @@ for (const mode of ['PUT','PATCH','batch'] as const) {
     const rows = await events(); expect(rows).toHaveLength(mode === 'batch' ? 2 : 1);
     expect(new Set(rows.map(row => JSON.parse(String(row.detail)).operation_id)).size).toBe(1);
     for (const row of rows) {
-      expect(row).toMatchObject({ action: 'page.update', event_class: 'mutation', retention_class: 'content_mutation', target_type: 'page', data_class: dataClass, actor_user_id: null, actor_roles: null, session_sid: null, acting_via: 'plugin:page-plugin-registry', outcome: 'success' });
+      expect(row).toMatchObject({ action: 'page.update', event_class: 'mutation', retention_class: dataClass === 'phi' ? 'phi_mutation' : 'content_mutation', target_type: 'page', data_class: dataClass, actor_user_id: null, actor_roles: null, session_sid: null, acting_via: 'plugin:page-plugin-registry', outcome: 'success' });
       expect(row.request_id).toMatch(/^page-update-request-/); expect(row.target_id).toMatch(/^page-2401[12]$/);
       const detail = JSON.parse(String(row.detail)); expect(detail).toMatchObject({ operation_id: expect.any(String), registry_id: 24010, version_uuid: expect.any(String), classification_policy_version: expect.any(Number), principal: 'credential_authenticated_plugin', fields: expect.arrayContaining(['lect','history']) });
       const version = await env.DB.prepare('SELECT v.lect,p.lect actual FROM page_versions v JOIN pages p ON p.id=v.page_id WHERE v.uuid=?').bind(detail.version_uuid).first(); expect(version?.lect).toBe(version?.actual);

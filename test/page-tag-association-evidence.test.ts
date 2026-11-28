@@ -38,7 +38,7 @@ for(const op of Object.keys(paths) as Operation[]) {
     if(classification!=='none')await classify('table','page_tags',classification);
     const before=await state();const response=await call(op);expect(response.status).toBe(200);
     const payload=await response.json() as {payload:{id:number;success:boolean}};expect(payload.payload.success).toBe(true);
-    const rows=await events();expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({action:op==='add'?'page.tag-add':'page.tag-remove',target_id:'page-uuid',target_count:1,data_class:classification,outcome:'success',actor_user_id:'12000',actor_roles:'admin',retention_class:'content_mutation'});
+    const rows=await events();expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({action:op==='add'?'page.tag-add':'page.tag-remove',target_id:'page-uuid',target_count:1,data_class:classification,outcome:'success',actor_user_id:'12000',actor_roles:'admin',retention_class: classification === 'phi' ? 'phi_mutation' : 'content_mutation'});
     expect(rows[0].source_ip).toMatch(/^10\.96\./);
     const detail=JSON.parse(String(rows[0].detail));expect(detail).toMatchObject({operation_id:expect.any(String),classification_policy_version:expect.any(Number),page:{id:12010,uuid:'page-uuid'},association:{id:payload.payload.id,page_id:12010,tag_id:op==='add'?12031:12030,weight:op==='add'?5:7}});
     expect(detail.links_before).toHaveLength(1);expect(detail.links_after).toHaveLength(op==='add'?2:0);

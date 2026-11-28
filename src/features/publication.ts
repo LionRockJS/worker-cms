@@ -4,6 +4,13 @@ import type { UiTranslator } from '../core/i18n';
 import type { AppContext } from '../core/http/context';
 import type { LivePageSnapshot, PagePublicationStatus } from '../contracts/publish';
 
+/** A trusted caller can bind its current credential proof to the core writer. */
+export interface SubmissionIngestAuthority {
+  check(): D1PreparedStatement[];
+  dataClass: 'none' | 'pii' | 'phi';
+  detail: Record<string, unknown>;
+}
+
 export interface EditorPublicationState {
   isPublished: boolean;
   publicationStatus: PagePublicationStatus;
@@ -100,7 +107,7 @@ export interface PublicationService {
   renderLiveVersionBadge(t: UiTranslator): string;
   dashboardPublishedTags(c: AppContext, pageIds: number[]): Promise<Array<{ pageId: number; name: string }>>;
   submissionMirrorIds(db: D1DatabaseClient, pageIds: number[]): Promise<Set<number>>;
-  ingestSubmissions(env: Env, actor?: AuditActor): Promise<{ scanned: number; created: number; more: boolean }>;
+  ingestSubmissions(env: Env, actor?: AuditActor, authority?: SubmissionIngestAuthority): Promise<{ scanned: number; created: number; more: boolean }>;
   eraseSubmissionSources(env: Env): Promise<number>;
   publishFlash(outcome: PublishOutcome): string;
 }

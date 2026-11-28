@@ -21,14 +21,18 @@
     if (inFlight) return;
     inFlight = true;
     lastAttempt = Date.now();
-    if (document.visibilityState === 'visible') {
-      lastInteraction = Date.now();
-    }
     var interaction = lastInteraction;
     var headers = { Accept: 'application/json' };
     if (interaction > lastReported) {
-      headers['X-CMS-Idle-For'] = String(Math.max(0, Math.floor((Date.now() - interaction) / 1000)));
-    } else {
+      var age = String(Math.max(0, Math.floor((Date.now() - interaction) / 1000)));
+      headers['X-CMS-Interaction-Age'] = age;
+      headers['X-CMS-Idle-For'] = age;
+    }
+    if (document.visibilityState === 'visible') {
+      // Ordinary deployments count reading. Regulated deployments use only
+      // the separately reported time of an actual input event.
+      headers['X-CMS-Idle-For'] = '0';
+    } else if (interaction <= lastReported) {
       headers['X-CMS-Background'] = '1';
     }
     try {

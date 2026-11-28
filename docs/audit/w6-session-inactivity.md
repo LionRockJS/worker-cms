@@ -1,5 +1,8 @@
 # W6 — session inactivity
 
+**28 November milestone.** Baseline `f36423369264` counted visibility alone as input. The working tree now reports the age of actual input separately. Regulated keepalives, including cached older clients, only advance activity when they report that input. Ordinary deployments retain visible reading. The approved idle interval and [staging exercises](w7-release-acceptance.md) are pending.
+
+
 Engineering record for W6 in [the compliance plan](compliance-implementation-plan-2026-10-30.md#w6--bound-inactivity-without-breaking-revocation). It builds on the idle window added in `5db2885` (see [the ISO review §2](iso-27001-coverage-review-2026-11-01.md#a85-as-implemented)) and closes the gap that window left: an open admin tab kept its session alive indefinitely. **Nothing here was deployed or applied to a live database.** Each "verified" item is verified in source and in the test runtime only.
 
 ## Reading activity update (2026-11-15)

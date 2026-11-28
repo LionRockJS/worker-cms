@@ -56,6 +56,17 @@ it('withholds hook bytes on audit failure outside an HTTP request', async () => 
   finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
 });
 
+it('withholds hook bytes when SQLite accepts a batch but skips its audit insert', async () => {
+  await env.DB.prepare(`CREATE TRIGGER skip_hook_intent BEFORE INSERT ON audit_events
+    WHEN NEW.action='page.hook' BEGIN SELECT RAISE(IGNORE); END`).run();
+  try {
+    await expect(deliverHooks(env, actor, 'update', [page])).rejects.toThrow();
+    expect(deliveries).toEqual([]);
+  } finally {
+    await env.DB.prepare('DROP TRIGGER skip_hook_intent').run();
+  }
+});
+
 it('honors destination scope revocation before later hook deliveries', async () => {
   await revokePageTypeAccess(env.DB, 'reader', 'chart', 'read');
   await expect(deliverHooks(env, actor, 'update', [page])).rejects.toThrow('not approved');

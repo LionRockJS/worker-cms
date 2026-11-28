@@ -36,7 +36,7 @@ function priced(amount=3){const call=pluginsServices.call!;vi.spyOn(pluginsServi
 it.each(['none','pii','phi'])('commits quick-create, history and exact %s evidence together',async dataClass=>{
   if(dataClass!=='none')await classify('page_type','default',dataClass);
   const response=await call();expect(response.status).toBe(302);
-  const rows=await events();expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({actor_user_id:'13000',actor_roles:'admin',target_type:'page',target_count:1,data_class:dataClass,retention_class:'content_mutation'});
+  const rows=await events();expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({actor_user_id:'13000',actor_roles:'admin',target_type:'page',target_count:1,data_class:dataClass,retention_class: dataClass === 'phi' ? 'phi_mutation' : 'content_mutation'});
   expect(rows[0].source_ip).toMatch(/^10\.97\./);const detail=JSON.parse(String(rows[0].detail));expect(detail).toMatchObject({version_uuid:expect.any(String),classification_policy_version:expect.any(Number),tag_count:0});
   const page=await env.DB.prepare('SELECT * FROM pages WHERE uuid=?').bind(rows[0].target_id).first<{id:number;lect:string}>();expect(page).toMatchObject({name:'Private Quick Name',slug:'private-quick-slug',weight:5,page_type:'default',creator:13000,editors:null,page_id:null,start:null,end:null,timezone:null});expect(response.headers.get('Location')).toBe(`/admin/pages/${page!.id}/edit`);
   expect(await env.DB.prepare('SELECT page_id,lect,action FROM page_versions WHERE uuid=?').bind(detail.version_uuid).first()).toEqual({page_id:page!.id,lect:page!.lect,action:'create'});expect((await env.DB.prepare('SELECT * FROM page_tags').all()).results).toEqual([]);

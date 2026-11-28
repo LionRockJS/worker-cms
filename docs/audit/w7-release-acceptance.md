@@ -2,33 +2,21 @@
 
 Release record for W7 in [the compliance plan](compliance-implementation-plan-2026-10-30.md): fault injection, staging verification, migration and rollback drills, and matrix updates (A.8.29, A.8.32). Started 3 November 2026. **No release has been tested, staged or deployed. W7 cannot close yet.**
 
-## Why W7 is not closable yet
+## Candidate and dependencies · 28 November 2026
 
-W7 verifies one exact release revision against W1–W6 and deployment evidence. None of that exists for a single revision today:
+The proposed staging input is the first-milestone working tree based on `development@f36423369264`. A releasable candidate requires the resulting reviewed commit and artifact digest. The deployed revision, staging environment and accountable tester/reviewer are pending. Record them in the restricted release record before staging.
 
-| Dependency | State on 3 November |
-|---|---|
-| W0–W4a | Engineering in source; deployed acceptance unexecuted ([P0 acceptance record](p0-manual-acceptance-2026-10-31.md)) |
-| W4b | R2–R6 open, about 23–41 person-days ([scope register](w4b-remaining-scope-2026-11-02.md)). Regulated writes stay contained until it closes |
-| W5 | Engineering done; deployment evidence outstanding ([record](w5-archive-protection.md#still-needs-deployment-evidence-w7)) |
-| W6 | Engineering done; deployment evidence and the idle-value decision outstanding ([record](w6-session-inactivity.md#still-open-outside-this-change)) |
-| Deployed revisions | Unrecorded. No tag or deployment record in the repository says what production runs |
+W0–W4a still await the P0 exercise. W4b R3–R6 remain open in the [writer register](w4b-remaining-scope-2026-11-02.md). W5 archive independence and W6 regulated inactivity require deployment evidence.
 
-What can be done now is the repository side: a repeatable migration drill, a single checklist for the release, and the matrix update. The rest needs an environment and named owners.
+## Migration and rollback drill
 
-## Migration and rollback drill (in source)
+Run `npm run check:upgrade -- --from <deployed-revision>`. The current drill reconstructs both schemas, applies subsequent numbered migrations in order, compares against fresh installs and reports rollback hazards. CI uses `acc57d7` as its comparison revision. Identify and reconcile any older hand-applied schema on a staging copy before treating it as a supported starting point.
 
-`npm run check:upgrade -- --from <revision>` ([tools/check-upgrade-path.mjs](../../tools/check-upgrade-path.mjs)) builds both D1 schemas as a fresh install of `<revision>`, then applies the upgrade path:
-1. manual core files added since then, in date order;
-2. numbered migrations added since then.
+On 28 November the local drill from `acc57d7` identified private migrations 0010 and 0011, no published migrations, matching fresh schemas and zero reported rollback hazards. Re-run from the actual deployed revision. Use the target schema check before promotion and exercise real application writes after rollback.
 
-It compares the result with a fresh install of the current tree: tables, columns, foreign keys, indexes, triggers and views. It exits 1 on any difference. It also prints the exact files an operator must apply for that revision, and what the older code would meet after a rollback:
-- **Hazards:** dropped tables or columns, and new NOT NULL columns without a default. These break the older code.
-- **Review items:** new triggers on tables the older code writes.
+### Local first-milestone checks on 28 November
 
-It uses local SQLite with foreign keys on, not D1, so it proves the SQL path, not a live database's state. It assumes the `--from` database is a fresh install of that revision; one that skipped an earlier manual file will differ, which is what the staging run below checks.
-
-CI runs it from `f9719a3`, the last revision before any manual migration. Move that floor forward only once no deployment is older.
+Type-check, feature profiles, import boundaries, generated files, inventory and requirement checks passed. All 11 Node checks for keepalive and schema validation passed. A local SQLite exercise of the ingestion code verified successful ingestion, PHI retention, retry without duplication and rollback after ignored version, read-evidence or mutation-evidence inserts. Across the broader Node suite, 36 of 37 passed. The self-hosted plugin-view test and the focused Worker suites could not start their loopback listeners in this environment. Worker CI and staging acceptance remain pending.
 
 ### Results on 3 November (working tree at `f391688`)
 
@@ -76,9 +64,9 @@ Use the identification table in the [P0 acceptance record](p0-manual-acceptance-
 | Package | What must pass | Where it is defined | Result |
 |---|---|---|---|
 | W0–W4a | Each package's test sequence and disposition | [P0 acceptance record](p0-manual-acceptance-2026-10-31.md#test-sequence) | Not run |
-| W4b | R6 coverage reconciliation, fault, concurrency and recovery acceptance | [scope register](w4b-remaining-scope-2026-11-02.md) | Blocked: R2–R6 open |
+| W4b | R6 coverage reconciliation, fault, concurrency and recovery acceptance | [scope register](w4b-remaining-scope-2026-11-02.md) | Blocked: R3–R6 open |
 | W5 | Production `AUDIT_BUCKET` binding and private access; bucket lock refuses overwrite and delete of a sealed segment; `/checkpoints` receiver stores write-once and answers 409 on conflict; a test `archive` incident reaches its owner and is acknowledged; backlog drains at peak load; `0007_enable_audit.sql` applied before deploy | [W5 record](w5-archive-protection.md#still-needs-deployment-evidence-w7) | Not run |
-| W6 | `SESSION_IDLE_TTL` set to the approved value; manual session migration applied before deploy; an untouched admin tab signs out at the deadline; a tab in use stays signed in; an open editor socket closes within 60 seconds of the deadline | [W6 record](w6-session-inactivity.md) | Not run; idle value not yet approved |
+| W6 | `SESSION_IDLE_TTL` set to the approved value; target schema includes sessions.last_activity_at; an untouched visible regulated admin tab loses access at the deadline, including with an older cached keepalive; verify sign-in redirect on the next refresh; a tab in use stays signed in; an open editor socket closes within 60 seconds of the deadline | [W6 record](w6-session-inactivity.md) | Not run; idle value not yet approved |
 
 ### Fault injection
 
