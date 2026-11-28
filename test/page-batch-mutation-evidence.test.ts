@@ -7,7 +7,7 @@ import { verifyJWT } from '../src/core/auth/jwt';
 import { applyBulkPageAction } from '../src/core/pages/bulk-action';
 import { updateDraftWeights, ContentBatchEvidenceUnavailableError } from '../src/core/evidence/batch-mutation-evidence';
 import { runCmsAdminJob } from '../src/features/jobs/runner';
-import { createAdvancedSearchBulkActionJob, getAdminJob } from '../src/features/jobs/queue';
+import { claimAdminJob, createAdvancedSearchBulkActionJob, getAdminJob } from '../src/features/jobs/queue';
 import type { Env,JWTPayload } from '../src/types';
 
 let cookie='';let user:JWTPayload;let count=0;
@@ -41,10 +41,10 @@ async function call(operation:Operation,overrides:Partial<Env>={}){try{return aw
 async function events(){return(await env.DB.prepare("SELECT * FROM audit_events WHERE action IN ('page.weight','page.weights','page.reorder','page.update') AND outcome='success' ORDER BY seq").all()).results;}
 async function state(){return Promise.all(['pages','page_versions','page_tags'].map(async t=>(await env.DB.prepare(`SELECT * FROM ${t} ORDER BY id`).all()).results));}
 async function classify(){await env.DB.prepare("INSERT INTO data_classes(container_kind,container_key,class) VALUES ('page_type','article','phi')").run();}
-function race(change:()=>Promise<unknown>,uncertain=false):Env['DB']{
+function race(change:()=>Promise<unknown>,uncertain=false, pattern = /^UPDATE pages SET/):Env['DB']{
   let changed=false;const tracked=new WeakMap<D1PreparedStatement,{sql:string;actual:D1PreparedStatement}>();
   function track(actual:D1PreparedStatement,sql:string):D1PreparedStatement{const proxy=new Proxy(actual,{get(target,key){if(key==='bind')return(...values:unknown[])=>track(actual.bind(...values),sql);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});tracked.set(proxy,{sql,actual});return proxy;}
-  const DB={withSession:()=>DB,prepare:(sql:string)=>track(env.DB.prepare(sql),sql),batch:async(statements:D1PreparedStatement[])=>{let inject=false;if(!changed&&statements.some(s=>/^UPDATE pages SET/.test(tracked.get(s)?.sql??''))){changed=true;inject=true;await change();}const result=await env.DB.batch(statements.map(s=>tracked.get(s)?.actual??s));if(inject&&uncertain)throw new Error('Synthetic lost acknowledgment');return result;}};return DB as Env['DB'];
+  const DB={withSession:()=>DB,prepare:(sql:string)=>track(env.DB.prepare(sql),sql),batch:async(statements:D1PreparedStatement[])=>{let inject=false;if(!changed&&statements.some(s=>pattern.test(tracked.get(s)?.sql??''))){changed=true;inject=true;await change();}const result=await env.DB.batch(statements.map(s=>tracked.get(s)?.actual??s));if(inject&&uncertain)throw new Error('Synthetic lost acknowledgment');return result;}};return DB as Env['DB'];
 }
 for(const operation of Object.keys(operations) as Operation[]){
   it.each(['none','phi'])(`commits ${operation} with exact private %s evidence`,async classification=>{
@@ -92,7 +92,46 @@ it('uses a taxonomy floor for bulk addition and retains it after removal',async(
 it('refuses direct stale or sessionless bulk authority',async()=>{await expect(applyBulkPageAction(env,{...user,sid:undefined},'replace_text',[9991],bulkOptions)).rejects.toThrow();await expect(updateDraftWeights(env,{...user,exp:0},[{id:9991,weight:10}])).rejects.toThrow();expect(await events()).toEqual([]);});
 it('keeps all direct local mutations blocked in regulated mode',async()=>{for(const operation of ['add_tag','replace_text'] as const)await expect(applyBulkPageAction({...env,REGULATED_MODE:'true'},user,operation,[9991],bulkOptions)).rejects.toThrow();await expect(updateDraftWeights({...env,REGULATED_MODE:'true'},user,[{id:9991,weight:20}])).rejects.toThrow();expect(await events()).toEqual([]);});
 
-async function job(ids = [9991,9992]){return createAdvancedSearchBulkActionJob(env.DB,{action:'replace_text',scope:'selected',ids,pageTypes:['article'],criteria:[],operator:'and',targetTagIds:[],searchText:'Old',replacementText:'New',returnTo:'/admin',user:{...user,exp:1}});}
+async function job(ids = [9991,9992]){return createAdvancedSearchBulkActionJob(env,{action:'replace_text',scope:'selected',ids,pageTypes:['article'],criteria:[],operator:'and',targetTagIds:[],searchText:'Old',replacementText:'New',returnTo:'/admin',user:{...user,exp:1}});}
+it('rolls back enqueue when its audit receipt is ignored', async () => {
+  await env.DB.prepare(`CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_events
+    WHEN NEW.action = 'job.enqueue' BEGIN SELECT RAISE(IGNORE); END`).run();
+  await expect(job()).rejects.toThrow();
+  expect(await env.DB.prepare('SELECT id FROM admin_jobs').first()).toBeNull();
+});
+
+it('leaves a job queued when its claim receipt is rewritten, then permits retry', async () => {
+  const queued = await job();
+  await env.DB.prepare(`CREATE TRIGGER ${trigger} AFTER INSERT ON audit_events
+    WHEN NEW.action = 'job.claim' BEGIN UPDATE audit_events SET detail = '{}' WHERE seq = NEW.seq; END`).run();
+  await expect(runCmsAdminJob(env, queued.id)).rejects.toThrow();
+  expect(await getAdminJob(env.DB, queued.id)).toMatchObject({ status: 'queued', attempts: 0 });
+  expect(await events()).toEqual([]);
+  await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
+  await runCmsAdminJob(env, queued.id);
+  expect(await getAdminJob(env.DB, queued.id)).toMatchObject({ status: 'done', attempts: 1 });
+});
+
+it('recovers a lost claim acknowledgement and only dispatches the winning claim', async () => {
+  await env.DB.prepare("INSERT INTO data_classes(container_kind, container_key, class) VALUES ('table', 'admin_jobs', 'pii')").run();
+  const queued = await job();
+  const DB = race(async () => {}, true, /^UPDATE admin_jobs SET status = 'running'/);
+  const recovered = await claimAdminJob({ ...env, DB }, queued.id);
+  expect(recovered).toMatchObject({ status: 'running', attempts: 1 });
+  expect(await claimAdminJob(env, queued.id)).toBeNull();
+  const another = await job();
+  const claims = await Promise.all([claimAdminJob(env, another.id), claimAdminJob(env, another.id)]);
+  expect(claims.filter(Boolean)).toHaveLength(1);
+  const { results } = await env.DB.prepare(`SELECT action, actor_user_id, acting_via, data_class, detail FROM audit_events
+    WHERE target_id = ? AND action IN ('job.enqueue', 'job.claim') ORDER BY seq`).bind(queued.id).all<{ action: string; actor_user_id: string | null; acting_via: string | null; data_class: string; detail: string }>();
+  expect(results).toEqual([
+    { action: 'job.enqueue', actor_user_id: '9990', acting_via: null, data_class: 'pii', detail: expect.any(String) },
+    { action: 'job.claim', actor_user_id: null, acting_via: 'system:admin-job-runner', data_class: 'pii', detail: expect.any(String) },
+  ]);
+  expect(JSON.parse(results[1].detail)).toMatchObject({ job_attempt: 1, claim_id: expect.any(String) });
+  expect(JSON.stringify(results)).not.toMatch(/searchText|replacementText|private-actor@example.invalid/);
+});
+
 it('executes a claimed job using current grants and its durable lease rather than an expired initiating JWT',async()=>{
   const queued=await job();await runCmsAdminJob(env,queued.id);expect(await env.DB.prepare('SELECT status FROM admin_jobs WHERE id=?').bind(queued.id).first()).toEqual({status:'done'});
   const rows=await events();expect(rows).toHaveLength(2);expect(rows.every(r=>r.acting_via===`job:${queued.id}`&&r.request_id===null)).toBe(true);expect(JSON.parse(String(rows[0].detail))).toMatchObject({job_id:queued.id,job_attempt:1});

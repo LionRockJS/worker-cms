@@ -40,7 +40,7 @@ export async function runCmsAdminJob(env: Env, jobId: string): Promise<void> {
   // Keep durable work queued; do not claim it and convert containment into a
   // terminal failure or replay an opaque plugin request.
   assertRegulatedWritesAllowed(env);
-  const job = await claimAdminJob(env.DB, jobId);
+  const job = await claimAdminJob(env, jobId);
   if (!job) return;
 
   let requeued = false;

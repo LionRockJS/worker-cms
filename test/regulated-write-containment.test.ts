@@ -168,9 +168,9 @@ it('keeps logout able to revoke the current session during containment', async (
 });
 
 it('holds existing bulk and opaque plugin jobs before claim, including calls outside the queue entrypoint', async () => {
-  const jobs = [await createAdvancedSearchBulkActionJob(env.DB, { action: 'replace_text', scope: 'selected', ids: [8251], pageTypes: ['chart'],
+  const jobs = [await createAdvancedSearchBulkActionJob(env, { action: 'replace_text', scope: 'selected', ids: [8251], pageTypes: ['chart'],
     criteria: [], operator: 'AND', targetTagIds: [], searchText: 'Private', replacementText: 'Changed', returnTo: '/admin', user }),
-  await createPluginAdminActionJob(env.DB, { pluginId: 'containment', method: 'POST', path: '/__plugin/admin/action', contentType: 'application/json', body: '{}', user })];
+  await createPluginAdminActionJob(env, { pluginId: 'containment', method: 'POST', path: '/__plugin/admin/action', contentType: 'application/json', body: '{}', user })];
   for (const job of jobs) {
     await expect(runCmsAdminJob(configured(), job.id)).rejects.toThrow('durable mutation evidence');
     expect(await getAdminJob(env.DB, job.id)).toMatchObject({ status: 'queued', attempts: 0 });

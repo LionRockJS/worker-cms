@@ -32,21 +32,21 @@ registerCoreExtensions({
   async enqueueAdminAction(c: AppContext, input: QueuedAdminAction): Promise<boolean> {
     assertRegulatedWritesAllowed(c.env);
     if (!c.env.ADMIN_JOBS_QUEUE) return false;
-    const job = await createPluginAdminActionJob(c.env.DB, {
+    const job = await createPluginAdminActionJob(c.env, {
       pluginId: input.contributorId,
       method: input.method,
       path: input.path,
       contentType: input.contentType,
       body: input.body,
       user: c.get('user'),
-    });
+    }, c);
     await c.env.ADMIN_JOBS_QUEUE.send(cmsAdminJobMessage(job.id));
     return true;
   },
 
   async enqueueBulkAction(c: AppContext, input: QueuedBulkAction): Promise<boolean> {
     assertRegulatedWritesAllowed(c.env);
-    const job = await createAdvancedSearchBulkActionJob(c.env.DB, {
+    const job = await createAdvancedSearchBulkActionJob(c.env, {
       action: input.action,
       scope: input.scope,
       ids: input.ids,
@@ -59,7 +59,7 @@ registerCoreExtensions({
       replacementText: input.replacementText ?? '',
       returnTo: input.returnTo,
       user: c.get('user'),
-    });
+    }, c);
     if (c.env.ADMIN_JOBS_QUEUE) {
       await c.env.ADMIN_JOBS_QUEUE.send(cmsAdminJobMessage(job.id));
     } else {

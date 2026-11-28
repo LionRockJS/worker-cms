@@ -97,16 +97,17 @@ it('records autonomous ingestion without inventing a user identity', async () =>
 });
 
 it('fails a PHI bulk job before changing content if the read event cannot be recorded', async () => {
-  const job = await createAdvancedSearchBulkActionJob(env.DB, { action: 'replace_text', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: 'Private', replacementText: 'Replaced', returnTo: '/admin', user: actor });
-  await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+  const job = await createAdvancedSearchBulkActionJob(env, { action: 'replace_text', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: 'Private', replacementText: 'Replaced', returnTo: '/admin', user: actor });
+  await env.DB.prepare(`CREATE TRIGGER skip_job_read BEFORE INSERT ON audit_events
+    WHEN NEW.action = 'page.job-read' BEGIN SELECT RAISE(IGNORE); END`).run();
   try { await runCmsAdminJob(env, job.id); }
-  finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
+  finally { await env.DB.prepare('DROP TRIGGER skip_job_read').run(); }
   expect((await getAdminJob(env.DB, job.id))?.status).toBe('failed');
   expect(await env.DB.prepare('SELECT name FROM pages WHERE id = 310').first()).toEqual({ name: 'Private Patient' });
 });
 
 it('does not replay a queued plugin request after the user is demoted', async () => {
-  const job = await createPluginAdminActionJob(env.DB, { pluginId: 'reader', method: 'POST', path: '/__plugin/admin/export', contentType: 'application/json', body: '{}', user: actor });
+  const job = await createPluginAdminActionJob(env, { pluginId: 'reader', method: 'POST', path: '/__plugin/admin/export', contentType: 'application/json', body: '{}', user: actor });
   await env.DB.prepare("UPDATE users SET role = 'viewer' WHERE id = 311").run();
   await runCmsAdminJob(env, job.id);
   expect((await getAdminJob(env.DB, job.id))?.status).toBe('failed');
@@ -152,16 +153,17 @@ it('inherits published taxonomy PHI before ingestion or hook disclosure', async 
 it('withholds PII queued disclosures when their audit cannot be persisted', async () => {
   await env.DB.prepare('DELETE FROM data_classes').run();
   await env.DB.prepare("INSERT INTO data_classes (container_kind, container_key, class) VALUES ('table', 'admin_jobs', 'pii')").run();
-  const job = await createPluginAdminActionJob(env.DB, { pluginId: 'reader', method: 'POST', path: '/__plugin/admin/export', contentType: 'application/json', body: '{}', user: actor });
-  await env.DB.prepare('ALTER TABLE audit_events RENAME TO audit_events_away').run();
+  const job = await createPluginAdminActionJob(env, { pluginId: 'reader', method: 'POST', path: '/__plugin/admin/export', contentType: 'application/json', body: '{}', user: actor });
+  await env.DB.prepare(`CREATE TRIGGER skip_job_read BEFORE INSERT ON audit_events
+    WHEN NEW.action = 'job.plugin-disclosure' BEGIN SELECT RAISE(IGNORE); END`).run();
   try { await runCmsAdminJob(env, job.id); }
-  finally { await env.DB.prepare('ALTER TABLE audit_events_away RENAME TO audit_events').run(); }
+  finally { await env.DB.prepare('DROP TRIGGER skip_job_read').run(); }
   expect((await getAdminJob(env.DB, job.id))?.status).toBe('failed');
   expect(deliveries).toEqual([]);
 });
 
 it('does not run a queued bulk job after its account is deleted', async () => {
-  const job = await createAdvancedSearchBulkActionJob(env.DB, { action: 'delete', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: '', replacementText: '', returnTo: '/admin', user: actor });
+  const job = await createAdvancedSearchBulkActionJob(env, { action: 'delete', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: '', replacementText: '', returnTo: '/admin', user: actor });
   await env.DB.prepare('DELETE FROM users WHERE id = 311').run();
   await runCmsAdminJob(env, job.id);
   expect((await getAdminJob(env.DB, job.id))?.status).toBe('failed');
@@ -169,7 +171,7 @@ it('does not run a queued bulk job after its account is deleted', async () => {
 });
 
 it('refreshes role policy when a job runs inside its originating request context', async () => {
-  const job = await createAdvancedSearchBulkActionJob(env.DB, { action: 'replace_text', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: 'Private', replacementText: 'Replaced', returnTo: '/admin', user: actor });
+  const job = await createAdvancedSearchBulkActionJob(env, { action: 'replace_text', scope: 'selected', ids: [310], pageTypes: ['chart'], criteria: [], operator: 'AND', targetTagIds: [], searchText: 'Private', replacementText: 'Replaced', returnTo: '/admin', user: actor });
   await env.DB.prepare("UPDATE users SET role = 'editor' WHERE id = 311").run();
   await requestContext.run({ cspNonce: '' }, async () => {
     await resolveRolePermissions(env);

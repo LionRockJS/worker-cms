@@ -289,7 +289,7 @@ it.each(['d1', 'r2'])('keeps %s live snapshots private after their source associ
 
 it('stops a queued bulk mutation when its retained private read cannot persist', async () => {
   await associate(); await classify('taxonomy', 'clinical'); await env.DB.prepare('DELETE FROM page_tags').run();
-  const job = await createAdvancedSearchBulkActionJob(env.DB, { action: 'replace_text', scope: 'selected', ids: [7000], pageTypes: ['article'], criteria: [], operator: 'AND', targetTagIds: [],
+  const job = await createAdvancedSearchBulkActionJob(env, { action: 'replace_text', scope: 'selected', ids: [7000], pageTypes: ['article'], criteria: [], operator: 'AND', targetTagIds: [],
     searchText: 'historic', replacementText: 'Changed', returnTo: '/admin', user: { sub: '7002', name: 'Operator', email: 'operator@example.invalid', role: 'admin', type: 'access', exp: 9999999999 } });
   await failAudit(); await runCmsAdminJob(env, job.id);
   expect((await getAdminJob(env.DB, job.id))?.status).toBe('failed');

@@ -89,7 +89,7 @@ it('runs the internal document lifecycle with no published database or bucket', 
   expect(await env.DB.prepare('SELECT name FROM pages WHERE id = ?').bind(id).first('name')).toBe('Private record');
 
   const user = (await verifyJWT(token, env.JWT_SECRET))!;
-  const job = await createAdvancedSearchBulkActionJob(env.DB, {
+  const job = await createAdvancedSearchBulkActionJob(env, {
     action: 'publish', scope: 'selected', ids: [id], criteria: [], operator: 'and',
     pageTypes: ['default'], targetTagIds: [], searchText: '', replacementText: '', returnTo: '/admin', user,
   });
