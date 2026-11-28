@@ -72,21 +72,33 @@ Five writers moved; plugin approval, the published-to-draft pull and page access
 | [Published-to-draft pull](../../src/features/publish/pull.ts) | 131 | `sensitive-read-coverage` | — | **Stays as is (rule 6).** Its classification comes from the published source's read-evidence rows; its local snapshots are deliberately not logged; the existing-draft path logs a strict read keyed by the row's page type; the sensitivity pin has no fixed change count |
 | [Page access policy](../../src/routes/admin/pages/access.ts) | 151 | `page-access` | — | **Stays as is (rules 1 and 6).** A guard failure answers 409 (reload and retry), not an outage 503; evidence is always class `none` with no policy guard; `INSERT OR IGNORE` grants have no fixed change count |
 
-### Wave A2: content writers (about 2–3 days)
+## Fit check after Wave A1 (28 November 2026)
+
+The runner fits writers that snapshot whole tables and log every read. Page-centric writers deliberately log only the page read, keyed by page type and UUID (often through the request read buffer), check page access partway through planning, and some change the classification policy version inside their own batch. **Decision: the page pattern is deferred.** Writers that need it stay as they are until it is designed, rather than growing the runner one writer at a time.
+
+| Group | Writers | Status |
+|---|---|---|
+| Fits now | Plugin automatic identity, plugin state, record holds, plugin taxonomy ensure | Next, once the `pluginCredential` actor (E5) lands |
+| Needs its own check | Metered debits and the plugin publish API (no snapshot), submission ingestion (published source, floor changes), Wave D system writers | Check each before porting |
+| Waits for the page pattern | All of Wave A2 and Wave B; plugin page create, update and delete; plugin tag ensure (request-buffered reads) | Deferred |
+
+The page pattern would need, at least: per-snapshot read logging that can be off or custom (including request-buffered page reads), a page-access check in the actor step, writes that move the policy version, and 409 or denial answers next to the 503 path.
+
+### Wave A2: content writers — deferred (page pattern)
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
-| [Page–tag association](../../src/core/evidence/tag-association-evidence.ts) | 102 | `page-tag-association-evidence` | E2, E5 `self` | |
-| [Taxonomies and tags](../../src/core/evidence/taxonomy-mutation-evidence.ts) | 188 | `taxonomy-mutation-evidence` | E1, E2 | Five receipts in one file; port one operation per commit |
+| [Page–tag association](../../src/core/evidence/tag-association-evidence.ts) | 102 | `page-tag-association-evidence` | page pattern | Logs only the page read; page access mid-plan; raw floor query |
+| [Taxonomies and tags](../../src/core/evidence/taxonomy-mutation-evidence.ts) | 188 | `taxonomy-mutation-evidence` | page pattern | Its writes move the policy version inside the batch; request-buffered reads |
 | [Draft content and history](../../src/core/evidence/mutation-evidence.ts) | 147 | `content-mutation-evidence`, `quick-create-mutation-evidence` | E2, E3, E4, E6, E9 | The largest guard set (versions, tags, floors, access policy). Port `removeDraftHistory` first, then `saveDraftContent` |
-| [Trash routes](../../src/features/trash/routes.ts) | 232 | `page-lifecycle-mutation-evidence` | E4 | |
-| [Audit administration](../../src/features/audit/routes.ts) | 319 | `audit-review`, `classification-policy-version` | — | One receipt (`data_class.set`); keep its read recording as is |
+| [Trash routes](../../src/features/trash/routes.ts) | 232 | `page-lifecycle-mutation-evidence` | — | **Stays as is.** Hold changes are about six lines with no snapshot and no policy guard; the runner would only add guards |
+| [Audit administration](../../src/features/audit/routes.ts) | 319 | `audit-review`, `classification-policy-version` | — | **Stays as is.** `data_class.set` moves the policy version in its batch and answers a declassification with 409; already about 20 lines |
 
 ### Wave A3: users and roles (about 1–2 days; decision first)
 
 [`role-writes.ts`](../../src/features/users-roles/role-writes.ts), [`roles.ts`](../../src/features/users-roles/routes/roles.ts), [`users.ts`](../../src/features/users-roles/routes/users.ts) and [`ip-access.ts`](../../src/features/users-roles/routes/ip-access.ts) (about 700 lines; tests `role-mutation-audit`, `role-store`, `ip-access`, `initial-user-roles`). These build receipts with `mutationAuditSelect`, which writes one receipt per affected row from SQL inside the batch (for example, every user losing a deleted role). **Decision gate:** add a receipt-from-SQL variant to the runner (E1b), or leave this family as is. Recommendation: leave it unless Wave A2 shows the declarations staying small, because its SQL-projected receipts are already a single coherent pattern.
 
-### Wave B: queued jobs (about 2 days)
+### Wave B: queued jobs — deferred (page pattern)
 
 | Writer | Lines | Tests | Needs | Notes |
 |---|---|---|---|---|
