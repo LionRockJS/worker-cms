@@ -28,14 +28,11 @@
 import type { Env } from '../../types';
 import type { AuditRow } from '../../core/db/audit';
 import { monitorSource, recordAuditOutage } from '../../core/db/audit-outages';
+import { hotDaysFor, pruneExpiredAuditEvents } from '../../core/db/audit-retention';
 
 /** Events per segment. Bounded so one cron tick cannot exceed the CPU budget
  *  gzipping and hashing, nor D1's result-size limit reading them. */
 const SEGMENT_SIZE = 1000;
-
-/** Rows a single run may prune, so a long backlog drains over several ticks
- *  instead of timing out on one. */
-const PRUNE_LIMIT = 2000;
 
 /** Seals read back from R2 per run before the prune ceiling may move. */
 const VERIFY_LIMIT = 10;
@@ -58,28 +55,9 @@ export const LEASE_MS = 10 * 60_000;
 const ARCHIVE_PREFIX = 'audit/';
 const SEGMENT_KEY = /^audit\/dt=\d{4}-\d{2}-\d{2}\/seg-(\d{12})-(\d{12})\.ndjson\.gz$/;
 
-/**
- * Days each retention class stays queryable in D1. The archive keeps its own,
- * longer horizon; this is only how long the hot copy lives.
- *
- * HIPAA pulls retention up and GDPR's storage limitation pulls it down, which
- * is why this is per class rather than one number.
- */
-const HOT_DAYS: Record<string, number> = {
-  phi_access: 90,
-  phi_mutation: 365,
-  content_mutation: 365,
-  pii_access: 90,
-  auth: 90,
-  admin_config: 365,
-  // Access a plugin recorded on an unclassified page (/__cms/audit/events).
-  plugin_access: 365,
-  none: 90,
-};
-
-/** Anything unrecognised keeps the most conservative horizon rather than the
- *  shortest, so a new class added without touching this file is not swept away. */
-const DEFAULT_HOT_DAYS = 365;
+// Retention windows live in core so archive-free pruning (audit feature off)
+// uses the same table.
+export { hotDaysFor };
 
 /** Coarse, PHI-free reasons the archive stopped making progress. */
 export type ArchiveFaultKind =
@@ -701,28 +679,7 @@ async function pruneArchived(env: Env): Promise<number> {
     .first<{ verified_seq: number }>();
   const ceiling = state?.verified_seq ?? 0;
   if (!ceiling) return 0;
-
-  // One statement per class: SQLite has no per-row window function here, and
-  // each class has its own cutoff. The subselect bounds the work per run.
-  let pruned = 0;
-  for (const [retentionClass, days] of Object.entries(HOT_DAYS)) {
-    const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
-    const result = await env.DB.prepare(
-      `DELETE FROM audit_events WHERE seq IN (
-         SELECT seq FROM audit_events
-          WHERE seq <= ? AND retention_class = ? AND occurred_at < ?
-          LIMIT ?
-       )`,
-    ).bind(ceiling, retentionClass, cutoff, PRUNE_LIMIT).run();
-    pruned += result.meta.changes ?? 0;
-    if (pruned >= PRUNE_LIMIT) break;
-  }
-  return pruned;
-}
-
-/** Unrecognised retention classes keep the conservative horizon. */
-export function hotDaysFor(retentionClass: string): number {
-  return HOT_DAYS[retentionClass] ?? DEFAULT_HOT_DAYS;
+  return pruneExpiredAuditEvents(env, ceiling);
 }
 
 export interface SealVerification {

@@ -35,6 +35,7 @@ import { generateCspNonce, requestContext } from './core/http/request-context';
 import { viewRevision } from './core/http/view-revision';
 import type { Env, Variables, WorkerEnv } from './types';
 import { drainAuditMutationOutbox } from './core/db/audit-mutation-outbox';
+import { pruneWithoutArchive } from './core/db/audit-retention';
 import { SessionEvidenceUnavailableError } from './core/evidence/session-evidence';
 import { AuthDenialEvidenceUnavailableError } from './core/auth/denials';
 import { maintainSessionHygiene } from './core/auth/sessions';
@@ -269,6 +270,8 @@ export default {
     const sessionEnv = withD1Sessions(env);
     await maintainSessionHygiene(sessionEnv);
     await drainAuditMutationOutbox(sessionEnv, undefined, 10);
+    const pruned = await pruneWithoutArchive(sessionEnv, featureInstalled('audit'));
+    if (pruned) console.log(`audit retention: pruned ${pruned} unarchived events`);
     await runFeatureMonitoringWork(sessionEnv);
     await assertRegulatedReady(sessionEnv, featureInstalled('audit'));
     for (const featureWork of await runFeatureScheduledWork(sessionEnv)) {

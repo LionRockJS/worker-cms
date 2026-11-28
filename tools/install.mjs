@@ -997,11 +997,12 @@ async function main() {
   // screens plus the archive sweep, so the bucket only matters with it on.
   console.log(
     '\nThe audit feature adds the /admin/audit review screens and the archive sweep.\n'
-    + 'Audit events are recorded either way.',
+    + 'Audit events are recorded either way. Without the feature, the core cron deletes\n'
+    + 'events from D1 once they pass their retention window (90 or 365 days), unarchived.',
   );
   const auditEnabled = await confirm('Enable the audit feature?', await featureEnabled('audit'));
-  // Default on: the sweep is what archives *and* prunes audit_events, so
-  // declining leaves that table growing in D1 with nothing to trim it.
+  // Default on: the sweep is what archives *and* prunes audit_events. Declining
+  // falls back to the core cron's unarchived prune by the same windows.
   if (auditEnabled) {
     console.log(
       '\nThe audit archive seals audit events to R2 and is what prunes them from D1.\n'
