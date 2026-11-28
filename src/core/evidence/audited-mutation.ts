@@ -1,5 +1,5 @@
 import type { AppContext } from '../http/context';
-import type { AccessAuthorization } from '../auth/access-authorization';
+import { captureSelfAuthorization, type AccessAuthorization } from '../auth/access-authorization';
 import { captureMutationAuthority } from './mutation-authority';
 import { classFor, classificationPolicyGuard, strongestClass, type ContainerKind, type DataClass, type DataClassMap } from '../db/data-classes';
 import { attributedMutationAuditEvidence, contextActor, type AuditEntry } from '../db/audit';
@@ -12,7 +12,8 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
 /**
  * The standard recipe for one audited admin change. A writer declares:
  *
- *   permission  who may make the change (session user + capability)
+ *   permission  who may make the change: a capability of the session user,
+ *               or 'self' for the user acting on their own account
  *   classify    which containers decide the evidence's data class (fixed,
  *               or from the snapshot rows; a plan may add more)
  *   snapshot    the rows the decision depends on, plus how their read is logged
@@ -32,7 +33,8 @@ import { assertRegulatedWritesAllowed } from '../http/regulated-writes';
  *                 follow-up snapshots that depend on the first rows, read
  *                 and guarded exactly like step 3
  *   5. commit     one D1 batch:
- *                   admission  authority, policy, every snapshot unchanged
+ *                   admission  authority, policy, every snapshot unchanged,
+ *                              plus the plan's own pre-write checks
  *                   writes     each followed by its exact changes() check
  *                   evidence   audit write + exact receipt guard
  *                   expect     writer's postconditions
@@ -78,6 +80,9 @@ export interface MutationPlan {
   evidence: { entry: AuditEntry; targetIds?: string[] };
   /** Containers the change itself touches, raising the evidence class. */
   classify?: Containers;
+  /** Checks run after admission and before the writes, such as an ID
+   *  allocator still matching what decide read. */
+  admit?: D1PreparedStatement[];
   /** Postconditions after the writes. `since` is the database clock read just
    *  before the batch, for rows whose timestamps the transaction sets. */
   expect: (since: string) => D1PreparedStatement[];
@@ -86,7 +91,7 @@ export interface MutationPlan {
 }
 
 export interface MutationSpec<S extends Record<string, SnapshotSpec>> {
-  permission: Exclude<AccessAuthorization['capability'], 'authenticated'>;
+  permission: Exclude<AccessAuthorization['capability'], 'authenticated'> | 'self';
   classify: Containers | ((rows: Snapshots<S>) => Containers);
   snapshot: S;
   /** The writer's own refusal, so its route keeps its existing 503 body. */
@@ -113,6 +118,13 @@ export interface AuditedMutation<S> {
   commit(decide: (rows: Snapshots<S>, tools: DecideTools) => MutationPlan | null | Promise<MutationPlan | null>): Promise<Record<string, Binding> | undefined>;
 }
 
+/** Session-bound self-service authority; the writer restricts ownership. */
+async function captureSelf(c: AppContext) {
+  const authority = await captureSelfAuthorization(c.env, c.get('user'));
+  if (!authority.allowed) throw new Error('Mutation authority unavailable');
+  return { authority, policy: authority.policy };
+}
+
 export async function beginAuditedMutation<S extends Record<string, SnapshotSpec>>(c: AppContext, spec: MutationSpec<S>): Promise<AuditedMutation<S>> {
   const fail = async (error: unknown): Promise<never> => {
     if (spec.passthrough?.(error)) throw error;
@@ -126,7 +138,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
   let prepared;
   try {
     // 2. authorize
-    const { authority, policy } = await captureMutationAuthority(c, spec.permission);
+    const { authority, policy } = spec.permission === 'self' ? await captureSelf(c) : await captureMutationAuthority(c, spec.permission);
 
     // 3. snapshot: one round trip for every snapshot, behind the policy guard
     let containers: Containers = [];
@@ -198,6 +210,7 @@ export async function beginAuditedMutation<S extends Record<string, SnapshotSpec
           classOf(plan.classify), policy, { context: c, targetIds });
         const results = await c.env.DB.batch([
           ...admission(),
+          ...plan.admit ?? [],
           ...plan.writes.flatMap(w => [
             c.env.DB.prepare(w.sql).bind(...w.args),
             abortIf(c.env, 'changes() <> ?', [w.changes ?? 1]),
